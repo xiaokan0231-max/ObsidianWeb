@@ -1,0 +1,4 @@
+interface:
+  display_name: "面试回答深度复盘"
+  short_description: "基于逐字证据评估漏答、五维评分、回答策略与日本面试风险"
+  default_prompt: "Use $review-interview-answers to analyze this completed interview transcript and produce an evidence-backed five-dimension review."

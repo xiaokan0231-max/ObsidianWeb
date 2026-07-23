@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ObsidianWeb",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:obsidian"],
+      "port": 3000,
+      "autoPort": true
+    }
+  ]
+}

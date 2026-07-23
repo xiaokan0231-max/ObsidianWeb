@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;background:#e7e3d8;color:#18231e;-webkit-font-smoothing:antialiased;font-family:"Noto Sans SC",system-ui,sans-serif;}
+  *{box-sizing:border-box;}
+  a{color:#e66d45;text-decoration:none;}
+  a:hover{color:#ee7c55;}
+  select{font:inherit;}
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:#c8c5bc;border-radius:6px;}
+</style>
+</helmet>
+
+<section style="display:flex;flex-direction:row;flex-wrap:nowrap;gap:64px;padding:60px;align-items:flex-start;">
+
+  <!-- ================= 1b — 新设计（two-pane 筛选台） ================= -->
+  <div id="1b" style="width:1360px;flex:0 0 auto;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:18px;">
+      <span style="display:inline-grid;place-items:center;min-width:34px;height:26px;padding:0 9px;background:#e66d45;color:#fff;font-family:'Geist Mono',monospace;font-size:13px;font-weight:600;border-radius:3px;">1b</span>
+      <strong style="font-family:'Noto Serif SC',serif;font-size:20px;font-weight:600;">新设计 · 双栏筛选台</strong>
+      <span style="color:#777e79;font-size:12px;">左侧常驻筛选栏 · 结果区更宽 · 卡片层级更清晰 · 可交互</span>
+    </div>
+
+    <div style="background:#f3f0e8;border:1px solid #d8d5ca;box-shadow:0 24px 60px rgba(28,37,32,.14);overflow:hidden;">
+      <!-- section intro -->
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:25px;padding:34px 40px 24px;border-bottom:1px solid #e0dcd2;background:#fbfaf6;">
+        <div>
+          <span style="display:flex;align-items:center;gap:8px;font-family:'Geist Mono',monospace;font-size:9px;font-weight:650;letter-spacing:.18em;color:#8e938f;"><i style="width:6px;height:6px;background:#e66d45;border-radius:50%;"></i> AI JOB MATCH</span>
+          <h1 style="margin:10px 0 8px;font-family:'Noto Serif SC',serif;font-size:44px;font-weight:520;letter-spacing:-.03em;">AI 推荐岗位</h1>
+          <p style="max-width:560px;margin:0;color:#777e79;font-size:12px;line-height:1.75;">基于 <strong>技術スタック</strong> 与 <strong>求職硬性約束</strong> 的匹配结果。这一层是 <em style="font-style:normal;color:#b5842f;font-weight:600;">分析 / 假设</em>，不是权威事实 —— 是否应募由本人判断。</p>
+        </div>
+        <div style="display:flex;gap:26px;align-items:flex-end;">
+          <div style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.1;"><strong style="font-size:30px;font-weight:600;">{{ total }}</strong><span style="font-size:11px;letter-spacing:.08em;color:#6f7772;margin-top:4px;">条推荐</span></div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.1;"><strong style="font-size:30px;font-weight:600;">{{ top8 }}</strong><span style="font-size:11px;letter-spacing:.08em;color:#6f7772;margin-top:4px;">8 点以上</span></div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.1;"><strong style="font-size:30px;font-weight:600;">{{ notApplied }}</strong><span style="font-size:11px;letter-spacing:.08em;color:#6f7772;margin-top:4px;">未应募</span></div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.1;"><strong style="font-size:30px;font-weight:600;">{{ salaryTopLabel }}</strong><span style="font-size:11px;letter-spacing:.08em;color:#6f7772;margin-top:4px;">最高年収</span></div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:280px minmax(0,1fr);align-items:start;">
+        <!-- ===== 左侧筛选栏 ===== -->
+        <aside style="border-right:1px solid #e0dcd2;background:#fbfaf6;padding:22px 22px 30px;position:sticky;top:0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+            <span style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:.16em;color:#959a96;">筛选 · FILTERS</span>
+            <button onClick="{{ reset }}" style="border:0;background:transparent;color:#e66d45;font-size:11px;cursor:pointer;font-family:inherit;padding:0;">重置{{ resetSuffix }}</button>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:22px;">
+            <div>
+              <div style="font-size:10.5px;letter-spacing:.12em;color:#8e938f;margin-bottom:10px;">应募状态</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                <sc-for list="{{ statusChips }}" as="chip" hint-placeholder-count="4">
+                  <button onClick="{{ chip.onClick }}" style="{{ chip.style }}">{{ chip.label }} <small style="opacity:.6;font-size:10.5px;">{{ chip.count }}</small></button>
+                </sc-for>
+              </div>
+            </div>
+
+            <div>
+              <div style="font-size:10.5px;letter-spacing:.12em;color:#8e938f;margin-bottom:10px;">匹配度</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                <sc-for list="{{ ratingSteps }}" as="chip" hint-placeholder-count="4">
+                  <button onClick="{{ chip.onClick }}" style="{{ chip.style }}">{{ chip.label }} <small style="opacity:.6;font-size:10.5px;">{{ chip.count }}</small></button>
+                </sc-for>
+              </div>
+            </div>
+
+            <div>
+              <div style="font-size:10.5px;letter-spacing:.12em;color:#8e938f;margin-bottom:10px;">年収上限</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                <sc-for list="{{ salarySteps }}" as="chip" hint-placeholder-count="5">
+                  <button onClick="{{ chip.onClick }}" style="{{ chip.style }}">{{ chip.label }} <small style="opacity:.6;font-size:10.5px;">{{ chip.count }}</small></button>
+                </sc-for>
+                <button onClick="{{ remoteChip.onClick }}" style="{{ remoteChip.style }}">リモート可 <small style="opacity:.6;font-size:10.5px;">{{ remoteChip.count }}</small></button>
+              </div>
+            </div>
+
+            <div>
+              <div style="font-size:10.5px;letter-spacing:.12em;color:#8e938f;margin-bottom:10px;">技術スタック</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                <sc-for list="{{ stackChips }}" as="chip" hint-placeholder-count="8">
+                  <button onClick="{{ chip.onClick }}" style="{{ chip.style }}">{{ chip.label }} <small style="opacity:.6;font-size:10.5px;">{{ chip.count }}</small></button>
+                </sc-for>
+              </div>
+            </div>
+
+            <div>
+              <div style="font-size:10.5px;letter-spacing:.12em;color:#8e938f;margin-bottom:10px;">原文核对</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                <sc-for list="{{ verifyChips }}" as="chip" hint-placeholder-count="3">
+                  <button onClick="{{ chip.onClick }}" style="{{ chip.style }}">{{ chip.label }} <small style="opacity:.6;font-size:10.5px;">{{ chip.count }}</small></button>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- ===== 结果区 ===== -->
+        <div style="padding:22px 26px 34px;min-width:0;">
+          <!-- toolbar -->
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+            <div style="flex:1 1 auto;display:flex;align-items:center;gap:9px;border:1px solid #d8d5ca;background:#fbfaf6;padding:0 12px;height:40px;">
+              <span style="color:#6f7772;font-size:15px;">⌕</span>
+              <input value="{{ q }}" onInput="{{ setQ }}" placeholder="搜索公司、职位、技术栈、推荐理由…" style="flex:1;min-width:0;border:0;background:transparent;font-size:13.5px;color:#18231e;outline:none;font-family:inherit;">
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;height:40px;padding:0 12px;border:1px solid #d8d5ca;background:#fbfaf6;font-size:12.5px;color:#6f7772;">
+              <span>排序</span>
+              <select value="{{ sort }}" onChange="{{ setSort }}" style="border:0;background:transparent;color:#18231e;font-size:13px;cursor:pointer;outline:none;">
+                <option value="rating">匹配度</option>
+                <option value="salary">年収上限</option>
+                <option value="updated">更新时间</option>
+                <option value="company">公司名</option>
+              </select>
+            </label>
+            <div style="display:flex;border:1px solid #d8d5ca;background:#fbfaf6;height:40px;overflow:hidden;">
+              <sc-for list="{{ viewTabs }}" as="tab" hint-placeholder-count="4">
+                <button onClick="{{ tab.onClick }}" style="{{ tab.style }}">{{ tab.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+
+          <sc-if value="{{ isJobView }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;font-size:12.5px;color:#6f7772;margin-bottom:16px;">
+            <span><strong style="color:#18231e;font-size:15px;">{{ resultCount }}</strong> / {{ total }} 条{{ queryNote }}</span>
+            <span style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:.1em;color:#959a96;">已选 {{ activeCount }} 个筛选</span>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ showEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px dashed #d8d5ca;padding:44px 24px;text-align:center;color:#6f7772;">
+              <p style="margin:0 0 12px;font-size:14px;">没有岗位同时满足这些条件。</p>
+              <button onClick="{{ reset }}" style="border:1px solid #d8d5ca;background:transparent;color:#18231e;padding:7px 15px;font-size:12.5px;cursor:pointer;font-family:inherit;">清空筛选</button>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isCard }}" hint-placeholder-val="{{ true }}">
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;">
+            <sc-for list="{{ visible }}" as="job" hint-placeholder-count="6">
+              <article onClick="{{ job.onDetail }}" style="{{ job.cardStyle }}">
+                <header style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;">
+                  <div style="display:flex;gap:13px;align-items:flex-start;min-width:0;">
+                    <div style="flex:0 0 auto;width:46px;height:46px;display:grid;place-items:center;border-radius:50%;background:{{ job.accentSoft }};">
+                      <span style="font-family:'Noto Serif SC',serif;font-size:22px;font-weight:600;line-height:1;color:{{ job.accent }};">{{ job.rating }}</span>
+                    </div>
+                    <div style="min-width:0;">
+                      <h2 style="margin:0;font-size:17px;font-weight:600;line-height:1.3;">{{ job.company }}</h2>
+                      <p style="margin:4px 0 0;font-size:12.5px;color:#6f7772;line-height:1.4;">{{ job.position }}</p>
+                    </div>
+                  </div>
+                  <span style="flex:0 0 auto;font-size:11px;padding:3px 9px;border-radius:2px;color:{{ job.verifyColor }};background:{{ job.verifyBg }};border:1px solid {{ job.verifyBd }};">{{ job.verifyLabel }}</span>
+                </header>
+
+                <div style="display:flex;align-items:baseline;gap:10px;">
+                  <span style="font-family:'Noto Serif SC',serif;font-size:22px;font-weight:600;color:#2f6b59;">{{ job.salaryLabel }}</span>
+                  <span style="font-size:11px;color:#959a96;">{{ job.rateMeta }}</span>
+                </div>
+
+                <div style="display:flex;flex-wrap:wrap;gap:7px;align-items:center;">
+                  <span style="font-size:11.5px;color:#6f7772;border:1px solid #d8d5ca;padding:3px 9px;border-radius:2px;">{{ job.employment }}</span>
+                  <span style="font-size:11.5px;color:#6f7772;border:1px solid #d8d5ca;padding:3px 9px;border-radius:2px;">{{ job.location }}</span>
+                  <sc-if value="{{ job.remote }}" hint-placeholder-val="{{ false }}">
+                    <span style="font-size:11.5px;color:#7466a9;border:1px solid rgba(116,102,169,.35);padding:3px 9px;border-radius:2px;">リモート可</span>
+                  </sc-if>
+                </div>
+
+                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                  <sc-for list="{{ job.stack }}" as="tag" hint-placeholder-count="4">
+                    <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#7466a9;background:rgba(116,102,169,.09);padding:3px 8px;letter-spacing:.02em;">{{ tag }}</span>
+                  </sc-for>
+                </div>
+
+                <div style="border-top:1px solid #e4e0d7;padding-top:11px;">
+                  <span style="display:block;font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:.14em;color:#959a96;margin-bottom:5px;">推荐理由</span>
+                  <p style="margin:0;font-size:12.5px;line-height:1.65;color:#18231e;">{{ job.reasonShort }}</p>
+                </div>
+
+                <footer onClick="{{ job.stop }}" style="display:flex;gap:10px;align-items:center;margin-top:auto;padding-top:13px;">
+                  <label style="position:relative;display:inline-flex;align-items:center;padding:6px 13px;font-size:12.5px;cursor:pointer;border-radius:2px;color:{{ job.statusColor }};background:{{ job.statusBg }};border:1px solid {{ job.statusBd }};">
+                    <select value="{{ job.status }}" onChange="{{ job.onStatus }}" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;">
+                      <option value="未応募">未応募</option>
+                      <option value="応募済">応募済</option>
+                      <option value="書類通過">書類通過</option>
+                      <option value="面接中">面接中</option>
+                      <option value="内定">内定</option>
+                      <option value="保留">保留</option>
+                      <option value="不採用">不採用</option>
+                    </select>
+                    <span>{{ job.status }} ⌄</span>
+                  </label>
+                  <button onClick="{{ job.onCompare }}" style="{{ job.compareStyle }}">{{ job.compareLabel }}</button>
+                  <button onClick="{{ job.onDetail }}" style="margin-left:auto;border:1px solid #d8d5ca;background:transparent;color:#18231e;padding:7px 15px;font-size:12.5px;cursor:pointer;font-family:inherit;">详情</button>
+                </footer>
+              </article>
+            </sc-for>
+          </div>
+          </sc-if>
+
+          <!-- 列表视图 -->
+          <sc-if value="{{ isList }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid #d8d5ca;background:#fbfaf6;">
+              <div style="display:grid;grid-template-columns:minmax(0,2.4fr) 62px minmax(0,1.2fr) minmax(0,1.9fr) 96px 84px;gap:14px;padding:11px 18px;border-bottom:1px solid #e0dcd2;font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:.12em;color:#959a96;">
+                <span>公司 / 职位</span><span>匹配</span><span>年収</span><span>技術スタック</span><span>状态</span><span>核对</span>
+              </div>
+              <sc-for list="{{ visible }}" as="job" hint-placeholder-count="6">
+                <div onClick="{{ job.onDetail }}" style="display:grid;grid-template-columns:minmax(0,2.4fr) 62px minmax(0,1.2fr) minmax(0,1.9fr) 96px 84px;gap:14px;padding:13px 18px;border-bottom:1px solid #ece9e0;align-items:center;cursor:pointer;">
+                  <div style="min-width:0;"><strong style="font-size:14px;">{{ job.company }}</strong><div style="font-size:11.5px;color:#6f7772;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ job.position }}</div></div>
+                  <span style="font-family:'Noto Serif SC',serif;font-size:17px;font-weight:600;color:{{ job.accent }};">{{ job.rating }}</span>
+                  <span style="font-size:12.5px;color:#2f6b59;font-weight:600;">{{ job.salaryLabel }}</span>
+                  <div style="display:flex;flex-wrap:wrap;gap:4px;overflow:hidden;max-height:22px;"><sc-for list="{{ job.stack }}" as="tag" hint-placeholder-count="3"><span style="font-family:'Geist Mono',monospace;font-size:10px;color:#7466a9;background:rgba(116,102,169,.09);padding:2px 6px;">{{ tag }}</span></sc-for></div>
+                  <span style="justify-self:start;font-size:11px;padding:3px 9px;border-radius:2px;color:{{ job.statusColor }};background:{{ job.statusBg }};border:1px solid {{ job.statusBd }};">{{ job.status }}</span>
+                  <span style="justify-self:start;font-size:10.5px;padding:2px 7px;border-radius:2px;color:{{ job.verifyColor }};background:{{ job.verifyBg }};border:1px solid {{ job.verifyBd }};">{{ job.verifyLabel }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <!-- 看板视图 -->
+          <sc-if value="{{ isKanban }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;">
+              <sc-for list="{{ kanbanColumns }}" as="col" hint-placeholder-count="5">
+                <div style="flex:0 0 228px;background:#fbfaf6;border:1px solid #e0dcd2;border-top:3px solid {{ col.color }};display:flex;flex-direction:column;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #ece9e0;"><strong style="font-size:12.5px;">{{ col.label }}</strong><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#959a96;">{{ col.count }}</span></div>
+                  <div style="display:flex;flex-direction:column;gap:8px;padding:10px;min-height:64px;">
+                    <sc-for list="{{ col.jobs }}" as="job" hint-placeholder-count="2">
+                      <article onClick="{{ job.onDetail }}" style="background:#fff;border:1px solid #e0dcd2;border-left:3px solid {{ job.accent }};padding:11px 12px;cursor:pointer;">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;"><strong style="font-size:13px;line-height:1.3;">{{ job.company }}</strong><span style="font-family:'Noto Serif SC',serif;font-size:15px;font-weight:600;color:{{ job.accent }};">{{ job.rating }}</span></div>
+                        <div style="font-size:11px;color:#6f7772;margin:3px 0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ job.position }}</div>
+                        <div style="font-size:12px;color:#2f6b59;font-weight:600;">{{ job.salaryLabel }}</div>
+                      </article>
+                    </sc-for>
+                    <sc-if value="{{ col.empty }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;color:#b7b3a8;text-align:center;padding:10px 0;">—</span></sc-if>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <!-- 周复盘 -->
+          <sc-if value="{{ isWeekly }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+                <button onClick="{{ prevWeek }}" style="border:1px solid #d8d5ca;background:#fbfaf6;width:32px;height:32px;cursor:pointer;font-family:inherit;color:#18231e;font-size:15px;">‹</button>
+                <div><div style="font-family:'Noto Serif SC',serif;font-size:20px;font-weight:600;line-height:1.1;">{{ weekTitle }}</div><div style="font-family:'Geist Mono',monospace;font-size:10px;color:#959a96;letter-spacing:.08em;margin-top:3px;">{{ weekRange }}</div></div>
+                <button onClick="{{ nextWeek }}" style="border:1px solid #d8d5ca;background:#fbfaf6;width:32px;height:32px;cursor:pointer;font-family:inherit;color:#18231e;font-size:15px;">›</button>
+              </div>
+              <sc-if value="{{ weekHasData }}" hint-placeholder-val="{{ true }}">
+                <div>
+                  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">
+                    <sc-for list="{{ weekKpis }}" as="kpi" hint-placeholder-count="4">
+                      <div style="border:1px solid #e0dcd2;background:#fbfaf6;padding:16px 18px;"><div style="font-family:'Noto Serif SC',serif;font-size:30px;font-weight:600;line-height:1;color:{{ kpi.color }};">{{ kpi.value }}</div><div style="font-size:11px;color:#6f7772;margin-top:8px;">{{ kpi.label }}</div></div>
+                    </sc-for>
+                  </div>
+                  <div style="display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px;">
+                    <div style="border:1px solid #e0dcd2;background:#fbfaf6;padding:20px 22px;">
+                      <span style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:.16em;color:#959a96;">本周动态 · TIMELINE</span>
+                      <div style="display:flex;flex-direction:column;margin-top:12px;">
+                        <sc-for list="{{ weekEvents }}" as="ev" hint-placeholder-count="5">
+                          <div style="display:grid;grid-template-columns:44px 1fr;gap:12px;padding:11px 0;border-top:1px solid #ece9e0;align-items:center;">
+                            <time style="font-family:'Geist Mono',monospace;font-size:11px;color:#959a96;">{{ ev.day }}</time>
+                            <div style="display:flex;align-items:center;gap:10px;"><i style="width:8px;height:8px;border-radius:50%;background:{{ ev.color }};flex:0 0 auto;"></i><span><strong style="font-size:13px;">{{ ev.company }}</strong><span style="font-size:12px;color:#6f7772;margin-left:8px;">{{ ev.label }}</span></span></div>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:14px;">
+                      <div style="border:1px solid #e0dcd2;background:#fbfaf6;padding:20px 22px;">
+                        <span style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:.16em;color:#959a96;">下周重点 · NEXT</span>
+                        <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px;">
+                          <sc-for list="{{ nextFocus }}" as="f" hint-placeholder-count="3">
+                            <div style="display:flex;gap:10px;align-items:flex-start;"><span style="width:17px;height:17px;flex:0 0 auto;border:1px solid #c4c0b5;border-radius:3px;margin-top:1px;"></span><div style="min-width:0;"><strong style="font-size:13px;">{{ f.company }}</strong><div style="font-size:11.5px;color:#6f7772;margin-top:3px;line-height:1.55;">{{ f.action }}</div></div></div>
+                          </sc-for>
+                        </div>
+                      </div>
+                      <div style="border:1px solid rgba(181,132,47,.35);background:rgba(181,132,47,.06);padding:16px 18px;">
+                        <span style="font-size:11px;color:#b5842f;font-weight:600;">复盘提醒</span>
+                        <p style="margin:8px 0 0;font-size:11.5px;line-height:1.7;color:#8a6f3a;">{{ weekNote }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ weekEmpty }}" hint-placeholder-val="{{ false }}">
+                <div style="border:1px dashed #d8d5ca;padding:44px 24px;text-align:center;color:#6f7772;font-size:13px;">这一周还没有求职记录。</div>
+              </sc-if>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 1a — 现状还原 ================= -->
+  <div id="1a" style="width:1180px;flex:0 0 auto;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:18px;">
+      <span style="display:inline-grid;place-items:center;min-width:34px;height:26px;padding:0 9px;background:#66706c;color:#fff;font-family:'Geist Mono',monospace;font-size:13px;font-weight:600;border-radius:3px;">1a</span>
+      <strong style="font-family:'Noto Serif SC',serif;font-size:20px;font-weight:600;">现状还原 · 当前筛选台</strong>
+      <span style="color:#777e79;font-size:12px;">横向 chip 筛选行 + 双列卡片（照现有实现还原）</span>
+    </div>
+
+    <div style="background:#f3f0e8;border:1px solid #d8d5ca;box-shadow:0 24px 60px rgba(28,37,32,.14);padding:34px 38px 46px;">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:25px;margin:0 0 28px;">
+        <div>
+          <span style="display:flex;align-items:center;gap:8px;font-family:'Geist Mono',monospace;font-size:9px;font-weight:650;letter-spacing:.18em;color:#8e938f;"><i style="width:6px;height:6px;background:#e66d45;border-radius:50%;"></i> AI JOB MATCH</span>
+          <h1 style="margin:8px 0 7px;font-family:'Noto Serif SC',serif;font-size:44px;font-weight:520;letter-spacing:-.03em;">AI 推荐岗位</h1>
+          <p style="max-width:560px;margin:0;color:#777e79;font-size:11px;line-height:1.75;">基于 <strong>技術スタック</strong> 与 <strong>求職硬性約束</strong> 做的匹配结果。这一层是 <em style="font-style:normal;color:#b5842f;font-weight:600;">分析 / 假设</em>，不是权威事实 —— 是否应募由本人判断。</p>
+        </div>
+        <div style="display:flex;gap:26px;align-items:flex-end;">
+          <div style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.1;"><strong style="font-size:30px;font-weight:600;">{{ total }}</strong><span style="font-size:11px;letter-spacing:.08em;color:#6f7772;margin-top:4px;">条推荐</span></div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.1;"><strong style="font-size:30px;font-weight:600;">{{ top8 }}</strong><span style="font-size:11px;letter-spacing:.08em;color:#6f7772;margin-top:4px;">8 点以上</span></div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.1;"><strong style="font-size:30px;font-weight:600;">{{ notApplied }}</strong><span style="font-size:11px;letter-spacing:.08em;color:#6f7772;margin-top:4px;">未应募</span></div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.1;"><strong style="font-size:30px;font-weight:600;">{{ salaryTopLabel }}</strong><span style="font-size:11px;letter-spacing:.08em;color:#6f7772;margin-top:4px;">最高年収</span></div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:22px;">
+        <div style="flex:1 1 320px;display:flex;align-items:center;gap:9px;border:1px solid #d8d5ca;background:#fbfaf6;padding:0 12px;height:40px;">
+          <span style="color:#6f7772;font-size:15px;">⌕</span>
+          <input placeholder="搜索公司、职位、技术栈、推荐理由…" style="flex:1;min-width:0;border:0;background:transparent;font-size:13.5px;color:#18231e;outline:none;font-family:inherit;">
+          <kbd style="border:1px solid #d8d5ca;color:#6f7772;font-size:10px;padding:1px 6px;font-family:'Geist Mono',monospace;">/</kbd>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;height:40px;padding:0 12px;border:1px solid #d8d5ca;background:#fbfaf6;font-size:12.5px;color:#6f7772;"><span>排序</span><select style="border:0;background:transparent;color:#18231e;font-size:13px;cursor:pointer;outline:none;"><option>匹配度</option></select></label>
+        <button style="height:40px;padding:0 16px;border:1px solid #d8d5ca;background:transparent;font-size:12.5px;color:#6f7772;opacity:.55;font-family:inherit;">重置</button>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px;border:1px solid #d8d5ca;background:#fbfaf6;padding:16px 18px;margin-bottom:22px;">
+        <sc-for list="{{ legacyRows }}" as="row" hint-placeholder-count="7">
+          <div style="display:grid;grid-template-columns:84px minmax(0,1fr);gap:12px;align-items:baseline;">
+            <span style="font-size:10.5px;letter-spacing:.12em;color:#6f7772;padding-top:4px;">{{ row.label }}</span>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              <sc-for list="{{ row.chips }}" as="chip" hint-placeholder-count="5">
+                <button style="{{ chip.style }}">{{ chip.label }} <small style="margin-left:5px;opacity:.6;font-size:10.5px;">{{ chip.count }}</small></button>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:#6f7772;margin-bottom:16px;"><span><strong style="color:#18231e;font-size:15px;">{{ total }}</strong> / {{ total }} 条</span></div>
+
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;">
+        <sc-for list="{{ allJobs }}" as="job" hint-placeholder-count="8">
+          <article style="display:flex;flex-direction:column;gap:13px;border:1px solid #d8d5ca;border-left:3px solid {{ job.accent }};background:#fbfaf6;padding:20px 22px;">
+            <header style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;">
+              <div style="min-width:0;">
+                <h2 style="font-size:17px;font-weight:600;line-height:1.35;margin:0;">{{ job.company }}</h2>
+                <p style="font-size:13px;color:#6f7772;margin:5px 0 0;line-height:1.45;">{{ job.position }}</p>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
+                <span style="display:flex;align-items:baseline;gap:2px;"><b style="font-size:1.5rem;font-weight:600;line-height:1;">{{ job.rating }}</b><small style="font-size:.72rem;color:#6f7772;">/10</small></span>
+                <span style="display:block;width:62px;height:4px;border-radius:2px;background:rgba(111,119,114,.28);overflow:hidden;"><i style="display:block;height:100%;border-radius:2px;background:{{ job.accent }};width:{{ job.meter }};"></i></span>
+              </div>
+            </header>
+            <div style="display:flex;flex-wrap:wrap;gap:7px;align-items:center;">
+              <span style="font-size:11.5px;color:#2f6b59;border:1px solid rgba(47,107,89,.35);background:rgba(47,107,89,.06);font-weight:600;padding:3px 9px;border-radius:2px;">{{ job.salaryLabel }}</span>
+              <span style="font-size:11.5px;color:#6f7772;border:1px solid #d8d5ca;padding:3px 9px;border-radius:2px;">{{ job.employment }}</span>
+              <span style="font-size:11.5px;color:#6f7772;border:1px solid #d8d5ca;padding:3px 9px;border-radius:2px;">{{ job.location }}</span>
+              <span style="font-size:11.5px;padding:3px 9px;border-radius:2px;color:{{ job.verifyColor }};background:{{ job.verifyBg }};border:1px solid {{ job.verifyBd }};margin-left:auto;">{{ job.verifyLabel }}</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              <sc-for list="{{ job.stack }}" as="tag" hint-placeholder-count="4">
+                <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#7466a9;background:rgba(116,102,169,.09);padding:3px 8px;letter-spacing:.02em;">{{ tag }}</span>
+              </sc-for>
+            </div>
+            <div style="border-top:1px solid #d8d5ca;padding-top:11px;">
+              <span style="display:block;font-size:10px;letter-spacing:.14em;color:#6f7772;margin-bottom:5px;">推荐理由</span>
+              <p style="font-size:13px;line-height:1.65;color:#18231e;margin:0;">{{ job.reasonShort }}</p>
+            </div>
+            <footer style="display:flex;gap:10px;align-items:center;margin-top:auto;padding-top:13px;">
+              <span style="display:inline-flex;align-items:center;padding:6px 13px;font-size:12.5px;border-radius:2px;color:{{ job.statusColor }};background:{{ job.statusBg }};border:1px solid {{ job.statusBd }};">{{ job.status }} ⌄</span>
+              <button style="border:1px solid #d8d5ca;background:transparent;color:#6f7772;padding:7px 13px;font-size:12.5px;font-family:inherit;">对比</button>
+              <button style="border:1px solid #d8d5ca;background:transparent;color:#18231e;padding:7px 15px;font-size:12.5px;font-family:inherit;">详情</button>
+            </footer>
+          </article>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+</section>
+
+<sc-if value="{{ compareOpen }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ closeCompare }}" style="position:fixed;inset:0;z-index:90;background:rgba(24,35,30,.5);display:flex;align-items:center;justify-content:center;padding:40px;">
+    <div onClick="{{ stopCompare }}" style="background:#fbfaf6;border:1px solid #cbc8be;box-shadow:0 30px 80px rgba(28,37,32,.3);max-width:1000px;width:100%;max-height:88vh;overflow:auto;">
+      <header style="display:flex;align-items:center;justify-content:space-between;padding:20px 26px;border-bottom:1px solid #e4e0d7;position:sticky;top:0;background:#fbfaf6;">
+        <h2 style="margin:0;font-family:'Noto Serif SC',serif;font-size:22px;font-weight:600;">并排对比</h2>
+        <button onClick="{{ closeCompare }}" style="border:0;background:transparent;font-size:22px;cursor:pointer;color:#6f7772;">×</button>
+      </header>
+      <div style="display:grid;grid-template-columns:repeat({{ compareCount }},minmax(0,1fr));gap:16px;padding:22px 26px;">
+        <sc-for list="{{ compared }}" as="job" hint-placeholder-count="2">
+          <div style="border:1px solid #d8d5ca;background:#fff;padding:18px;border-top:3px solid {{ job.accent }};">
+            <h3 style="margin:0 0 2px;font-size:16px;font-weight:600;">{{ job.company }}</h3>
+            <p style="margin:0 0 14px;font-size:12px;color:#6f7772;">{{ job.position }}</p>
+            <dl style="margin:0;display:flex;flex-direction:column;gap:10px;">
+              <div><dt style="font-size:9px;letter-spacing:.14em;color:#959a96;">匹配度</dt><dd style="margin:3px 0 0;font-family:'Noto Serif SC',serif;font-size:20px;font-weight:600;color:{{ job.accent }};">{{ job.rating }} / 10</dd></div>
+              <div><dt style="font-size:9px;letter-spacing:.14em;color:#959a96;">年収</dt><dd style="margin:3px 0 0;font-size:13px;color:#2f6b59;font-weight:600;">{{ job.salaryLabel }}</dd></div>
+              <div><dt style="font-size:9px;letter-spacing:.14em;color:#959a96;">勤務地</dt><dd style="margin:3px 0 0;font-size:13px;">{{ job.location }}</dd></div>
+              <div><dt style="font-size:9px;letter-spacing:.14em;color:#959a96;">状态</dt><dd style="margin:3px 0 0;font-size:13px;">{{ job.status }}</dd></div>
+              <div><dt style="font-size:9px;letter-spacing:.14em;color:#959a96;">原文核对</dt><dd style="margin:3px 0 0;font-size:13px;color:{{ job.verifyColor }};">{{ job.verifyLabel }}</dd></div>
+              <div><dt style="font-size:9px;letter-spacing:.14em;color:#959a96;">技術スタック</dt><dd style="margin:5px 0 0;display:flex;flex-wrap:wrap;gap:5px;"><sc-for list="{{ job.stack }}" as="tag" hint-placeholder-count="3"><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#7466a9;background:rgba(116,102,169,.09);padding:2px 7px;">{{ tag }}</span></sc-for></dd></div>
+              <div><dt style="font-size:9px;letter-spacing:.14em;color:#959a96;">推荐理由</dt><dd style="margin:3px 0 0;font-size:12px;line-height:1.6;color:#18231e;">{{ job.reason }}</dd></div>
+              <div><dt style="font-size:9px;letter-spacing:.14em;color:#959a96;">注意点</dt><dd style="margin:3px 0 0;font-size:12px;line-height:1.6;color:#8a5a2b;">{{ job.caution }}</dd></div>
+            </dl>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</sc-if>
+
+<sc-if value="{{ hasCompare }}" hint-placeholder-val="{{ false }}">
+  <div style="position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:80;display:flex;align-items:center;gap:14px;background:#18231e;color:#f3f0e8;padding:12px 18px;border-radius:4px;box-shadow:0 18px 45px rgba(24,35,30,.4);">
+    <span style="font-family:'Geist Mono',monospace;font-size:11px;letter-spacing:.06em;color:#c9c4b6;">{{ compareCount }} / 3 已选</span>
+    <div style="display:flex;gap:8px;">
+      <sc-for list="{{ compared }}" as="job" hint-placeholder-count="2">
+        <button onClick="{{ job.onCompare }}" style="border:1px solid rgba(255,255,255,.25);background:transparent;color:#f3f0e8;padding:5px 10px;font-size:12px;cursor:pointer;font-family:inherit;border-radius:2px;">{{ job.company }} <i style="font-style:normal;opacity:.6;">×</i></button>
+      </sc-for>
+    </div>
+    <button onClick="{{ openCompare }}" style="{{ openCompareStyle }}">并排对比</button>
+    <button onClick="{{ clearCompare }}" style="border:0;background:transparent;color:#c9c4b6;font-size:12px;cursor:pointer;font-family:inherit;">清空</button>
+  </div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    q: "", sort: "rating",
+    statuses: [], minRating: 0, minSalary: 0, stacks: [], verifications: [], remoteOnly: false,
+    statusOverride: {}, compare: [], compareOpen: false,
+    viewMode: "card", weekOffset: 0,
+  };
+
+  JOBS = [
+    { id: "mercari", company: "メルカリ", position: "バックエンドエンジニア（Go）", rating: 9, status: "未応募",
+      salaryMin: 750, salaryMax: 1100, salaryText: "年俸 750万〜1,100万円", location: "東京都港区・一部在宅", region: "東京都", remote: true,
+      employment: "正社員", source: "求人票", stack: ["Go", "Kubernetes", "GCP", "gRPC", "MySQL"], verify: "verified", date: "2026-07-20", updatedAt: 8,
+      reason: "Go による大規模マイクロサービス経験と決済ドメインの相性が高い。gRPC / Kubernetes の実務が求人要件とほぼ一致している。",
+      caution: "英語での設計ドキュメント作成が日常。ドキュメント文化への適応が前提。" },
+    { id: "layerx", company: "LayerX", position: "ソフトウェアエンジニア（Rust）", rating: 9, status: "未応募",
+      salaryMin: 800, salaryMax: 1200, salaryText: "年俸 800万〜1,200万円", location: "東京都中央区（フルリモート可）", region: "東京都", remote: true,
+      employment: "正社員", source: "公式サイト", stack: ["Rust", "TypeScript", "AWS", "PostgreSQL"], verify: "warned", date: "2026-07-19", updatedAt: 7,
+      reason: "Rust への移行フェーズで、型システムとパフォーマンス志向のバックエンド設計を高く評価している。",
+      caution: "Rust の実務歴が浅い場合、選考課題の比重が大きい。要確認。" },
+    { id: "smarthr", company: "SmartHR", position: "フロントエンドエンジニア", rating: 8, status: "応募済",
+      salaryMin: 650, salaryMax: 950, salaryText: "年俸 650万〜950万円", location: "東京都港区・リモート併用", region: "東京都", remote: true,
+      employment: "正社員", source: "エージェント", stack: ["TypeScript", "React", "GraphQL"], verify: "verified", date: "2026-07-18", updatedAt: 6,
+      reason: "TypeScript / React の設計力と、労務ドメインの複雑な業務ロジックを扱う経験がマッチしている。",
+      caution: "アクセシビリティ基準が厳格。既存の a11y 実績を整理しておくとよい。" },
+    { id: "ca", company: "サイバーエージェント", position: "SRE エンジニア", rating: 8, status: "面接中",
+      salaryMin: 700, salaryMax: 1050, salaryText: "年俸 700万〜1,050万円", location: "東京都渋谷区・一部在宅", region: "東京都", remote: true,
+      employment: "正社員", source: "求人票", stack: ["Kubernetes", "Go", "Terraform", "GCP"], verify: "verified", date: "2026-07-17", updatedAt: 5,
+      reason: "SRE として GKE / Terraform を用いた信頼性設計の経験が中核要件と合致している。",
+      caution: "オンコール体制あり。夜間対応の可否を面談で要確認。" },
+    { id: "freee", company: "freee", position: "プラットフォームエンジニア", rating: 7, status: "未応募",
+      salaryMin: 680, salaryMax: 980, salaryText: "年俸 680万〜980万円", location: "東京都大田区", region: "東京都", remote: false,
+      employment: "正社員", source: "LinkedIn", stack: ["Ruby", "Go", "AWS", "Kafka"], verify: "unchecked", date: "2026-07-16", updatedAt: 4,
+      reason: "会計ドメインの整合性設計と Go / Kafka のイベント駆動経験を評価している。",
+      caution: "求人原文の年収レンジ未確認。提示は推定値。" },
+    { id: "paypay", company: "PayPay", position: "データエンジニア", rating: 7, status: "書類通過",
+      salaryMin: 720, salaryMax: 1100, salaryText: "年俸 720万〜1,100万円", location: "東京都千代田区・リモート可", region: "東京都", remote: true,
+      employment: "正社員", source: "エージェント", stack: ["Spark", "Scala", "GCP", "BigQuery"], verify: "warned", date: "2026-07-15", updatedAt: 3,
+      reason: "Spark / BigQuery による大規模データ基盤の運用経験がそのまま活きる。",
+      caution: "求人票にリモート頻度の記載揺れあり。要確認。" },
+    { id: "rakus", company: "ラクス", position: "Web エンジニア", rating: 6, status: "未応募",
+      salaryMin: 550, salaryMax: 800, salaryText: "年俸 550万〜800万円", location: "東京都渋谷区", region: "東京都", remote: false,
+      employment: "正社員", source: "求人票", stack: ["PHP", "Laravel", "MySQL"], verify: "unchecked", date: "2026-07-14", updatedAt: 2,
+      reason: "PHP / Laravel の堅実な Web 開発経験と、自社 SaaS の長期運用志向が合う。",
+      caution: "技術スタックが既存資産中心。モダン化の意欲は面談で伝える必要あり。" },
+    { id: "toyota", company: "トヨタコネクティッド", position: "車載バックエンドエンジニア", rating: 5, status: "不採用",
+      salaryMin: 600, salaryMax: 900, salaryText: "年俸 600万〜900万円", location: "愛知県名古屋市", region: "愛知県", remote: false,
+      employment: "正社員", source: "公式サイト", stack: ["Java", "Spring", "AWS"], verify: "verified", date: "2026-07-12", updatedAt: 1,
+      reason: "車載バックエンドの大規模 Java システムと、堅牢性重視の設計経験がマッチしている。",
+      caution: "名古屋勤務が前提。リモート不可。" },
+  ];
+
+  RATING_STEPS = [{ v: 0, l: "全部" }, { v: 7, l: "7+" }, { v: 8, l: "8+" }, { v: 9, l: "9+" }];
+  SALARY_STEPS = [0, 700, 800, 900, 1000];
+  VERIFY_META = { verified: "原文確認済", warned: "要確認", unchecked: "未核对" };
+
+  CHIP = "display:inline-flex;align-items:center;gap:5px;border:1px solid #d8d5ca;background:transparent;color:#6f7772;padding:4px 11px;font-size:12px;line-height:1;cursor:pointer;border-radius:2px;font-family:inherit;";
+  CHIP_ON = "display:inline-flex;align-items:center;gap:5px;border:1px solid #18231e;background:#18231e;color:#f3f0e8;padding:4px 11px;font-size:12px;line-height:1;cursor:pointer;border-radius:2px;font-family:inherit;";
+  chipStyle(active) { return active ? this.CHIP_ON : this.CHIP; }
+
+  accent(r) { if (r >= 9) return "#e66d45"; if (r >= 7) return "#2f6b59"; if (r >= 5) return "#b5842f"; return "#6f7772"; }
+  accentSoft(r) { if (r >= 9) return "rgba(230,109,69,.12)"; if (r >= 7) return "rgba(47,107,89,.12)"; if (r >= 5) return "rgba(181,132,47,.12)"; return "rgba(111,119,114,.12)"; }
+  salaryLabel(j) { if (j.salaryMax && j.salaryMax !== j.salaryMin) return `${j.salaryMin}〜${j.salaryMax}万`; return `${j.salaryMin}万〜`; }
+
+  statusStyle(s) {
+    if (s === "未応募") return { c: "#b5842f", bg: "rgba(181,132,47,.08)", bd: "rgba(181,132,47,.4)" };
+    if (s === "応募済" || s === "書類通過" || s === "面接中") return { c: "#2f6b59", bg: "rgba(47,107,89,.07)", bd: "rgba(47,107,89,.4)" };
+    if (s === "内定") return { c: "#f3f0e8", bg: "#2f6b59", bd: "#2f6b59" };
+    if (s === "不採用") return { c: "#8f938e", bg: "transparent", bd: "#d8d5ca" };
+    return { c: "#6f7772", bg: "transparent", bd: "#d8d5ca" };
+  }
+  verifyStyle(v) {
+    if (v === "verified") return { c: "#2f6b59", bg: "rgba(47,107,89,.07)", bd: "rgba(47,107,89,.4)" };
+    if (v === "warned") return { c: "#e66d45", bg: "rgba(230,109,69,.08)", bd: "rgba(230,109,69,.4)" };
+    return { c: "#6f7772", bg: "transparent", bd: "#d8d5ca" };
+  }
+
+  effStatus(j) { return this.state.statusOverride[j.id] ?? j.status; }
+  toggle(list, v) { return list.includes(v) ? list.filter((x) => x !== v) : [...list, v]; }
+
+  clip(t, n) { return t.length > n ? t.slice(0, n) + "…" : t; }
+
+  decorate(j) {
+    const status = this.effStatus(j);
+    const ss = this.statusStyle(status);
+    const vs = this.verifyStyle(j.verify);
+    const compared = this.state.compare.includes(j.id);
+    const compareFull = this.state.compare.length >= 3;
+    const baseCard = "display:flex;flex-direction:column;gap:13px;background:#fbfaf6;padding:20px 22px;cursor:pointer;transition:transform 160ms ease,box-shadow 160ms ease;border:1px solid " + (compared ? "#7466a9" : "#d8d5ca") + ";box-shadow:" + (compared ? "0 0 0 1px rgba(116,102,169,.35)" : "none") + ";";
+    const cmpBase = "border:1px solid #d8d5ca;background:transparent;color:#6f7772;padding:7px 13px;font-size:12.5px;cursor:pointer;font-family:inherit;";
+    const cmpOn = "border:1px solid #7466a9;background:rgba(116,102,169,.12);color:#7466a9;padding:7px 13px;font-size:12.5px;cursor:pointer;font-family:inherit;";
+    const cmpOff = "border:1px solid #d8d5ca;background:transparent;color:#c3c0b7;padding:7px 13px;font-size:12.5px;cursor:not-allowed;font-family:inherit;";
+    return {
+      ...j, status, rating: j.rating, meter: `${j.rating * 10}%`,
+      accent: this.accent(j.rating), accentSoft: this.accentSoft(j.rating),
+      salaryLabel: this.salaryLabel(j), rateMeta: `匹配度 ${j.rating}/10`,
+      reasonShort: this.clip(j.reason, 92),
+      statusColor: ss.c, statusBg: ss.bg, statusBd: ss.bd,
+      verifyLabel: this.VERIFY_META[j.verify], verifyColor: vs.c, verifyBg: vs.bg, verifyBd: vs.bd,
+      cardStyle: baseCard,
+      compareLabel: compared ? "已加入对比" : "对比",
+      compareStyle: compared ? cmpOn : (compareFull ? cmpOff : cmpBase),
+      onDetail: () => {},
+      stop: (e) => e.stopPropagation(),
+      onStatus: (e) => { e.stopPropagation(); this.setState((s) => ({ statusOverride: { ...s.statusOverride, [j.id]: e.target.value } })); },
+      onCompare: (e) => { e && e.stopPropagation && e.stopPropagation(); this.setState((s) => {
+        if (s.compare.includes(j.id)) return { compare: s.compare.filter((x) => x !== j.id) };
+        if (s.compare.length >= 3) return {};
+        return { compare: [...s.compare, j.id] };
+      }); },
+    };
+  }
+
+  facetCount(fn) { const m = new Map(); this.JOBS.forEach((j) => fn(j).forEach((v) => m.set(v, (m.get(v) || 0) + 1))); return m; }
+
+  buildChips(entries, selected, key) {
+    return entries.map(([value, count]) => ({
+      value, label: value, count, active: selected.includes(value),
+      style: this.chipStyle(selected.includes(value)),
+      onClick: () => this.setState((s) => ({ [key]: this.toggle(s[key], value) })),
+    }));
+  }
+
+  renderVals() {
+    const s = this.state;
+    const total = this.JOBS.length;
+    const top8 = this.JOBS.filter((j) => j.rating >= 8).length;
+    const notApplied = this.JOBS.filter((j) => this.effStatus(j) === "未応募").length;
+    const salaryTop = Math.max(...this.JOBS.map((j) => j.salaryMax || 0));
+
+    // ---- facets ----
+    const statusCounts = this.facetCount((j) => [this.effStatus(j)]);
+    const statusOrder = ["未応募", "応募済", "書類通過", "面接中", "内定", "保留", "不採用"];
+    const statusEntries = statusOrder.filter((k) => statusCounts.has(k)).map((k) => [k, statusCounts.get(k)]);
+    const stackCounts = this.facetCount((j) => j.stack);
+    const stackEntries = Array.from(stackCounts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const verifyCounts = this.facetCount((j) => [j.verify]);
+    const verifyEntries = ["verified", "warned", "unchecked"].filter((k) => verifyCounts.has(k)).map((k) => [k, verifyCounts.get(k)]);
+
+    const statusChips = this.buildChips(statusEntries, s.statuses, "statuses");
+    const stackChips = this.buildChips(stackEntries, s.stacks, "stacks");
+    const verifyChips = verifyEntries.map(([v, count]) => ({
+      value: v, label: this.VERIFY_META[v], count, active: s.verifications.includes(v),
+      style: this.chipStyle(s.verifications.includes(v)),
+      onClick: () => this.setState((st) => ({ verifications: this.toggle(st.verifications, v) })),
+    }));
+    const ratingSteps = this.RATING_STEPS.map((step) => ({
+      label: step.l, count: this.JOBS.filter((j) => j.rating >= step.v).length, active: s.minRating === step.v,
+      style: this.chipStyle(s.minRating === step.v), onClick: () => this.setState({ minRating: step.v }),
+    }));
+    const salarySteps = this.SALARY_STEPS.map((step) => ({
+      label: step === 0 ? "全部" : `${step}万+`, count: this.JOBS.filter((j) => (j.salaryMax || 0) >= step).length,
+      active: s.minSalary === step, style: this.chipStyle(s.minSalary === step), onClick: () => this.setState({ minSalary: step }),
+    }));
+    const remoteChip = {
+      count: this.JOBS.filter((j) => j.remote).length, active: s.remoteOnly,
+      style: this.chipStyle(s.remoteOnly), onClick: () => this.setState((st) => ({ remoteOnly: !st.remoteOnly })),
+    };
+
+    // ---- filter + sort ----
+    const q = s.q.trim().toLowerCase();
+    let list = this.JOBS.filter((j) => {
+      const hay = [j.company, j.position, j.stack.join(" "), j.location, j.reason].join("\n").toLowerCase();
+      if (q && !q.split(/\s+/).every((t) => hay.includes(t))) return false;
+      if (s.statuses.length && !s.statuses.includes(this.effStatus(j))) return false;
+      if (j.rating < s.minRating) return false;
+      if (s.minSalary && (j.salaryMax || 0) < s.minSalary) return false;
+      if (s.stacks.length && !j.stack.some((t) => s.stacks.includes(t))) return false;
+      if (s.verifications.length && !s.verifications.includes(j.verify)) return false;
+      if (s.remoteOnly && !j.remote) return false;
+      return true;
+    });
+    list.sort((a, b) => {
+      if (s.sort === "salary") { const d = (b.salaryMax || -1) - (a.salaryMax || -1); if (d) return d; }
+      else if (s.sort === "updated") { const d = b.updatedAt - a.updatedAt; if (d) return d; }
+      else if (s.sort === "company") { const d = a.company.localeCompare(b.company, "ja"); if (d) return d; }
+      const r = b.rating - a.rating; if (r) return r; return a.company.localeCompare(b.company, "ja");
+    });
+    const visible = list.map((j) => this.decorate(j));
+
+    const activeCount = s.statuses.length + s.stacks.length + s.verifications.length +
+      (s.minRating > 0 ? 1 : 0) + (s.minSalary > 0 ? 1 : 0) + (s.remoteOnly ? 1 : 0);
+
+    // ---- legacy (1a) static rows ----
+    const flat = (v) => ({ label: v, count: 0, style: this.CHIP });
+    const staticChips = (entries) => entries.map(([v, c]) => ({ label: this.VERIFY_META[v] || v, count: c, style: this.CHIP }));
+    const regionCounts = this.facetCount((j) => [j.region]);
+    const sourceCounts = this.facetCount((j) => [j.source]);
+    const legacyRows = [
+      { label: "应募状态", chips: statusEntries.map(([v, c]) => ({ label: v, count: c, style: this.CHIP })) },
+      { label: "匹配度", chips: this.RATING_STEPS.map((st) => ({ label: st.l, count: this.JOBS.filter((j) => j.rating >= st.v).length, style: this.CHIP })) },
+      { label: "年収上限", chips: [...this.SALARY_STEPS.map((st) => ({ label: st === 0 ? "全部" : `${st}万+`, count: this.JOBS.filter((j) => (j.salaryMax || 0) >= st).length, style: this.CHIP })), { label: "リモート可", count: remoteChip.count, style: this.CHIP }] },
+      { label: "技術スタック", chips: stackEntries.slice(0, 12).map(([v, c]) => ({ label: v, count: c, style: this.CHIP })) },
+      { label: "勤務地", chips: Array.from(regionCounts.entries()).sort((a, b) => b[1] - a[1]).map(([v, c]) => ({ label: v, count: c, style: this.CHIP })) },
+      { label: "来源", chips: Array.from(sourceCounts.entries()).sort((a, b) => b[1] - a[1]).map(([v, c]) => ({ label: v, count: c, style: this.CHIP })) },
+      { label: "原文核对", chips: staticChips(verifyEntries) },
+    ];
+    const allJobs = [...this.JOBS].sort((a, b) => b.rating - a.rating || a.company.localeCompare(b.company, "ja")).map((j) => this.decorate(j));
+
+    // ---- compare ----
+    const compared = s.compare.map((id) => this.JOBS.find((j) => j.id === id)).filter(Boolean).map((j) => this.decorate(j));
+    const compareCount = compared.length;
+    const openCompareBase = "border:1px solid #f3f0e8;background:#f3f0e8;color:#18231e;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;border-radius:2px;";
+    const openCompareOff = "border:1px solid rgba(255,255,255,.2);background:transparent;color:#8f938e;padding:6px 14px;font-size:12px;cursor:not-allowed;font-family:inherit;border-radius:2px;";
+
+    // ---- view switcher ----
+    const mode = s.viewMode;
+    const isJobView = mode !== "weekly";
+    const viewDefs = [["card", "卡片"], ["list", "列表"], ["kanban", "看板"], ["weekly", "周复盘"]];
+    const tabBase = "display:inline-flex;align-items:center;border:0;background:transparent;color:#6f7772;padding:0 15px;height:100%;font-size:12px;cursor:pointer;font-family:inherit;";
+    const tabOn = "display:inline-flex;align-items:center;border:0;background:#18231e;color:#f3f0e8;padding:0 15px;height:100%;font-size:12px;cursor:pointer;font-family:inherit;";
+    const viewTabs = viewDefs.map(([k, l], i) => ({
+      key: k, label: l,
+      style: (mode === k ? tabOn : tabBase) + (i < viewDefs.length - 1 ? "border-right:1px solid #e0dcd2;" : ""),
+      onClick: () => this.setState({ viewMode: k }),
+    }));
+
+    // ---- kanban ----
+    const kanbanOrder = ["未応募", "応募済", "書類通過", "面接中", "内定", "保留", "不採用"];
+    const kanbanCore = ["未応募", "応募済", "書類通過", "面接中", "内定"];
+    const kanbanColumns = kanbanOrder.map((st) => {
+      const js = visible.filter((j) => j.status === st);
+      return { status: st, label: st, color: this.statusStyle(st).c, count: js.length, jobs: js, empty: js.length === 0 };
+    }).filter((c) => c.count > 0 || kanbanCore.includes(c.status));
+
+    // ---- weekly review ----
+    const baseD = new Date(2026, 6, 14); baseD.setDate(baseD.getDate() + s.weekOffset * 7);
+    const endD = new Date(baseD); endD.setDate(baseD.getDate() + 6);
+    const fmtD = (d) => `${d.getMonth() + 1}月${d.getDate()}日`;
+    const weekRange = `${fmtD(baseD)} – ${fmtD(endD)}`;
+    const weekTitle = s.weekOffset === 0 ? "本周复盘" : (s.weekOffset < 0 ? `${-s.weekOffset} 周前` : `${s.weekOffset} 周后`);
+    const weekHasData = s.weekOffset === 0;
+    const inWeek = (d) => d >= "2026-07-14" && d <= "2026-07-20";
+    const evColor = { 未応募: "#b5842f", 応募済: "#2f6b59", 書類通過: "#2f6b59", 面接中: "#e66d45", 内定: "#2f6b59", 不採用: "#8f938e", 保留: "#6f7772" };
+    const evLabel = (j) => { const st = this.effStatus(j); if (st === "未応募") return `AI が新規推薦（匹配度 ${j.rating}）`; if (st === "応募済") return "応募完了"; if (st === "書類通過") return "書類選考通過"; if (st === "面接中") return "一次面接を実施"; if (st === "内定") return "内定"; if (st === "不採用") return "不採用"; return "保留"; };
+    const weekEvents = this.JOBS.filter((j) => inWeek(j.date)).sort((a, b) => b.date.localeCompare(a.date))
+      .map((j) => ({ day: `7/${parseInt(j.date.slice(-2), 10)}`, company: j.company, label: evLabel(j), color: evColor[this.effStatus(j)] || "#6f7772" }));
+    const cnt = (f) => this.JOBS.filter(f).length;
+    const weekKpis = [
+      { value: cnt((j) => ["応募済", "書類通過", "面接中", "内定"].includes(this.effStatus(j)) && inWeek(j.date)), label: "本周应募 / 进展", color: "#2f6b59" },
+      { value: cnt((j) => this.effStatus(j) === "面接中"), label: "面接进行中", color: "#e66d45" },
+      { value: cnt((j) => ["書類通過", "面接中", "内定"].includes(this.effStatus(j))), label: "选考推进中", color: "#18231e" },
+      { value: cnt((j) => this.effStatus(j) === "未応募" && j.rating >= 8), label: "待投递（8+）", color: "#b5842f" },
+    ];
+    const nextFocus = [];
+    this.JOBS.forEach((j) => { const st = this.effStatus(j);
+      if (st === "面接中") nextFocus.push({ company: j.company, action: "面接準備・逆質問の整理。" + j.caution });
+      else if (st === "書類通過") nextFocus.push({ company: j.company, action: "面接日程を調整。" + j.caution });
+    });
+    this.JOBS.filter((j) => this.effStatus(j) === "未応募" && j.rating >= 9).forEach((j) => nextFocus.push({ company: j.company, action: "今週中に優先応募。" + j.caution }));
+    const weekNote = "本周动态来自笔记的状态与日期字段，属于「证据层」；AI 匹配度只是假设，投递决定仍由本人做出。";
+
+    return {
+      isJobView, isCard: mode === "card", isList: mode === "list", isKanban: mode === "kanban", isWeekly: mode === "weekly",
+      viewTabs, kanbanColumns,
+      showEmpty: isJobView && visible.length === 0,
+      weekTitle, weekRange, weekHasData, weekEmpty: !weekHasData, weekKpis, weekEvents, nextFocus: nextFocus.slice(0, 4), weekNote,
+      prevWeek: () => this.setState((st) => ({ weekOffset: st.weekOffset - 1 })),
+      nextWeek: () => this.setState((st) => ({ weekOffset: st.weekOffset + 1 })),
+      total, top8, notApplied, salaryTopLabel: salaryTop ? `${salaryTop}万` : "—",
+      q: s.q, sort: s.sort, setQ: (e) => this.setState({ q: e.target.value }), setSort: (e) => this.setState({ sort: e.target.value }),
+      statusChips, stackChips, verifyChips, ratingSteps, salarySteps, remoteChip,
+      visible, resultCount: visible.length, isEmpty: visible.length === 0,
+      queryNote: q ? ` · 关键词「${s.q.trim()}」` : "",
+      activeCount, resetSuffix: activeCount > 0 ? ` (${activeCount})` : "",
+      reset: () => this.setState({ q: "", statuses: [], minRating: 0, minSalary: 0, stacks: [], verifications: [], remoteOnly: false }),
+      legacyRows, allJobs,
+      compared, compareCount, hasCompare: compareCount > 0,
+      compareOpen: s.compareOpen && compareCount >= 2,
+      openCompare: () => compareCount >= 2 && this.setState({ compareOpen: true }),
+      openCompareStyle: compareCount >= 2 ? openCompareBase : openCompareOff,
+      closeCompare: () => this.setState({ compareOpen: false }),
+      clearCompare: () => this.setState({ compare: [], compareOpen: false }),
+      stopCompare: (e) => e.stopPropagation(),
+    };
+  }
+}
+</script>
+</body>
+</html>
