@@ -304,14 +304,23 @@ export default function JobsView({
   notes,
   onOpen,
   onVaultChanged,
+  initialStatuses,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
   onVaultChanged?: () => void | Promise<void>;
+  /**
+   * 別画面（求職分析の「進行中 N 件をすべて見る」など）から遷移してきた時の初期状態フィルタ。
+   * このコンポーネントは view 切替でアンマウントされるので、初期値として一度読むだけでよい。
+   * 呼び出し側はナビで直接来た時に null に戻す責任を持つ（memory-atlas.tsx）。
+   */
+  initialStatuses?: string[] | null;
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<JobSort>("rating");
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<Filters>(() =>
+    initialStatuses?.length ? { ...EMPTY_FILTERS, statuses: initialStatuses } : EMPTY_FILTERS,
+  );
   const [viewMode, setViewMode] = useState<ViewMode>("card");
   const [weekOffset, setWeekOffset] = useState(0);
   // 这个面板常挂着不关，「今天」要在跨天后重新取，否则周复盘会一直停在打开那天的那一周。

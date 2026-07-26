@@ -32,6 +32,9 @@ import {
   type ReviewFeedbackEntry,
   type ReviewFeedbackKind,
 } from "@/lib/review-feedback";
+// タグのラベルは vault の 面接傾向_横断 を生成する側と同じものを使う。
+// 二重に持つと Web の表示と generated ノートの表記がずれる
+import { STRATEGY_TREND_META } from "@/lib/interview-trends.mjs";
 
 // 面接復盤：整理稿（派生層）を読む・批注（事実層）へ追記する、の2操作だけを持つ。
 // 整理稿の中身をここで書き換える経路は意図的に存在しない（唯一writer表を参照）。
@@ -844,36 +847,6 @@ const FEEDBACK_LABELS: Record<ReviewFeedbackKind, string> = {
   context: "补充事实",
 };
 
-const STRATEGY_TREND_META: Record<AnswerStrategyTag, { label: string; description: string }> = {
-  "compound-question-miss": {
-    label: "复合问题漏答",
-    description: "问题包含多个子问，但回答只覆盖其中一部分。",
-  },
-  "no-conclusion-first": {
-    label: "不先说结论",
-    description: "先铺背景或过程，面试官需要自行寻找答案。",
-  },
-  "negative-oversharing": {
-    label: "主动暴露负面信息",
-    description: "在没有必要时主动扩展弱点、冲突或不利细节。",
-  },
-  "weak-evidence": {
-    label: "证据偏弱",
-    description: "观点缺少具体案例、数据、角色或结果支撑。",
-  },
-  "over-absolute": {
-    label: "表述过于绝对",
-    description: "使用容易被反例击穿的绝对化判断。",
-  },
-  "role-mismatch": {
-    label: "角色期待错位",
-    description: "回答重点与职位、职级或面试官关注点不一致。",
-  },
-  "numbers-confusion": {
-    label: "数字口径混乱",
-    description: "年份、规模、人数或成果数字前后不一致。",
-  },
-};
 
 function DeepReviewPanel({
   review,

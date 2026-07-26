@@ -19,6 +19,8 @@ export const LEDGER = join(VAULT, "20_求職/_不採用台帳_正.md");
 export const DICTIONARY = join(VAULT, "99_系统/_数据字典.md");
 export const QUEUE = join(VAULT, "20_求職/_AI推薦/_探索キュー.md");
 export const APPLIED_LEDGER = join(VAULT, "20_求職/_応募日台帳.md");
+export const PREP_LIBRARY = join(VAULT, "20_求職/_素材/面接標準回答集.md");
+export const TRENDS = join(VAULT, "20_求職/_素材/面接傾向_横断.md");
 
 /** CSV は iCloud 側にある（vault 外）。無い環境でも壊れないよう呼び出し側で握る。 */
 export const REJECTIONS_CSV =

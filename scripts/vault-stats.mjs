@@ -17,8 +17,10 @@ import {
   JOB_STATUSES,
   KNOWN_CHANNELS,
   LEDGER,
+  PREP_LIBRARY,
   QUEUE,
   REJECTIONS_CSV,
+  TRENDS,
   baseStatus,
   listMarkdownFiles,
   parseCsv,
@@ -28,6 +30,13 @@ import {
 } from "./vault-lib.mjs";
 import { JOB_CASE_ORIGINS } from "../lib/vault-boundary.mjs";
 import { parseQueue, queueStats } from "../lib/job-queue.mjs";
+import { parseInterviewAnswerReview } from "../lib/review-deep.ts";
+import {
+  buildCardCoverage,
+  buildInterviewTrends,
+  interviewKeyFromNoteName,
+  renderInterviewTrends,
+} from "../lib/interview-trends.mjs";
 import {
   buildStatsPayload,
   buildTimeline,
@@ -43,11 +52,33 @@ const CHANNEL_ALIAS = { "企业直投/ATS": "企業直投/ATS" };
 const normalizeChannel = (value) => CHANNEL_ALIAS[value] ?? (value || "その他");
 const isDocStage = (stage) => stage.includes("书类") || stage.includes("書類");
 
-let csvRows = [];
+// 上流が欠けたまま派生を書き換えない——欠測は 0 件ではなく「計算不能」。
+// CSV は凍結済み 175社＝台帳の数字のほぼ全部を占める。読めないまま続行すると
+// 「CSV 0 件」で集計し、181社を 10社で、2025年の月別推移ごと上書きしてしまう。
+// 2026-07-25 実際に踏んだ：iCloud のフルディスクアクセスが外れて読めなくなり、
+// 旧実装は warning だけ出して続行 → --check が「台帳がずれている、vault:stats を実行せよ」と
+// 破壊的な指示を出した（Stop hook 経由で AI に届く）。中止が正しい。
+let csvRows;
 try {
   csvRows = parseCsv(await readFile(REJECTIONS_CSV, "utf8"));
-} catch {
-  console.warn(`⚠️  CSV を読めなかった（過去分は 0 件として集計）: ${REJECTIONS_CSV}`);
+} catch (error) {
+  console.error(`❌ CSV を読めなかったので中止した: ${REJECTIONS_CSV}`);
+  console.error(`   理由: ${error.code ?? error.message}`);
+  console.error("   台帳の数字の大半はこの CSV 由来。読めないまま集計すると過去分が消える。");
+  console.error("   macOS: システム設定 → プライバシーとセキュリティ → フルディスクアクセス を確認する");
+  console.error("   （iCloud Drive 配下はアクセス権が外れると stat だけ通り read が EPERM になる）");
+  // 3 = 上流にアクセスできない（環境の問題）。データ不整合の 1 と区別する。
+  // Stop hook はこれをブロック理由にしない——別マシンや権限切れで毎ターン止まると、
+  // 防線そのものが無視されるようになる（hook 側の設計方針と揃えている）。
+  process.exit(3);
+}
+
+// 読めても 0 行なら、空ファイル・iCloud のプレースホルダ・破損のいずれか。
+// 「本当に 0 社」はあり得ない（凍結済みの過去分が入っている）ので同じく中止する。
+if (csvRows.length === 0) {
+  console.error(`❌ CSV は読めたが 0 行だったので中止した: ${REJECTIONS_CSV}`);
+  console.error("   凍結済みの過去分が入っているはずのファイル。空＝取得失敗か破損を疑うこと。");
+  process.exit(3);
 }
 
 const records = csvRows.map((row) => ({
@@ -268,6 +299,33 @@ for (const path of await listMarkdownFiles(JOB_CASE_ROOT)) {
   });
 }
 
+// 回答品質復盤の横断集計。どの弱点が「癖」かは1本ずつ読んでも見えないので機械で出す。
+// カードとの対応は標準回答集の「证据」に実在する `整理稿#qNN` 出典だけから作る（推測しない）。
+let cardCoverage = new Map();
+try {
+  cardCoverage = buildCardCoverage(await readFile(PREP_LIBRARY, "utf8"));
+} catch (error) {
+  // 上流が読めないまま「対応カード無し」と書くと、実在するカードを見落として
+  // 「新カードを起こせ」と誤った指示を出してしまう。欠測は 0 件ではなく計算不能。
+  console.error(`❌ 面接標準回答集が読めない: ${error.message}`);
+  process.exit(1);
+}
+const reviewEntries = [];
+for (const path of await listMarkdownFiles(JOB_CASE_ROOT)) {
+  const content = await readFile(path, "utf8");
+  const fm = parseFrontmatter(content);
+  if (fm.type !== "interview-answer-review") continue;
+  const name = (path.split("/").pop() ?? "").replace(/\.md$/i, "");
+  reviewEntries.push({
+    key: interviewKeyFromNoteName(name),
+    company: String(fm.company ?? ""),
+    date: String(fm.date ?? ""),
+    round: String(fm.round ?? ""),
+    review: parseInterviewAnswerReview(content),
+  });
+}
+const trendsBlock = renderInterviewTrends(buildInterviewTrends(reviewEntries, cardCoverage));
+
 let queueRows = [];
 try {
   queueRows = parseQueue(await readFile(QUEUE, "utf8"));
@@ -314,6 +372,11 @@ const targets = [
       "field-enums": enumTable,
       "type-census": censusTable,
     },
+  },
+  {
+    path: TRENDS,
+    label: "面接傾向_横断",
+    blocks: { "interview-trends": trendsBlock },
   },
 ];
 

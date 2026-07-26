@@ -12,6 +12,10 @@ import type {
   LanguageTrainingStage,
   LanguageV2State,
 } from "@/lib/language/types";
+import {
+  LANGUAGE_COMPILE_LIMIT,
+  LANGUAGE_STRESS_LIMIT,
+} from "@/lib/language/types";
 
 const EMPTY_STATE: LanguageV2State = {
   ready: false,
@@ -245,7 +249,7 @@ function TodayDashboard({
         <div>
           <small>ONE-HOUR DEEP WORK</small>
           <h2>{state.currentBatch ? "继续未完成批次" : "生成今天的批处理任务"}</h2>
-          <p>默认200项。规模只改变扫描量；集中编译最多60项，压力测试最多40项。</p>
+          <p>默认200项。规模只改变快速扫描量；精练最多20项，压力测试最多15项。</p>
         </div>
         {!state.currentBatch && (
           <div className="focus-language-size" role="group" aria-label="训练规模">
@@ -573,7 +577,11 @@ function LanguageBatchWorkspace({
     }
   };
 
-  const phaseItems = batch.phase === "scan" ? batch.scanItemIds : batch.phase === "compile" ? batch.compileItemIds : batch.stressItemIds;
+  const phaseItems = batch.phase === "scan"
+    ? batch.scanItemIds
+    : batch.phase === "compile"
+      ? batch.compileItemIds.slice(0, LANGUAGE_COMPILE_LIMIT)
+      : batch.stressItemIds.slice(0, LANGUAGE_STRESS_LIMIT);
   const currentScanItem = itemById.get(batch.scanItemIds[cursor]);
   const currentScanJudgment = currentScanItem ? scanJudgments.get(currentScanItem.id) : undefined;
   const scanComplete = scanJudgments.size === batch.scanItemIds.length;
@@ -662,8 +670,8 @@ function LanguageBatchWorkspace({
       {batch.phase === "compile" && (
         <LanguageInputStage
           phase="compile"
-          title="只处理缓存未命中"
-          description={`从犹豫和不会中选出 ${phaseItems.length} 个最高价值项目。使用日语输入法，不做被动选择。`}
+          title="只精练一个词块或一处修正"
+          description={`从犹豫和不会中选出 ${phaseItems.length} 个最高价值项目。不是重答面试题，也不用默写整段。`}
           itemIds={phaseItems}
           itemById={itemById}
           answers={answers}
@@ -679,7 +687,7 @@ function LanguageBatchWorkspace({
         <LanguageInputStage
           phase="stress"
           title="答案已隐藏，重新提取"
-          description={`本轮抽取 ${phaseItems.length} 项；回答结构题允许写短答案，其余项目输入目标词块。`}
+          description={`本轮最多 ${phaseItems.length} 项；普通题本地匹配，至多3个回答结构题由 Codex 批改2–3句日语短回答。`}
           itemIds={phaseItems}
           itemById={itemById}
           answers={answers}
@@ -724,6 +732,20 @@ function LanguageInputStage({
   return (
     <main className="language-input-stage">
       <header><div><small>{phase === "compile" ? "PHASE 2 · COMPILE" : "PHASE 3 · STRESS"}</small><h1>{title}</h1><p>{description}</p></div><div><strong>{answered}</strong><span>/ {itemIds.length}</span></div></header>
+      <section className="language-input-guide">
+        {phase === "compile" ? (
+          <>
+            <strong>本阶段只做短项主动提取</strong>
+            <p>使用日语输入法，根据中文功能输入一个日语词块；错误修正题只写修正后的表达。输入后再展开目标自查，不需要重新回答整道面试题。</p>
+            <small>评分：忽略空格和标点，与目标词块或确认修正完全匹配。</small>
+          </>
+        ) : (
+          <>
+            <strong>压力测试分两种评分</strong>
+            <p>普通题只输入目标词块，由本地匹配；“回答结构”题才用日语写2–3句，并由 Codex 检查题意覆盖、结论先行、自然度和事实安全。</p>
+          </>
+        )}
+      </section>
       {!itemIds.length ? (
         <section className="language-no-input"><strong>这一阶段没有待处理项目</strong><p>扫描中没有标记“犹豫/不会”，系统会从“已会”中抽样进入压力测试。</p></section>
       ) : (
@@ -732,20 +754,25 @@ function LanguageInputStage({
             const value = itemById.get(id);
             if (!value) return null;
             const result = resultFor(id);
-            const open = value.kind === "answer_strategy";
+            const open = phase === "stress" && value.kind === "answer_strategy";
             return (
               <article key={id}>
                 <b>{String(index + 1).padStart(2, "0")}</b>
                 <div className="prompt"><small>{KIND_LABELS[value.kind]}{value.pattern ? ` · ${value.pattern}` : ""}</small><strong>{phase === "compile" && value.kind === "error_patch" ? value.promptZh : value.meaningZh}</strong>{phase === "compile" && value.originalJa && <code lang="ja">{value.originalJa}</code>}</div>
                 <label>
                   {open ? (
-                    <textarea rows={4} value={answers[id] ?? ""} onChange={(event) => onAnswer(id, phase, event.target.value)} placeholder="用日语写出结论先行的短回答…" />
+                    <textarea rows={4} value={answers[id] ?? ""} onChange={(event) => onAnswer(id, phase, event.target.value)} placeholder="用日语写2–3句：先说结论，再给一个依据…" />
                   ) : (
-                    <input lang="ja" value={answers[id] ?? ""} onChange={(event) => onAnswer(id, phase, event.target.value)} placeholder="输入日语答案" />
+                    <input lang="ja" value={answers[id] ?? ""} onChange={(event) => onAnswer(id, phase, event.target.value)} placeholder={phase === "compile" ? "只输入一个词块或修正表达" : "输入目标日语词块"} />
                   )}
                   {result && <span className={result.passed ? "pass" : "fail"}>{result.passed ? "✓ 已命中" : "× 继续复练"}</span>}
                 </label>
-                {phase === "compile" && <div className="answer"><small>目标</small><strong lang="ja">{value.correctedJa || value.targetJa}</strong></div>}
+                {phase === "compile" && (
+                  <details className="answer">
+                    <summary>输入后查看目标</summary>
+                    <strong lang="ja">{value.correctedJa || value.targetJa}</strong>
+                  </details>
+                )}
               </article>
             );
           })}

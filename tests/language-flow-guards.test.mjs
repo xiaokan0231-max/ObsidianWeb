@@ -52,8 +52,9 @@ test("language v2 uses a keyboard-first three-phase batch and keeps old routes o
   assert.ok(css.includes(".language-scan-table"));
   assert.ok(css.includes(".language-scan-focus-card"));
   assert.ok(css.includes(".language-input-list"));
-  assert.ok(engine.includes("slice(0, 60)"));
-  assert.ok(engine.includes("slice(0, 40)"));
+  assert.ok(engine.includes("LANGUAGE_COMPILE_LIMIT"));
+  assert.ok(engine.includes("LANGUAGE_STRESS_LIMIT"));
+  assert.ok(engine.includes("LANGUAGE_OPEN_STRESS_LIMIT"));
   assert.ok(engine.includes("ITEM_QUOTAS"));
 });
 

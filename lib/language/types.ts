@@ -331,6 +331,10 @@ export type LanguageItemProgress = {
 export type LanguageBatchPhase = "scan" | "compile" | "stress" | "completed";
 export type LanguageScanJudgment = "known" | "uncertain" | "unknown" | "reject";
 
+export const LANGUAGE_COMPILE_LIMIT = 20;
+export const LANGUAGE_STRESS_LIMIT = 15;
+export const LANGUAGE_OPEN_STRESS_LIMIT = 3;
+
 export type LanguageBatchAction = {
   actionId: string;
   itemId: string;

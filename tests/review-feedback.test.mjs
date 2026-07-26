@@ -44,11 +44,18 @@ test("feedback is written separately, shown per AI block, and reused on regenera
 });
 
 test("cross-interview trends require the same strategy tag in two interviews", async () => {
-  const ui = await readFile("app/interview-review.tsx", "utf8");
+  // タグのラベルは lib/interview-trends.mjs が唯一の持ち主（Web と vault の generated ノートで共用）。
+  // ここに二重に持たせないこと——表示と生成ノートの表記がずれる
+  const [ui, trends] = await Promise.all([
+    readFile("app/interview-review.tsx", "utf8"),
+    readFile("lib/interview-trends.mjs", "utf8"),
+  ]);
   assert.match(ui, /item\.interviewKeys\.size >= 2/);
   assert.match(ui, /跨面试回答趋势/);
-  assert.match(ui, /复合问题漏答/);
-  assert.match(ui, /主动暴露负面信息/);
+  assert.match(ui, /STRATEGY_TREND_META.*from "@\/lib\/interview-trends\.mjs"/s);
+  assert.match(trends, /复合问题漏答/);
+  assert.match(trends, /主动暴露负面信息/);
+  assert.doesNotMatch(ui, /const STRATEGY_TREND_META/);
   assert.match(ui, /setSelectedTrend\(tag\)/);
   assert.match(ui, /selectedTrendItem\.questions\.map/);
   assert.match(ui, /onSelect\(question\.docKey, question\.blockId\)/);

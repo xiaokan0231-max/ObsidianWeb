@@ -12,6 +12,11 @@ import type {
   LanguageTrainingStage,
   LanguageV2State,
 } from "../language/types";
+import {
+  LANGUAGE_COMPILE_LIMIT,
+  LANGUAGE_OPEN_STRESS_LIMIT,
+  LANGUAGE_STRESS_LIMIT,
+} from "../language/types.ts";
 import { normalizeAnswer, stableId, tokyoParts, yamlString } from "../dojo/utils.ts";
 import {
   latestListeningMarks,
@@ -878,9 +883,15 @@ export function selectLanguageBatchItems(
   return selected.slice(0, size);
 }
 
-async function hmac(value: object) {
-  const secret = process.env.CODEX_BRIDGE_TOKEN;
-  if (!secret) throw new Error("训练签名密钥未配置，请通过 npm run dev 启动。");
+function languageSigningSecrets() {
+  return [...new Set([
+    process.env.LANGUAGE_BATCH_SIGNING_KEY,
+    process.env.OBSIDIAN_API_KEY,
+    process.env.CODEX_BRIDGE_TOKEN,
+  ].filter((value): value is string => Boolean(value)))];
+}
+
+async function hmacWithSecret(value: object, secret: string) {
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
@@ -890,6 +901,12 @@ async function hmac(value: object) {
   );
   const bytes = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(JSON.stringify(value))));
   return btoa(String.fromCharCode(...bytes));
+}
+
+async function hmac(value: object) {
+  const secret = languageSigningSecrets()[0];
+  if (!secret) throw new Error("训练签名密钥未配置，请通过 npm run dev 启动。");
+  return hmacWithSecret(value, secret);
 }
 
 function batchSignaturePayload(batch: Omit<LanguageBatch, "signature"> | LanguageBatch) {
@@ -924,7 +941,37 @@ export async function createLanguageBatch(state: LanguageV2State, size: 100 | 15
 }
 
 export async function verifyLanguageBatch(batch: LanguageBatch) {
-  return batch.signature === await hmac(batchSignaturePayload(batch));
+  const payload = batchSignaturePayload(batch);
+  for (const secret of languageSigningSecrets()) {
+    if (batch.signature === await hmacWithSecret(payload, secret)) return true;
+  }
+  return false;
+}
+
+export async function refreshLanguageBatchSignature(
+  batch: LanguageBatch,
+  curriculum: LanguageCurriculum,
+) {
+  const curriculumFingerprint = curriculum.contentFingerprint ?? curriculum.sourceFingerprint;
+  const curriculumIds = new Set(curriculum.items.map((value) => value.id));
+  const uniqueScanIds = new Set(batch.scanItemIds);
+  const structurallyValid =
+    [100, 150, 200].includes(batch.targetSize) &&
+    batch.curriculumFingerprint === curriculumFingerprint &&
+    batch.scanItemIds.length === batch.targetSize &&
+    uniqueScanIds.size === batch.scanItemIds.length &&
+    batch.scanItemIds.every((id) => curriculumIds.has(id)) &&
+    batch.compileItemIds.every((id) => uniqueScanIds.has(id)) &&
+    batch.stressItemIds.every((id) => uniqueScanIds.has(id)) &&
+    batch.actions.every((action) =>
+      action.phase === "scan"
+        ? uniqueScanIds.has(action.itemId)
+        : action.phase === "compile"
+          ? batch.compileItemIds.includes(action.itemId)
+          : batch.stressItemIds.includes(action.itemId)
+    );
+  if (!structurallyValid) throw new Error("训练批次结构与课程不一致，已停止写入以保护现有记录。");
+  return { ...batch, signature: await hmac(batchSignaturePayload(batch)) };
 }
 
 export async function migrateScanningBatchToCurriculum(
@@ -1004,7 +1051,7 @@ function acceptedAnswers(value: LanguageLearningItem) {
 export function gradeLanguageItem(value: LanguageLearningItem, answer: string) {
   const normalized = normalizeAnswer(answer);
   if (!normalized) return false;
-  return acceptedAnswers(value).some((accepted) => accepted === normalized || accepted.includes(normalized) && normalized.length >= 6);
+  return acceptedAnswers(value).some((accepted) => accepted === normalized);
 }
 
 export function mergeLanguageBatchCheckpoint(
@@ -1041,22 +1088,41 @@ export function mergeLanguageBatchCheckpoint(
   let phase = nextPhase ?? batch.phase;
   let compileItemIds = batch.compileItemIds;
   let stressItemIds = batch.stressItemIds;
-  if (phase === "compile" && !compileItemIds.length) {
-    const latestJudgment = new Map<string, LanguageScanJudgment>();
-    for (const action of merged) if (action.phase === "scan" && action.judgment) latestJudgment.set(action.itemId, action.judgment);
-    compileItemIds = batch.scanItemIds
-      .filter((id) => ["uncertain", "unknown"].includes(latestJudgment.get(id) ?? ""))
-      .sort((left, right) => (itemById.get(right)?.basePriority ?? 0) - (itemById.get(left)?.basePriority ?? 0))
-      .slice(0, 60);
+  if (phase === "compile") {
+    if (!compileItemIds.length) {
+      const latestJudgment = new Map<string, LanguageScanJudgment>();
+      for (const action of merged) if (action.phase === "scan" && action.judgment) latestJudgment.set(action.itemId, action.judgment);
+      compileItemIds = batch.scanItemIds
+        .filter((id) => ["uncertain", "unknown"].includes(latestJudgment.get(id) ?? ""))
+        .sort((left, right) => (itemById.get(right)?.basePriority ?? 0) - (itemById.get(left)?.basePriority ?? 0));
+    }
+    // 已经作答的旧批次项目不丢；尚未开始输入的 60 项旧批次会直接收紧为 20 项。
+    const answered = merged
+      .filter((action) => action.phase === "compile" && action.answer?.trim())
+      .map((action) => action.itemId);
+    compileItemIds = [...new Set([...answered, ...compileItemIds])]
+      .slice(0, Math.max(LANGUAGE_COMPILE_LIMIT, new Set(answered).size));
   }
-  if (phase === "stress" && !stressItemIds.length) {
-    const knownIds = batch.scanItemIds.filter((id) => merged.some((action) =>
-      action.itemId === id && action.phase === "scan" && action.judgment === "known"
-    ));
-    stressItemIds = [...compileItemIds, ...knownIds]
-      .filter((id, index, all) => all.indexOf(id) === index)
-      .sort((left, right) => (itemById.get(right)?.basePriority ?? 0) - (itemById.get(left)?.basePriority ?? 0))
-      .slice(0, 40);
+  if (phase === "stress") {
+    if (!stressItemIds.length) {
+      const knownIds = batch.scanItemIds.filter((id) => merged.some((action) =>
+        action.itemId === id && action.phase === "scan" && action.judgment === "known"
+      ));
+      const candidates = [...compileItemIds, ...knownIds]
+        .filter((id, index, all) => all.indexOf(id) === index)
+        .sort((left, right) => (itemById.get(right)?.basePriority ?? 0) - (itemById.get(left)?.basePriority ?? 0));
+      let openCount = 0;
+      stressItemIds = candidates.filter((id) => {
+        if (itemById.get(id)?.kind !== "answer_strategy") return true;
+        openCount += 1;
+        return openCount <= LANGUAGE_OPEN_STRESS_LIMIT;
+      });
+    }
+    const answered = merged
+      .filter((action) => action.phase === "stress" && action.answer?.trim())
+      .map((action) => action.itemId);
+    stressItemIds = [...new Set([...answered, ...stressItemIds])]
+      .slice(0, Math.max(LANGUAGE_STRESS_LIMIT, new Set(answered).size));
   }
   if (phase === "completed") phase = "completed";
   const now = new Date().toISOString();

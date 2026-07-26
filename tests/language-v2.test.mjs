@@ -240,9 +240,12 @@ test("checkpoint actions are idempotent and compile/stress lists stay bounded", 
   }));
   const compile = mergeLanguageBatchCheckpoint(batch, bigCurriculum, [...scans, ...scans], "compile", 0);
   assert.equal(compile.actions.length, scans.length);
-  assert.equal(compile.compileItemIds.length, 60);
+  assert.equal(compile.compileItemIds.length, 20);
   const stress = mergeLanguageBatchCheckpoint(compile, bigCurriculum, [], "stress", 0);
-  assert.equal(stress.stressItemIds.length, 40);
+  assert.equal(stress.stressItemIds.length, 15);
+  assert.ok(stress.stressItemIds.filter((id) =>
+    bigCurriculum.items.find((item) => item.id === id)?.kind === "answer_strategy"
+  ).length <= 3);
 });
 
 test("self-reported knowledge never becomes stable and later failure demotes stability", () => {

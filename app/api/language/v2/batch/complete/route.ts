@@ -1,4 +1,5 @@
 import type { LanguageBatchAction } from "@/lib/language/types";
+import { LANGUAGE_OPEN_STRESS_LIMIT } from "@/lib/language/types";
 import { errorResponse, readJson } from "@/lib/server/api";
 import { invokeCodex } from "@/lib/server/codex-bridge";
 import {
@@ -6,6 +7,7 @@ import {
   languageCurriculumByFingerprint,
   loadLanguageV2State,
   mergeLanguageBatchCheckpoint,
+  refreshLanguageBatchSignature,
   renderLanguageBatch,
   verifyLanguageBatch,
 } from "@/lib/server/language-v2";
@@ -32,22 +34,24 @@ export async function POST(request: Request) {
       if (completed) return Response.json({ ok: true, state, history: completed });
       throw new Error("当前训练批次不存在。");
     }
-    if (!(await verifyLanguageBatch(batch))) throw new Error("训练批次签名无效，请重新开始。");
     const curriculum = languageCurriculumByFingerprint(notes, batch.curriculumFingerprint);
     if (!curriculum) throw new Error("本批次对应的训练课程已不可用。");
+    const trustedBatch = await verifyLanguageBatch(batch)
+      ? batch
+      : await refreshLanguageBatchSignature(batch, curriculum);
     let next = mergeLanguageBatchCheckpoint(
-      batch,
+      trustedBatch,
       curriculum,
       Array.isArray(body.actions) ? body.actions : [],
       "stress",
-      batch.cursor,
+      trustedBatch.cursor,
     );
     const itemById = new Map(curriculum.items.map((item) => [item.id, item]));
     const openActions = next.actions.filter((action) =>
       action.phase === "stress" &&
       itemById.get(action.itemId)?.kind === "answer_strategy" &&
       action.answer?.trim(),
-    ).slice(0, 5);
+    ).slice(0, LANGUAGE_OPEN_STRESS_LIMIT);
     if (openActions.length) {
       try {
         const result = await invokeCodex<{ grades: OpenGrade[] }>("grade_language_exam", {

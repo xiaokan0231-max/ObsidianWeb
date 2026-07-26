@@ -6,6 +6,7 @@ import {
   JOB_RATING_BANDS,
   JOB_STATUSES,
   toJobCard,
+  type JobCard,
 } from "@/lib/jobs";
 import { JOB_CASE_TYPE } from "@/lib/vault-boundary.mjs";
 import {
@@ -14,7 +15,7 @@ import {
   reachRate,
   SMALL_SAMPLE_THRESHOLD,
 } from "@/lib/job-stats.mjs";
-import { getType, type Note } from "@/lib/notes";
+import { getString, getType, type Note } from "@/lib/notes";
 
 /**
  * 期間フィルタは**1本だけ**、全チャートに効く。
@@ -29,6 +30,19 @@ const RANGES = [
 
 type RangeId = (typeof RANGES)[number]["id"];
 
+/**
+ * 「現在の手札」セクションの母集団。既定は 7 点以上。
+ * 4〜6 点は基本的に投げない札なので、状態内訳や技術集計に混ぜると
+ * 「何を持っているか」が薄まる（実測：現役 55 件のうち 7 点未満が 9 件）。
+ * ただし消すのではなく**切り替えにする**——母数が黙って変わるのが一番危ない。
+ */
+const HAND_SCOPES = [
+  { id: "high", label: "評点 7 以上", min: 7 },
+  { id: "all", label: "全件", min: 0 },
+] as const;
+
+type HandScopeId = (typeof HAND_SCOPES)[number]["id"];
+
 /** 月文字列の比較だけで足りるので Date を作らない（タイムゾーンの罠を持ち込まない）。 */
 function monthFloor(months: number): string | null {
   if (months <= 0) return null;
@@ -42,6 +56,74 @@ const pct1 = (value: number) => `${(value * 100).toFixed(1)}%`;
 /** 台帳は不採用しか記録していない。「応募済」系はノート側からしか数えられない。 */
 const IN_FLIGHT: string[] = ["応募済", "書類通過", "面接中"];
 const PASSED_SCREENING: string[] = ["書類通過", "面接中", "内定"];
+const ACTIVE_SELECTION: string[] = [...IN_FLIGHT, "内定"];
+
+function actionDate(job: JobCard) {
+  const text = [
+    job.nextAction,
+    getString(job.note.frontmatter.status),
+    job.statusUpdated,
+  ].join(" ");
+  return text.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1] ?? "";
+}
+
+function shortDate(value: string) {
+  const match = value.match(/\b20\d{2}-(\d{2})-(\d{2})\b/);
+  return match ? `${Number(match[1])}/${Number(match[2])}` : "—";
+}
+
+function actionTime(job: JobCard) {
+  return [job.nextAction, getString(job.note.frontmatter.status)]
+    .join(" ")
+    .match(/\b([01]?\d|2[0-3]):[0-5]\d\b/)?.[0] ?? "";
+}
+
+function focusAction(job: JobCard) {
+  if (job.nextAction) return job.nextAction;
+  if (job.status === "面接中") return "面接準備を最優先";
+  if (job.status === "書類通過") return "次回選考の準備";
+  if (job.status === "応募済") return "書類選考の結果待ち";
+  if (job.status === "内定") return "条件確認・意思決定";
+  return "応募判断";
+}
+
+function focusBadge(job: JobCard) {
+  if (job.status === "面接中") return "NEXT INTERVIEW";
+  if (job.rating >= 9) return "HOT";
+  return "STRONG FIT";
+}
+
+function FocusJobCard({
+  job,
+  onOpen,
+}: {
+  job: JobCard;
+  onOpen: (note: Note) => void;
+}) {
+  const evidence = job.matches[0] || job.reason || job.stack.slice(0, 3).join("・");
+
+  return (
+    <button
+      type="button"
+      className={`analytics-focus-card${job.status === "面接中" ? " is-next" : ""}`}
+      onClick={() => onOpen(job.note)}
+    >
+      <span className="analytics-focus-topline">
+        <b>{focusBadge(job)}</b>
+        <em>{job.rating > 0 ? `${job.rating} / 10` : "面接優先"}</em>
+      </span>
+      <strong>{job.company}</strong>
+      <small className="analytics-focus-position">{job.position}</small>
+      <span className="analytics-focus-state">
+        <i data-status={job.status}>{job.status}</i>
+        {job.statusUpdated ? <time>{job.statusUpdated}</time> : null}
+      </span>
+      <p>{focusAction(job)}</p>
+      {evidence ? <small className="analytics-focus-evidence">{evidence}</small> : null}
+      <span className="analytics-focus-open">案件詳細を見る ↗</span>
+    </button>
+  );
+}
 
 function Tile({ value, label, note }: { value: string; label: string; note?: string }) {
   return (
@@ -134,8 +216,18 @@ function BarRow({
   );
 }
 
-export default function JobsAnalytics({ notes }: { notes: Note[] }) {
+export default function JobsAnalytics({
+  notes,
+  onOpen,
+  onViewJobs,
+}: {
+  notes: Note[];
+  onOpen: (note: Note) => void;
+  /** statuses を渡すと求人一覧側の状態フィルタに引き継がれる（渡さなければ全件）。 */
+  onViewJobs: (statuses?: string[]) => void;
+}) {
   const [range, setRange] = useState<RangeId>("all");
+  const [handScope, setHandScope] = useState<HandScopeId>("high");
 
   const jobs = useMemo(
     () => notes.filter((note) => getType(note) === JOB_CASE_TYPE).map(toJobCard),
@@ -180,6 +272,67 @@ export default function JobsAnalytics({ notes }: { notes: Note[] }) {
 
   const inFlight = jobs.filter((job) => IN_FLIGHT.includes(job.status)).length;
   const readyToApply = jobs.filter((job) => job.status === "未応募" && job.rating >= 7).length;
+  const highFitInFlight = jobs.filter(
+    (job) => IN_FLIGHT.includes(job.status) && job.rating >= 8,
+  ).length;
+  const focusJobs = useMemo(
+    () =>
+      jobs
+        .filter(
+          (job) =>
+            ACTIVE_SELECTION.includes(job.status)
+            && (job.rating >= 8 || job.status === "書類通過" || job.status === "面接中" || job.status === "内定"),
+        )
+        .sort((left, right) => {
+          const stage = (job: JobCard) => {
+            if (job.status === "内定") return 4;
+            if (job.status === "面接中") return 3;
+            if (job.status === "書類通過") return 2;
+            return 1;
+          };
+          return (
+            stage(right) - stage(left)
+            || right.rating - left.rating
+            || right.statusUpdated.localeCompare(left.statusUpdated)
+            || left.company.localeCompare(right.company, "ja")
+          );
+        })
+        .slice(0, 8),
+    [jobs],
+  );
+  const nextInterview = useMemo(
+    () =>
+      jobs
+        .filter((job) => job.status === "面接中")
+        .sort((left, right) => {
+          const leftDate = actionDate(left) || "9999-12-31";
+          const rightDate = actionDate(right) || "9999-12-31";
+          return leftDate.localeCompare(rightDate);
+        })[0] ?? null,
+    [jobs],
+  );
+  const liveJobs = useMemo(
+    () => jobs.filter((job) => job.status !== "不採用"),
+    [jobs],
+  );
+
+  /**
+   * 状態内訳・技術集計の母集団。評点フィルタが効くのはこの2枚だけ。
+   * 「現役案件の評点」チャートには**掛けない**——しきい値を決めるための図を
+   * そのしきい値で絞ったら、7 点未満が何件あるか永久に見えなくなる。
+   *
+   * 🔴 選考が動いている案件（応募済〜内定）は評点に関わらず必ず残す。
+   * 評点は「投げるかどうか」の判断軸であって、既に投げた案件を隠す軸ではない。
+   * 実例：面接中の Sharing Innovations は rating 未記入（＝0 点扱い）で、
+   * 素直に `rating >= 7` で絞ると**唯一の面接中案件が状態内訳から消えた**。
+   * この例外があるおかげで、状態内訳の進行中の合計は上の KPI「進行中」と必ず一致する。
+   */
+  const handMin = HAND_SCOPES.find((item) => item.id === handScope)?.min ?? 0;
+  const handJobs = useMemo(
+    () => liveJobs.filter((job) => job.rating >= handMin || ACTIVE_SELECTION.includes(job.status)),
+    [liveJobs, handMin],
+  );
+  const handExcluded = liveJobs.length - handJobs.length;
 
   // ファネル：観測できている範囲だけ。総応募数は台帳（不採用のみ）からは出せない。
   const passedNow = jobs.filter((job) => PASSED_SCREENING.includes(job.status)).length;
@@ -195,19 +348,19 @@ export default function JobsAnalytics({ notes }: { notes: Note[] }) {
 
   const bands = JOB_RATING_BANDS.filter((band) => band.id !== "7plus").map((band) => ({
     ...band,
-    count: jobs.filter((job) => jobRatingBand(job.rating) === band.id).length,
+    count: liveJobs.filter((job) => jobRatingBand(job.rating) === band.id).length,
   }));
   const bandMax = Math.max(1, ...bands.map((band) => band.count));
 
   const statuses = JOB_STATUSES.map((status) => ({
     status,
-    count: jobs.filter((job) => job.status === status).length,
+    count: handJobs.filter((job) => job.status === status).length,
   })).filter((row) => row.count > 0);
   const statusTotal = statuses.reduce((sum, row) => sum + row.count, 0) || 1;
 
   const stacks = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const job of jobs) {
+    for (const job of handJobs) {
       // 「Spark（歓迎欄のみ）」のような注記付きは同じ技術として数える
       for (const tag of job.stack) {
         const key = tag.replace(/[（(].*$/, "").trim();
@@ -218,7 +371,7 @@ export default function JobsAnalytics({ notes }: { notes: Note[] }) {
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
       .slice(0, 10);
-  }, [jobs]);
+  }, [handJobs]);
   const stackMax = Math.max(1, ...stacks.map((row) => row.count));
 
   const hasHistory = stats.rejections.total > 0;
@@ -233,236 +386,75 @@ export default function JobsAnalytics({ notes }: { notes: Note[] }) {
   return (
     <div className="analytics">
       <header className="analytics-head">
-        <span className="eyebrow">● JOB ANALYTICS</span>
+        <span className="eyebrow">● JOB COMMAND</span>
         <h1>求職分析</h1>
         <p>
-          応募の実績と現在の手札を、リストでは見えない形で見る。
-          <strong>上段は 181 社の履歴</strong>（凍結 CSV ＋ ノート）、
-          <strong>下段は現在の {jobs.length} 件</strong>（job-case ノート）——
-          データ源が違うので混ぜて読まないこと。
+          過去の統計より、<strong>いま準備する会社・結果を待つ有力案件・次に投げる手札</strong>を先に見る。
+          不採用や経路別到達率は、必要な時だけ最下部で振り返る。
         </p>
       </header>
 
-      {/* フィルタは1行だけ。すべてのチャートが同じスライスを見る。 */}
+      <div className="stat-row analytics-action-stats">
+        <Tile
+          value={nextInterview ? shortDate(actionDate(nextInterview)) : "—"}
+          label={nextInterview ? `次の面談・${nextInterview.company}` : "次の面談"}
+          note={
+            nextInterview
+              ? [actionTime(nextInterview), nextInterview.position].filter(Boolean).join(" · ")
+              : "面談予定なし"
+          }
+        />
+        <Tile value={`${inFlight}`} label="進行中" note="応募済・書類通過・面接中" />
+        <Tile value={`${highFitInFlight}`} label="高相性で進行中" note="評点 8 以上・結果待ちを含む" />
+        <Tile value={`${readyToApply}`} label="次に応募できる" note="未応募・評点 7 以上" />
+      </div>
+
+      <section className="analytics-focus">
+        <header>
+          <div>
+            <span>HOT LIST · 現在の有力案件</span>
+            <h2>いま見るべき会社</h2>
+            <p>面接予定を最優先し、その次に評点 8 以上で選考中の案件を並べている。</p>
+          </div>
+          <button type="button" onClick={() => onViewJobs(IN_FLIGHT)}>進行中 {inFlight} 件をすべて見る</button>
+        </header>
+        {focusJobs.length > 0 ? (
+          <div className="analytics-focus-grid">
+            {focusJobs.map((job) => <FocusJobCard key={job.path} job={job} onOpen={onOpen} />)}
+          </div>
+        ) : (
+          <p className="chart-empty">評点 8 以上の進行中案件はまだない。</p>
+        )}
+      </section>
+
+      <h2 className="analytics-section">現在の手札を判断する</h2>
+
+      {/* 母数を変えるスイッチなので、影響する2枚より必ず**上**に置く。 */}
       <div className="analytics-filter">
-        <span>期間</span>
-        {RANGES.map((item) => (
+        <span>集計対象</span>
+        {HAND_SCOPES.map((item) => (
           <button
             key={item.id}
             type="button"
-            className={`job-chip${range === item.id ? " active" : ""}`}
-            aria-pressed={range === item.id}
-            onClick={() => setRange(item.id)}
+            className={`job-chip${handScope === item.id ? " active" : ""}`}
+            aria-pressed={handScope === item.id}
+            onClick={() => setHandScope(item.id)}
           >
             {item.label}
           </button>
         ))}
+        <small className="analytics-filter-note">
+          {handScope === "high"
+            ? `状態内訳と技術集計は ${handJobs.length} 件で算出（7 点未満の未応募 ${handExcluded} 件を除外／選考中の案件は評点に関わらず残す）。評点チャートは常に全 ${liveJobs.length} 件。`
+            : `現役 ${liveJobs.length} 件すべてで算出。4〜6 点の投げない札も母数に入っている。`}
+        </small>
       </div>
-
-      <div className="stat-row">
-        <Tile value={`${stats.rejections.total}`} label="不採用（累計）" note="凍結CSV 175 ＋ ノート" />
-        <Tile
-          value={pct1(reachRate(stats.rejections.reachedInterview, stats.rejections.total))}
-          label="面接到達率"
-          note={`${stats.rejections.reachedInterview} 社が書類を通過`}
-        />
-        <Tile value={`${inFlight}`} label="進行中" note="応募済・書類通過・面接中" />
-        <Tile value={`${readyToApply}`} label="未応募 7点以上" note="いま投げられる手札" />
-      </div>
-
-      <h2 className="analytics-section">これまでの実績（{stats.rejections.total} 社）</h2>
-
-      <Card
-        title="経路別の面接到達率"
-        caption={
-          range === "all"
-            ? "どの経路が書類を通っているか。バーの長さ＝到達率、右の n＝その経路の不採用社数。"
-            : "⚠️ 経路別は月内訳を持たないため、ここだけ常に全期間の数字。他のチャートとは母数が違う。"
-        }
-      >
-        {hasHistory ? (
-          <>
-            <div className="chart-bars">
-              {channels.map((row) => (
-                <BarRow
-                  key={row.channel}
-                  label={row.channel}
-                  ratio={row.rate}
-                  valueLabel={pct1(row.rate)}
-                  title={`${row.channel}：${row.reached} / ${row.total} 社が面接到達`}
-                  flag={
-                    row.total < SMALL_SAMPLE_THRESHOLD
-                      ? `n=${row.total}・少数`
-                      : `n=${row.total}`
-                  }
-                />
-              ))}
-            </div>
-            <p className="chart-note">
-              🔴 <strong>n が小さい経路の率を単独で読まない。</strong>
-              企業直投の {channels.find((c) => c.channel.includes("直投"))?.reached ?? 0} / {channels.find((c) => c.channel.includes("直投"))?.total ?? 0} 社は、
-              1 社増減するだけで率が十数ポイント動く。母数 {SMALL_SAMPLE_THRESHOLD} 未満には「少数」と付けてある。
-            </p>
-            <TableView
-              head={["経路", "不採用", "書類終了", "面接到達", "到達率"]}
-              rows={channels.map((row) => [
-                row.channel,
-                row.total,
-                row.total - row.reached,
-                row.reached,
-                pct1(row.rate),
-              ])}
-            />
-          </>
-        ) : (
-          <p className="chart-empty">台帳の集計がまだ生成されていない（`npm run vault:stats`）。</p>
-        )}
-      </Card>
-
-      <Card
-        title="選考ファネル（観測できている範囲）"
-        caption="⚠️ 台帳は不採用しか記録していないため、総応募数は直接には分からない。さらに Indeed の求人URLから直接応募した分は受理メールが来ないので、ここには含まれていない。"
-      >
-        <div className="chart-bars">
-          {funnel.map((row, index) => (
-            <BarRow
-              key={row.stage}
-              label={row.stage}
-              ratio={row.value / funnelTop}
-              step={index}
-              valueLabel={`${row.value}`}
-              title={`${row.stage}：${row.value} 件（応募比 ${pct1(row.value / funnelTop)}）`}
-              flag={index === 0 ? undefined : pct1(row.value / funnelTop)}
-            />
-          ))}
-        </div>
-        <TableView
-          head={["段階", "件数", "応募比"]}
-          rows={funnel.map((row) => [row.stage, row.value, pct1(row.value / funnelTop)])}
-        />
-      </Card>
-
-      <Card
-        title="月別：投げた数と落ちた数"
-        caption={
-          stats.timeline.appliedKnownFrom
-            ? `応募数が分かるのは ${stats.timeline.appliedKnownFrom} 以降。それ以前は Gmail を遡っていないので「不明」であって 0 件ではない（当然どこかで応募している）。`
-            : "応募日台帳がまだ無いので応募数は全月不明。"
-        }
-      >
-        {timeline.length > 0 ? (
-          <>
-            <ul className="chart-legend">
-              <li><b data-step="1" /> 投げた <small>応募</small></li>
-              <li><b data-step="4" /> 落ちた <small>不採用</small></li>
-            </ul>
-            <div className="chart-months">
-              {timeline.map((row) => (
-                <div className="chart-month" key={row.month}>
-                  <div className="chart-month-bars">
-                    {/* 不明を 0 の棒で描くと「応募していなかった」に見える。棒ごと出さずハッチにする */}
-                    {row.applied === null ? (
-                      <i className="chart-month-unknown" title={`${row.month}：応募数は不明（未走査）`} />
-                    ) : (
-                      <i
-                        data-step="1"
-                        style={{ height: `${(row.applied / timelineMax) * 100}%` }}
-                        title={`${row.month}：${row.applied} 件応募`}
-                      />
-                    )}
-                    <i
-                      data-step="4"
-                      style={{ height: `${(row.rejected / timelineMax) * 100}%` }}
-                      title={`${row.month}：${row.rejected} 社が不採用`}
-                    />
-                  </div>
-                  <span>{row.month.slice(2).replace("-", "/")}</span>
-                </div>
-              ))}
-            </div>
-            <TableView
-              head={["月", "投げた", "落ちた"]}
-              rows={timeline.map((row) => [row.month, row.applied === null ? "不明" : row.applied, row.rejected])}
-            />
-          </>
-        ) : (
-          <p className="chart-empty">この期間に該当するデータがない。</p>
-        )}
-      </Card>
-
-      <Card
-        title="いま何件待っているか"
-        caption={`応募日が分かる ${flow.length > 0 ? flow[0].date : "—"} 以降の分だけ。この線は「投げた − 結果が出た」で、過去181社の不採用は混ぜていない（それらは窓より前の応募なので引くと数が壊れる）。`}
-      >
-        {flow.length > 0 ? (
-          <>
-            <ul className="chart-legend">
-              <li><b data-step="1" /> 累計で投げた <small>{flow[flow.length - 1].appliedCum}</small></li>
-              <li><b data-step="4" /> 累計で結果が出た <small>{flow[flow.length - 1].resolvedCum}</small></li>
-              <li><b data-step="2" /> 待っている <small>{flow[flow.length - 1].pending}</small></li>
-            </ul>
-            <svg className="chart-line" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="応募・結果・待機の推移">
-              {[0, 0.5, 1].map((tick) => {
-                const y = PAD.top + plotH - tick * plotH;
-                return (
-                  <g key={tick}>
-                    <line className="chart-grid" x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} />
-                    <text className="chart-tick" x={PAD.left - 8} y={y + 4} textAnchor="end">
-                      {Math.round(tick * flowMax)}
-                    </text>
-                  </g>
-                );
-              })}
-              {([
-                { key: "appliedCum", step: 1 },
-                { key: "resolvedCum", step: 4 },
-                { key: "pending", step: 2 },
-              ] as const).map(({ key, step }) => (
-                <polyline
-                  key={key}
-                  className="chart-line-path"
-                  data-step={step}
-                  points={flow
-                    .map((d, i) => {
-                      const x = PAD.left + (flow.length <= 1 ? plotW / 2 : (i / (flow.length - 1)) * plotW);
-                      const y = PAD.top + plotH - (d[key] / flowMax) * plotH;
-                      return `${x},${y}`;
-                    })
-                    .join(" ")}
-                />
-              ))}
-              {flow.map((d, i) => {
-                const x = PAD.left + (flow.length <= 1 ? plotW / 2 : (i / (flow.length - 1)) * plotW);
-                const y = PAD.top + plotH - (d.pending / flowMax) * plotH;
-                return (
-                  <g key={d.date} tabIndex={0}>
-                    <title>{`${d.date}：投げた計 ${d.appliedCum}・結果 ${d.resolvedCum}・待ち ${d.pending}`}</title>
-                    <circle className="chart-hit" cx={x} cy={y} r={12} />
-                    {(d.applied > 0 || d.resolved > 0) && <circle className="chart-dot" data-step="2" cx={x} cy={y} r={4} />}
-                  </g>
-                );
-              })}
-              <text className="chart-tick" x={PAD.left} y={H - 8} textAnchor="start">{flow[0].date.slice(5)}</text>
-              <text className="chart-tick" x={W - PAD.right} y={H - 8} textAnchor="end">
-                {flow[flow.length - 1].date.slice(5)}
-              </text>
-            </svg>
-            <TableView
-              head={["日付", "投げた", "結果", "累計投げた", "累計結果", "待ち"]}
-              rows={flow
-                .filter((d) => d.applied > 0 || d.resolved > 0)
-                .map((d) => [d.date, d.applied, d.resolved, d.appliedCum, d.resolvedCum, d.pending])}
-            />
-          </>
-        ) : (
-          <p className="chart-empty">応募日台帳がまだ無い（`npm run vault:stats` と Gmail 走査が必要）。</p>
-        )}
-      </Card>
-
-      <h2 className="analytics-section">現在のパイプライン（{jobs.length} 件）</h2>
 
       <div className="chart-grid-2">
-        <Card title="評点の分布" caption="job-case ノートの rating。7 点以上が「応募すべき」帯。">
+        <Card
+          title="現役案件の評点"
+          caption="不採用を除いた現在の手札・常に全件。7 点以上が「応募すべき」帯。しきい値を決める図なので、上の集計対象は掛けない。"
+        >
           <div className="chart-bars">
             {bands.map((band, index) => (
               <BarRow
@@ -478,7 +470,14 @@ export default function JobsAnalytics({ notes }: { notes: Note[] }) {
           <TableView head={["評点", "件数", "意味"]} rows={bands.map((b) => [b.label, b.count, b.hint])} />
         </Card>
 
-        <Card title="状態の分布" caption="選考のどの段階に何件あるか。">
+        <Card
+          title="現役案件の状態"
+          caption={
+            handScope === "high"
+              ? `評点 7 以上＋選考中の ${handJobs.length} 件。いま動かせる札の内訳で、進行中の合計は上の KPI と一致する。`
+              : `現役 ${handJobs.length} 件すべて。4〜6 点の投げない札も含む。`
+          }
+        >
           <div className="chart-stack" role="img" aria-label="状態の分布">
             {statuses.map((row, index) => (
               <i
@@ -503,7 +502,14 @@ export default function JobsAnalytics({ notes }: { notes: Note[] }) {
         </Card>
       </div>
 
-      <Card title="求人が求める技術（上位10）" caption="現在のパイプラインの stack を集計。市場が実際に何を書いているか。">
+      <Card
+        title="現役求人が求める技術（上位10）"
+        caption={
+          handScope === "high"
+            ? `評点 7 以上＋選考中の ${handJobs.length} 件の stack を集計。次の応募先を選ぶ材料。`
+            : `現役 ${handJobs.length} 件の stack を集計。投げない帯の求人も母数に入っている。`
+        }
+      >
         <div className="chart-bars">
           {stacks.map((row) => (
             <BarRow
@@ -517,6 +523,229 @@ export default function JobsAnalytics({ notes }: { notes: Note[] }) {
         </div>
         <TableView head={["技術", "出現件数"]} rows={stacks.map((row) => [row.name, row.count])} />
       </Card>
+
+      <details className="analytics-history">
+        <summary>
+          <span>
+            <b>参考データ</b>
+            <strong>過去の不採用・経路別到達率・選考ファネル</strong>
+            <small>日々の判断には使わないため、通常は閉じておく</small>
+          </span>
+          <em>開く</em>
+        </summary>
+        <div className="analytics-history-body">
+          {/* 期間フィルタは履歴チャートだけに効く。 */}
+          <div className="analytics-filter">
+            <span>履歴の期間</span>
+            {RANGES.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`job-chip${range === item.id ? " active" : ""}`}
+                aria-pressed={range === item.id}
+                onClick={() => setRange(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="stat-row analytics-history-stats">
+            <Tile value={`${stats.rejections.total}`} label="不採用（累計）" note="凍結CSV 175 ＋ ノート" />
+            <Tile
+              value={pct1(reachRate(stats.rejections.reachedInterview, stats.rejections.total))}
+              label="面接到達率"
+              note={`${stats.rejections.reachedInterview} 社が書類を通過`}
+            />
+          </div>
+
+          <Card
+            title="経路別の面接到達率"
+            caption={
+              range === "all"
+                ? "どの経路が書類を通っているか。バーの長さ＝到達率、右の n＝その経路の不採用社数。"
+                : "⚠️ 経路別は月内訳を持たないため、ここだけ常に全期間の数字。他のチャートとは母数が違う。"
+            }
+          >
+            {hasHistory ? (
+              <>
+                <div className="chart-bars">
+                  {channels.map((row) => (
+                    <BarRow
+                      key={row.channel}
+                      label={row.channel}
+                      ratio={row.rate}
+                      valueLabel={pct1(row.rate)}
+                      title={`${row.channel}：${row.reached} / ${row.total} 社が面接到達`}
+                      flag={
+                        row.total < SMALL_SAMPLE_THRESHOLD
+                          ? `n=${row.total}・少数`
+                          : `n=${row.total}`
+                      }
+                    />
+                  ))}
+                </div>
+                <p className="chart-note">
+                  <strong>n が小さい経路の率を単独で読まない。</strong>
+                  企業直投の {channels.find((c) => c.channel.includes("直投"))?.reached ?? 0} / {channels.find((c) => c.channel.includes("直投"))?.total ?? 0} 社は、
+                  1 社増減するだけで率が十数ポイント動く。
+                </p>
+                <TableView
+                  head={["経路", "不採用", "書類終了", "面接到達", "到達率"]}
+                  rows={channels.map((row) => [
+                    row.channel,
+                    row.total,
+                    row.total - row.reached,
+                    row.reached,
+                    pct1(row.rate),
+                  ])}
+                />
+              </>
+            ) : (
+              <p className="chart-empty">台帳の集計がまだ生成されていない。</p>
+            )}
+          </Card>
+
+          <Card
+            title="選考ファネル（観測できている範囲）"
+            caption="台帳は不採用しか記録していないため、総応募数は直接には分からない。"
+          >
+            <div className="chart-bars">
+              {funnel.map((row, index) => (
+                <BarRow
+                  key={row.stage}
+                  label={row.stage}
+                  ratio={row.value / funnelTop}
+                  step={index}
+                  valueLabel={`${row.value}`}
+                  title={`${row.stage}：${row.value} 件（応募比 ${pct1(row.value / funnelTop)}）`}
+                  flag={index === 0 ? undefined : pct1(row.value / funnelTop)}
+                />
+              ))}
+            </div>
+            <TableView
+              head={["段階", "件数", "応募比"]}
+              rows={funnel.map((row) => [row.stage, row.value, pct1(row.value / funnelTop)])}
+            />
+          </Card>
+
+          <Card
+            title="月別：投げた数と落ちた数"
+            caption={
+              stats.timeline.appliedKnownFrom
+                ? `応募数が分かるのは ${stats.timeline.appliedKnownFrom} 以降。それ以前は未走査。`
+                : "応募日台帳がまだ無いので応募数は全月不明。"
+            }
+          >
+            {timeline.length > 0 ? (
+              <>
+                <ul className="chart-legend">
+                  <li><b data-step="1" /> 投げた <small>応募</small></li>
+                  <li><b data-step="4" /> 落ちた <small>不採用</small></li>
+                </ul>
+                <div className="chart-months">
+                  {timeline.map((row) => (
+                    <div className="chart-month" key={row.month}>
+                      <div className="chart-month-bars">
+                        {row.applied === null ? (
+                          <i className="chart-month-unknown" title={`${row.month}：応募数は不明（未走査）`} />
+                        ) : (
+                          <i
+                            data-step="1"
+                            style={{ height: `${(row.applied / timelineMax) * 100}%` }}
+                            title={`${row.month}：${row.applied} 件応募`}
+                          />
+                        )}
+                        <i
+                          data-step="4"
+                          style={{ height: `${(row.rejected / timelineMax) * 100}%` }}
+                          title={`${row.month}：${row.rejected} 社が不採用`}
+                        />
+                      </div>
+                      <span>{row.month.slice(2).replace("-", "/")}</span>
+                    </div>
+                  ))}
+                </div>
+                <TableView
+                  head={["月", "投げた", "落ちた"]}
+                  rows={timeline.map((row) => [row.month, row.applied === null ? "不明" : row.applied, row.rejected])}
+                />
+              </>
+            ) : (
+              <p className="chart-empty">この期間に該当するデータがない。</p>
+            )}
+          </Card>
+
+          <Card
+            title="応募と結果の推移"
+            caption={`応募日が分かる ${flow.length > 0 ? flow[0].date : "—"} 以降の分だけ。`}
+          >
+            {flow.length > 0 ? (
+              <>
+                <ul className="chart-legend">
+                  <li><b data-step="1" /> 累計で投げた <small>{flow[flow.length - 1].appliedCum}</small></li>
+                  <li><b data-step="4" /> 累計で結果が出た <small>{flow[flow.length - 1].resolvedCum}</small></li>
+                  <li><b data-step="2" /> 待っている <small>{flow[flow.length - 1].pending}</small></li>
+                </ul>
+                <svg className="chart-line" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="応募・結果・待機の推移">
+                  {[0, 0.5, 1].map((tick) => {
+                    const y = PAD.top + plotH - tick * plotH;
+                    return (
+                      <g key={tick}>
+                        <line className="chart-grid" x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} />
+                        <text className="chart-tick" x={PAD.left - 8} y={y + 4} textAnchor="end">
+                          {Math.round(tick * flowMax)}
+                        </text>
+                      </g>
+                    );
+                  })}
+                  {([
+                    { key: "appliedCum", step: 1 },
+                    { key: "resolvedCum", step: 4 },
+                    { key: "pending", step: 2 },
+                  ] as const).map(({ key, step }) => (
+                    <polyline
+                      key={key}
+                      className="chart-line-path"
+                      data-step={step}
+                      points={flow
+                        .map((d, i) => {
+                          const x = PAD.left + (flow.length <= 1 ? plotW / 2 : (i / (flow.length - 1)) * plotW);
+                          const y = PAD.top + plotH - (d[key] / flowMax) * plotH;
+                          return `${x},${y}`;
+                        })
+                        .join(" ")}
+                    />
+                  ))}
+                  {flow.map((d, i) => {
+                    const x = PAD.left + (flow.length <= 1 ? plotW / 2 : (i / (flow.length - 1)) * plotW);
+                    const y = PAD.top + plotH - (d.pending / flowMax) * plotH;
+                    return (
+                      <g key={d.date} tabIndex={0}>
+                        <title>{`${d.date}：投げた計 ${d.appliedCum}・結果 ${d.resolvedCum}・待ち ${d.pending}`}</title>
+                        <circle className="chart-hit" cx={x} cy={y} r={12} />
+                        {(d.applied > 0 || d.resolved > 0) && <circle className="chart-dot" data-step="2" cx={x} cy={y} r={4} />}
+                      </g>
+                    );
+                  })}
+                  <text className="chart-tick" x={PAD.left} y={H - 8} textAnchor="start">{flow[0].date.slice(5)}</text>
+                  <text className="chart-tick" x={W - PAD.right} y={H - 8} textAnchor="end">
+                    {flow[flow.length - 1].date.slice(5)}
+                  </text>
+                </svg>
+                <TableView
+                  head={["日付", "投げた", "結果", "累計投げた", "累計結果", "待ち"]}
+                  rows={flow
+                    .filter((d) => d.applied > 0 || d.resolved > 0)
+                    .map((d) => [d.date, d.applied, d.resolved, d.appliedCum, d.resolvedCum, d.pending])}
+                />
+              </>
+            ) : (
+              <p className="chart-empty">応募日台帳がまだ無い。</p>
+            )}
+          </Card>
+        </div>
+      </details>
     </div>
   );
 }

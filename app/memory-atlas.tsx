@@ -13,6 +13,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import InterviewReview from "./interview-review";
+import InterviewPrep from "./interview-prep";
+import InterviewSession from "./interview-session";
 import JapaneseTraining from "./japanese-training";
 import JobsAnalytics from "./jobs-analytics";
 import JobsView from "./jobs-view";
@@ -50,7 +52,7 @@ type VaultResponse = {
   notes: Note[];
 };
 
-type View = "overview" | "review" | "language" | "jobs" | "analytics" | "todo" | "graph" | "calendar" | "timeline" | "library";
+type View = "overview" | "session" | "prep" | "review" | "language" | "jobs" | "analytics" | "todo" | "graph" | "calendar" | "timeline" | "library";
 
 type CalendarEvent = {
   id: string;
@@ -123,6 +125,8 @@ const NAVIGATION: { id: View; label: string; glyph: string }[] = [
   { id: "analytics", label: "求职分析", glyph: "◑" },
   { id: "todo", label: "待办事项", glyph: "✓" },
   { id: "calendar", label: "日历", glyph: "▦" },
+  { id: "session", label: "本场面试", glyph: "戦" },
+  { id: "prep", label: "面试准备", glyph: "答" },
   { id: "review", label: "面试复盘", glyph: "復" },
   { id: "language", label: "日语训练", glyph: "語" },
   { id: "timeline", label: "时间线", glyph: "◷" },
@@ -199,6 +203,8 @@ function typeLabel(type: string) {
     "interview-answer-review": "回答质量复盘",
     "interview-answer-practice": "回答重练队列",
     "interview-answer-feedback": "回答质量批注",
+    "interview-prep-library": "面试标准回答库",
+    "interview-prep": "单场面接准备",
     policy: "规则",
     material: "素材",
     "training-profile": "训练画像",
@@ -388,7 +394,17 @@ function buildCalendarEvents(notes: Note[]): CalendarEvent[] {
       addEvent(note, frontmatterDate, getTitle(note), type === "review" ? 4 : 3);
     }
 
-    // 将来日程は状態正本である job-case の next_action だけから作る。
+    // エージェント面談・説明会など単一案件に紐づかない予定は todo の next_action が正本
+    //（2026-07-24 ワークポート面談が job-case 側に存在せず日历から漏れた実証）。
+    // todo 本文は経緯メモが多く誤検出するので frontmatter しか読まない。完了済みは予定ではない。
+    if (type === "todo" && todoStatus(note) !== "完了") {
+      const line = getString(note.frontmatter.next_action);
+      const date = line.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
+      if (date) addEvent(note, date, line, 3);
+      return;
+    }
+
+    // 将来日程は状態正本である job-case／todo の next_action だけから作る。
     // company 本文を再走査すると、同じ面接が証拠記述と案件で二重表示される。
     if (type !== JOB_CASE_TYPE) return;
     const sources = [
@@ -437,7 +453,12 @@ function MemoryAtlas() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [view, setView] = useState<View>("overview");
   const [reviewInitialKey, setReviewInitialKey] = useState<string | null>(null);
+  // 本场面试のドキュメントから回答库のカードへ飛んだときの初期選択
+  const [prepInitialCard, setPrepInitialCard] = useState<string | null>(null);
+  // 求職分析から「進行中 N 件をすべて見る」で飛んできた時だけ、求人一覧に状態フィルタを引き継ぐ。
+  const [jobsInitialStatuses, setJobsInitialStatuses] = useState<string[] | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [groupFilter, setGroupFilter] = useState<GroupKey | "all">("all");
@@ -498,15 +519,20 @@ function MemoryAtlas() {
 
   const openNote = useCallback((note: Note) => {
     setSelectedPath(note.path);
+    setSelectedSection(null);
     setSearchOpen(false);
   }, []);
 
   const openWikiLink = useCallback(
-    (target: string) => {
+    (target: string, section?: string) => {
       const note = notesByBasename.get(target) ?? notes.find((item) => item.path.endsWith(`/${target}.md`));
-      if (note) openNote(note);
+      if (note) {
+        setSelectedPath(note.path);
+        setSelectedSection(section || null);
+        setSearchOpen(false);
+      }
     },
-    [notes, notesByBasename, openNote],
+    [notes, notesByBasename],
   );
 
   const filteredNotes = useMemo(() => {
@@ -627,6 +653,8 @@ function MemoryAtlas() {
               className={view === item.id ? "active" : ""}
               onClick={() => {
                 if (item.id === "review") setReviewInitialKey(null);
+                // ナビから直接来た時は分析画面由来のフィルタを持ち越さない。
+                if (item.id === "jobs") setJobsInitialStatuses(null);
                 setView(item.id);
               }}
               aria-current={view === item.id ? "page" : undefined}
@@ -720,13 +748,48 @@ function MemoryAtlas() {
                 initialSelectedKey={reviewInitialKey}
               />
             )}
+            {view === "session" && (
+              <InterviewSession
+                notes={notes}
+                onOpen={openNote}
+                onOpenWiki={openWikiLink}
+                onOpenCard={(cardId) => {
+                  setPrepInitialCard(cardId);
+                  setView("prep");
+                  // 長い準備ドキュメントの途中から飛ぶので、そのままだとスクロール位置が残る
+                  window.scrollTo(0, 0);
+                }}
+              />
+            )}
+            {view === "prep" && (
+              <InterviewPrep
+                key={prepInitialCard ?? "prep"}
+                notes={notes}
+                onOpen={openNote}
+                initialCardId={prepInitialCard}
+              />
+            )}
             {view === "language" && (
               <JapaneseTraining onVaultChanged={loadVault} />
             )}
             {view === "jobs" && (
-              <JobsView notes={notes} onOpen={openNote} onVaultChanged={loadVault} />
+              <JobsView
+                notes={notes}
+                onOpen={openNote}
+                onVaultChanged={loadVault}
+                initialStatuses={jobsInitialStatuses}
+              />
             )}
-            {view === "analytics" && <JobsAnalytics notes={notes} />}
+            {view === "analytics" && (
+              <JobsAnalytics
+                notes={notes}
+                onOpen={openNote}
+                onViewJobs={(statuses) => {
+                  setJobsInitialStatuses(statuses ?? null);
+                  setView("jobs");
+                }}
+              />
+            )}
             {view === "todo" && (
               <TodoView notes={notes} onOpen={openNote} />
             )}
@@ -766,6 +829,7 @@ function MemoryAtlas() {
             className={view === item.id ? "active" : ""}
             onClick={() => {
               if (item.id === "review") setReviewInitialKey(null);
+              if (item.id === "jobs") setJobsInitialStatuses(null);
               setView(item.id);
             }}
           >
@@ -778,8 +842,12 @@ function MemoryAtlas() {
       {selectedNote && (
         <NoteDrawer
           note={selectedNote}
+          section={selectedSection}
           allNotes={notes}
-          onClose={() => setSelectedPath(null)}
+          onClose={() => {
+            setSelectedPath(null);
+            setSelectedSection(null);
+          }}
           onOpenWiki={openWikiLink}
           onOpen={openNote}
         />
@@ -1810,21 +1878,39 @@ function LibraryView({
 
 function NoteDrawer({
   note,
+  section,
   allNotes,
   onClose,
   onOpenWiki,
   onOpen,
 }: {
   note: Note;
+  section: string | null;
   allNotes: Note[];
   onClose: () => void;
-  onOpenWiki: (target: string) => void;
+  onOpenWiki: (target: string, section?: string) => void;
   onOpen: (note: Note) => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const group = getGroup(note.path);
   const trust = trustLayer(note);
   const basename = noteBasename(note.path);
   const backlinks = allNotes.filter((candidate) => extractLinks(candidate.content).includes(basename));
+
+  useEffect(() => {
+    if (!section) return;
+    const timer = window.setTimeout(() => {
+      const wanted = normalizeHeading(section);
+      const target = [...(scrollRef.current?.querySelectorAll<HTMLElement>("[data-md-heading]") ?? [])]
+        .find((heading) => {
+          const actual = heading.dataset.mdHeading ?? "";
+          return actual === wanted || actual.startsWith(wanted) || wanted.startsWith(actual);
+        });
+      target?.scrollIntoView({ block: "start" });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [note.path, section]);
+
   return (
     <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <aside className="note-drawer" aria-label="记忆详情" aria-modal="true" role="dialog">
@@ -1832,7 +1918,7 @@ function NoteDrawer({
           <div><span style={{ color: GROUPS[group].color }}>{GROUPS[group].label}</span><small>{note.path}</small></div>
           <button onClick={onClose} aria-label="关闭详情">×</button>
         </header>
-        <div className="drawer-scroll">
+        <div className="drawer-scroll" ref={scrollRef}>
           <div className="drawer-title-row">
             <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
             <span>{typeLabel(getType(note))}</span>
@@ -1866,14 +1952,27 @@ function NoteDrawer({
   );
 }
 
-function renderInline(text: string, onWikiLink: (target: string) => void): ReactNode[] {
+function normalizeHeading(text: string) {
+  return text
+    .normalize("NFKC")
+    .replace(/\*\*/g, "")
+    .replace(/\[\[([^#|\]]+)(?:#[^|\]]+)?(?:\|([^\]]+))?\]\]/g, "$2$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function renderInline(text: string, onWikiLink: (target: string, section?: string) => void): ReactNode[] {
   const pieces = text.split(/(\[\[[^\]]+\]\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
   return pieces.map((piece, index) => {
     if (piece.startsWith("[[") && piece.endsWith("]]")) {
       const body = piece.slice(2, -2);
       const [targetWithHeading, alias] = body.split("|");
-      const target = targetWithHeading.split("#")[0];
-      return <button className="wiki-link" key={index} onClick={() => onWikiLink(target)}>{alias || target} ↗</button>;
+      const [target, section] = targetWithHeading.split("#");
+      return (
+        <button className="wiki-link" key={index} onClick={() => onWikiLink(target, section)}>
+          {alias || section || target} ↗
+        </button>
+      );
     }
     if (piece.startsWith("**") && piece.endsWith("**")) return <strong key={index}>{piece.slice(2, -2)}</strong>;
     if (piece.startsWith("`") && piece.endsWith("`")) return <code key={index}>{piece.slice(1, -1)}</code>;
@@ -1881,7 +1980,13 @@ function renderInline(text: string, onWikiLink: (target: string) => void): React
   });
 }
 
-function MarkdownDocument({ content, onWikiLink }: { content: string; onWikiLink: (target: string) => void }) {
+function MarkdownDocument({
+  content,
+  onWikiLink,
+}: {
+  content: string;
+  onWikiLink: (target: string, section?: string) => void;
+}) {
   const lines = stripFrontmatter(content).split("\n");
   const blocks: ReactNode[] = [];
   let codeLines: string[] = [];
@@ -1900,9 +2005,10 @@ function MarkdownDocument({ content, onWikiLink }: { content: string; onWikiLink
     const heading = line.match(/^(#{2,4})\s+(.+)/);
     if (heading) {
       const level = heading[1].length;
-      if (level === 2) blocks.push(<h2 key={index}>{renderInline(heading[2], onWikiLink)}</h2>);
-      else if (level === 3) blocks.push(<h3 key={index}>{renderInline(heading[2], onWikiLink)}</h3>);
-      else blocks.push(<h4 key={index}>{renderInline(heading[2], onWikiLink)}</h4>);
+      const data = { "data-md-heading": normalizeHeading(heading[2]) };
+      if (level === 2) blocks.push(<h2 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h2>);
+      else if (level === 3) blocks.push(<h3 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h3>);
+      else blocks.push(<h4 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h4>);
       return;
     }
     if (line.startsWith(">")) {

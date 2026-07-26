@@ -5,6 +5,7 @@ import {
   languageCurriculumByFingerprint,
   loadLanguageV2State,
   mergeLanguageBatchCheckpoint,
+  refreshLanguageBatchSignature,
   renderLanguageBatch,
   verifyLanguageBatch,
 } from "@/lib/server/language-v2";
@@ -24,15 +25,17 @@ export async function POST(request: Request) {
     const state = await loadLanguageV2State(notes);
     const batch = state.currentBatch;
     if (!batch || batch.id !== body.batchId) throw new Error("当前训练批次不存在或已经完成。");
-    if (!(await verifyLanguageBatch(batch))) throw new Error("训练批次签名无效，请重新开始。");
     const curriculum = languageCurriculumByFingerprint(notes, batch.curriculumFingerprint);
     if (!curriculum) throw new Error("本批次对应的训练课程已不可用。");
+    const trustedBatch = await verifyLanguageBatch(batch)
+      ? batch
+      : await refreshLanguageBatchSignature(batch, curriculum);
     const next = mergeLanguageBatchCheckpoint(
-      batch,
+      trustedBatch,
       curriculum,
       Array.isArray(body.actions) ? body.actions : [],
       body.nextPhase,
-      Number.isFinite(body.cursor) ? Number(body.cursor) : batch.cursor,
+      Number.isFinite(body.cursor) ? Number(body.cursor) : trustedBatch.cursor,
     );
     await writeNote(batchVaultPath(next), renderLanguageBatch(next));
     return Response.json({ ok: true, batch: next, state: await loadLanguageV2State() });

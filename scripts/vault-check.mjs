@@ -16,8 +16,10 @@ import {
   readJobCases,
 } from "./vault-lib.mjs";
 import { JOB_CASE_ORIGINS } from "../lib/vault-boundary.mjs";
+import { listEmbeds, listHeadings, sliceSection, stripFrontmatter } from "../lib/interview-prep-embed.mjs";
 
 const REQUIRED = ["case_id", "company", "status", "origin"];
+const PREP_REQUIRED = ["company", "date", "round", "format", "interviewers", "case"];
 
 const problems = [];
 const notes = await readJobCases();
@@ -73,8 +75,29 @@ for (const [caseId, files] of caseIds) {
 // 規則IDの正本は1ファイルだけ（vault AGENTS.md「同じ規範を2箇所に書かない」）。
 // 2つの正本が同じIDを持つと「どちらが現行か」が壊れたまま残り続けるので、ここで落とす。
 const ownersById = new Map();
-for (const path of await listMarkdownFiles()) {
-  const frontmatter = parseFrontmatter(await readFile(path, "utf8"));
+// 埋め込みの解決に使うため、ノート名 → 本文 を先に集める。
+// basename が重複していると Obsidian 側も参照が曖昧になるので、その事実も持っておく。
+const bodyByName = new Map();
+const frontmatterByName = new Map();
+const duplicateNames = new Set();
+let prepCount = 0;
+let prepEmbedCount = 0;
+const files = await listMarkdownFiles();
+const contents = new Map();
+for (const path of files) {
+  const content = await readFile(path, "utf8");
+  contents.set(path, content);
+  const name = path.split("/").pop().replace(/\.md$/i, "");
+  if (bodyByName.has(name)) duplicateNames.add(name);
+  else {
+    bodyByName.set(name, stripFrontmatter(content));
+    frontmatterByName.set(name, parseFrontmatter(content));
+  }
+}
+
+for (const path of files) {
+  const content = contents.get(path);
+  const frontmatter = parseFrontmatter(content);
   const relativePath = relative(VAULT, path);
   if (frontmatter.type === "company" && frontmatter.status) {
     problems.push(`${relativePath}: company は応募 status を持てない。対応する job-case へ移す`);
@@ -84,6 +107,49 @@ for (const path of await listMarkdownFiles()) {
   }
   if (frontmatter.type === "policy-change" && frontmatter.owns) {
     problems.push(`${relativePath}: policy-change は規則IDを owns できない`);
+  }
+
+  // 面接準備ノートは共通資産を ![[…]] で参照する形にしているので、参照が切れると
+  // Web と当日用 HTML から章がまるごと消える。しかも「空の章」は目視で気づきにくい。
+  if (frontmatter.type === "interview-prep") {
+    prepCount += 1;
+    for (const key of PREP_REQUIRED) {
+      if (!frontmatter[key]) problems.push(`${relativePath}: frontmatter に \`${key}\` が無い`);
+    }
+    if (frontmatter.date && !/^\d{4}-\d{2}-\d{2}$/.test(String(frontmatter.date))) {
+      problems.push(`${relativePath}: date "${frontmatter.date}" が YYYY-MM-DD ではない`);
+    }
+    if (frontmatter.case) {
+      const rawCase = String(frontmatter.case).trim().replace(/^["']|["']$/g, "");
+      const innerCase = rawCase.match(/^\[\[([^\]]+)\]\]$/)?.[1] ?? rawCase;
+      const caseTarget = innerCase.split("|")[0].split("#")[0].trim();
+      const targetFrontmatter = frontmatterByName.get(caseTarget);
+      if (!targetFrontmatter) {
+        problems.push(`${relativePath}: case の参照先が無い [[${caseTarget}]]`);
+      } else if (duplicateNames.has(caseTarget)) {
+        problems.push(`${relativePath}: case の参照先「${caseTarget}」が同名複数あり曖昧`);
+      } else if (targetFrontmatter.type !== "job-case") {
+        problems.push(`${relativePath}: case [[${caseTarget}]] は type: job-case ではない`);
+      }
+    }
+    for (const embed of listEmbeds(content)) {
+      prepEmbedCount += 1;
+      const target = bodyByName.get(embed.target);
+      if (!target) {
+        problems.push(`${relativePath}: 埋め込み先が無い ${embed.raw}`);
+        continue;
+      }
+      if (duplicateNames.has(embed.target)) {
+        problems.push(`${relativePath}: 埋め込み先「${embed.target}」が同名複数あり参照が曖昧 ${embed.raw}`);
+      }
+      if (embed.section && !sliceSection(target, embed.section)) {
+        const available = listHeadings(target).slice(0, 8).join(" / ");
+        problems.push(
+          `${relativePath}: 埋め込み先に「${embed.section}」の節が無い ${embed.raw}` +
+            (available ? `（その ノート の見出し: ${available}）` : ""),
+        );
+      }
+    }
   }
   for (const id of parseOwns(frontmatter.owns)) {
     const files = ownersById.get(id) ?? [];
@@ -97,7 +163,10 @@ for (const [id, files] of ownersById) {
   }
 }
 
-console.log(`job-case ノート ${notes.length} 件・owns 規則ID ${ownersById.size} 件を検査`);
+console.log(
+  `job-case ノート ${notes.length} 件・owns 規則ID ${ownersById.size} 件・` +
+    `面接準備ノート ${prepCount} 件（埋め込み ${prepEmbedCount} 件）を検査`,
+);
 
 if (problems.length) {
   console.error(`\n❌ ${problems.length} 件の問題:\n`);
