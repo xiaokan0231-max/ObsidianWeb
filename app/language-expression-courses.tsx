@@ -560,16 +560,32 @@ function CompleteAndNextButton({
   };
 
   return (
-    <button
-      type="button"
-      className={`expression-complete expression-complete-next ${done ? "done" : ""}`}
-      disabled={Boolean(busyKey)}
-      onClick={() => void completeAndNext()}
-    >
-      <span aria-hidden="true">{done ? "✓" : "○"}</span>
-      {busy ? "正在保存…" : done ? "已练，下一条" : "标记已练并下一条"}
-      {!busy && <span aria-hidden="true">→</span>}
-    </button>
+    <span className="expression-complete-group">
+      <button
+        type="button"
+        className={`expression-complete expression-complete-next ${done ? "done" : ""}`}
+        disabled={Boolean(busyKey)}
+        onClick={() => void completeAndNext()}
+      >
+        <span aria-hidden="true">{done ? "✓" : "○"}</span>
+        {busy ? "正在保存…" : done ? "已练，下一条" : "标记已练并下一条"}
+        {!busy && <span aria-hidden="true">→</span>}
+      </button>
+      {/* 「已练」を取り消す唯一の導線。押し間違いや練習し直しで戻せないと、
+          完了状態が事実上不可逆になる（reopened はイベント型・API・reducer とも
+          対応済みなのに UI から発火する経路が無かった）。 */}
+      {done && (
+        <button
+          type="button"
+          className="expression-reopen"
+          disabled={Boolean(busyKey)}
+          title="取消「已练」，放回练习队列"
+          onClick={() => void onSave(itemId, exercise, "reopened")}
+        >
+          {busy ? "…" : "↩ 取消已练"}
+        </button>
+      )}
+    </span>
   );
 }
 

@@ -105,9 +105,33 @@ test("专项课程解析稳定 ID、词块、句型和关联", () => {
   ]);
   assert.equal(course.safeRewrites[0].safeJa, "新しい技術への慣れには個人差があります");
   assert.deepEqual(course.recipes[0].patternLevels, ["core", "extended"]);
+  // 進捗ログは可変の表示名（topic）ではなく courseId で決める。
   assert.equal(
     languageExpressionProgressPath(course),
-    "30_日本語学習/専門コースログ/AI活用推進_進捗.md",
+    "30_日本語学習/専門コースログ/ai-adoption_進捗.md",
+  );
+});
+
+test("進捗ログのパスは topic を改名しても変わらない", () => {
+  const course = parseLanguageExpressionCourse(note());
+  const renamed = { ...course, topic: "AI活用推進（2026年版）" };
+  assert.equal(
+    languageExpressionProgressPath(renamed),
+    languageExpressionProgressPath(course),
+    "topic を改名すると過去の練習履歴が別ファイルに飛んで消える",
+  );
+});
+
+test("例文は読点で分割しない（1文が2件に化けて検証を誤魔化さない）", () => {
+  const withComma = courseContent().replace(
+    "- 例句:: 一つの要因だと考えています。",
+    "- 例句:: まず試し、結果を確認します。",
+  );
+  const course = parseLanguageExpressionCourse(note(withComma));
+  assert.deepEqual(
+    course.patterns[0].examplesJa,
+    ["まず試し、結果を確認します。", "段階的に進める必要があると考えています。"],
+    "読点で割ると 1 文が 2 件に化け、「两个例句」検証を 1 文の半分ずつで満たしてしまう",
   );
 });
 

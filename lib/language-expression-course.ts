@@ -248,7 +248,10 @@ function patternFromRaw(item: RawItem): SentencePattern {
     functionZh: field(item, "功能", "中文功能", "機能", "用途"),
     patternJa: field(item, "句型", "パターン", "型", "日本語"),
     slotsZh: field(item, "槽位", "スロット", "替换位置", "置換箇所"),
-    examplesJa: fields(item, "例句", "例文", "短例文", "例句1", "例句2"),
+    // 例文は「文」なので区切り文字で割らない（rawFields）。`まず試し、結果を確認します。`を
+    // splitList に通すと 1 文が 2 断片になり、表示が壊れるうえ §363 の「两个例句」検証を
+    // 1 文の半分ずつで満たしてしまう。複数example は行を分けて書く。
+    examplesJa: rawFields(item, "例句", "例文", "短例文", "例句1", "例句2"),
     topics: fields(item, "主题", "テーマ", "適用テーマ"),
   };
 }
@@ -515,13 +518,17 @@ export function deriveLanguageExpressionProgress(
   };
 }
 
-export function languageExpressionProgressPath(course: Pick<LanguageExpressionCourse, "topic">) {
-  const topic = course.topic
-    .trim()
-    .replace(/[\\/:*?"<>|]/gu, "＿")
-    .replace(/\.\./gu, "．");
-  if (!topic) throw new Error("课程 topic 为空，无法生成进度路径。");
-  return `30_日本語学習/専門コースログ/${topic}_進捗.md`;
+/**
+ * 進捗ログの置き場所は **courseId で決める**。表示名（topic）で決めると、
+ * topic を改名しただけで別ファイルを指し、それまでの練習履歴が丸ごと消える
+ * （イベントも進捗ノートの frontmatter も courseId で課程を識別しているのに、
+ * パスだけ可変の表示名に依存していた）。courseId は §309 で
+ * `^[a-z0-9][a-z0-9-]{0,63}$` に制限済みなので、そのままファイル名に使える。
+ */
+export function languageExpressionProgressPath(course: Pick<LanguageExpressionCourse, "courseId">) {
+  const courseId = course.courseId.trim();
+  if (!courseId) throw new Error("课程 courseId 为空，无法生成进度路径。");
+  return `30_日本語学習/専門コースログ/${courseId}_進捗.md`;
 }
 
 export function renderLanguageExpressionProgressNote(

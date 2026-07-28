@@ -8485,7 +8485,16 @@ button.prep-doc-ref.card::after { content: " →"; font-size: 0.85em; }
   gap: 12px;
   margin: 0 auto;
 }
-.expression-practice-actions > button {
+/* 「已练」と「取消已练」は1つの塊。直接の子だけを拾う下の指定から漏れないよう、
+   グループ内のボタンも同じ見た目に含める。 */
+.expression-complete-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.expression-practice-actions > button,
+.expression-practice-actions .expression-complete-group > button {
   min-height: 39px;
   display: inline-flex;
   align-items: center;
@@ -8497,8 +8506,10 @@ button.prep-doc-ref.card::after { content: " →"; font-size: 0.85em; }
   font-size: 10px;
   cursor: pointer;
 }
-.expression-practice-actions > button:hover:not(:disabled) { background: #edf4ef; }
-.expression-practice-actions > button:disabled { opacity: 0.45; cursor: wait; }
+.expression-practice-actions > button:hover:not(:disabled),
+.expression-complete-group > button:hover:not(:disabled) { background: #edf4ef; }
+.expression-practice-actions > button:disabled,
+.expression-complete-group > button:disabled { opacity: 0.45; cursor: wait; }
 .expression-practice-actions .expression-complete.done {
   border-color: #a8c7b7;
   background: #e5f0e9;
@@ -8507,7 +8518,12 @@ button.prep-doc-ref.card::after { content: " →"; font-size: 0.85em; }
 .expression-practice-actions .expression-complete-next {
   min-width: 190px;
   justify-content: center;
-  margin-left: auto;
+}
+/* 取消は破壊的ではないが後退操作なので、主ボタンより弱く見せる */
+.expression-complete-group .expression-reopen {
+  color: var(--muted);
+  padding: 0 10px;
+  white-space: nowrap;
 }
 
 .expression-empty,
