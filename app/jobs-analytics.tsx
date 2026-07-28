@@ -216,6 +216,29 @@ function BarRow({
   );
 }
 
+/**
+ * 「現在の手札」に効く条件フィルタ。KPI・HOT LIST は**行動リスト**なので絞らない
+ * （次の面談が条件で消えて「予定なし」に見えるのが最悪の誤読）。
+ * 効く範囲は評点・状態・技術の3枚だけで、注記行に必ず母数を出す。
+ */
+type CondFilters = {
+  statuses: string[];
+  sources: string[];
+  regions: string[];
+  remoteOnly: boolean;
+};
+
+const EMPTY_COND: CondFilters = { statuses: [], sources: [], regions: [], remoteOnly: false };
+
+function condMatch(job: JobCard, cond: CondFilters, except?: keyof CondFilters) {
+  return (
+    (except === "statuses" || cond.statuses.length === 0 || cond.statuses.includes(job.status)) &&
+    (except === "sources" || cond.sources.length === 0 || cond.sources.includes(job.sourceGroup)) &&
+    (except === "regions" || cond.regions.length === 0 || job.regions.some((r) => cond.regions.includes(r))) &&
+    (except === "remoteOnly" || !cond.remoteOnly || job.remote)
+  );
+}
+
 export default function JobsAnalytics({
   notes,
   onOpen,
@@ -228,6 +251,7 @@ export default function JobsAnalytics({
 }) {
   const [range, setRange] = useState<RangeId>("all");
   const [handScope, setHandScope] = useState<HandScopeId>("high");
+  const [cond, setCond] = useState<CondFilters>(EMPTY_COND);
 
   const jobs = useMemo(
     () => notes.filter((note) => getType(note) === JOB_CASE_TYPE).map(toJobCard),
@@ -328,11 +352,49 @@ export default function JobsAnalytics({
    * この例外があるおかげで、状態内訳の進行中の合計は上の KPI「進行中」と必ず一致する。
    */
   const handMin = HAND_SCOPES.find((item) => item.id === handScope)?.min ?? 0;
+  /** 条件フィルタ通過後の現役案件。評点チャートの母数（handScope は掛けない）。 */
+  const condJobs = useMemo(() => liveJobs.filter((job) => condMatch(job, cond)), [liveJobs, cond]);
   const handJobs = useMemo(
-    () => liveJobs.filter((job) => job.rating >= handMin || ACTIVE_SELECTION.includes(job.status)),
-    [liveJobs, handMin],
+    () => condJobs.filter((job) => job.rating >= handMin || ACTIVE_SELECTION.includes(job.status)),
+    [condJobs, handMin],
   );
-  const handExcluded = liveJobs.length - handJobs.length;
+  const handExcluded = condJobs.length - handJobs.length;
+  /**
+   * 状態チャートだけは状態フィルタを**自分に掛けない**（facet の except 方式）。
+   * 「応募済だけに絞ったら状態図が1本になる」のは情報ゼロで、
+   * 評点チャートに評点フィルタを掛けないのと同じ理屈。
+   */
+  const statusPool = useMemo(
+    () =>
+      liveJobs
+        .filter((job) => condMatch(job, cond, "statuses"))
+        .filter((job) => job.rating >= handMin || ACTIVE_SELECTION.includes(job.status)),
+    [liveJobs, cond, handMin],
+  );
+  const condActive =
+    cond.statuses.length + cond.sources.length + cond.regions.length + (cond.remoteOnly ? 1 : 0);
+  /** chips の件数は常に現役全件からの静的カウント。動的に変わる件数は注記行で出す。 */
+  const condOptions = useMemo(() => {
+    const countBy = (values: (job: JobCard) => string[]) => {
+      const map = new Map<string, number>();
+      liveJobs.forEach((job) => values(job).forEach((v) => v && map.set(v, (map.get(v) ?? 0) + 1)));
+      return [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ja"));
+    };
+    return {
+      statuses: JOB_STATUSES.map((status) => [status, liveJobs.filter((j) => j.status === status).length] as const)
+        .filter(([, count]) => count > 0),
+      sources: countBy((job) => [job.sourceGroup]),
+      regions: countBy((job) => job.regions),
+      remote: liveJobs.filter((job) => job.remote).length,
+    };
+  }, [liveJobs]);
+  const toggleCond = (key: "statuses" | "sources" | "regions", value: string) =>
+    setCond((current) => ({
+      ...current,
+      [key]: current[key].includes(value)
+        ? current[key].filter((item) => item !== value)
+        : [...current[key], value],
+    }));
 
   // ファネル：観測できている範囲だけ。総応募数は台帳（不採用のみ）からは出せない。
   const passedNow = jobs.filter((job) => PASSED_SCREENING.includes(job.status)).length;
@@ -348,13 +410,13 @@ export default function JobsAnalytics({
 
   const bands = JOB_RATING_BANDS.filter((band) => band.id !== "7plus").map((band) => ({
     ...band,
-    count: liveJobs.filter((job) => jobRatingBand(job.rating) === band.id).length,
+    count: condJobs.filter((job) => jobRatingBand(job.rating) === band.id).length,
   }));
   const bandMax = Math.max(1, ...bands.map((band) => band.count));
 
   const statuses = JOB_STATUSES.map((status) => ({
     status,
-    count: handJobs.filter((job) => job.status === status).length,
+    count: statusPool.filter((job) => job.status === status).length,
   })).filter((row) => row.count > 0);
   const statusTotal = statuses.reduce((sum, row) => sum + row.count, 0) || 1;
 
@@ -429,7 +491,7 @@ export default function JobsAnalytics({
 
       <h2 className="analytics-section">現在の手札を判断する</h2>
 
-      {/* 母数を変えるスイッチなので、影響する2枚より必ず**上**に置く。 */}
+      {/* 母数を変えるスイッチなので、影響する図より必ず**上**に置く。 */}
       <div className="analytics-filter">
         <span>集計対象</span>
         {HAND_SCOPES.map((item) => (
@@ -445,15 +507,77 @@ export default function JobsAnalytics({
         ))}
         <small className="analytics-filter-note">
           {handScope === "high"
-            ? `状態内訳と技術集計は ${handJobs.length} 件で算出（7 点未満の未応募 ${handExcluded} 件を除外／選考中の案件は評点に関わらず残す）。評点チャートは常に全 ${liveJobs.length} 件。`
-            : `現役 ${liveJobs.length} 件すべてで算出。4〜6 点の投げない札も母数に入っている。`}
+            ? `状態内訳と技術集計は ${handJobs.length} 件で算出（7 点未満の未応募 ${handExcluded} 件を除外／選考中の案件は評点に関わらず残す）。評点チャートは条件通過後の ${condJobs.length} 件。`
+            : `条件通過後の ${condJobs.length} 件すべてで算出。4〜6 点の投げない札も母数に入っている。`}
         </small>
+      </div>
+
+      {/* 条件フィルタ。下の3枚（評点・状態・技術）にだけ効く——
+          上の KPI・HOT LIST は行動リストなので絞らない（面談予定が条件で消えるのが最悪の誤読）。 */}
+      <div className="analytics-filter analytics-cond-filter">
+        <span>条件</span>
+        {condOptions.statuses.map(([status, count]) => (
+          <button
+            key={status}
+            type="button"
+            className={`job-chip${cond.statuses.includes(status) ? " active" : ""}`}
+            aria-pressed={cond.statuses.includes(status)}
+            onClick={() => toggleCond("statuses", status)}
+          >
+            {status} <small>{count}</small>
+          </button>
+        ))}
+        {condActive > 0 ? (
+          <button type="button" className="job-chip" onClick={() => setCond(EMPTY_COND)}>
+            重置（{condActive}）
+          </button>
+        ) : null}
+        <small className="analytics-filter-note">
+          状態で絞っても状態内訳の図は全状態を表示し続ける（評点図に評点を掛けないのと同じ理屈）。
+          上の KPI・HOT LIST には効かない。
+        </small>
+      </div>
+      <div className="analytics-filter analytics-cond-filter">
+        <span>来源</span>
+        {condOptions.sources.map(([source, count]) => (
+          <button
+            key={source}
+            type="button"
+            className={`job-chip${cond.sources.includes(source) ? " active" : ""}`}
+            aria-pressed={cond.sources.includes(source)}
+            onClick={() => toggleCond("sources", source)}
+          >
+            {source} <small>{count}</small>
+          </button>
+        ))}
+      </div>
+      <div className="analytics-filter analytics-cond-filter">
+        <span>勤務地</span>
+        {condOptions.regions.slice(0, 8).map(([region, count]) => (
+          <button
+            key={region}
+            type="button"
+            className={`job-chip${cond.regions.includes(region) ? " active" : ""}`}
+            aria-pressed={cond.regions.includes(region)}
+            onClick={() => toggleCond("regions", region)}
+          >
+            {region} <small>{count}</small>
+          </button>
+        ))}
+        <button
+          type="button"
+          className={`job-chip${cond.remoteOnly ? " active" : ""}`}
+          aria-pressed={cond.remoteOnly}
+          onClick={() => setCond((current) => ({ ...current, remoteOnly: !current.remoteOnly }))}
+        >
+          リモート可 <small>{condOptions.remote}</small>
+        </button>
       </div>
 
       <div className="chart-grid-2">
         <Card
           title="現役案件の評点"
-          caption="不採用を除いた現在の手札・常に全件。7 点以上が「応募すべき」帯。しきい値を決める図なので、上の集計対象は掛けない。"
+          caption={`不採用を除いた現在の手札${condActive > 0 ? `・条件通過後の ${condJobs.length} 件` : "・全件"}。7 点以上が「応募すべき」帯。しきい値を決める図なので、上の集計対象（評点）は掛けない。`}
         >
           <div className="chart-bars">
             {bands.map((band, index) => (
@@ -474,8 +598,8 @@ export default function JobsAnalytics({
           title="現役案件の状態"
           caption={
             handScope === "high"
-              ? `評点 7 以上＋選考中の ${handJobs.length} 件。いま動かせる札の内訳で、進行中の合計は上の KPI と一致する。`
-              : `現役 ${handJobs.length} 件すべて。4〜6 点の投げない札も含む。`
+              ? `評点 7 以上＋選考中の ${statusPool.length} 件。いま動かせる札の内訳${condActive === 0 ? "で、進行中の合計は上の KPI と一致する" : "（条件フィルタ適用中・状態自身は絞らない）"}。`
+              : `現役 ${statusPool.length} 件${condActive === 0 ? "すべて" : "（条件フィルタ適用中）"}。4〜6 点の投げない札も含む。`
           }
         >
           <div className="chart-stack" role="img" aria-label="状態の分布">

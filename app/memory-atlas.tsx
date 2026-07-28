@@ -15,7 +15,9 @@ import {
 import InterviewReview from "./interview-review";
 import InterviewPrep from "./interview-prep";
 import InterviewSession from "./interview-session";
+import InterviewSharedAsset from "./interview-shared-asset";
 import JapaneseTraining from "./japanese-training";
+import LanguageExpressionCourses from "./language-expression-courses";
 import JobsAnalytics from "./jobs-analytics";
 import JobsView from "./jobs-view";
 import { compareJobs, jobSection, normalizeJobStatus, toJobCard } from "@/lib/jobs";
@@ -32,6 +34,7 @@ import {
   type ReviewDimensionKey,
 } from "@/lib/review-deep";
 import { JOB_CASE_TYPE } from "@/lib/vault-boundary.mjs";
+import type { SharedAssetTarget } from "@/lib/interview-shared-assets";
 import {
   formatDate,
   getString,
@@ -52,7 +55,7 @@ type VaultResponse = {
   notes: Note[];
 };
 
-type View = "overview" | "session" | "prep" | "review" | "language" | "jobs" | "analytics" | "todo" | "graph" | "calendar" | "timeline" | "library";
+type View = "overview" | "session" | "prep" | "review" | "language" | "topics" | "jobs" | "analytics" | "todo" | "graph" | "calendar" | "timeline" | "library";
 
 type CalendarEvent = {
   id: string;
@@ -129,6 +132,7 @@ const NAVIGATION: { id: View; label: string; glyph: string }[] = [
   { id: "prep", label: "面试准备", glyph: "答" },
   { id: "review", label: "面试复盘", glyph: "復" },
   { id: "language", label: "日语训练", glyph: "語" },
+  { id: "topics", label: "专项训练", glyph: "組" },
   { id: "timeline", label: "时间线", glyph: "◷" },
   { id: "graph", label: "关系图", glyph: "✣" },
   { id: "library", label: "记忆库", glyph: "▤" },
@@ -184,6 +188,156 @@ function RailToggle() {
   );
 }
 
+function PrepCardOverlay({
+  notes,
+  cardId,
+  origin,
+  onOpen,
+  onClose,
+}: {
+  notes: Note[];
+  cardId: string;
+  origin: { x: number; y: number };
+  onOpen: (note: Note) => void;
+  onClose: () => void;
+}) {
+  const backRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    // 背面の本场面试はマウントしたまま残す。ただし history.back() と
+    // overflow の復元に任せるだけではブラウザの自動スクロール復元と競合し、
+    // 元のカード参照ではなく節の先頭へ戻ることがある。開く直前の座標を正本にする。
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const bodyOverflow = document.body.style.overflow;
+    const rootOverflow = document.documentElement.style.overflow;
+    const scrollRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    backRef.current?.focus();
+    return () => {
+      document.body.style.overflow = bodyOverflow;
+      document.documentElement.style.overflow = rootOverflow;
+      previousFocus?.focus({ preventScroll: true });
+      const restore = () => window.scrollTo({ left: origin.x, top: origin.y });
+      // rAF はバックグラウンドタブで止まる。popstate と sticky 要素の再計算後にも
+      // 必ず走る timer で二段固定し、最後にブラウザ本来の設定へ戻す。
+      restore();
+      window.setTimeout(restore, 0);
+      window.setTimeout(() => {
+        restore();
+        window.history.scrollRestoration = scrollRestoration;
+      }, 80);
+    };
+  }, [origin.x, origin.y]);
+
+  return (
+    <section
+      className="prep-card-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="prep-card-overlay-title"
+    >
+      <header className="prep-card-overlay-bar">
+        <button ref={backRef} type="button" onClick={onClose}>
+          <span aria-hidden="true">←</span>
+          返回本场面试
+        </button>
+        <div>
+          <small>STANDARD ANSWER LIBRARY</small>
+          <strong id="prep-card-overlay-title">回答库 · {cardId}</strong>
+        </div>
+        <span><kbd>Esc</kbd> 也可返回</span>
+      </header>
+      <div className="prep-card-overlay-content">
+        <InterviewPrep
+          key={cardId}
+          notes={notes}
+          onOpen={onOpen}
+          initialCardId={cardId}
+        />
+      </div>
+    </section>
+  );
+}
+
+function SharedAssetOverlay({
+  note,
+  target,
+  origin,
+  onOpenCard,
+  onOpenWiki,
+  onClose,
+}: {
+  note: Note;
+  target: SharedAssetTarget;
+  origin: { x: number; y: number };
+  onOpenCard: (cardId: string) => void;
+  onOpenWiki: (target: string, section?: string) => void;
+  onClose: () => void;
+}) {
+  const backRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const bodyOverflow = document.body.style.overflow;
+    const rootOverflow = document.documentElement.style.overflow;
+    const scrollRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    backRef.current?.focus();
+    return () => {
+      document.body.style.overflow = bodyOverflow;
+      document.documentElement.style.overflow = rootOverflow;
+      previousFocus?.focus({ preventScroll: true });
+      const restore = () => window.scrollTo({ left: origin.x, top: origin.y });
+      restore();
+      window.setTimeout(restore, 0);
+      window.setTimeout(() => {
+        restore();
+        window.history.scrollRestoration = scrollRestoration;
+      }, 80);
+    };
+  }, [origin.x, origin.y]);
+
+  return (
+    <section
+      className="prep-card-overlay shared-asset-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="shared-asset-overlay-title"
+    >
+      <header className="prep-card-overlay-bar">
+        <button ref={backRef} type="button" onClick={onClose}>
+          <span aria-hidden="true">←</span>
+          返回本场面试
+        </button>
+        <div>
+          <small>
+            {target.scope === "company"
+              ? "THIS INTERVIEW · COMPANY MOTIVATION"
+              : "COMMON INTERVIEW ASSET"}
+          </small>
+          <strong id="shared-asset-overlay-title">{target.label}</strong>
+        </div>
+        <span><kbd>Esc</kbd> 也可返回</span>
+      </header>
+      <div className="prep-card-overlay-content shared-asset-overlay-content">
+        <InterviewSharedAsset
+          key={`${target.note}#${target.section ?? ""}#${target.defaultSection ?? ""}`}
+          note={note}
+          target={target}
+          onOpenCard={onOpenCard}
+          onOpenWiki={onOpenWiki}
+        />
+      </div>
+    </section>
+  );
+}
+
 function getGroup(path: string): GroupKey {
   if (path.startsWith("10_")) return "self";
   if (path.startsWith("20_")) return "career";
@@ -210,6 +364,7 @@ function typeLabel(type: string) {
     "training-profile": "训练画像",
     "training-lesson": "训练教材",
     "training-log": "训练记录",
+    "language-expression-course-progress": "专项训练进度",
     "practice-log": "教练练习",
     "exam-log": "考试记录",
     [JOB_CASE_TYPE]: "应募案件",
@@ -453,8 +608,11 @@ function MemoryAtlas() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [view, setView] = useState<View>("overview");
   const [reviewInitialKey, setReviewInitialKey] = useState<string | null>(null);
-  // 本场面试のドキュメントから回答库のカードへ飛んだときの初期選択
-  const [prepInitialCard, setPrepInitialCard] = useState<string | null>(null);
+  // 本场面试を残したまま、その上に全幅で開く回答库カード
+  const [prepOverlayCard, setPrepOverlayCard] = useState<string | null>(null);
+  const [prepOverlayOrigin, setPrepOverlayOrigin] = useState({ x: 0, y: 0 });
+  const [sharedAssetOverlay, setSharedAssetOverlay] = useState<SharedAssetTarget | null>(null);
+  const [sharedAssetOrigin, setSharedAssetOrigin] = useState({ x: 0, y: 0 });
   // 求職分析から「進行中 N 件をすべて見る」で飛んできた時だけ、求人一覧に状態フィルタを引き継ぐ。
   const [jobsInitialStatuses, setJobsInitialStatuses] = useState<string[] | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -485,6 +643,136 @@ function MemoryAtlas() {
     }
   }, []);
 
+  const openPrepCard = useCallback((cardId: string) => {
+    // setState→overlay の effect を待つと、focus と overflow の変更後の座標を
+    // 拾ってしまう。クリックハンドラ内で、画面が動く前の位置を同期保存する。
+    const origin = { x: window.scrollX, y: window.scrollY };
+    setPrepOverlayOrigin(origin);
+    const currentState =
+      window.history.state && typeof window.history.state === "object"
+        ? window.history.state
+        : {};
+    window.history.pushState(
+      {
+        ...currentState,
+        __echoPrepCardOverlay: cardId,
+        __echoPrepCardOrigin: origin,
+      },
+      "",
+      window.location.href,
+    );
+    setPrepOverlayCard(cardId);
+  }, []);
+
+  const closePrepCard = useCallback(() => {
+    if (window.history.state?.__echoPrepCardOverlay) {
+      window.history.back();
+      return;
+    }
+    setPrepOverlayCard(null);
+  }, []);
+
+  const openSharedAsset = useCallback((asset: SharedAssetTarget) => {
+    const origin = { x: window.scrollX, y: window.scrollY };
+    setSharedAssetOrigin(origin);
+    const currentState =
+      window.history.state && typeof window.history.state === "object"
+        ? window.history.state
+        : {};
+    window.history.pushState(
+      {
+        ...currentState,
+        __echoSharedAssetOverlay: asset,
+        __echoSharedAssetOrigin: origin,
+      },
+      "",
+      window.location.href,
+    );
+    setSharedAssetOverlay(asset);
+  }, []);
+
+  const closeSharedAsset = useCallback(() => {
+    if (window.history.state?.__echoSharedAssetOverlay) {
+      window.history.back();
+      return;
+    }
+    setSharedAssetOverlay(null);
+  }, []);
+
+  useEffect(() => {
+    const syncOverlays = (state: unknown) => {
+      const cardId =
+        state && typeof state === "object" && "__echoPrepCardOverlay" in state
+          ? (state as { __echoPrepCardOverlay?: unknown }).__echoPrepCardOverlay
+          : null;
+      const origin =
+        state && typeof state === "object" && "__echoPrepCardOrigin" in state
+          ? (state as { __echoPrepCardOrigin?: unknown }).__echoPrepCardOrigin
+          : null;
+      if (
+        origin &&
+        typeof origin === "object" &&
+        "x" in origin &&
+        "y" in origin &&
+        typeof origin.x === "number" &&
+        typeof origin.y === "number"
+      ) {
+        setPrepOverlayOrigin({ x: origin.x, y: origin.y });
+      }
+      setPrepOverlayCard(typeof cardId === "string" ? cardId : null);
+
+      const asset =
+        state && typeof state === "object" && "__echoSharedAssetOverlay" in state
+          ? (state as { __echoSharedAssetOverlay?: unknown }).__echoSharedAssetOverlay
+          : null;
+      const assetOrigin =
+        state && typeof state === "object" && "__echoSharedAssetOrigin" in state
+          ? (state as { __echoSharedAssetOrigin?: unknown }).__echoSharedAssetOrigin
+          : null;
+      if (
+        assetOrigin &&
+        typeof assetOrigin === "object" &&
+        "x" in assetOrigin &&
+        "y" in assetOrigin &&
+        typeof assetOrigin.x === "number" &&
+        typeof assetOrigin.y === "number"
+      ) {
+        setSharedAssetOrigin({ x: assetOrigin.x, y: assetOrigin.y });
+      }
+      if (
+        asset &&
+        typeof asset === "object" &&
+        "note" in asset &&
+        "label" in asset &&
+        "hint" in asset &&
+        typeof asset.note === "string" &&
+        typeof asset.label === "string" &&
+        typeof asset.hint === "string"
+      ) {
+        setSharedAssetOverlay({
+          note: asset.note,
+          label: asset.label,
+          hint: asset.hint,
+          ...("section" in asset && typeof asset.section === "string"
+            ? { section: asset.section }
+            : {}),
+          ...("defaultSection" in asset && typeof asset.defaultSection === "string"
+            ? { defaultSection: asset.defaultSection }
+            : {}),
+          ...("scope" in asset && (asset.scope === "shared" || asset.scope === "company")
+            ? { scope: asset.scope }
+            : {}),
+        });
+      } else {
+        setSharedAssetOverlay(null);
+      }
+    };
+    const onPopState = (event: PopStateEvent) => syncOverlays(event.state);
+    syncOverlays(window.history.state);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   useEffect(() => {
     // rAF は非アクティブなタブでは発火しないため timer で初回ロードする。
     const timer = window.setTimeout(() => void loadVault(), 0);
@@ -499,13 +787,35 @@ function MemoryAtlas() {
         searchRef.current?.focus();
       }
       if (event.key === "Escape") {
+        // 回答库の上に原笔记 drawer を開いている時は、一段ずつ閉じる。
+        if (selectedPath) {
+          setSelectedPath(null);
+          setSelectedSection(null);
+          return;
+        }
+        if (prepOverlayCard) {
+          event.preventDefault();
+          closePrepCard();
+          return;
+        }
+        if (sharedAssetOverlay) {
+          event.preventDefault();
+          closeSharedAsset();
+          return;
+        }
         setSearchOpen(false);
         setSelectedPath(null);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [
+    closePrepCard,
+    closeSharedAsset,
+    prepOverlayCard,
+    selectedPath,
+    sharedAssetOverlay,
+  ]);
 
   const notesByBasename = useMemo(() => {
     const index = new Map<string, Note>();
@@ -515,6 +825,11 @@ function MemoryAtlas() {
 
   const selectedNote = selectedPath
     ? notes.find((note) => note.path === selectedPath) ?? null
+    : null;
+  const sharedAssetNote = sharedAssetOverlay
+    ? notes.find((note) => note.path === sharedAssetOverlay.note) ??
+      notesByBasename.get(sharedAssetOverlay.note) ??
+      null
     : null;
 
   const openNote = useCallback((note: Note) => {
@@ -753,24 +1068,24 @@ function MemoryAtlas() {
                 notes={notes}
                 onOpen={openNote}
                 onOpenWiki={openWikiLink}
-                onOpenCard={(cardId) => {
-                  setPrepInitialCard(cardId);
-                  setView("prep");
-                  // 長い準備ドキュメントの途中から飛ぶので、そのままだとスクロール位置が残る
-                  window.scrollTo(0, 0);
-                }}
+                onOpenCard={openPrepCard}
+                onOpenAsset={openSharedAsset}
               />
             )}
             {view === "prep" && (
               <InterviewPrep
-                key={prepInitialCard ?? "prep"}
                 notes={notes}
                 onOpen={openNote}
-                initialCardId={prepInitialCard}
               />
             )}
             {view === "language" && (
               <JapaneseTraining onVaultChanged={loadVault} />
+            )}
+            {view === "topics" && (
+              <LanguageExpressionCourses
+                notes={notes}
+                onVaultChanged={loadVault}
+              />
             )}
             {view === "jobs" && (
               <JobsView
@@ -838,6 +1153,27 @@ function MemoryAtlas() {
           </button>
         ))}
       </nav>
+
+      {sharedAssetOverlay && sharedAssetNote && (
+        <SharedAssetOverlay
+          note={sharedAssetNote}
+          target={sharedAssetOverlay}
+          origin={sharedAssetOrigin}
+          onOpenCard={openPrepCard}
+          onOpenWiki={openWikiLink}
+          onClose={closeSharedAsset}
+        />
+      )}
+
+      {prepOverlayCard && (
+        <PrepCardOverlay
+          notes={notes}
+          cardId={prepOverlayCard}
+          origin={prepOverlayOrigin}
+          onOpen={openNote}
+          onClose={closePrepCard}
+        />
+      )}
 
       {selectedNote && (
         <NoteDrawer

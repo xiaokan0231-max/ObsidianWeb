@@ -1447,6 +1447,31 @@ function SentenceCard({
         {learnerCount > 0 && <span className="rv-cnt err">誤 {learnerCount}</span>}
         {pendingCount > 0 && <span className="rv-cnt pending">疑 {pendingCount}</span>}
         {resolvedCount > 0 && <span className="rv-cnt resolved">済 {resolvedCount}</span>}
+        <span className="rv-tools">
+          <button className={rawShown ? "active" : ""} onClick={onToggleRaw}>原文</button>
+          {(sentence.errors.length > 0 || sentence.uncertainSpeaker) && (
+            <button className={errored ? "active" : ""} onClick={onToggleErrors}>
+              指摘 {sentence.errors.length + (sentence.uncertainSpeaker ? 1 : 0)}
+            </button>
+          )}
+          {sentence.speaker === "面" && (
+            <span className="rv-listen">
+              <button
+                className={mark === "△" ? "active soft" : ""}
+                disabled={busy}
+                title="当时半懂半猜"
+                onClick={() => onSubmit("聴解", "△推測で理解")}
+              >△</button>
+              <button
+                className={mark === "×" ? "active hard" : ""}
+                disabled={busy}
+                title="当时没听懂"
+                onClick={() => onSubmit("聴解", "×聞き取れず")}
+              >×</button>
+            </span>
+          )}
+          <button onClick={noting ? onCancelNote : onStartNote}>批注{annotations.length > 0 ? ` ${annotations.length}` : ""}</button>
+        </span>
       </header>
 
       <p
@@ -1570,33 +1595,6 @@ function SentenceCard({
           {genText}
         </p>
       )}
-
-      <footer className="rv-tools">
-        <button className={rawShown ? "active" : ""} onClick={onToggleRaw}>原文</button>
-        {(sentence.errors.length > 0 || sentence.uncertainSpeaker) && (
-          <button className={errored ? "active" : ""} onClick={onToggleErrors}>
-            指摘 {sentence.errors.length + (sentence.uncertainSpeaker ? 1 : 0)}
-          </button>
-        )}
-        {sentence.speaker === "面" && (
-          <span className="rv-listen">
-            聴解
-            <button
-              className={mark === "△" ? "active soft" : ""}
-              disabled={busy}
-              title="当时半懂半猜"
-              onClick={() => onSubmit("聴解", "△推測で理解")}
-            >△</button>
-            <button
-              className={mark === "×" ? "active hard" : ""}
-              disabled={busy}
-              title="当时没听懂"
-              onClick={() => onSubmit("聴解", "×聞き取れず")}
-            >×</button>
-          </span>
-        )}
-        <button onClick={noting ? onCancelNote : onStartNote}>批注{annotations.length > 0 ? ` ${annotations.length}` : ""}</button>
-      </footer>
 
       {annotations.length > 0 && (
         <div className="rv-annotations">

@@ -45,3 +45,7 @@ next-env.d.ts
 # 作業用スクラッチ（履歴書レンダリングの PNG など計 31MB）。成果物は vault 側にある
 /tmp/
 /tmp_resume_work/
+
+# 応募書類の書き出し先（生成物・個人情報を含むため追跡しない）
+/output
+.DS_Store

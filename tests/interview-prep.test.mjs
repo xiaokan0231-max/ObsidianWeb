@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseInterviewPrepLibrary } from "../lib/interview-prep.ts";
+import {
+  interviewPrepPlainText,
+  parseInterviewPrepLibrary,
+} from "../lib/interview-prep.ts";
 
 function note(content, type = "interview-prep-library") {
   return {
@@ -67,4 +70,13 @@ type: interview-prep-library
 
 test("non-library notes are ignored", () => {
   assert.equal(parseInterviewPrepLibrary(note("# 普通笔记", "material")), null);
+});
+
+test("copy text removes furigana without removing ordinary parentheses", () => {
+  assert.equal(
+    interviewPrepPlainText(
+      "**実務（じつむ）経験（けいけん）**はありません（現時点）。CTR約300%（やくさんびゃくパーセント）。[[本人事实|確認（かくにん）済（ず）み]]",
+    ),
+    "実務経験はありません（現時点）。CTR約300%。確認済み",
+  );
 });

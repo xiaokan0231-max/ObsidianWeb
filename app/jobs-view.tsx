@@ -360,7 +360,7 @@ export default function JobsView({
         keep("salary", () => filters.minSalary === 0 || (job.salary.max ?? 0) >= filters.minSalary) &&
         keep("stacks", () => filters.stacks.length === 0 || job.stack.some((tag) => filters.stacks.includes(tag))) &&
         keep("regions", () => filters.regions.length === 0 || job.regions.some((region) => filters.regions.includes(region))) &&
-        keep("sources", () => filters.sources.length === 0 || filters.sources.includes(job.source)) &&
+        keep("sources", () => filters.sources.length === 0 || filters.sources.includes(job.sourceGroup)) &&
         keep("verifications", () => filters.verifications.length === 0 || filters.verifications.includes(job.verification)) &&
         keep("intakes", () => filters.intakes.length === 0 || filters.intakes.includes(jobIntake(job.date, today))) &&
         keep("remote", () => !filters.remoteOnly || job.remote),
@@ -380,7 +380,7 @@ export default function JobsView({
       statuses: count(narrow("statuses"), (job) => [job.status]),
       stacks: count(narrow("stacks"), (job) => job.stack),
       regions: count(narrow("regions"), (job) => job.regions),
-      sources: count(narrow("sources"), (job) => (job.source ? [job.source] : [])),
+      sources: count(narrow("sources"), (job) => (job.sourceGroup ? [job.sourceGroup] : [])),
       verifications: count(narrow("verifications"), (job) => [job.verification]),
       intakes: count(narrow("intakes"), (job) => [jobIntake(job.date, today)]),
       ratingPool: narrow("rating"),
@@ -673,6 +673,15 @@ export default function JobsView({
                 }
               />
 
+              {/* 来源在年収より上：応募経路の混在（ワークポート起票以降 6 経路超）で、
+                  「どこ由来の求人か」が年収より先に効く絞り込みになった（2026-07-27 本人指示）。 */}
+              <FilterChips
+                label="来源"
+                options={facetOptions(facets.sources, filters.sources)}
+                selected={filters.sources}
+                onToggle={(value) => setFilters((current) => ({ ...current, sources: toggle(current.sources, value) }))}
+              />
+
               <div className="job-filter-row">
                 <span className="job-filter-label">年収上限</span>
                 <div className="job-chips">
@@ -715,13 +724,6 @@ export default function JobsView({
                 options={facetOptions(facets.regions, filters.regions)}
                 selected={filters.regions}
                 onToggle={(value) => setFilters((current) => ({ ...current, regions: toggle(current.regions, value) }))}
-              />
-
-              <FilterChips
-                label="来源"
-                options={facetOptions(facets.sources, filters.sources)}
-                selected={filters.sources}
-                onToggle={(value) => setFilters((current) => ({ ...current, sources: toggle(current.sources, value) }))}
               />
 
               <FilterChips

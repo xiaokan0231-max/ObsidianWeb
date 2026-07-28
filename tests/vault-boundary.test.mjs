@@ -33,4 +33,17 @@ test("AI boundary accepts current facts and evidence but rejects navigation and 
   assert.equal(includeAiSourceNote(note("20_求職/_求職総覧.md", "moc")), false);
   assert.equal(includeAiSourceNote(note("99_系统/模板/tpl_復盤.md", "review")), false);
   assert.equal(includeAiSourceNote(note("80_AI分析/面接道場/profile.md", "training-profile")), false);
+  assert.equal(
+    includeAiSourceNote(note("20_求職/_素材/AI专项.md", "material", {
+      material_kind: "language-expression-course",
+    })),
+    false,
+  );
+  assert.equal(
+    includeAiSourceNote(note(
+      "30_日本語学習/専門コースログ/AI专项_進捗.md",
+      "language-expression-course-progress",
+    )),
+    false,
+  );
 });
