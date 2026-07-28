@@ -106,8 +106,13 @@ test("素テキスト化は検索用にルビの親字と表のセルを拾う",
 });
 
 test("ruby 注音は base と reading に分かれ、補足の括弧は素のテキストのまま残る", () => {
-  const nodes = parseInline("約4年（やくよねん）はCTR約300%（比較群あり）です");
+  const nodes = parseInline("約4年（やくよねん）はCTR約300%（やくさんびゃくパーセント）です（比較群あり）");
   assert.deepEqual(nodes[0], { kind: "ruby", base: "約4年", reading: "やくよねん" });
+  assert.deepEqual(nodes[2], {
+    kind: "ruby",
+    base: "CTR約300%",
+    reading: "やくさんびゃくパーセント",
+  });
   const flat = nodes.map((item) => (item.kind === "text" ? item.text : `<${item.kind}>`)).join("");
   assert.match(flat, /（比較群あり）/, "仮名以外を含む括弧はルビにしない");
 });

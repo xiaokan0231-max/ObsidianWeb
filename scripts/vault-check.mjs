@@ -17,6 +17,11 @@ import {
 } from "./vault-lib.mjs";
 import { JOB_CASE_ORIGINS } from "../lib/vault-boundary.mjs";
 import { listEmbeds, listHeadings, sliceSection, stripFrontmatter } from "../lib/interview-prep-embed.mjs";
+import { companyMotivationIssues } from "../lib/interview-prep-validation.mjs";
+import {
+  isLanguageExpressionCourseNote,
+  parseLanguageExpressionCourse,
+} from "../lib/language-expression-course.ts";
 
 const REQUIRED = ["case_id", "company", "status", "origin"];
 const PREP_REQUIRED = ["company", "date", "round", "format", "interviewers", "case"];
@@ -82,6 +87,8 @@ const frontmatterByName = new Map();
 const duplicateNames = new Set();
 let prepCount = 0;
 let prepEmbedCount = 0;
+let languageExpressionCourseCount = 0;
+const languageExpressionCoursePathsById = new Map();
 const files = await listMarkdownFiles();
 const contents = new Map();
 for (const path of files) {
@@ -109,12 +116,38 @@ for (const path of files) {
     problems.push(`${relativePath}: policy-change は規則IDを owns できない`);
   }
 
+  const courseNote = {
+    path: relativePath,
+    frontmatter,
+    content: stripFrontmatter(content),
+  };
+  if (isLanguageExpressionCourseNote(courseNote)) {
+    languageExpressionCourseCount += 1;
+    const courseId = String(frontmatter.course_id ?? "").trim();
+    if (courseId) {
+      const coursePaths = languageExpressionCoursePathsById.get(courseId) ?? [];
+      coursePaths.push(relativePath);
+      languageExpressionCoursePathsById.set(courseId, coursePaths);
+    }
+    try {
+      parseLanguageExpressionCourse(courseNote);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      for (const line of message.split("\n")) {
+        problems.push(line.startsWith(`${relativePath}:`) ? line : `${relativePath}: ${line}`);
+      }
+    }
+  }
+
   // 面接準備ノートは共通資産を ![[…]] で参照する形にしているので、参照が切れると
   // Web と当日用 HTML から章がまるごと消える。しかも「空の章」は目視で気づきにくい。
   if (frontmatter.type === "interview-prep") {
     prepCount += 1;
     for (const key of PREP_REQUIRED) {
       if (!frontmatter[key]) problems.push(`${relativePath}: frontmatter に \`${key}\` が無い`);
+    }
+    for (const issue of companyMotivationIssues(content)) {
+      problems.push(`${relativePath}: ${issue}`);
     }
     if (frontmatter.date && !/^\d{4}-\d{2}-\d{2}$/.test(String(frontmatter.date))) {
       problems.push(`${relativePath}: date "${frontmatter.date}" が YYYY-MM-DD ではない`);
@@ -162,10 +195,16 @@ for (const [id, files] of ownersById) {
     problems.push(`規則ID「${id}」を複数の正本が持っている: ${files.join(" と ")}`);
   }
 }
+for (const [courseId, coursePaths] of languageExpressionCoursePathsById) {
+  if (coursePaths.length > 1) {
+    problems.push(`表現専門コース course_id「${courseId}」が重複: ${coursePaths.join(" と ")}`);
+  }
+}
 
 console.log(
   `job-case ノート ${notes.length} 件・owns 規則ID ${ownersById.size} 件・` +
-    `面接準備ノート ${prepCount} 件（埋め込み ${prepEmbedCount} 件）を検査`,
+    `面接準備ノート ${prepCount} 件（埋め込み ${prepEmbedCount} 件）・` +
+    `表現専門コース ${languageExpressionCourseCount} 件を検査`,
 );
 
 if (problems.length) {

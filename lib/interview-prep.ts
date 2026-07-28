@@ -1,4 +1,5 @@
 import { getString, getType, stripFrontmatter, type Note } from "./notes.ts";
+import { parseInline, prepInlineText } from "./interview-prep-doc.ts";
 
 export type InterviewPrepItem = {
   id: string;
@@ -21,6 +22,17 @@ export type InterviewPrepLibrary = {
   description: string;
   items: InterviewPrepItem[];
 };
+
+/**
+ * 回答库の表示用記法を、クリップボードに載せる素の文章へ戻す。
+ * ルビの読みだけを落とし、通常の補足括弧（例「（現時点）」）は残す。
+ */
+export function interviewPrepPlainText(value: string) {
+  // [[出典|表示名（ひょうじめい）]] は一度目で表示名が現れるため、
+  // 二度目でその中のルビも落とす。通常の補足括弧は parseInline が触らない。
+  const expanded = prepInlineText(parseInline(value));
+  return prepInlineText(parseInline(expanded)).replace(/^- /gm, "• ");
+}
 
 function sectionText(block: string, heading: string) {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

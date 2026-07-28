@@ -124,7 +124,9 @@ export const INTERVIEW_PREP_TYPE = "interview-prep";
 
 // 汉字/拉丁字母 + 「纯假名括号」→ ruby。括号内に仮名以外が混ざる場合は注音ではなく
 // 普通の補足（例「（約70%）」「（Azure）」）なので変換しない。build_interview_html.py と同じ判定。
-const RUBY_SOURCE = "([一-龥々ヶ〆A-Za-z0-9]+)（([ぁ-んァ-ヶーゝゞ・]+)）";
+// 数字の発声（6.5万tps／約300%）も面接では重要な注音。小数点と percent 記号を
+// 親字に含めないと「約300%（やくさんびゃく…）」だけ括弧のままコピーされてしまう。
+const RUBY_SOURCE = "([一-龥々ヶ〆A-Za-z0-9.%％]+)（([ぁ-んァ-ヶーゝゞ・]+)）";
 const INLINE_RE = new RegExp(
   [
     "(\\*\\*[^*]+\\*\\*)",
@@ -327,7 +329,7 @@ function isSeparatorRow(line: string) {
   return splitCells(line).every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
 }
 
-function parseBlocks(markdown: string): PrepBlock[] {
+export function parseBlocks(markdown: string): PrepBlock[] {
   const blocks: PrepBlock[] = [];
   const lines = markdown.split("\n");
   let list: { ordered: boolean; start?: number; items: PrepInline[][] } | null = null;

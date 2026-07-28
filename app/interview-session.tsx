@@ -17,6 +17,10 @@ import {
   buildInterviewTrends,
   interviewKeyFromNoteName,
 } from "@/lib/interview-trends.mjs";
+import {
+  companyMotivationAssetTarget,
+  type SharedAssetTarget,
+} from "@/lib/interview-shared-assets";
 import { Blocks } from "./prep-doc-render";
 
 // 「このタイミングでこの会社を面接する」ための画面。
@@ -24,16 +28,33 @@ import { Blocks } from "./prep-doc-render";
 // 共通の話術は各社ノートに ![[…]] で埋め込まれており、ここで展開済みの本文として読める。
 
 /** 全社共通の資産。準備ドキュメントから外れた話を確認したいときの入口。 */
-const SHARED_ASSETS = [
-  { note: "自己紹介_音読台本", label: "自己紹介", hint: "60秒／30秒・注音つき" },
+type SessionAsset =
+  | SharedAssetTarget
+  | { cardId: string; label: string; hint: string };
+
+const SHARED_ASSETS: SessionAsset[] = [
   {
-    note: "転職理由台本",
-    section: "⭐ 音読用スクリプト（注音つき・面接直前に声出し）",
-    label: "転職理由",
-    hint: "面接で読む安全な節だけを開く",
+    cardId: "p01",
+    label: "自己紹介",
+    hint: "回答库 p01・标准答案／30秒版／边界／证据",
+  },
+  {
+    cardId: "p35",
+    label: "最近の退職理由",
+    hint: "回答库 p35・前の会社を辞めた理由／事前说明／长期就职",
+  },
+  {
+    cardId: "p10",
+    label: "来日理由",
+    hint: "回答库 p10・为什么来日本／为什么长期留下",
   },
   { note: "当日フレーズ集", label: "当日フレーズ", hint: "受付・入室・聞き返し・締め" },
-  { note: "単語文法帳", label: "単語文法帳", hint: "数字の読み方は G表" },
+  {
+    note: "単語文法帳",
+    label: "単語文法帳",
+    hint: "数字の読み方は G表",
+    defaultSection: "G. ⭐実績数字の読み方（5秒以内で言えるまで）",
+  },
   { note: "NG集_禁句と口癖", label: "NG集", hint: "禁句・口癖・one-liner" },
   { note: "面接傾向_横断", label: "横断傾向", hint: "五維の推移・反復タグ" },
 ];
@@ -395,11 +416,13 @@ export default function InterviewSession({
   onOpen,
   onOpenWiki,
   onOpenCard,
+  onOpenAsset,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
   onOpenWiki: (target: string, section?: string) => void;
   onOpenCard: (cardId: string) => void;
+  onOpenAsset: (asset: SharedAssetTarget) => void;
 }) {
   const docs = useMemo(() => findInterviewPrepDocs(notes), [notes]);
   const { upcoming, past } = useMemo(() => splitPrepDocsByDate(docs, todayKey()), [docs]);
@@ -408,6 +431,10 @@ export default function InterviewSession({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const selected =
     docs.find((doc) => doc.note.path === selectedPath) ?? upcoming[0] ?? past[0] ?? null;
+  const motivationAsset = useMemo(
+    () => (selected ? companyMotivationAssetTarget(selected) : null),
+    [selected],
+  );
 
   // 当日は文書をすぐ読みたいので、既定は1行に畳んでおく。中身は展開すれば出る
   const digestBand = digest && (
@@ -521,13 +548,38 @@ export default function InterviewSession({
 
           <ExternalSources doc={selected} />
 
-          <section className="session-assets" aria-label="全社共通の資産">
+          <section className="session-assets" aria-label="本场专属与全社共通的面试话术">
+            <span>本场专属</span>
+            {motivationAsset ? (
+              <button
+                type="button"
+                className="company-motivation"
+                onClick={() => onOpenAsset(motivationAsset)}
+                title={motivationAsset.hint}
+              >
+                <small>20秒</small>
+                志望動機
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="company-motivation missing"
+                disabled
+                title="这份面试准备的 §6 还没有公司专属志望動機"
+              >
+                志望動機未准备
+              </button>
+            )}
+            <i className="session-assets-separator" aria-hidden="true" />
             <span>共通资产</span>
             {SHARED_ASSETS.map((asset) => (
               <button
-                key={asset.note}
+                key={"cardId" in asset ? asset.cardId : asset.note}
                 type="button"
-                onClick={() => onOpenWiki(asset.note, asset.section)}
+                onClick={() => {
+                  if ("cardId" in asset) onOpenCard(asset.cardId);
+                  else onOpenAsset(asset);
+                }}
                 title={asset.hint}
               >
                 {asset.label}

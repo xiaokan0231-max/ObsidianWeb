@@ -203,6 +203,23 @@ export const VERIFICATION_LABEL: Record<JobVerification, string> = {
   unchecked: "未核对",
 };
 
+/**
+ * source（求人票在哪发现的）的筛选用主值。frontmatter 原文允许带括号补充
+ * （「公式採用（HRMOS）」「リクルートエージェント（本永氏おすすめメール）」），
+ * 但筛选器若按整串聚合，同一来源会裂成一堆只有 1 件的选项——
+ * 所以截掉括号取主值，再吸收英日别名。详情抽屉仍显示原文。
+ */
+const SOURCE_ALIASES: Record<string, string> = {
+  "Recruit Agent": "リクルートエージェント",
+  RA: "リクルートエージェント",
+};
+
+export function normalizeJobSource(raw: string): string {
+  const main = raw.split(/[（(]/)[0].trim();
+  if (!main) return "";
+  return SOURCE_ALIASES[main] ?? main;
+}
+
 /** 卡片、抽屉、对比都用这一份派生数据，避免每处各解析一遍。 */
 export type JobCard = {
   note: Note;
@@ -221,6 +238,8 @@ export type JobCard = {
   remote: boolean;
   employment: string;
   source: string;
+  /** normalizeJobSource(source)。筛选/facet 用这个，卡片详情仍显示 source 原文。 */
+  sourceGroup: string;
   url: string;
   officialApplyUrl: string;
   officialApplyStatus: OfficialApplyStatus;
@@ -263,6 +282,7 @@ export function toJobCard(note: Note): JobCard {
     remote: jobRemote(note),
     employment: getString(note.frontmatter.employment),
     source,
+    sourceGroup: normalizeJobSource(source),
     url: getString(note.frontmatter.url),
     officialApplyUrl: getString(note.frontmatter.official_apply_url),
     officialApplyStatus: officialApplyStatus(note),

@@ -1,19 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   findInterviewPrepLibrary,
+  interviewPrepPlainText,
   type InterviewPrepItem,
 } from "@/lib/interview-prep";
+import { parseInline } from "@/lib/interview-prep-doc";
 import type { Note } from "@/lib/notes";
-
-function plainText(value: string) {
-  return value
-    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2")
-    .replace(/\[\[([^\]]+)\]\]/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/^- /gm, "• ");
-}
+import { Inlines } from "./prep-doc-render";
+import { copySelectionWithoutRuby } from "./ruby-copy";
 
 function GuidanceBlock({
   title,
@@ -28,7 +28,7 @@ function GuidanceBlock({
   return (
     <section className={`prep-guidance-card ${tone ?? ""}`}>
       <h3>{title}</h3>
-      <p>{plainText(text)}</p>
+      <p>{interviewPrepPlainText(text)}</p>
     </section>
   );
 }
@@ -79,6 +79,7 @@ export default function InterviewPrep({
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       const index = Number(event.key) - 1;
+      if (!Number.isInteger(index)) return;
       if (index < 0 || index >= Math.min(filteredItems.length, 9)) return;
       event.preventDefault();
       setSelectedId(filteredItems[index].id);
@@ -88,7 +89,7 @@ export default function InterviewPrep({
   }, [filteredItems]);
 
   const copyAnswer = async (item: InterviewPrepItem) => {
-    await navigator.clipboard.writeText(plainText(item.standardAnswer));
+    await navigator.clipboard.writeText(interviewPrepPlainText(item.standardAnswer));
     setCopiedId(item.id);
     window.setTimeout(() => setCopiedId((current) => current === item.id ? null : current), 1600);
   };
@@ -201,11 +202,11 @@ export default function InterviewPrep({
               {selected.purpose && (
                 <p className="prep-purpose">
                   <span>这题要让对方得到什么</span>
-                  {plainText(selected.purpose)}
+                  {interviewPrepPlainText(selected.purpose)}
                 </p>
               )}
 
-              <section className="prep-standard">
+              <section className="prep-standard" onCopy={copySelectionWithoutRuby}>
                 <header>
                   <div>
                     <span>STANDARD REFERENCE</span>
@@ -215,13 +216,13 @@ export default function InterviewPrep({
                     {copiedId === selected.id ? "已复制 ✓" : "复制日语答案"}
                   </button>
                 </header>
-                <p lang="ja">{plainText(selected.standardAnswer)}</p>
+                <p lang="ja"><Inlines nodes={parseInline(selected.standardAnswer)} /></p>
               </section>
 
               {selected.shortAnswer && (
                 <section className="prep-short">
                   <span>30秒版 · 压力下先说这个</span>
-                  <p lang="ja">{plainText(selected.shortAnswer)}</p>
+                  <p lang="ja">{interviewPrepPlainText(selected.shortAnswer)}</p>
                 </section>
               )}
 
@@ -233,7 +234,7 @@ export default function InterviewPrep({
               {selected.evidence && (
                 <section className="prep-evidence">
                   <span>只使用已经确认的事实</span>
-                  <p>{plainText(selected.evidence)}</p>
+                  <p>{interviewPrepPlainText(selected.evidence)}</p>
                 </section>
               )}
             </article>
