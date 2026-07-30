@@ -1490,6 +1490,15 @@ canvas:focus-visible {
   background: #18231e;
 }
 
+.graph-layout[data-renderer="space"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* 顶部筛选器已经承担 3D 星图的图例，侧栏只会挤掉最需要的横向视野。 */
+.graph-layout[data-renderer="space"] > .graph-legend {
+  display: none;
+}
+
 .space-graph-stage,
 .space-graph-loading-shell,
 .space-graph-empty {
@@ -1501,6 +1510,17 @@ canvas:focus-visible {
     radial-gradient(circle at 22% 22%, rgba(55, 102, 80, .24), transparent 28%),
     radial-gradient(circle at 78% 72%, rgba(181, 132, 47, .14), transparent 26%),
     #101b17;
+}
+
+.space-graph-stage:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  background: #07110d;
+}
+
+.space-graph-stage::backdrop {
+  background: #07110d;
 }
 
 .space-graph-stage::after {
@@ -1535,6 +1555,64 @@ canvas:focus-visible {
 
 .space-graph-webgl canvas:focus-visible {
   box-shadow: inset 0 0 0 2px rgba(230, 109, 69, .88);
+}
+
+.space-graph-label-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.space-graph-label-layer > span {
+  --label-accent: #fff;
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: 180px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(238, 243, 239, .58);
+  font-size: 8px;
+  line-height: 1;
+  opacity: 0;
+  text-shadow: 0 2px 7px #07110d, 0 0 12px #07110d;
+  white-space: nowrap;
+  transition: color 180ms ease, opacity 180ms ease;
+  will-change: transform;
+}
+
+.space-graph-label-layer > span[data-visible="true"] {
+  opacity: .72;
+}
+
+.space-graph-label-layer > span[data-active="neighbor"] {
+  color: rgba(255, 255, 255, .86);
+  opacity: .92;
+}
+
+.space-graph-label-layer > span[data-active="selected"] {
+  color: #fff;
+  font-size: 9px;
+  font-weight: 760;
+  opacity: 1;
+}
+
+.space-graph-label-layer i {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  background: var(--label-accent);
+  border-radius: 50%;
+  box-shadow: 0 0 9px var(--label-accent);
+}
+
+.space-graph-label-layer b {
+  overflow: hidden;
+  font-weight: 560;
+  text-overflow: ellipsis;
 }
 
 .space-graph-loading,
@@ -1681,6 +1759,16 @@ canvas:focus-visible {
 .space-graph-controls button:hover {
   border-color: rgba(255, 255, 255, .36);
   color: #fff;
+}
+
+.space-graph-controls kbd {
+  margin-left: 5px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  padding: 1px 4px;
+  background: rgba(255, 255, 255, .07);
+  color: rgba(255, 255, 255, .56);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
 }
 
 .space-graph-caption {

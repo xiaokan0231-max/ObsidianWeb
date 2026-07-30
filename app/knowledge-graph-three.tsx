@@ -2,6 +2,7 @@
 
 import {
   type CSSProperties,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -63,7 +64,7 @@ const NODE_VERTEX_SHADER = `
     float pulse = 1.0 + sin(uTime * 1.5 + aPhase) * 0.08 * uMotion;
     vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * viewPosition;
-    gl_PointSize = aSize * pulse * (250.0 / max(3.0, -viewPosition.z));
+    gl_PointSize = aSize * pulse * (300.0 / max(3.0, -viewPosition.z));
   }
 `;
 
@@ -74,10 +75,13 @@ const NODE_FRAGMENT_SHADER = `
   void main() {
     float distanceFromCenter = length(gl_PointCoord - vec2(0.5));
     if (distanceFromCenter > 0.5) discard;
-    float halo = smoothstep(0.5, 0.04, distanceFromCenter);
-    float core = smoothstep(0.18, 0.0, distanceFromCenter);
-    float alpha = halo * mix(0.7, 1.0, vFocus);
-    vec3 color = vColor + core * vec3(0.85) + vFocus * vec3(0.22);
+    float corona = smoothstep(0.5, 0.22, distanceFromCenter);
+    float body = smoothstep(0.29, 0.08, distanceFromCenter);
+    float core = smoothstep(0.14, 0.0, distanceFromCenter);
+    float ring = smoothstep(0.38, 0.32, distanceFromCenter)
+      - smoothstep(0.29, 0.23, distanceFromCenter);
+    float alpha = max(corona * 0.72, body) * mix(0.82, 1.0, vFocus);
+    vec3 color = vColor * 1.42 + ring * vec3(0.48) + core * vec3(1.0) + vFocus * vec3(0.28);
     gl_FragColor = vec4(color, alpha);
   }
 `;
@@ -99,7 +103,7 @@ const LINK_FRAGMENT_SHADER = `
   varying float vFocus;
 
   void main() {
-    float alpha = mix(0.105, 0.82, vFocus);
+    float alpha = mix(0.16, 0.88, vFocus);
     gl_FragColor = vec4(vColor + vFocus * vec3(0.2), alpha);
   }
 `;
@@ -125,6 +129,7 @@ export default function ThreeKnowledgeGraph({
   onOpen,
   onFallback,
 }: Props) {
+  const stageRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const resetViewRef = useRef<() => void>(() => undefined);
   const pauseRef = useRef(false);
@@ -132,8 +137,51 @@ export default function ThreeKnowledgeGraph({
   const onFallbackRef = useRef(onFallback);
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const toggleFullscreen = useCallback(async () => {
+    const stage = stageRef.current;
+    if (!stage || !document.fullscreenEnabled) return;
+    try {
+      if (document.fullscreenElement === stage) {
+        await document.exitFullscreen();
+      } else {
+        await stage.requestFullscreen();
+      }
+    } catch {
+      // 埋め込みブラウザが権限を拒否しても、星図本体と他の操作は壊さない。
+    }
+  }, []);
+
+  useEffect(() => {
+    const syncFullscreen = () => {
+      setFullscreen(document.fullscreenElement === stageRef.current);
+    };
+    const handleShortcut = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        event.key.toLowerCase() !== "f" ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      void toggleFullscreen();
+    };
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    document.addEventListener("keydown", handleShortcut);
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreen);
+      document.removeEventListener("keydown", handleShortcut);
+    };
+  }, [toggleFullscreen]);
 
   useEffect(() => {
     onOpenRef.current = onOpen;
@@ -215,7 +263,7 @@ export default function ThreeKnowledgeGraph({
       const color = new THREE.Color(node.color);
       positions.set(position.toArray(), index * 3);
       colors.set(color.toArray(), index * 3);
-      sizes[index] = 0.58 + Math.min(0.72, Math.sqrt(node.degree + 1) * 0.12);
+      sizes[index] = 0.82 + Math.min(1.08, Math.sqrt(node.degree + 1) * 0.17);
       phases[index] = seeded(`${node.id}:phase`) * Math.PI * 2;
       positionById.set(node.id, position);
       indexById.set(node.id, index);
@@ -244,6 +292,29 @@ export default function ThreeKnowledgeGraph({
     const nodePoints = new THREE.Points(nodeGeometry, nodeMaterial);
     nodePoints.renderOrder = 3;
     root.add(nodePoints);
+
+    // 常驻少量高连接节点的标签，让星图不再只是一片“看不清是什么”的光点。
+    const labelLayer = document.createElement("div");
+    labelLayer.className = "space-graph-label-layer";
+    host.appendChild(labelLayer);
+    const labeledNodes = Object.keys(GROUP_CENTERS).flatMap((group) =>
+      nodes
+        .filter((node) => node.group === group)
+        .toSorted((left, right) => right.degree - left.degree)
+        .slice(0, 3),
+    );
+    const labelItems = labeledNodes.flatMap((node) => {
+      const position = positionById.get(node.id);
+      if (!position) return [];
+      const label = document.createElement("span");
+      label.style.setProperty("--label-accent", node.color);
+      const dot = document.createElement("i");
+      const text = document.createElement("b");
+      text.textContent = node.title.length > 22 ? `${node.title.slice(0, 22)}…` : node.title;
+      label.append(dot, text);
+      labelLayer.appendChild(label);
+      return [{ node, position, label }];
+    });
 
     const validLinks = links.filter(
       (link) => positionById.has(link.source) && positionById.has(link.target),
@@ -288,20 +359,24 @@ export default function ThreeKnowledgeGraph({
     const pulseGeometry = new THREE.BufferGeometry();
     pulseGeometry.setAttribute("position", new THREE.BufferAttribute(pulsePositions, 3));
     pulseGeometry.setAttribute("color", new THREE.BufferAttribute(pulseColors, 3));
-    pulseGeometry.setDrawRange(0, 0);
     const pulseMaterial = new THREE.PointsMaterial({
-      size: 0.1,
+      size: 0.115,
       sizeAttenuation: true,
       vertexColors: true,
       transparent: true,
-      opacity: 0.95,
+      opacity: 0.9,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
     const pulsePoints = new THREE.Points(pulseGeometry, pulseMaterial);
     pulsePoints.renderOrder = 4;
     root.add(pulsePoints);
-    let pulseLinks: KnowledgeGraphSceneLink[] = [];
+    const ambientPulseStep = Math.max(1, Math.ceil(validLinks.length / pulseLimit));
+    const ambientPulseLinks = validLinks
+      .filter((_, index) => index % ambientPulseStep === 0)
+      .slice(0, pulseLimit);
+    let pulseLinks: KnowledgeGraphSceneLink[] = ambientPulseLinks;
+    pulseGeometry.setDrawRange(0, pulseLinks.length);
 
     const haloGeometry = new THREE.RingGeometry(2.5, 2.53, 96);
     Object.entries(GROUP_CENTERS).forEach(([group, center]) => {
@@ -321,6 +396,92 @@ export default function ThreeKnowledgeGraph({
       halo.renderOrder = 0;
       root.add(halo);
     });
+
+    const nebulaCanvas = document.createElement("canvas");
+    nebulaCanvas.width = 192;
+    nebulaCanvas.height = 192;
+    const nebulaContext = nebulaCanvas.getContext("2d");
+    if (nebulaContext) {
+      const gradient = nebulaContext.createRadialGradient(96, 96, 0, 96, 96, 96);
+      gradient.addColorStop(0, "rgba(255,255,255,.72)");
+      gradient.addColorStop(0.2, "rgba(255,255,255,.23)");
+      gradient.addColorStop(0.58, "rgba(255,255,255,.07)");
+      gradient.addColorStop(1, "rgba(255,255,255,0)");
+      nebulaContext.fillStyle = gradient;
+      nebulaContext.fillRect(0, 0, 192, 192);
+    }
+    const nebulaTexture = new THREE.CanvasTexture(nebulaCanvas);
+    Object.entries(GROUP_CENTERS).forEach(([group, center], groupIndex) => {
+      const groupNode = nodes.find((node) => node.group === group);
+      if (!groupNode) return;
+      const nebulaMaterial = new THREE.SpriteMaterial({
+        map: nebulaTexture,
+        color: groupNode.color,
+        transparent: true,
+        opacity: group === "system" ? 0.12 : 0.18,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const nebula = new THREE.Sprite(nebulaMaterial);
+      nebula.position.set(center[0], center[1], center[2] - 1.6);
+      nebula.scale.set(7.2 + groupIndex * 0.16, 4.4, 1);
+      nebula.renderOrder = -1;
+      root.add(nebula);
+    });
+
+    const galaxyGroups = Object.entries(GROUP_CENTERS).filter(([group]) =>
+      nodes.some((node) => node.group === group),
+    );
+    const dustCount = Math.min(1300, Math.max(520, nodes.length * 4));
+    const dustPositions = new Float32Array(dustCount * 3);
+    const dustColors = new Float32Array(dustCount * 3);
+    for (let index = 0; index < dustCount; index += 1) {
+      const [group, center] = galaxyGroups[index % galaxyGroups.length];
+      const radius = Math.pow(seeded(`dust:${index}:radius`), 0.72) * 3.1;
+      const arm = index % 3;
+      const angle =
+        radius * 1.55 +
+        arm * (Math.PI * 2 / 3) +
+        (seeded(`dust:${index}:angle`) - 0.5) * 0.72;
+      dustPositions.set([
+        center[0] + Math.cos(angle) * radius,
+        center[1] + Math.sin(angle) * radius * 0.56,
+        center[2] - 0.45 + (seeded(`dust:${index}:depth`) - 0.5) * 1.7,
+      ], index * 3);
+      const groupColor = new THREE.Color(
+        nodes.find((node) => node.group === group)?.color ?? "#9fb5a8",
+      ).lerp(new THREE.Color("#ffffff"), 0.22);
+      dustColors.set(groupColor.toArray(), index * 3);
+    }
+    const dustGeometry = new THREE.BufferGeometry();
+    dustGeometry.setAttribute("position", new THREE.BufferAttribute(dustPositions, 3));
+    dustGeometry.setAttribute("color", new THREE.BufferAttribute(dustColors, 3));
+    const dustMaterial = new THREE.PointsMaterial({
+      size: 0.035,
+      sizeAttenuation: true,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.58,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const galaxyDust = new THREE.Points(dustGeometry, dustMaterial);
+    galaxyDust.renderOrder = 0;
+    root.add(galaxyDust);
+
+    const focusRingGeometry = new THREE.RingGeometry(0.31, 0.37, 72);
+    const focusRingMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const focusRing = new THREE.Mesh(focusRingGeometry, focusRingMaterial);
+    focusRing.visible = false;
+    focusRing.renderOrder = 5;
+    root.add(focusRing);
 
     const backgroundPositions = new Float32Array(360 * 3);
     for (let index = 0; index < 360; index += 1) {
@@ -355,8 +516,16 @@ export default function ThreeKnowledgeGraph({
     );
     const homeTarget = bounds.getCenter(new THREE.Vector3());
     const boundsSize = bounds.getSize(new THREE.Vector3());
-    const homeDistance = Math.max(12, Math.max(boundsSize.x, boundsSize.y) * 1.48);
-    const homeCamera = homeTarget.clone().add(new THREE.Vector3(0, 0, homeDistance));
+    const fitDistance = (aspect: number) => {
+      const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+      const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(0.3, aspect));
+      const verticalDistance = boundsSize.y / (2 * Math.tan(verticalFov / 2));
+      const horizontalDistance = boundsSize.x / (2 * Math.tan(horizontalFov / 2));
+      return Math.max(10.5, Math.max(verticalDistance, horizontalDistance) * 1.24 + boundsSize.z * 0.45);
+    };
+    let homeCamera = homeTarget.clone().add(
+      new THREE.Vector3(0, 0, fitDistance(camera.aspect)),
+    );
     camera.position.copy(homeCamera);
 
     const controls = new OrbitControls(camera, canvas);
@@ -414,8 +583,19 @@ export default function ThreeKnowledgeGraph({
         ? validLinks
             .filter((link) => link.source === id || link.target === id)
             .slice(0, pulseLimit)
-        : [];
+        : ambientPulseLinks;
       pulseGeometry.setDrawRange(0, pulseLinks.length);
+
+      const focusPosition = id ? positionById.get(id) : undefined;
+      focusRing.visible = Boolean(focusPosition);
+      if (focusPosition && id) {
+        focusRing.position.copy(focusPosition);
+        focusRingMaterial.color.set(nodeById.get(id)?.color ?? "#ffffff");
+      }
+      labelItems.forEach(({ node, label }) => {
+        label.dataset.active =
+          node.id === id ? "selected" : neighbors.has(node.id) ? "neighbor" : "";
+      });
     };
 
     const selectNode = (id: string) => {
@@ -523,6 +703,14 @@ export default function ThreeKnowledgeGraph({
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
+      homeCamera = homeTarget.clone().add(
+        new THREE.Vector3(0, 0, fitDistance(camera.aspect)),
+      );
+      if (!selectedRef.current) {
+        camera.position.copy(homeCamera);
+        controls.target.copy(homeTarget);
+        controls.update();
+      }
     });
     resizeObserver.observe(host);
 
@@ -552,6 +740,15 @@ export default function ThreeKnowledgeGraph({
         root.rotation.y = Math.sin(seconds * 0.11) * 0.055;
         root.rotation.x = Math.cos(seconds * 0.08) * 0.018;
         background.rotation.y = seconds * 0.004;
+        galaxyDust.rotation.z = Math.sin(seconds * 0.07) * 0.025;
+      }
+
+      if (focusRing.visible) {
+        const ringPulse = pauseRef.current || reducedMotion
+          ? 1
+          : 1 + Math.sin(seconds * 3.1) * 0.18;
+        focusRing.scale.setScalar(ringPulse);
+        focusRingMaterial.opacity = 0.62 + Math.sin(seconds * 3.1) * 0.22;
       }
 
       if (!pauseRef.current && pulseLinks.length > 0) {
@@ -571,6 +768,21 @@ export default function ThreeKnowledgeGraph({
       }
 
       controls.update();
+      scene.updateMatrixWorld(true);
+      labelItems.forEach(({ position, label }) => {
+        const projected = nodePoints.localToWorld(position.clone()).project(camera);
+        const onScreen =
+          projected.z > -1 &&
+          projected.z < 1 &&
+          Math.abs(projected.x) < 1.08 &&
+          Math.abs(projected.y) < 1.08;
+        label.dataset.visible = onScreen ? "true" : "false";
+        if (onScreen) {
+          const x = (projected.x * 0.5 + 0.5) * host.clientWidth;
+          const y = (-projected.y * 0.5 + 0.5) * host.clientHeight;
+          label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, 13px)`;
+        }
+      });
       renderer.render(scene, camera);
     };
     renderer.setAnimationLoop(animate);
@@ -595,9 +807,14 @@ export default function ThreeKnowledgeGraph({
           const materials = Array.isArray(object.material) ? object.material : [object.material];
           materials.forEach((material) => material.dispose());
         }
+        if (object instanceof THREE.Sprite) {
+          object.material.dispose();
+        }
       });
+      nebulaTexture.dispose();
       haloGeometry.dispose();
       renderer.dispose();
+      labelLayer.remove();
       canvas.remove();
       resetViewRef.current = () => undefined;
     };
@@ -608,7 +825,12 @@ export default function ThreeKnowledgeGraph({
   }
 
   return (
-    <div className="space-graph-stage" data-ready={ready ? "true" : "false"}>
+    <div
+      ref={stageRef}
+      className="space-graph-stage"
+      data-ready={ready ? "true" : "false"}
+      data-fullscreen={fullscreen ? "true" : "false"}
+    >
       <div ref={hostRef} className="space-graph-webgl" />
       {!ready && (
         <div className="space-graph-loading" role="status">
@@ -637,6 +859,13 @@ export default function ThreeKnowledgeGraph({
         </div>
       )}
       <div className="space-graph-controls">
+        <button
+          type="button"
+          aria-label={fullscreen ? "退出全屏" : "全屏查看星图，快捷键 F"}
+          onClick={() => void toggleFullscreen()}
+        >
+          {fullscreen ? "退出全屏" : "全屏"} <kbd>F</kbd>
+        </button>
         <button type="button" onClick={() => resetViewRef.current()}>
           回到全景
         </button>
