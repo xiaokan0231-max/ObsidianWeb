@@ -4,7 +4,9 @@
 
 前提：Workflow 工具需用户已 opt-in（关键词 ultracode / 明确要求 / 本 skill 触发时可用）。若不可用，就串行地自己多写两版再合并，逻辑相同。
 
-给每个 agent 的 prompt 里**必须塞满 context**：候选人档案、公司情报、定位主轴、口癖清单、输出格式要求。context 越足，产出越可用。
+给每个 agent 的 prompt 里**必须塞满 context**：候选人档案、公司情报、定位主轴、口癖清单、输出格式要求。第二轮起还必须先做 Evidence phase，把前轮一手事实、对方反应、未展示证据、复盘优先项、人工反对和持越问题连同 source refs 放进 `BG`。context 越足，产出越可用。
+
+评审必须拒绝三类稿：无来源的公司事实；与人工批注冲突的结论；只重复上轮已确认内容、却没有把对话推进到新判断的答案。
 
 ---
 
@@ -16,9 +18,9 @@
 export const meta = {
   name: 'draft-and-judge',
   description: '多角度起草+评审合成一件关键话术',
-  phases: [{ title: 'Draft' }, { title: 'Judge' }],
+  phases: [{ title: 'Evidence' }, { title: 'Draft' }, { title: 'Judge' }],
 }
-const BG = `【候选人档案】…【公司情报】…【定位主轴】…【口癖清单·必须结构性回避】…【输出格式：20秒版=2〜3句/结论+证据+落点；必要时另写追问追加；日本語带(かな)注音+中文策略；避い形+だと思います/感じします/句尾けど；短句断定】`
+const BG = `【候选人档案】…【公司情报】…【前轮证据（每项 source ref）】已确认事实…／对方反应…／未展示证据…／人工反对…／持越问题…【本轮定位主轴】…【口癖清单·必须结构性回避】…【输出格式：20秒版=2〜3句/结论+证据+落点；必要时另写追问追加；日本語带(かな)注音+中文策略；避い形+だと思います/感じします/句尾けど；短句断定】`
 const SCHEMA = { type:'object', required:['main','memo'],
   properties:{ main:{type:'string'}, short:{type:'string'}, memo:{type:'string'} } }
 const ANGLES = [
@@ -26,6 +28,8 @@ const ANGLES = [
   {key:'warm',   inst:'角度B【人柄温度】：安全前提下突出人となり和温度。'},
   {key:'rhythm', inst:'角度C【朗读节奏】：按呼吸群分行、全注音、当朗读台本写。'},
 ]
+phase('Evidence')
+// ここで前輪の source refs と人工裁定を確認し、BG を確定する。未確認の事実は Draft へ渡さない。
 phase('Draft')
 const drafts = (await parallel(ANGLES.map(a => () =>
   agent(`资深日语面接指导。为候选人写自我介绍。\n${BG}\n${a.inst}`,
@@ -47,7 +51,7 @@ phase('Draft')
 const [m1, m2, m3, m4] = await parallel([
   () => agent(`写「面接官攻略」模块…\n${BG}\n${RULES}`, {label:'攻略', phase:'Draft', schema:SCHEMA}),
   () => agent(`写「语言战略」模块…\n${BG}\n${RULES}`, {label:'语言', phase:'Draft', schema:SCHEMA}),
-  () => agent(`写「想定问答」模块…至少10题…\n${BG}\n${RULES}`, {label:'问答', phase:'Draft', schema:SCHEMA}),
+  () => agent(`写「想定问答」模块…按本轮时长只保留最可能决定通过与否的核心题（30分钟通常5题＋追问层）…\n${BG}\n${RULES}`, {label:'问答', phase:'Draft', schema:SCHEMA}),
   () => agent(`写「技术深挖+逆質問」模块…\n${BG}\n${RULES}`, {label:'技术', phase:'Draft', schema:SCHEMA}),
 ])
 phase('Polish')

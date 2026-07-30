@@ -15,7 +15,7 @@ export type SharedAssetTarget = {
   hint: string;
   section?: string;
   defaultSection?: string;
-  scope?: "shared" | "company";
+  scope?: "shared" | "company" | "round";
 };
 
 export type SharedAssetSection = {
@@ -52,9 +52,9 @@ export function companyMotivationAssetTarget(
   return {
     note: doc.note.path,
     label: "志望動機",
-    hint: `${doc.company || doc.title}专属・默认打开20秒版`,
+    hint: `${doc.company || doc.title}本轮专属・默认打开20秒版`,
     section,
-    scope: "company",
+    scope: "round",
   };
 }
 

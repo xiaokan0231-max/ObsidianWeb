@@ -143,7 +143,7 @@ test("本場専属の志望動機は準備ノートの exact path と §6 H4 を
 
   assert.ok(target);
   assert.equal(target.note, prepNote.path);
-  assert.equal(target.scope, "company");
+  assert.equal(target.scope, "round");
   assert.equal(target.section, "Q. 志望動機／なぜ当社ですか（本社版）");
 
   const parsed = parseSharedAssetDocument(prepNote, target.section);

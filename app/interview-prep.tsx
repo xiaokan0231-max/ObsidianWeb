@@ -106,23 +106,8 @@ export default function InterviewPrep({
     );
   }
 
-  const priorityCount = library.items.filter((item) => item.priority === "S").length;
-
   return (
     <div className="prep-view">
-      <header className="prep-hero">
-        <div>
-          <p className="eyebrow"><i /> INTERVIEW DOJO · BEFORE THE INTERVIEW</p>
-          <h1>面试准备</h1>
-          <p>{library.description}</p>
-        </div>
-        <dl>
-          <div><dt>参考答案</dt><dd>{library.items.length}</dd></div>
-          <div><dt>优先必练</dt><dd>{priorityCount}</dd></div>
-          <div><dt>答案分类</dt><dd>{Math.max(categories.length - 1, 0)}</dd></div>
-        </dl>
-      </header>
-
       <section className="prep-command">
         <label>
           <span aria-hidden="true">⌕</span>

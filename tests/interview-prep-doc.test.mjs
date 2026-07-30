@@ -390,7 +390,10 @@ test("frontmatter から会社・日付・面接官を取り、interview-prep �
       round: "最終面接",
       format: "対面",
       interviewers: "佐藤様・本部長",
-      case: "[[テスト社_データエンジニア]]",
+      case: "[[テスト社_データエンジニア|案件正本]]",
+      session_id: "test-data-s03",
+      session_order: 3,
+      session_status: "scheduled",
     }),
     [],
   );
@@ -398,6 +401,9 @@ test("frontmatter から会社・日付・面接官を取り、interview-prep �
   assert.equal(doc.round, "最終面接");
   assert.equal(doc.interviewers, "佐藤様・本部長");
   assert.equal(doc.caseLink, "テスト社_データエンジニア");
+  assert.equal(doc.sessionId, "test-data-s03");
+  assert.equal(doc.sessionOrder, 3);
+  assert.equal(doc.sessionStatus, "scheduled");
   assert.equal(parseInterviewPrepDoc(PHRASES, []), null);
 });
 

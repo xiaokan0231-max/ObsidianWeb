@@ -3,14 +3,19 @@ import { jobSectionBody } from "./job-sections";
 import { intakeSortKey } from "./job-intake";
 import {
   DEFAULT_JOB_STATUS,
+  jobStatusNote,
   normalizeJobStatus,
 } from "./job-status";
 import { JOB_CASE_TYPE } from "./vault-boundary.mjs";
 
 export {
+  composeJobStatus,
   DEFAULT_JOB_STATUS,
   isJobStatus,
   JOB_STATUSES,
+  JOB_STATUS_NOTE_MAX,
+  jobStatusNote,
+  jobStatusNoteError,
   normalizeJobStatus,
   statusRequiresChannel,
   type JobStatus,
@@ -220,6 +225,33 @@ export function normalizeJobSource(raw: string): string {
   return SOURCE_ALIASES[main] ?? main;
 }
 
+/**
+ * 応募日。**`date`（入库日）とも `status_updated` とも別物**——
+ * `date` は AI がキューに載せた日、`status_updated` は最後の状態変化日で、
+ * 不採用になった瞬間に応募日は拒否日で上書きされて消える（`_応募日台帳` の冒頭に同じ警告がある）。
+ *
+ * 正本は `20_求職/_応募日台帳.md` だが、台帳は手動更新で追従が遅れる（2026-07-29 時点で
+ * 07-23 までしか無く、応募済 37 件のうち載っているのは 7 件だけ）。
+ * そこで **status 文字列の先頭の日付**で補う——`応募済（2026-07-20・リクルートエージェント経由）`
+ * のように、括弧内の1つ目の日付が応募日という書式が全件で守られている（残り30件を全部拾えた）。
+ *
+ * 台帳が育ったらそちらが優先される作りにしてあるので、二重管理にはならない。
+ */
+export function jobAppliedOn(note: Note, statusText: string): string {
+  const explicit = getString(note.frontmatter.applied_on);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(explicit)) return explicit;
+
+  // 🔴 status 内の1つ目の日付が応募日と言えるのは **`応募済` の時だけ**。
+  // 先へ進むと同じ位置がその段階の日付に置き換わる：
+  //   不採用（2026-07-28・書類選考…）      ← 拒否日
+  //   面接中（2026-07-29 選考進行確定…）    ← 面接段階に入った日
+  // ここを一律に拾うと PayPay が「応募 7/28・1日経過」（実際は 7/20 応募・8日で不採用）になる。
+  // 分からないものは**出さない**。空欄なら「記録が無い」と読めるが、
+  // 嘘の日付は「そこから何日経ったか」の判断ごと壊す。
+  if (!/^応募済/.test(statusText)) return "";
+  return statusText.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1] ?? "";
+}
+
 /** 卡片、抽屉、对比都用这一份派生数据，避免每处各解析一遍。 */
 export type JobCard = {
   note: Note;
@@ -228,8 +260,15 @@ export type JobCard = {
   position: string;
   rating: number;
   status: string;
+  /**
+   * status の括弧内注記。`status` は 7 枚举に正規化されるので、
+   * 「募集終了で応募機会なし」のような**死因**はここにしか残らない。
+   */
+  statusNote: string;
   /** 最近一次状态变化日（frontmatter `status_updated`）。未応募的笔记通常没有。 */
   statusUpdated: string;
+  /** 応募日（jobAppliedOn 参照）。未応募なら空。 */
+  appliedOn: string;
   nextAction: string;
   salaryText: string;
   salary: SalaryRange;
@@ -273,7 +312,9 @@ export function toJobCard(note: Note): JobCard {
     position,
     rating: jobRating(note),
     status: jobStatus(note),
+    statusNote: jobStatusNote(getString(note.frontmatter.status)),
     statusUpdated: getString(note.frontmatter.status_updated),
+    appliedOn: jobAppliedOn(note, getString(note.frontmatter.status)),
     nextAction: getString(note.frontmatter.next_action),
     salaryText,
     salary: parseSalary(salaryText),
@@ -301,12 +342,13 @@ export function toJobCard(note: Note): JobCard {
   };
 }
 
-export type JobSort = "rating" | "salary" | "date" | "updated" | "company";
+export type JobSort = "rating" | "salary" | "date" | "applied" | "updated" | "company";
 
 export const JOB_SORTS: { id: JobSort; label: string }[] = [
   { id: "rating", label: "匹配度" },
   { id: "salary", label: "年収上限" },
   { id: "date", label: "入库时间" },
+  { id: "applied", label: "応募日（古い順）" },
   { id: "updated", label: "更新时间" },
   { id: "company", label: "公司名" },
 ];
@@ -319,6 +361,15 @@ export function compareJobs(left: JobCard, right: JobCard, sort: JobSort) {
     // 入库日（`date`）と更新时间（ファイル mtime）は別物。
     // 拒信一通で mtime は動くが入库日は動かない —— 「いつ入ってきたか」はこちらでしか出せない。
     const diff = intakeSortKey(right.date).localeCompare(intakeSortKey(left.date));
+    if (diff !== 0) return diff;
+  } else if (sort === "applied") {
+    // 他の並びと違って**昇順**（古い応募が先頭）。この並びを使う理由は
+    // 「どれが一番待たされているか」＝催促・見切りの判断で、新しい応募は当然まだ待つ時間ではない。
+    // 応募日が分からない案件（書類通過以降で台帳に無いもの）は末尾へ。
+    // 先頭に来ると「最も古い」が空欄で埋まり、この並びの意味が消える。
+    const l = left.appliedOn || "9999-99-99";
+    const r = right.appliedOn || "9999-99-99";
+    const diff = l.localeCompare(r);
     if (diff !== 0) return diff;
   } else if (sort === "updated") {
     const diff = right.updatedAt - left.updatedAt;

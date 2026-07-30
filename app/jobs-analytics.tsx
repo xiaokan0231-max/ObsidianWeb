@@ -15,6 +15,7 @@ import {
   reachRate,
   SMALL_SAMPLE_THRESHOLD,
 } from "@/lib/job-stats.mjs";
+import { explicitNextEventDate, explicitNextEventTime } from "@/lib/job-progress";
 import { getString, getType, type Note } from "@/lib/notes";
 
 /**
@@ -58,13 +59,8 @@ const IN_FLIGHT: string[] = ["応募済", "書類通過", "面接中"];
 const PASSED_SCREENING: string[] = ["書類通過", "面接中", "内定"];
 const ACTIVE_SELECTION: string[] = [...IN_FLIGHT, "内定"];
 
-function actionDate(job: JobCard) {
-  const text = [
-    job.nextAction,
-    getString(job.note.frontmatter.status),
-    job.statusUpdated,
-  ].join(" ");
-  return text.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1] ?? "";
+function scheduledDate(job: JobCard) {
+  return explicitNextEventDate(job.note);
 }
 
 function shortDate(value: string) {
@@ -72,13 +68,13 @@ function shortDate(value: string) {
   return match ? `${Number(match[1])}/${Number(match[2])}` : "—";
 }
 
-function actionTime(job: JobCard) {
-  return [job.nextAction, getString(job.note.frontmatter.status)]
-    .join(" ")
-    .match(/\b([01]?\d|2[0-3]):[0-5]\d\b/)?.[0] ?? "";
+function scheduledTime(job: JobCard) {
+  return explicitNextEventTime(job.note);
 }
 
 function focusAction(job: JobCard) {
+  const waitingLabel = getString(job.note.frontmatter.waiting_label);
+  if (waitingLabel) return waitingLabel;
   if (job.nextAction) return job.nextAction;
   if (job.status === "面接中") return "面接準備を最優先";
   if (job.status === "書類通過") return "次回選考の準備";
@@ -87,13 +83,7 @@ function focusAction(job: JobCard) {
   return "応募判断";
 }
 
-function focusBadge(job: JobCard) {
-  if (job.status === "面接中") return "NEXT INTERVIEW";
-  if (job.rating >= 9) return "HOT";
-  return "STRONG FIT";
-}
-
-function FocusJobCard({
+function ProgressPriority({
   job,
   onOpen,
 }: {
@@ -105,22 +95,57 @@ function FocusJobCard({
   return (
     <button
       type="button"
-      className={`analytics-focus-card${job.status === "面接中" ? " is-next" : ""}`}
+      className="analytics-priority-card"
       onClick={() => onOpen(job.note)}
     >
-      <span className="analytics-focus-topline">
-        <b>{focusBadge(job)}</b>
-        <em>{job.rating > 0 ? `${job.rating} / 10` : "面接優先"}</em>
+      <span className="analytics-priority-topline">
+        <b>{job.status === "面接中" ? "面接を最優先" : "現在の最優先案件"}</b>
+        <i data-status={job.status}>{job.status}</i>
       </span>
       <strong>{job.company}</strong>
-      <small className="analytics-focus-position">{job.position}</small>
-      <span className="analytics-focus-state">
-        <i data-status={job.status}>{job.status}</i>
-        {job.statusUpdated ? <time>{job.statusUpdated}</time> : null}
+      <small>{job.position}</small>
+      <div className="analytics-priority-action">
+        <span>NEXT ACTION</span>
+        <p>{focusAction(job)}</p>
+      </div>
+      <dl>
+        <div>
+          <dt>次回日程</dt>
+          <dd>{scheduledDate(job) ? `${shortDate(scheduledDate(job))}${scheduledTime(job) ? ` ${scheduledTime(job)}` : ""}` : "未定"}</dd>
+        </div>
+        <div>
+          <dt>相性</dt>
+          <dd>{job.rating > 0 ? `${job.rating} / 10` : "未採点"}</dd>
+        </div>
+      </dl>
+      {evidence ? <small className="analytics-priority-evidence">{evidence}</small> : null}
+      <span className="analytics-priority-open">案件を開く <b>→</b></span>
+    </button>
+  );
+}
+
+function ProgressWatchRow({
+  job,
+  onOpen,
+}: {
+  job: JobCard;
+  onOpen: (note: Note) => void;
+}) {
+  return (
+    <button type="button" className="analytics-watch-row" onClick={() => onOpen(job.note)}>
+      <span>
+        <b>{job.rating > 0 ? job.rating : "—"}</b>
+        <small>/ 10</small>
       </span>
-      <p>{focusAction(job)}</p>
-      {evidence ? <small className="analytics-focus-evidence">{evidence}</small> : null}
-      <span className="analytics-focus-open">案件詳細を見る ↗</span>
+      <span>
+        <strong>{job.company}</strong>
+        <small>{job.position}</small>
+      </span>
+      <span>
+        <i data-status={job.status}>{job.status}</i>
+        <small>{focusAction(job)}</small>
+      </span>
+      <b aria-hidden="true">↗</b>
     </button>
   );
 }
@@ -295,10 +320,9 @@ export default function JobsAnalytics({
   );
 
   const inFlight = jobs.filter((job) => IN_FLIGHT.includes(job.status)).length;
+  const interviewCount = jobs.filter((job) => job.status === "面接中").length;
+  const resultWaiting = jobs.filter((job) => ["応募済", "書類通過"].includes(job.status)).length;
   const readyToApply = jobs.filter((job) => job.status === "未応募" && job.rating >= 7).length;
-  const highFitInFlight = jobs.filter(
-    (job) => IN_FLIGHT.includes(job.status) && job.rating >= 8,
-  ).length;
   const focusJobs = useMemo(
     () =>
       jobs
@@ -329,12 +353,16 @@ export default function JobsAnalytics({
       jobs
         .filter((job) => job.status === "面接中")
         .sort((left, right) => {
-          const leftDate = actionDate(left) || "9999-12-31";
-          const rightDate = actionDate(right) || "9999-12-31";
+          const leftDate = scheduledDate(left) || "9999-12-31";
+          const rightDate = scheduledDate(right) || "9999-12-31";
           return leftDate.localeCompare(rightDate);
         })[0] ?? null,
     [jobs],
   );
+  const priorityJob = nextInterview ?? focusJobs[0] ?? null;
+  const watchJobs = focusJobs
+    .filter((job) => job.path !== priorityJob?.path)
+    .slice(0, 4);
   const liveJobs = useMemo(
     () => jobs.filter((job) => job.status !== "不採用"),
     [jobs],
@@ -447,52 +475,68 @@ export default function JobsAnalytics({
 
   return (
     <div className="analytics">
-      <header className="analytics-head">
-        <span className="eyebrow">● JOB COMMAND</span>
-        <h1>求職分析</h1>
-        <p>
-          過去の統計より、<strong>いま準備する会社・結果を待つ有力案件・次に投げる手札</strong>を先に見る。
-          不採用や経路別到達率は、必要な時だけ最下部で振り返る。
-        </p>
-      </header>
+      <dl className="analytics-head-glance page-stat-strip module-stat-strip" aria-label="当前求职进展摘要">
+        <div>
+          <dt>进行中</dt>
+          <dd>{inFlight}</dd>
+        </div>
+        <div>
+          <dt>面试阶段</dt>
+          <dd>{interviewCount}</dd>
+        </div>
+        <div>
+          <dt>结果等待</dt>
+          <dd>{resultWaiting}</dd>
+        </div>
+        <div>
+          <dt>可応募</dt>
+          <dd>{readyToApply}</dd>
+        </div>
+      </dl>
 
-      <div className="stat-row analytics-action-stats">
-        <Tile
-          value={nextInterview ? shortDate(actionDate(nextInterview)) : "—"}
-          label={nextInterview ? `次の面談・${nextInterview.company}` : "次の面談"}
-          note={
-            nextInterview
-              ? [actionTime(nextInterview), nextInterview.position].filter(Boolean).join(" · ")
-              : "面談予定なし"
-          }
-        />
-        <Tile value={`${inFlight}`} label="進行中" note="応募済・書類通過・面接中" />
-        <Tile value={`${highFitInFlight}`} label="高相性で進行中" note="評点 8 以上・結果待ちを含む" />
-        <Tile value={`${readyToApply}`} label="次に応募できる" note="未応募・評点 7 以上" />
-      </div>
-
-      <section className="analytics-focus">
+      <section className="analytics-command">
         <header>
           <div>
-            <span>HOT LIST · 現在の有力案件</span>
-            <h2>いま見るべき会社</h2>
-            <p>面接予定を最優先し、その次に評点 8 以上で選考中の案件を並べている。</p>
+            <span>NOW</span>
+            <h2>当前推进</h2>
+            <p>1 件优先处理，{watchJobs.length} 件持续观察</p>
           </div>
-          <button type="button" onClick={() => onViewJobs(IN_FLIGHT)}>進行中 {inFlight} 件をすべて見る</button>
+          <button type="button" onClick={() => onViewJobs(IN_FLIGHT)}>
+            全部进行中 <b>{inFlight}</b> <i aria-hidden="true">→</i>
+          </button>
         </header>
-        {focusJobs.length > 0 ? (
-          <div className="analytics-focus-grid">
-            {focusJobs.map((job) => <FocusJobCard key={job.path} job={job} onOpen={onOpen} />)}
+        {priorityJob ? (
+          <div className="analytics-command-grid">
+            <ProgressPriority job={priorityJob} onOpen={onOpen} />
+            <div className="analytics-watch-list">
+              <header>
+                <strong>观察名单</strong>
+                <small>高相性・选考中</small>
+              </header>
+              {watchJobs.length > 0 ? (
+                watchJobs.map((job) => <ProgressWatchRow key={job.path} job={job} onOpen={onOpen} />)
+              ) : (
+                <p className="chart-empty">暂时没有其他需要持续观察的高相性案件。</p>
+              )}
+            </div>
           </div>
         ) : (
-          <p className="chart-empty">評点 8 以上の進行中案件はまだない。</p>
+          <p className="chart-empty">当前没有处于选考中的案件。</p>
         )}
       </section>
 
-      <h2 className="analytics-section">現在の手札を判断する</h2>
-
-      {/* 母数を変えるスイッチなので、影響する図より必ず**上**に置く。 */}
-      <div className="analytics-filter">
+      <details className="analytics-hand">
+        <summary>
+          <span>
+            <b>DEEPER VIEW</b>
+            <strong>当前手札分析</strong>
+            <small>评分、状态与技术需求；只有需要比较下一批岗位时再看</small>
+          </span>
+          <em>打开</em>
+        </summary>
+        <div className="analytics-hand-body">
+          {/* 母数を変えるスイッチなので、影響する図より必ず**上**に置く。 */}
+          <div className="analytics-filter">
         <span>集計対象</span>
         {HAND_SCOPES.map((item) => (
           <button
@@ -510,11 +554,11 @@ export default function JobsAnalytics({
             ? `状態内訳と技術集計は ${handJobs.length} 件で算出（7 点未満の未応募 ${handExcluded} 件を除外／選考中の案件は評点に関わらず残す）。評点チャートは条件通過後の ${condJobs.length} 件。`
             : `条件通過後の ${condJobs.length} 件すべてで算出。4〜6 点の投げない札も母数に入っている。`}
         </small>
-      </div>
+          </div>
 
-      {/* 条件フィルタ。下の3枚（評点・状態・技術）にだけ効く——
-          上の KPI・HOT LIST は行動リストなので絞らない（面談予定が条件で消えるのが最悪の誤読）。 */}
-      <div className="analytics-filter analytics-cond-filter">
+          {/* 条件フィルタ。下の3枚（評点・状態・技術）にだけ効く——
+              上の KPI・重点案件は行動リストなので絞らない。 */}
+          <div className="analytics-filter analytics-cond-filter">
         <span>条件</span>
         {condOptions.statuses.map(([status, count]) => (
           <button
@@ -534,10 +578,10 @@ export default function JobsAnalytics({
         ) : null}
         <small className="analytics-filter-note">
           状態で絞っても状態内訳の図は全状態を表示し続ける（評点図に評点を掛けないのと同じ理屈）。
-          上の KPI・HOT LIST には効かない。
+          上の KPI・重点案件には効かない。
         </small>
-      </div>
-      <div className="analytics-filter analytics-cond-filter">
+          </div>
+          <div className="analytics-filter analytics-cond-filter">
         <span>来源</span>
         {condOptions.sources.map(([source, count]) => (
           <button
@@ -550,8 +594,8 @@ export default function JobsAnalytics({
             {source} <small>{count}</small>
           </button>
         ))}
-      </div>
-      <div className="analytics-filter analytics-cond-filter">
+          </div>
+          <div className="analytics-filter analytics-cond-filter">
         <span>勤務地</span>
         {condOptions.regions.slice(0, 8).map(([region, count]) => (
           <button
@@ -572,9 +616,9 @@ export default function JobsAnalytics({
         >
           リモート可 <small>{condOptions.remote}</small>
         </button>
-      </div>
+          </div>
 
-      <div className="chart-grid-2">
+          <div className="chart-grid-2">
         <Card
           title="現役案件の評点"
           caption={`不採用を除いた現在の手札${condActive > 0 ? `・条件通過後の ${condJobs.length} 件` : "・全件"}。7 点以上が「応募すべき」帯。しきい値を決める図なので、上の集計対象（評点）は掛けない。`}
@@ -624,9 +668,9 @@ export default function JobsAnalytics({
             rows={statuses.map((row) => [row.status, row.count, pct1(row.count / statusTotal)])}
           />
         </Card>
-      </div>
+          </div>
 
-      <Card
+          <Card
         title="現役求人が求める技術（上位10）"
         caption={
           handScope === "high"
@@ -646,7 +690,9 @@ export default function JobsAnalytics({
           ))}
         </div>
         <TableView head={["技術", "出現件数"]} rows={stacks.map((row) => [row.name, row.count])} />
-      </Card>
+          </Card>
+        </div>
+      </details>
 
       <details className="analytics-history">
         <summary>

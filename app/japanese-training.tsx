@@ -16,6 +16,7 @@ import {
   LANGUAGE_COMPILE_LIMIT,
   LANGUAGE_STRESS_LIMIT,
 } from "@/lib/language/types";
+import { activeSessionMinutes } from "@/lib/language/session-time";
 
 const EMPTY_STATE: LanguageV2State = {
   ready: false,
@@ -47,6 +48,20 @@ const JUDGMENT_LABELS: Record<LanguageScanJudgment, string> = {
   uncertain: "犹豫",
   unknown: "不会",
   reject: "排除",
+};
+
+const BATCH_PHASE_LABELS: Record<LanguageBatchPhase, string> = {
+  scan: "快速扫描",
+  compile: "集中修正",
+  stress: "压力测试",
+  completed: "已完成",
+};
+
+const ISSUE_DISPLAY_LABELS: Record<string, string> = {
+  "compound-question-miss": "复合问题漏答",
+  "weak-evidence": "回答缺少事实证据",
+  "over-absolute": "表述过于绝对",
+  "negative-oversharing": "负面信息展开过多",
 };
 
 const AUTO_SAVE_ACTION_COUNT = 50;
@@ -134,6 +149,15 @@ export default function JapaneseTraining({
     () => new Map(state.progress.map((value) => [value.itemId, value])),
     [state.progress],
   );
+  const stageCounts = useMemo(
+    () => Object.fromEntries(
+      Object.keys(STAGE_LABELS).map((stage) => [
+        stage,
+        state.progress.filter((item) => item.stage === stage).length,
+      ]),
+    ) as Record<LanguageTrainingStage, number>,
+    [state.progress],
+  );
 
   if (showBatch && state.currentBatch && curriculum) {
     return (
@@ -148,23 +172,12 @@ export default function JapaneseTraining({
 
   return (
     <div className="focus-language-view">
-      <header className="focus-language-hero">
-        <div>
-          <span className="eyebrow"><i /> INTERVIEW-EVIDENCE COMPILER</span>
-          <h1>一小时，把面试日语<br />批量编译成主动能力。</h1>
-          <p>{curriculum?.summaryZh || "从真实面试原话、本人裁定和回答复盘建立高吞吐训练课程。"}</p>
-        </div>
-        <div className="focus-language-build">
-          <small>DAILY BUILD</small>
-          <strong>{state.currentBatch ? "训练已自动保存" : `${size} 项 / 约 60 分钟`}</strong>
-          <p>扫描建立索引，集中处理缓存未命中，最后做隐藏答案压力测试。</p>
-          {state.currentBatch ? (
-            <button onClick={() => setShowBatch(true)}>继续今天的批次</button>
-          ) : (
-            <button disabled={!state.ready || Boolean(busy)} onClick={() => void start()}>开始集中训练</button>
-          )}
-        </div>
-      </header>
+      <dl className="focus-language-glance page-stat-strip module-stat-strip" aria-label="日语训练摘要">
+        <div><dt>训练项目</dt><dd>{curriculum?.items.length ?? 0}</dd></div>
+        <div><dt>尚未扫描</dt><dd>{stageCounts.unseen}</dd></div>
+        <div><dt>可主动提取</dt><dd>{stageCounts.retrievable + stageCounts.transferable}</dd></div>
+        <div><dt>训练稳定</dt><dd>{stageCounts.stable}</dd></div>
+      </dl>
 
       {(error || notice || busy) && (
         <div className={`focus-language-message ${error ? "error" : busy ? "working" : "success"}`}>
@@ -184,6 +197,15 @@ export default function JapaneseTraining({
         </section>
       ) : curriculum ? (
         <>
+          <TrainingNow
+            state={state}
+            size={size}
+            busy={Boolean(busy)}
+            onSize={setSize}
+            onStart={() => void start()}
+            onResume={() => setShowBatch(true)}
+          />
+
           {state.stale && (
             <section className="focus-language-stale">
               <div><strong>面试或岗位资料已经更新</strong><span>当前批次仍可继续；重建后，新证据才会进入下一批。</span></div>
@@ -203,13 +225,7 @@ export default function JapaneseTraining({
           </nav>
 
           {tab === "today" && (
-            <TodayDashboard
-              state={state}
-              size={size}
-              onSize={setSize}
-              onStart={() => void start()}
-              onResume={() => setShowBatch(true)}
-            />
+            <TodayDashboard state={state} />
           )}
           {tab === "profile" && <AbilityProfile state={state} />}
           {tab === "issues" && <IssueMap state={state} />}
@@ -220,57 +236,88 @@ export default function JapaneseTraining({
   );
 }
 
-function TodayDashboard({
+function TrainingNow({
   state,
   size,
+  busy,
   onSize,
   onStart,
   onResume,
 }: {
   state: LanguageV2State;
   size: 100 | 150 | 200;
+  busy: boolean;
   onSize: (size: 100 | 150 | 200) => void;
   onStart: () => void;
   onResume: () => void;
 }) {
-  const stageCounts = Object.fromEntries(
-    Object.keys(STAGE_LABELS).map((stage) => [stage, state.progress.filter((item) => item.stage === stage).length]),
-  ) as Record<LanguageTrainingStage, number>;
+  const batch = state.currentBatch;
+  const phaseOrder: Exclude<LanguageBatchPhase, "completed">[] = ["scan", "compile", "stress"];
+  const currentIndex = batch ? phaseOrder.indexOf(batch.phase as Exclude<LanguageBatchPhase, "completed">) : -1;
+
+  return (
+    <section className="focus-language-now">
+      <span className="focus-language-now-mark" aria-hidden="true">語</span>
+      <div className="focus-language-now-copy">
+        <small>{batch ? "CURRENT BATCH · AUTO SAVED" : "TODAY'S TRAINING"}</small>
+        <h2>{batch ? `继续${BATCH_PHASE_LABELS[batch.phase]}` : "开始今天的集中训练"}</h2>
+        <p>
+          {batch
+            ? `本批 ${batch.targetSize} 项。当前只处理训练未命中，完成后进入隐藏答案压力测试。`
+            : "先快速扫描建立索引，再集中修正最多 20 项，最后压力测试最多 15 项。"}
+        </p>
+      </div>
+      {batch ? (
+        <ol className="focus-language-now-steps" aria-label="当前训练阶段">
+          {phaseOrder.map((phase, index) => (
+            <li
+              key={phase}
+              className={index < currentIndex ? "done" : index === currentIndex ? "active" : ""}
+            >
+              <b>{index + 1}</b>
+              <span>{BATCH_PHASE_LABELS[phase]}</span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="focus-language-size" role="group" aria-label="训练规模">
+          {[100, 150, 200].map((value) => (
+            <button key={value} className={size === value ? "active" : ""} onClick={() => onSize(value as 100 | 150 | 200)}>
+              <strong>{value}</strong><span>{value === 100 ? "轻量" : value === 150 ? "标准" : "深度"}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <button
+        className="focus-language-now-action"
+        disabled={busy}
+        onClick={batch ? onResume : onStart}
+      >
+        {batch ? `继续${BATCH_PHASE_LABELS[batch.phase]}` : `开始 ${size} 项`}
+        <span aria-hidden="true">→</span>
+      </button>
+    </section>
+  );
+}
+
+function TodayDashboard({
+  state,
+}: {
+  state: LanguageV2State;
+}) {
   const recent = state.history.slice(0, 5);
   return (
     <div className="focus-language-dashboard">
-      <section className="focus-language-metrics">
-        <div><strong>{state.curriculum?.items.length ?? 0}</strong><span>证据项目</span></div>
-        <div><strong>{stageCounts.unseen}</strong><span>尚未扫描</span></div>
-        <div><strong>{stageCounts.retrievable + stageCounts.transferable}</strong><span>可主动提取</span></div>
-        <div><strong>{stageCounts.stable}</strong><span>训练稳定</span></div>
-      </section>
-      <section className="focus-language-launcher">
-        <div>
-          <small>ONE-HOUR DEEP WORK</small>
-          <h2>{state.currentBatch ? "继续未完成批次" : "生成今天的批处理任务"}</h2>
-          <p>默认200项。规模只改变快速扫描量；精练最多20项，压力测试最多15项。</p>
-        </div>
-        {!state.currentBatch && (
-          <div className="focus-language-size" role="group" aria-label="训练规模">
-            {[100, 150, 200].map((value) => (
-              <button key={value} className={size === value ? "active" : ""} onClick={() => onSize(value as 100 | 150 | 200)}>
-                <strong>{value}</strong><span>{value === 100 ? "轻量" : value === 150 ? "标准" : "深度"}</span>
-              </button>
-            ))}
-          </div>
-        )}
-        <button className="focus-language-primary" onClick={state.currentBatch ? onResume : onStart}>
-          {state.currentBatch ? `继续 ${state.currentBatch.phase}` : `开始 ${size} 项训练`}
-        </button>
-      </section>
       <section className="focus-language-two-column">
         <div>
           <header><small>HOT PATH</small><h2>现在最值得修</h2></header>
           {state.curriculum?.profile.topIssues.slice(0, 8).map((issue, index) => (
             <article className="focus-issue-compact" key={issue.key}>
               <b>{String(index + 1).padStart(2, "0")}</b>
-              <div><strong>{issue.label}</strong><span>{issue.interviewCount} 场 · {issue.occurrenceCount} 次证据</span></div>
+              <div>
+                <strong title={issue.label}>{ISSUE_DISPLAY_LABELS[issue.label] ?? issue.label}</strong>
+                <span>{issue.interviewCount} 场 · {issue.occurrenceCount} 次证据</span>
+              </div>
             </article>
           ))}
         </div>
@@ -328,7 +375,7 @@ function IssueMap({ state }: { state: LanguageV2State }) {
         {state.curriculum!.profile.topIssues.map((issue) => (
           <details key={issue.key}>
             <summary>
-              <span>{KIND_LABELS[issue.kind]}</span><strong>{issue.label}</strong>
+              <span>{KIND_LABELS[issue.kind]}</span><strong title={issue.label}>{ISSUE_DISPLAY_LABELS[issue.label] ?? issue.label}</strong>
               <b>{issue.interviewCount} 场 / {issue.occurrenceCount} 次</b>
             </summary>
             <div>
@@ -407,6 +454,7 @@ function LanguageBatchWorkspace({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [elapsed, setElapsed] = useState(0);
+  const activeSessionStartedAt = useRef(0);
   const [showScanOverview, setShowScanOverview] = useState(false);
   const saveInFlight = useRef<Promise<void> | null>(null);
 
@@ -483,14 +531,15 @@ function LanguageBatchWorkspace({
   }, [pending, busy, checkpoint, cursor]);
 
   useEffect(() => {
-    const update = () => setElapsed(Math.max(0, Math.round((Date.now() - new Date(batch.createdAt).getTime()) / 60_000)));
+    activeSessionStartedAt.current = Date.now();
+    const update = () => setElapsed(activeSessionMinutes(activeSessionStartedAt.current));
     const timer = window.setInterval(update, 30_000);
     const first = window.setTimeout(update, 0);
     return () => {
       window.clearInterval(timer);
       window.clearTimeout(first);
     };
-  }, [batch.createdAt]);
+  }, [batch.id]);
 
   useEffect(() => {
     const leave = () => {
@@ -758,7 +807,7 @@ function LanguageInputStage({
             return (
               <article key={id}>
                 <b>{String(index + 1).padStart(2, "0")}</b>
-                <div className="prompt"><small>{KIND_LABELS[value.kind]}{value.pattern ? ` · ${value.pattern}` : ""}</small><strong>{phase === "compile" && value.kind === "error_patch" ? value.promptZh : value.meaningZh}</strong>{phase === "compile" && value.originalJa && <code lang="ja">{value.originalJa}</code>}</div>
+                <div className="prompt"><small>{KIND_LABELS[value.kind]}{value.pattern ? ` · ${ISSUE_DISPLAY_LABELS[value.pattern] ?? value.pattern}` : ""}</small><strong>{phase === "compile" && value.kind === "error_patch" ? value.promptZh : value.meaningZh}</strong>{phase === "compile" && value.originalJa && <code lang="ja">{value.originalJa}</code>}</div>
                 <label>
                   {open ? (
                     <textarea rows={4} value={answers[id] ?? ""} onChange={(event) => onAnswer(id, phase, event.target.value)} placeholder="用日语写2–3句：先说结论，再给一个依据…" />

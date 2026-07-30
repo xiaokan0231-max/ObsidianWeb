@@ -61,6 +61,12 @@ type ReviewDoc = {
   feedbackByBlock: Map<string, ReviewFeedbackEntry[]>;
 };
 
+/**
+ * 写入失败的一条提示。`subject` 必须自带主语（哪场面接、哪句/哪个 block），
+ * 因为这条提示不出现在触发它的按钮旁边，靠位置认不出说的是谁。
+ */
+type WriteAlert = { subject: string; detail: string };
+
 type Mode = "study" | "compare";
 type Filter =
   | "all"
@@ -229,6 +235,19 @@ export default function InterviewReview({
   const [deepFocusBlockId, setDeepFocusBlockId] = useState<string | null>(null);
   const [evidenceFocus, setEvidenceFocus] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  /**
+   * 🔴 写入失败**不走** `message`。`message` 只在正文流的一个位置（第二阶段面板之后）渲染，
+   * 而这四条写入路径的触发点全都看不到那个位置：句卡在它下面几千 px，
+   * 「加入重练」「同意」在展开的 `<details>` 里往下几百 px，
+   * 「重新生成」隔着整份报告面板（约 2,400px）。
+   * 按下的人看不到失败理由，就跟按了没反应的死按钮没有区别 —— 这正是这次要修的病。
+   *
+   * 所以失败一律积到 `writeAlerts`，只由固定层 `.rv-write-alerts` 一处渲染：
+   * 不依赖任何子树保持挂载、不依赖滚动位置、不依赖当前是详情页还是一覧页。
+   * 同样的理由和同样的形状见 jobs-view 的 `statusErrors`
+   *（那边把提示放在控件旁边试过两次，两次都在实际使用中看不见）。
+   */
+  const [writeAlerts, setWriteAlerts] = useState<Record<string, WriteAlert>>({});
   const inFlightAnnotations = useRef(new Set<string>());
 
   const switchMode = (next: Mode) => {
@@ -265,6 +284,24 @@ export default function InterviewReview({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [doc]);
 
+  /** 同一个 key 也用于「重试前先清掉上一次的失败」：成功了就不会再被写回去。 */
+  const dismissWriteAlert = useCallback((key: string) => {
+    setWriteAlerts((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const noteWriteFailure = useCallback(
+    (key: string, subject: string, error: unknown, fallback: string) => {
+      const reason = error instanceof Error && error.message ? error.message : fallback;
+      setWriteAlerts((current) => ({ ...current, [key]: { subject, detail: reason } }));
+    },
+    [],
+  );
+
   const submitAnnotation = useCallback(
     async (
       target: ReviewDoc,
@@ -276,8 +313,11 @@ export default function InterviewReview({
       const submissionKey = [target.key, sentenceId, kind, decisionTarget ?? "", text].join("\u0000");
       if (inFlightAnnotations.current.has(submissionKey)) return;
       inFlightAnnotations.current.add(submissionKey);
+      // 裁定按 target 分 key：同一句上「話者裁定」和「誤2 裁定」各自失败时要能同时看到两条。
+      const alertKey = `annotate:${target.key}:${sentenceId}:${kind}:${decisionTarget ?? ""}`;
       setBusy(sentenceId);
       setMessage(null);
+      dismissWriteAlert(alertKey);
       try {
         const response = await fetch("/api/review/annotate", {
           method: "POST",
@@ -298,19 +338,26 @@ export default function InterviewReview({
         setNoteDraft("");
         await onVaultChanged();
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "批注写入失败");
+        noteWriteFailure(
+          alertKey,
+          `${target.company} · ${sentenceId} 的${kind}`,
+          error,
+          "批注写入失败",
+        );
       } finally {
         inFlightAnnotations.current.delete(submissionKey);
         setBusy(null);
       }
     },
-    [onVaultChanged],
+    [dismissWriteAlert, noteWriteFailure, onVaultChanged],
   );
 
   const generateDeepReview = useCallback(
     async (target: ReviewDoc) => {
+      const alertKey = `deep:${target.key}`;
       setDeepBusy(true);
       setMessage(null);
+      dismissWriteAlert(alertKey);
       try {
         const response = await fetch("/api/review/deep", {
           method: "POST",
@@ -324,12 +371,17 @@ export default function InterviewReview({
         await onVaultChanged();
         setDeepOpen(true);
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "回答质量复盘生成失败");
+        noteWriteFailure(
+          alertKey,
+          `${target.company} · 回答质量复盘`,
+          error,
+          "回答质量复盘生成失败",
+        );
       } finally {
         setDeepBusy(false);
       }
     },
-    [onVaultChanged],
+    [dismissWriteAlert, noteWriteFailure, onVaultChanged],
   );
 
   const queuePractice = useCallback(
@@ -1263,24 +1315,14 @@ function ReviewIndex({
 
   return (
     <div className="review-view">
-      <header className="rv-hero">
-        <div>
-          <p className="eyebrow"><i /> INTERVIEW REVIEW · 逐字稿復盤</p>
-          <h1>面试复盘</h1>
-          <p>
-            逐字稿（证据层）→ 整理稿（AI 派生层）→ 你的批注（事实层）。
-            这里只读整理稿、只往批注追记；改判定跑重生成，都以 vault 为准。
-          </p>
-        </div>
-        {aggregate.length > 0 && (
-          <div className="rv-agg">
-            <span>跨面接错误型 TOP</span>
-            {aggregate.map(([slug, count]) => (
-              <div key={slug}><em>{slug}</em><b>{count}</b></div>
-            ))}
-          </div>
-        )}
-      </header>
+      {aggregate.length > 0 && (
+        <section className="rv-agg" aria-label="跨面试错误型摘要">
+          <span>跨面试错误型 TOP</span>
+          {aggregate.map(([slug, count]) => (
+            <div key={slug}><em>{slug}</em><b>{count}</b></div>
+          ))}
+        </section>
+      )}
 
       {docs.length > 0 && (
         <section className="rv-answer-trends">
