@@ -51,6 +51,10 @@ type Props = {
 const WARM_ACCENT = "#e66d45";
 const COOL_ACCENT = "#9adfc6";
 const PAST_EVENT_ACCENT = "#66706c";
+// 两种视角：俯瞰（默认）像无人机掠过星河，整条时间线与每日活动量尽收眼底；
+// 巡航是隧道内第一人称，用于沉浸式穿行。切换只动镜头与雾，不动任何数据。
+type ViewMode = "overview" | "cruise";
+const FOG_DENSITY: Record<ViewMode, number> = { overview: 0.0062, cruise: 0.016 };
 // 每滚动 1px 注入的行进速度（单位/秒）。衰减 4.2 意味着一次滚动的总行程 ≈ 速度/4.2。
 const WHEEL_VELOCITY = 0.09;
 const VELOCITY_DECAY = 4.2;
@@ -78,7 +82,10 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
   });
   const pauseRef = useRef(false);
   const dossierModeRef = useRef<"dock" | "focus">("dock");
+  const viewModeRef = useRef<ViewMode>("overview");
+  const applyViewModeRef = useRef<(mode: ViewMode) => void>(() => undefined);
   const onFallbackRef = useRef(onFallback);
+  const [viewMode, setViewMode] = useState<ViewMode>("overview");
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -159,6 +166,13 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     ));
   }, []);
 
+  const toggleViewMode = useCallback(() => {
+    const next = viewModeRef.current === "overview" ? "cruise" : "overview";
+    viewModeRef.current = next;
+    setViewMode(next);
+    applyViewModeRef.current(next);
+  }, []);
+
   useEffect(() => {
     const request = {
       ids: search.results.map((note) => note.id),
@@ -192,6 +206,11 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       if (key === "p") {
         event.preventDefault();
         setPaused((current) => !current);
+        return;
+      }
+      if (key === "v") {
+        event.preventDefault();
+        toggleViewMode();
         return;
       }
       if (!selectedId) return;
@@ -228,7 +247,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     };
     document.addEventListener("keydown", handleDeckShortcut);
     return () => document.removeEventListener("keydown", handleDeckShortcut);
-  }, [changeDossierZoom, dossierMode, openNode, selectedId]);
+  }, [changeDossierZoom, dossierMode, openNode, selectedId, toggleViewMode]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -257,7 +276,9 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     const deepestZ = stations[stations.length - 1].z;
 
     const stageScene = new THREE.Scene();
-    stageScene.fog = new THREE.FogExp2(0x101b17, 0.016);
+    let fogTargetDensity = FOG_DENSITY[viewModeRef.current];
+    const stageFog = new THREE.FogExp2(0x101b17, fogTargetDensity);
+    stageScene.fog = stageFog;
 
     const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 260);
     const root = new THREE.Group();
@@ -446,6 +467,41 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     if (stationRings.instanceColor) stationRings.instanceColor.needsUpdate = true;
     root.add(stationRings);
 
+    // ── 每日活动光柱：高度 = 当天笔记数 + 日程数。俯瞰视角下这就是一条
+    // 沿星河排开的柱状图，「哪天发生了多少事」不用数星星也能读出来。
+    // 立在环顶偏左（0.66π），给环顶正中的日程旗让位。
+    const pillarGeometry = new THREE.CylinderGeometry(0.032, 0.032, 1, 6, 1, true);
+    const pillarMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.42,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const pillars = new THREE.InstancedMesh(pillarGeometry, pillarMaterial, stations.length);
+    stations.forEach((station, index) => {
+      const activity = station.noteIds.length + station.eventIds.length;
+      const height = Math.min(3.4, 0.35 + Math.sqrt(activity) * 0.52);
+      const ringScale = station.isMonthStart ? 1.18 : 1;
+      const baseAngle = Math.PI * 0.66;
+      ringMatrix.position.set(
+        Math.cos(baseAngle) * 2.64 * ringScale,
+        Math.sin(baseAngle) * 2.64 * ringScale + 0.1 + height / 2,
+        -station.z,
+      );
+      ringMatrix.scale.set(1, height, 1);
+      ringMatrix.updateMatrix();
+      pillars.setMatrixAt(index, ringMatrix.matrix);
+      pillars.setColorAt(
+        index,
+        warmColor.clone().lerp(coolColor, Math.min(1, station.z / 30)),
+      );
+    });
+    if (pillars.instanceColor) pillars.instanceColor.needsUpdate = true;
+    pillars.renderOrder = 1;
+    root.add(pillars);
+
     // ── 月门：数量少，独立 mesh + 星云衬底。
     const nebulaTexture = createNebulaTexture();
     const gateGeometry = new THREE.RingGeometry(3.3, 3.42, 96);
@@ -593,18 +649,42 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
 
     // ── 相机 rig：travel 标量 = 距当下的纵深。OrbitControls 只负责姿态，
     // 缩放/平移全部关掉，滚轮由我们自己接管成「时间行进」。
-    camera.position.set(0, 1.1, 8.2);
+    // 俯瞰视角从右上方斜看整条星河，巡航视角回到隧道内第一人称。
+    const vantageFor = (mode: ViewMode) =>
+      mode === "overview"
+        ? new THREE.Vector3(14, 6.8, 16.5)
+        : new THREE.Vector3(0, 1.1, 8.2);
+    // 俯瞰时注视点前移到航道深处：当前环落在画面左下，整条星河横穿中心。
+    // 注视点若钉在近端，「未来」一侧永远是半屏空白。
+    const lookLeadFor = (mode: ViewMode) => (mode === "overview" ? 12 : 0);
+    const flightAnchor = (depth: number) =>
+      new THREE.Vector3(0, 0, -(depth + lookLeadFor(viewModeRef.current)));
+    camera.position.copy(
+      vantageFor(viewModeRef.current).add(
+        new THREE.Vector3(0, 0, -lookLeadFor(viewModeRef.current)),
+      ),
+    );
     const controls = new OrbitControls(camera, canvas);
-    controls.target.set(0, 0, 0);
+    controls.target.set(0, 0, -lookLeadFor(viewModeRef.current));
     controls.enableDamping = true;
     controls.dampingFactor = 0.065;
     controls.enableZoom = false;
     controls.enablePan = false;
     controls.rotateSpeed = 0.42;
-    controls.minPolarAngle = Math.PI * 0.38;
-    controls.maxPolarAngle = Math.PI * 0.62;
-    controls.minAzimuthAngle = -Math.PI * 0.22;
-    controls.maxAzimuthAngle = Math.PI * 0.22;
+    const applyModeConstraints = (mode: ViewMode) => {
+      if (mode === "overview") {
+        controls.minPolarAngle = Math.PI * 0.22;
+        controls.maxPolarAngle = Math.PI * 0.52;
+        controls.minAzimuthAngle = Math.PI * 0.04;
+        controls.maxAzimuthAngle = Math.PI * 0.42;
+      } else {
+        controls.minPolarAngle = Math.PI * 0.38;
+        controls.maxPolarAngle = Math.PI * 0.62;
+        controls.minAzimuthAngle = -Math.PI * 0.22;
+        controls.maxAzimuthAngle = Math.PI * 0.22;
+      }
+    };
+    applyModeConstraints(viewModeRef.current);
     controls.update();
 
     const raycaster = new THREE.Raycaster();
@@ -635,6 +715,19 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         }
       },
     });
+
+    // 切视角 = 一次到「当前深度对应机位」的飞行 + 雾密度渐变 + 姿态钳位换挡。
+    const applyViewMode = (mode: ViewMode) => {
+      viewModeRef.current = mode;
+      applyModeConstraints(mode);
+      fogTargetDensity = FOG_DENSITY[mode];
+      labelWindowKey = "";
+      const anchor = flightAnchor(travel);
+      flightTargetTravel = travel;
+      travelVelocity = 0;
+      flightController.start(anchor.clone().add(vantageFor(mode)), anchor, 860);
+    };
+    applyViewModeRef.current = applyViewMode;
 
     // 行进 = 相机与注视点整体沿 -Z 平移，姿态偏移原样保留，所以不会与拖拽打架。
     const applyTravel = (next: number) => {
@@ -711,22 +804,30 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     };
     selectNodeRef.current = selectNote;
 
-    const clearSelection = () => {
+    const clearSelection = (flyBack: boolean) => {
       selectedRef.current = null;
       hoveredRef.current = null;
       setSelectedId(null);
       setHoveredId(null);
       setDossierMode("dock");
       focusAttributes(null);
+      // 从星体特写退出时飞回当前视角的标准机位，而不是留在原地漂着。
+      if (flyBack) {
+        const anchor = flightAnchor(travel);
+        flightTargetTravel = travel;
+        travelVelocity = 0;
+        flightController.start(anchor.clone().add(vantageFor(viewModeRef.current)), anchor, 760);
+      }
     };
 
     const resetView = () => {
-      clearSelection();
+      clearSelection(false);
+      const anchor = flightAnchor(0);
       flightTargetTravel = 0;
       travelVelocity = 0;
       flightController.start(
-        new THREE.Vector3(0, 1.1, 8.2),
-        new THREE.Vector3(0, 0, 0),
+        anchor.clone().add(vantageFor(viewModeRef.current)),
+        anchor,
         900,
       );
     };
@@ -735,11 +836,12 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     const goToStation = (index: number) => {
       const clamped = Math.min(stations.length - 1, Math.max(0, index));
       const station = stations[clamped];
+      const anchor = flightAnchor(station.z);
       flightTargetTravel = station.z;
       travelVelocity = 0;
       flightController.start(
-        new THREE.Vector3(camera.position.x, camera.position.y, -station.z + 8.2),
-        new THREE.Vector3(controls.target.x, controls.target.y, -station.z),
+        anchor.clone().add(vantageFor(viewModeRef.current)),
+        anchor,
         720,
       );
     };
@@ -844,7 +946,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
           return;
         }
         if (selectedRef.current) {
-          clearSelection();
+          clearSelection(true);
           return;
         }
         resetView();
@@ -945,10 +1047,16 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
 
     const updateLabelWindow = () => {
       const centerIndex = nearestStationIndex(travel);
-      const key = `${centerIndex}:${selectedRef.current ?? ""}`;
+      const key = `${centerIndex}:${selectedRef.current ?? ""}:${viewModeRef.current}`;
       if (key === labelWindowKey) return;
       labelWindowKey = key;
       activeLabelItems = [];
+      // 俯瞰时视距更远，标签的可见窗口与衰减距离一并放宽。
+      const overview = viewModeRef.current === "overview";
+      const dateFadeSpan = overview ? 90 : 40;
+      const monthRange = overview ? 120 : 60;
+      const eventRange = overview ? 80 : 42;
+      const eventFadeSpan = overview ? 80 : 34;
 
       const start = Math.max(0, centerIndex - Math.floor(DATE_LABEL_POOL / 2));
       const windowStations = stations.slice(start, start + DATE_LABEL_POOL);
@@ -964,7 +1072,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         // 否则远处站牌全亮，在灭点处叠成一摞。
         label.element.style.setProperty(
           "--label-depth-fade",
-          Math.max(0.08, 1 - Math.abs(station.z - travel) / 40).toFixed(3),
+          Math.max(0.08, 1 - Math.abs(station.z - travel) / dateFadeSpan).toFixed(3),
         );
         label.element.style.setProperty(
           "--label-accent",
@@ -982,7 +1090,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
 
       const nearbyMonths = months
         .map((month, index) => ({ month, index }))
-        .filter(({ month }) => Math.abs(month.zStart - travel) < 60)
+        .filter(({ month }) => Math.abs(month.zStart - travel) < monthRange)
         .slice(0, MONTH_LABEL_POOL);
       monthLabels.forEach((label, index) => {
         const entry = nearbyMonths[index];
@@ -998,7 +1106,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
 
       const nearbyEvents = events
         .map((event, index) => ({ event, index }))
-        .filter(({ event }) => Math.abs(stations[event.dayIndex].z - travel) < 42)
+        .filter(({ event }) => Math.abs(stations[event.dayIndex].z - travel) < eventRange)
         .slice(0, EVENT_FLAG_POOL);
       eventFlags.forEach((label, index) => {
         const entry = nearbyEvents[index];
@@ -1011,7 +1119,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         label.element.dataset.phase = entry.event.phase;
         label.element.style.setProperty(
           "--label-depth-fade",
-          Math.max(0.08, 1 - Math.abs(stations[entry.event.dayIndex].z - travel) / 34).toFixed(3),
+          Math.max(0.08, 1 - Math.abs(stations[entry.event.dayIndex].z - travel) / eventFadeSpan).toFixed(3),
         );
         const position = eventPositionByIndex[entry.index];
         label.position.set(position.x, position.y + 0.2, position.z);
@@ -1075,10 +1183,14 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       }
 
       flightController.tick(now);
+      stageFog.density += (fogTargetDensity - stageFog.density) * Math.min(1, dt * 3);
 
       if (flightController.active) {
-        // 飞行途中让 travel 跟随注视点，scrubber 与标签窗口就能平滑随行。
-        travel = Math.min(deepestZ, Math.max(0, -controls.target.z));
+        // 飞行途中 travel 独立向目的地缓动（注视点带 lead 偏移，不能反推），
+        // scrubber 与标签窗口照样平滑随行，落点由 onComplete 精确校准。
+        if (flightTargetTravel !== null) {
+          travel += (flightTargetTravel - travel) * Math.min(1, dt * 3.2);
+        }
       } else {
         if (travelVelocity !== 0) {
           applyTravel(travel + travelVelocity * dt);
@@ -1352,6 +1464,14 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
           <>
             <button
               type="button"
+              aria-pressed={viewMode === "cruise"}
+              aria-label={viewMode === "overview" ? "切换到隧道内巡航视角" : "切换到俯瞰整条时间线的视角"}
+              onClick={toggleViewMode}
+            >
+              {viewMode === "overview" ? "巡航视角" : "俯瞰全线"} <kbd>V</kbd>
+            </button>
+            <button
+              type="button"
               aria-label="回到更近的一天"
               onClick={() => stepStationRef.current(-1)}
             >
@@ -1374,6 +1494,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
           onClose={() => setShortcutHelp(false)}
           entries={[
             { keys: ["/"], label: "全文搜索" },
+            { keys: ["V"], label: "俯瞰／巡航切换" },
             { keys: ["F"], label: "全屏" },
             { keys: ["D"], label: "档案居中／停靠" },
             { keys: ["O"], label: "打开完整记忆" },

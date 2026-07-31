@@ -76,6 +76,20 @@ test("航道核心交互：滚轮行进、磁吸泊站、键盘时间导航、re
   assert.ok(ui.includes('data-view="corridor"'));
 });
 
+test("视角系统：默认俯瞰全线、V 键与按钮切巡航、每日活动光柱", () => {
+  assert.ok(
+    ui.includes('useState<ViewMode>("overview")'),
+    "默认必须是俯瞰——总览感是这个视图存在的理由",
+  );
+  assert.ok(ui.includes("巡航视角"));
+  assert.ok(ui.includes("俯瞰全线"));
+  assert.ok(ui.includes('key === "v"'), "V 键切换视角");
+  assert.ok(ui.includes("CylinderGeometry"), "站点活动光柱（沿河柱状图）");
+  assert.ok(ui.includes("noteIds.length + station.eventIds.length"), "柱高 = 笔记 + 日程");
+  assert.ok(ui.includes("FOG_DENSITY"), "两种视角的雾密度分离");
+  assert.ok(ui.includes("applyModeConstraints"), "姿态钳位随视角换挡");
+});
+
 test("航道 HTML 覆盖层：档案卡同日块、日程旗、密度 scrubber、列表兜底", () => {
   assert.ok(ui.includes("同日的记忆"));
   assert.ok(ui.includes("当日安排"));
