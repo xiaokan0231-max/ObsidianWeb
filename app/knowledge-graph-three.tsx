@@ -2,7 +2,6 @@
 
 import {
   type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -11,6 +10,34 @@ import {
 } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import {
+  createCometTexture,
+  createFlightController,
+  createFocusArtifact,
+  createLabelLayer,
+  createNebulaTexture,
+  createStageRenderer,
+  createStarfield,
+  disposeStage,
+  fitDistance,
+  LINK_FRAGMENT_SHADER,
+  LINK_VERTEX_SHADER,
+  NODE_FRAGMENT_SHADER,
+  NODE_VERTEX_SHADER,
+  projectLabelItems,
+  seeded,
+  type StageLabelItem,
+} from "./three-stage";
+import {
+  isEditableTarget,
+  StageControls,
+  StagePortal,
+  StageSearchRadar,
+  StageShortcuts,
+  useStageFullscreen,
+  useStagePortal,
+  useStageSearch,
+} from "./three-stage-chrome";
 
 export type KnowledgeGraphSceneNode = {
   id: string;
@@ -38,15 +65,6 @@ type Props = {
   onFallback: () => void;
 };
 
-type Flight = {
-  startedAt: number;
-  duration: number;
-  fromCamera: THREE.Vector3;
-  fromTarget: THREE.Vector3;
-  toCamera: THREE.Vector3;
-  toTarget: THREE.Vector3;
-};
-
 const GROUP_CENTERS: Record<string, [number, number, number]> = {
   self: [-3.8, 2.15, 0.6],
   career: [3.8, 2.05, -0.2],
@@ -54,99 +72,6 @@ const GROUP_CENTERS: Record<string, [number, number, number]> = {
   analysis: [3.7, -2.35, 0.7],
   system: [0, 0, -1.25],
 };
-
-const NODE_VERTEX_SHADER = `
-  attribute float aSize;
-  attribute float aFocus;
-  attribute float aPhase;
-  attribute float aSearch;
-  varying vec3 vColor;
-  varying float vFocus;
-  varying float vSearch;
-  uniform float uTime;
-  uniform float uMotion;
-  uniform float uSearchActive;
-
-  void main() {
-    vColor = color;
-    vFocus = aFocus;
-    vSearch = aSearch;
-    float pulse = 1.0 + sin(uTime * 1.5 + aPhase) * 0.08 * uMotion;
-    float searchScale = mix(1.0, 1.28, aSearch * uSearchActive);
-    vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
-    gl_Position = projectionMatrix * viewPosition;
-    gl_PointSize = aSize * pulse * searchScale * (360.0 / max(3.0, -viewPosition.z));
-  }
-`;
-
-const NODE_FRAGMENT_SHADER = `
-  varying vec3 vColor;
-  varying float vFocus;
-  varying float vSearch;
-  uniform float uSearchActive;
-
-  void main() {
-    vec2 point = (gl_PointCoord - vec2(0.5)) * 2.0;
-    float radius = length(point);
-    if (radius > 1.0) discard;
-    float core = exp(-radius * radius * 34.0);
-    float halo = exp(-radius * 5.4) * 0.58;
-    float horizontal = exp(-abs(point.y) * 52.0)
-      * smoothstep(1.0, 0.08, abs(point.x));
-    float vertical = exp(-abs(point.x) * 64.0)
-      * smoothstep(0.82, 0.04, abs(point.y));
-    float diagonal = (
-      exp(-abs(point.x + point.y) * 42.0)
-      + exp(-abs(point.x - point.y) * 42.0)
-    ) * smoothstep(0.72, 0.0, radius) * 0.15;
-    float diffraction = horizontal * 0.62 + vertical * 0.42 + diagonal;
-    float searchVisibility = mix(1.0, mix(0.16, 1.0, vSearch), uSearchActive);
-    float alpha = min(1.0, halo + core + diffraction)
-      * mix(0.76, 1.0, vFocus)
-      * searchVisibility;
-    vec3 color = mix(vColor * 1.2, vec3(1.0), core * 0.92 + diffraction * 0.42);
-    gl_FragColor = vec4(color, alpha);
-  }
-`;
-
-const LINK_VERTEX_SHADER = `
-  attribute float aFocus;
-  varying vec3 vColor;
-  varying float vFocus;
-
-  void main() {
-    vColor = color;
-    vFocus = aFocus;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const LINK_FRAGMENT_SHADER = `
-  varying vec3 vColor;
-  varying float vFocus;
-  uniform float uSearchActive;
-
-  void main() {
-    float searchVisibility = mix(1.0, mix(0.18, 1.0, vFocus), uSearchActive);
-    float alpha = mix(0.16, 0.88, vFocus) * searchVisibility;
-    gl_FragColor = vec4(vColor + vFocus * vec3(0.2), alpha);
-  }
-`;
-
-function seeded(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return ((hash >>> 0) % 100000) / 100000;
-}
-
-function easeInOutCubic(value: number) {
-  return value < 0.5
-    ? 4 * value * value * value
-    : 1 - Math.pow(-2 * value + 2, 3) / 2;
-}
 
 export default function ThreeKnowledgeGraph({
   nodes,
@@ -168,67 +93,15 @@ export default function ThreeKnowledgeGraph({
   });
   const pauseRef = useRef(false);
   const dossierModeRef = useRef<"dock" | "focus">("dock");
-  const openingTimerRef = useRef<number | null>(null);
-  const openingRequestRef = useRef(0);
-  const onOpenRef = useRef(onOpen);
   const onFallbackRef = useRef(onFallback);
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [openingId, setOpeningId] = useState<string | null>(null);
   const [dossierMode, setDossierMode] = useState<"dock" | "focus">("dock");
   const [dossierZoom, setDossierZoom] = useState(1);
   const [shortcutHelp, setShortcutHelp] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchCursor, setSearchCursor] = useState(0);
-
-  const toggleFullscreen = useCallback(async () => {
-    const stage = stageRef.current;
-    if (!stage || !document.fullscreenEnabled) return;
-    try {
-      if (document.fullscreenElement === stage) {
-        await document.exitFullscreen();
-      } else {
-        await stage.requestFullscreen();
-      }
-    } catch {
-      // 埋め込みブラウザが権限を拒否しても、星図本体と他の操作は壊さない。
-    }
-  }, []);
-
-  useEffect(() => {
-    const syncFullscreen = () => {
-      setFullscreen(document.fullscreenElement === stageRef.current);
-    };
-    const handleShortcut = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (
-        event.key.toLowerCase() !== "f" ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return;
-      }
-      event.preventDefault();
-      void toggleFullscreen();
-    };
-    document.addEventListener("fullscreenchange", syncFullscreen);
-    document.addEventListener("keydown", handleShortcut);
-    return () => {
-      document.removeEventListener("fullscreenchange", syncFullscreen);
-      document.removeEventListener("keydown", handleShortcut);
-    };
-  }, [toggleFullscreen]);
-
-  useEffect(() => {
-    onOpenRef.current = onOpen;
-  }, [onOpen]);
+  const { fullscreen, toggleFullscreen } = useStageFullscreen(stageRef);
 
   useEffect(() => {
     onFallbackRef.current = onFallback;
@@ -246,43 +119,22 @@ export default function ThreeKnowledgeGraph({
     () => new Map(nodes.map((node) => [node.id, node])),
     [nodes],
   );
+  const canOpen = useCallback((id: string) => nodeById.has(id), [nodeById]);
+  const { openingId, openNode } = useStagePortal({ stageRef, onOpen, canOpen });
+  const pickSearchResult = useCallback((id: string) => selectNodeRef.current(id), []);
+  const searchTiebreak = useCallback(
+    (left: KnowledgeGraphSceneNode, right: KnowledgeGraphSceneNode) => right.degree - left.degree,
+    [],
+  );
+  const search = useStageSearch({
+    items: nodes,
+    inputRef: searchInputRef,
+    onPick: pickSearchResult,
+    tiebreak: searchTiebreak,
+  });
   const activeNode = nodeById.get(selectedId ?? hoveredId ?? "") ?? null;
   const selectedNode = nodeById.get(selectedId ?? "") ?? null;
   const openingNode = nodeById.get(openingId ?? "") ?? null;
-  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
-  const searchResults = useMemo(() => {
-    if (!normalizedSearchQuery) return [];
-    const terms = normalizedSearchQuery.split(/\s+/).filter(Boolean);
-    return nodes
-      .flatMap((node) => {
-        const title = node.title.toLocaleLowerCase();
-        const path = node.path.toLocaleLowerCase();
-        const content = node.excerpt.toLocaleLowerCase();
-        const searchable = `${title}\n${path}\n${content}`;
-        if (!terms.every((term) => searchable.includes(term))) return [];
-        const score = terms.reduce((total, term) => (
-          total
-          + (title.includes(term) ? 8 : 0)
-          + (path.includes(term) ? 3 : 0)
-          + (content.includes(term) ? 1 : 0)
-        ), 0);
-        return [{ node, score }];
-      })
-      .toSorted((left, right) => (
-        right.score - left.score
-        || right.node.degree - left.node.degree
-        || left.node.title.localeCompare(right.node.title)
-      ))
-      .map(({ node }) => node);
-  }, [nodes, normalizedSearchQuery]);
-  const searchWindowStart = Math.min(
-    Math.max(0, searchCursor - 2),
-    Math.max(0, searchResults.length - 6),
-  );
-  const visibleSearchResults = searchResults.slice(
-    searchWindowStart,
-    searchWindowStart + 6,
-  );
   const selectedNeighbors = useMemo(() => {
     if (!selectedId) return [];
     const neighborIds = new Set<string>();
@@ -299,37 +151,6 @@ export default function ThreeKnowledgeGraph({
       .slice(0, 4);
   }, [links, nodeById, selectedId]);
 
-  const openNode = useCallback((id: string) => {
-    if (!nodeById.has(id)) return;
-    const request = ++openingRequestRef.current;
-    if (openingTimerRef.current !== null) {
-      window.clearTimeout(openingTimerRef.current);
-    }
-    setOpeningId(id);
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    openingTimerRef.current = window.setTimeout(() => {
-      void (async () => {
-        if (openingRequestRef.current !== request) return;
-        const stage = stageRef.current;
-        // Fullscreen API 只显示全屏元素的子树。先完成“穿越”动画，再退出全屏，
-        // 才能让应用根节点下的完整笔记抽屉真正出现在用户眼前。
-        if (stage && document.fullscreenElement === stage) {
-          try {
-            await document.exitFullscreen();
-          } catch {
-            // 某些嵌入式浏览器会拒绝退出请求，仍然继续打开笔记。
-          }
-        }
-        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-        if (openingRequestRef.current !== request) return;
-        onOpenRef.current(id);
-        openingTimerRef.current = window.setTimeout(() => {
-          if (openingRequestRef.current === request) setOpeningId(null);
-        }, reducedMotion ? 80 : 320);
-      })();
-    }, reducedMotion ? 120 : 680);
-  }, [nodeById]);
-
   const changeDossierZoom = useCallback((amount: number) => {
     setDossierZoom((current) => (
       Math.round(Math.min(1.35, Math.max(0.85, current + amount)) * 100) / 100
@@ -338,101 +159,20 @@ export default function ThreeKnowledgeGraph({
 
   useEffect(() => {
     const request = {
-      ids: searchResults.map((node) => node.id),
-      active: Boolean(normalizedSearchQuery),
+      ids: search.results.map((node) => node.id),
+      active: Boolean(search.normalizedQuery),
     };
     searchRequestRef.current = request;
     updateSearchRef.current(request.ids, request.active);
-  }, [normalizedSearchQuery, searchResults]);
-
-  useEffect(() => {
-    const focusSearch = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (
-        event.key === "Escape"
-        && normalizedSearchQuery
-        && !(target instanceof HTMLInputElement)
-        && !(target instanceof HTMLTextAreaElement)
-        && !(target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-        setSearchQuery("");
-        setSearchCursor(0);
-        return;
-      }
-      if (
-        event.key !== "/"
-        || event.metaKey
-        || event.ctrlKey
-        || event.altKey
-        || target instanceof HTMLInputElement
-        || target instanceof HTMLTextAreaElement
-        || (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return;
-      }
-      event.preventDefault();
-      searchInputRef.current?.focus();
-      searchInputRef.current?.select();
-    };
-    document.addEventListener("keydown", focusSearch, true);
-    return () => document.removeEventListener("keydown", focusSearch, true);
-  }, [normalizedSearchQuery]);
-
-  const selectSearchResult = useCallback((index: number) => {
-    const result = searchResults[index];
-    if (!result) return;
-    setSearchCursor(index);
-    selectNodeRef.current(result.id);
-    searchInputRef.current?.blur();
-  }, [searchResults]);
-
-  const handleSearchKeyDown = useCallback((
-    event: ReactKeyboardEvent<HTMLInputElement>,
-  ) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setSearchCursor((current) => (
-        searchResults.length === 0 ? 0 : (current + 1) % searchResults.length
-      ));
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setSearchCursor((current) => (
-        searchResults.length === 0
-          ? 0
-          : (current - 1 + searchResults.length) % searchResults.length
-      ));
-      return;
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      selectSearchResult(searchCursor);
-      return;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      if (searchQuery) {
-        setSearchQuery("");
-        setSearchCursor(0);
-      } else {
-        searchInputRef.current?.blur();
-      }
-    }
-  }, [searchCursor, searchQuery, searchResults.length, selectSearchResult]);
+  }, [search.normalizedQuery, search.results]);
 
   useEffect(() => {
     const handleDossierShortcut = (event: KeyboardEvent) => {
-      const target = event.target;
       if (
         event.metaKey ||
         event.ctrlKey ||
         event.altKey ||
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
+        isEditableTarget(event.target)
       ) {
         return;
       }
@@ -488,13 +228,6 @@ export default function ThreeKnowledgeGraph({
     return () => document.removeEventListener("keydown", handleDossierShortcut);
   }, [changeDossierZoom, dossierMode, openNode, selectedId]);
 
-  useEffect(() => () => {
-    openingRequestRef.current += 1;
-    if (openingTimerRef.current !== null) {
-      window.clearTimeout(openingTimerRef.current);
-    }
-  }, []);
-
   useEffect(() => {
     const host = hostRef.current;
     if (!host || nodes.length === 0) return;
@@ -503,32 +236,17 @@ export default function ThreeKnowledgeGraph({
     setHoveredId(null);
     setSelectedId(null);
 
-    let renderer: THREE.WebGLRenderer;
-    try {
-      renderer = new THREE.WebGLRenderer({
-        antialias: nodes.length < 1200,
-        alpha: false,
-        powerPreference: "high-performance",
-      });
-    } catch {
+    const stage = createStageRenderer({
+      host,
+      antialias: nodes.length < 1200,
+      pixelRatioCap: nodes.length > 1200 ? 1.25 : 1.75,
+      ariaLabel: `Obsidian 2.5D 记忆星图，共 ${nodes.length} 个节点；单击聚焦，双击打开完整笔记，方向键选择`,
+    });
+    if (!stage) {
       onFallbackRef.current();
       return;
     }
-
-    const canvas = renderer.domElement;
-    canvas.setAttribute("role", "img");
-    canvas.setAttribute(
-      "aria-label",
-      `Obsidian 2.5D 记忆星图，共 ${nodes.length} 个节点；单击聚焦，双击打开完整笔记，方向键选择`,
-    );
-    canvas.tabIndex = 0;
-    host.appendChild(canvas);
-
-    renderer.setClearColor(0x101b17, 1);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.setPixelRatio(
-      Math.min(window.devicePixelRatio || 1, nodes.length > 1200 ? 1.25 : 1.75),
-    );
+    const { renderer, canvas } = stage;
 
     const scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0x101b17, 0.035);
@@ -644,9 +362,7 @@ export default function ThreeKnowledgeGraph({
     root.add(searchSpheres);
 
     // 常驻少量高连接节点的标签，让星图不再只是一片“看不清是什么”的光点。
-    const labelLayer = document.createElement("div");
-    labelLayer.className = "space-graph-label-layer";
-    host.appendChild(labelLayer);
+    const labelLayer = createLabelLayer(host);
     const labeledNodes = Object.keys(GROUP_CENTERS).flatMap((group) =>
       nodes
         .filter((node) => node.group === group)
@@ -665,6 +381,9 @@ export default function ThreeKnowledgeGraph({
       labelLayer.appendChild(label);
       return [{ node, position, label }];
     });
+    const stageLabelItems: StageLabelItem[] = labelItems.map(
+      ({ position, label }) => ({ position, element: label }),
+    );
     let searchActive = false;
     const applySearchMatches = (ids: string[], active: boolean) => {
       const matches = new Set(ids);
@@ -763,35 +482,7 @@ export default function ThreeKnowledgeGraph({
     const pulseGeometry = new THREE.BufferGeometry();
     pulseGeometry.setAttribute("position", new THREE.BufferAttribute(pulsePositions, 3));
     pulseGeometry.setAttribute("color", new THREE.BufferAttribute(pulseColors, 3));
-    const pulseCanvas = document.createElement("canvas");
-    pulseCanvas.width = 192;
-    pulseCanvas.height = 96;
-    const pulseContext = pulseCanvas.getContext("2d");
-    if (pulseContext) {
-      pulseContext.translate(96, 48);
-      pulseContext.scale(1, 0.42);
-      const halo = pulseContext.createRadialGradient(0, 0, 0, 0, 0, 74);
-      halo.addColorStop(0, "rgba(255,255,255,1)");
-      halo.addColorStop(0.08, "rgba(255,255,255,.94)");
-      halo.addColorStop(0.28, "rgba(215,245,232,.5)");
-      halo.addColorStop(0.62, "rgba(110,210,173,.13)");
-      halo.addColorStop(1, "rgba(110,210,173,0)");
-      pulseContext.fillStyle = halo;
-      pulseContext.beginPath();
-      pulseContext.arc(0, 0, 74, 0, Math.PI * 2);
-      pulseContext.fill();
-      pulseContext.setTransform(1, 0, 0, 1, 0, 0);
-      const streak = pulseContext.createLinearGradient(12, 0, 180, 0);
-      streak.addColorStop(0, "rgba(255,255,255,0)");
-      streak.addColorStop(0.42, "rgba(210,255,237,.2)");
-      streak.addColorStop(0.5, "rgba(255,255,255,.92)");
-      streak.addColorStop(0.58, "rgba(210,255,237,.2)");
-      streak.addColorStop(1, "rgba(255,255,255,0)");
-      pulseContext.fillStyle = streak;
-      pulseContext.fillRect(12, 45, 168, 6);
-    }
-    const pulseTexture = new THREE.CanvasTexture(pulseCanvas);
-    pulseTexture.colorSpace = THREE.SRGBColorSpace;
+    const pulseTexture = createCometTexture();
     const pulseMaterial = new THREE.PointsMaterial({
       size: 0.24,
       sizeAttenuation: true,
@@ -832,20 +523,7 @@ export default function ThreeKnowledgeGraph({
       root.add(halo);
     });
 
-    const nebulaCanvas = document.createElement("canvas");
-    nebulaCanvas.width = 192;
-    nebulaCanvas.height = 192;
-    const nebulaContext = nebulaCanvas.getContext("2d");
-    if (nebulaContext) {
-      const gradient = nebulaContext.createRadialGradient(96, 96, 0, 96, 96, 96);
-      gradient.addColorStop(0, "rgba(255,255,255,.72)");
-      gradient.addColorStop(0.2, "rgba(255,255,255,.23)");
-      gradient.addColorStop(0.58, "rgba(255,255,255,.07)");
-      gradient.addColorStop(1, "rgba(255,255,255,0)");
-      nebulaContext.fillStyle = gradient;
-      nebulaContext.fillRect(0, 0, 192, 192);
-    }
-    const nebulaTexture = new THREE.CanvasTexture(nebulaCanvas);
+    const nebulaTexture = createNebulaTexture();
     Object.entries(GROUP_CENTERS).forEach(([group, center], groupIndex) => {
       const groupNode = nodes.find((node) => node.group === group);
       if (!groupNode) return;
@@ -904,168 +582,11 @@ export default function ThreeKnowledgeGraph({
     galaxyDust.renderOrder = 0;
     root.add(galaxyDust);
 
-    // 选中节点是一枚悬浮的“记忆数据核心”：有天体的体量感，但不模拟真实星球。
-    // 粒子扫描、测地骨架和晶体内核共同表达未来感，避免重新堆叠装饰性轨道。
-    const focusArtifact = new THREE.Group();
-    const shellPointCount = 460;
-    const shellPositions = new Float32Array(shellPointCount * 3);
-    const shellPhases = new Float32Array(shellPointCount);
-    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-    for (let index = 0; index < shellPointCount; index += 1) {
-      const y = 1 - ((index + 0.5) / shellPointCount) * 2;
-      const radial = Math.sqrt(1 - y * y);
-      const angle = goldenAngle * index;
-      const shellRadius = 0.36 * (0.972 + seeded(`focus-shell:${index}`) * 0.032);
-      shellPositions.set([
-        Math.cos(angle) * radial * shellRadius,
-        y * shellRadius,
-        Math.sin(angle) * radial * shellRadius,
-      ], index * 3);
-      shellPhases[index] = seeded(`focus-shell:${index}:phase`) * Math.PI * 2;
-    }
-    const focusShellGeometry = new THREE.BufferGeometry();
-    focusShellGeometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(shellPositions, 3),
-    );
-    focusShellGeometry.setAttribute(
-      "aPhase",
-      new THREE.BufferAttribute(shellPhases, 1),
-    );
-    const focusShellMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0 },
-        uAccent: { value: new THREE.Color("#ffffff") },
-      },
-      vertexShader: `
-        attribute float aPhase;
-        uniform float uTime;
-        varying float vEnergy;
-        void main() {
-          float scanHeight = sin(uTime * 0.58) * 0.24;
-          float scan = exp(-abs(position.y - scanHeight) * 38.0);
-          float flicker = 0.58 + sin(uTime * 1.6 + aPhase) * 0.18;
-          vEnergy = min(1.0, flicker + scan * 0.84);
-          vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_Position = projectionMatrix * viewPosition;
-          gl_PointSize = 2.0 + scan * 3.6 + flicker * 0.8;
-        }
-      `,
-      fragmentShader: `
-        uniform vec3 uAccent;
-        varying float vEnergy;
-        void main() {
-          vec2 point = gl_PointCoord - vec2(0.5);
-          float radius = length(point);
-          if (radius > 0.5) discard;
-          float alpha = smoothstep(0.5, 0.08, radius) * (0.46 + vEnergy * 0.54);
-          vec3 color = mix(uAccent, vec3(1.0), vEnergy * 0.72);
-          gl_FragColor = vec4(color, alpha);
-        }
-      `,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const focusShell = new THREE.Points(focusShellGeometry, focusShellMaterial);
-    focusShell.renderOrder = 7;
+    const focusArtifact = createFocusArtifact(pulseTexture);
+    root.add(focusArtifact.group);
 
-    const focusLatticeMaterial = new THREE.LineBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.28,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const focusLattice = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(0.372, 2), 18),
-      focusLatticeMaterial,
-    );
-    focusLattice.renderOrder = 6;
-
-    const focusCoreMaterial = new THREE.MeshPhysicalMaterial({
-      color: 0xffffff,
-      emissive: 0xffffff,
-      emissiveIntensity: 1.45,
-      roughness: 0.11,
-      metalness: 0.36,
-      transmission: 0.2,
-      thickness: 0.8,
-      clearcoat: 1,
-      clearcoatRoughness: 0.04,
-      transparent: true,
-      opacity: 0.9,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const focusCore = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.14, 1),
-      focusCoreMaterial,
-    );
-    focusCore.renderOrder = 9;
-
-    const focusCageMaterial = new THREE.LineBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.58,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const focusCage = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(0.19, 1), 8),
-      focusCageMaterial,
-    );
-    focusCage.renderOrder = 8;
-
-    const focusBloomMaterial = new THREE.SpriteMaterial({
-      map: pulseTexture,
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.22,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const focusBloom = new THREE.Sprite(focusBloomMaterial);
-    focusBloom.scale.set(1.36, 0.42, 1);
-    focusBloom.renderOrder = 5;
-    const focusLight = new THREE.PointLight(0xffffff, 2.6, 2.65, 1.7);
-    focusArtifact.add(
-      focusBloom,
-      focusLattice,
-      focusShell,
-      focusCage,
-      focusCore,
-      focusLight,
-    );
-    focusArtifact.visible = false;
-    focusArtifact.renderOrder = 6;
-    root.add(focusArtifact);
-
-    const backgroundPositions = new Float32Array(360 * 3);
-    for (let index = 0; index < 360; index += 1) {
-      const radius = 8 + seeded(`background:${index}`) * 18;
-      const theta = seeded(`background:${index}:theta`) * Math.PI * 2;
-      const phi = Math.acos(2 * seeded(`background:${index}:phi`) - 1);
-      backgroundPositions.set([
-        radius * Math.sin(phi) * Math.cos(theta),
-        radius * Math.sin(phi) * Math.sin(theta),
-        radius * Math.cos(phi),
-      ], index * 3);
-    }
-    const backgroundGeometry = new THREE.BufferGeometry();
-    backgroundGeometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(backgroundPositions, 3),
-    );
-    const backgroundMaterial = new THREE.PointsMaterial({
-      color: 0xcfe2d7,
-      size: 0.027,
-      transparent: true,
-      opacity: 0.48,
-      depthWrite: false,
-    });
-    const background = new THREE.Points(backgroundGeometry, backgroundMaterial);
-    scene.add(background);
+    const starfield = createStarfield();
+    scene.add(starfield.points);
 
     nodeGeometry.computeBoundingBox();
     const bounds = nodeGeometry.boundingBox ?? new THREE.Box3(
@@ -1074,15 +595,13 @@ export default function ThreeKnowledgeGraph({
     );
     const homeTarget = bounds.getCenter(new THREE.Vector3());
     const boundsSize = bounds.getSize(new THREE.Vector3());
-    const fitDistance = (aspect: number) => {
-      const verticalFov = THREE.MathUtils.degToRad(camera.fov);
-      const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(0.3, aspect));
-      const verticalDistance = boundsSize.y / (2 * Math.tan(verticalFov / 2));
-      const horizontalDistance = boundsSize.x / (2 * Math.tan(horizontalFov / 2));
-      return Math.max(10.5, Math.max(verticalDistance, horizontalDistance) * 1.24 + boundsSize.z * 0.45);
-    };
+    const fitHomeDistance = (aspect: number) => fitDistance({
+      fovDeg: camera.fov,
+      aspect,
+      size: boundsSize,
+    });
     let homeCamera = homeTarget.clone().add(
-      new THREE.Vector3(0, 0, fitDistance(camera.aspect)),
+      new THREE.Vector3(0, 0, fitHomeDistance(camera.aspect)),
     );
     camera.position.copy(homeCamera);
 
@@ -1107,21 +626,19 @@ export default function ThreeKnowledgeGraph({
     const pointer = new THREE.Vector2();
     const selectedRef = { current: null as string | null };
     const hoveredRef = { current: null as string | null };
-    let flight: Flight | null = null;
     let pointerStart: [number, number] | null = null;
     let keyboardIndex = 0;
     let visible = true;
 
-    const setFlight = (toCamera: THREE.Vector3, toTarget: THREE.Vector3, duration = 820) => {
-      flight = {
-        startedAt: performance.now(),
-        duration,
-        fromCamera: camera.position.clone(),
-        fromTarget: controls.target.clone(),
-        toCamera,
-        toTarget,
-      };
-    };
+    const flightController = createFlightController({
+      camera,
+      target: controls.target,
+      warp: {
+        material: starfield.material,
+        baseSize: 0.027,
+        baseOpacity: 0.48,
+      },
+    });
 
     const relationCurve = (link: KnowledgeGraphSceneLink) => {
       const source = positionById.get(link.source)!;
@@ -1168,21 +685,15 @@ export default function ThreeKnowledgeGraph({
 
       const lockedId = selectedRef.current;
       const focusPosition = lockedId ? positionById.get(lockedId) : undefined;
-      focusArtifact.visible = Boolean(focusPosition);
+      focusArtifact.setVisible(Boolean(focusPosition));
       if (focusPosition && lockedId) {
         const activeGraphNode = nodeById.get(lockedId);
         const accent = activeGraphNode?.color ?? "#ffffff";
         const artifactAccent = activeGraphNode?.group === "system"
           ? "#48c5a6"
           : accent;
-        focusArtifact.position.copy(focusPosition);
-        focusShellMaterial.uniforms.uAccent.value.set(artifactAccent);
-        focusLatticeMaterial.color.set(artifactAccent);
-        focusCoreMaterial.color.set(artifactAccent);
-        focusCoreMaterial.emissive.set(artifactAccent);
-        focusCageMaterial.color.set(artifactAccent);
-        focusBloomMaterial.color.set(artifactAccent);
-        focusLight.color.set(artifactAccent);
+        focusArtifact.setPosition(focusPosition);
+        focusArtifact.setAccent(artifactAccent);
       }
       clearRelationRibbons();
       if (selectedRef.current) {
@@ -1234,7 +745,7 @@ export default function ThreeKnowledgeGraph({
       setSelectedId(id);
       focusAttributes(id);
       const worldPosition = nodePoints.localToWorld(localPosition.clone());
-      setFlight(
+      flightController.start(
         worldPosition.clone().add(new THREE.Vector3(0, 0.12, 5.1)),
         worldPosition,
       );
@@ -1248,7 +759,7 @@ export default function ThreeKnowledgeGraph({
       setHoveredId(null);
       setDossierMode("dock");
       focusAttributes(null);
-      setFlight(homeCamera.clone(), homeTarget.clone(), 900);
+      flightController.start(homeCamera.clone(), homeTarget.clone(), 900);
     };
     resetViewRef.current = resetView;
 
@@ -1339,7 +850,7 @@ export default function ThreeKnowledgeGraph({
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       homeCamera = homeTarget.clone().add(
-        new THREE.Vector3(0, 0, fitDistance(camera.aspect)),
+        new THREE.Vector3(0, 0, fitHomeDistance(camera.aspect)),
       );
       if (!selectedRef.current) {
         camera.position.copy(homeCamera);
@@ -1382,51 +893,16 @@ export default function ThreeKnowledgeGraph({
         searchSpheres.instanceMatrix.needsUpdate = true;
       }
 
-      if (flight) {
-        const rawProgress = Math.min(1, (now - flight.startedAt) / flight.duration);
-        const progress = easeInOutCubic(rawProgress);
-        const thrust = Math.sin(rawProgress * Math.PI);
-        camera.position.lerpVectors(flight.fromCamera, flight.toCamera, progress);
-        controls.target.lerpVectors(flight.fromTarget, flight.toTarget, progress);
-        camera.fov = 43 + thrust * 5.5;
-        backgroundMaterial.size = 0.027 + thrust * 0.045;
-        backgroundMaterial.opacity = 0.48 + thrust * 0.24;
-        camera.updateProjectionMatrix();
-        if (rawProgress >= 1) {
-          camera.fov = 43;
-          backgroundMaterial.size = 0.027;
-          backgroundMaterial.opacity = 0.48;
-          camera.updateProjectionMatrix();
-          flight = null;
-        }
-      }
+      flightController.tick(now);
 
       if (!pauseRef.current && !reducedMotion && !selectedRef.current) {
         root.rotation.y = Math.sin(seconds * 0.11) * 0.055;
         root.rotation.x = Math.cos(seconds * 0.08) * 0.018;
-        background.rotation.y = seconds * 0.004;
+        starfield.points.rotation.y = seconds * 0.004;
         galaxyDust.rotation.z = Math.sin(seconds * 0.07) * 0.025;
       }
 
-      if (focusArtifact.visible) {
-        const artifactPulse = pauseRef.current || reducedMotion
-          ? 1
-          : 1 + Math.sin(seconds * 1.05) * 0.012;
-        focusArtifact.scale.setScalar(artifactPulse);
-        focusShellMaterial.uniforms.uTime.value =
-          pauseRef.current || reducedMotion ? 0 : seconds;
-        if (!pauseRef.current && !reducedMotion) {
-          focusShell.rotation.y = seconds * 0.11;
-          focusShell.rotation.x = Math.sin(seconds * 0.16) * 0.08;
-          focusLattice.rotation.y = -seconds * 0.055;
-          focusLattice.rotation.z = seconds * 0.032;
-          focusCore.rotation.x = seconds * 0.34;
-          focusCore.rotation.y = seconds * 0.47;
-          focusCage.rotation.x = -seconds * 0.19;
-          focusCage.rotation.z = seconds * 0.23;
-          focusBloomMaterial.opacity = 0.18 + Math.sin(seconds * 1.4) * 0.045;
-        }
-      }
+      focusArtifact.tick(seconds, !pauseRef.current && !reducedMotion);
 
       if (!pauseRef.current && pulseLinks.length > 0) {
         pulseLinks.forEach((link, index) => {
@@ -1444,20 +920,7 @@ export default function ThreeKnowledgeGraph({
 
       controls.update();
       scene.updateMatrixWorld(true);
-      labelItems.forEach(({ position, label }) => {
-        const projected = nodePoints.localToWorld(position.clone()).project(camera);
-        const onScreen =
-          projected.z > -1 &&
-          projected.z < 1 &&
-          Math.abs(projected.x) < 1.08 &&
-          Math.abs(projected.y) < 1.08;
-        label.dataset.visible = onScreen ? "true" : "false";
-        if (onScreen) {
-          const x = (projected.x * 0.5 + 0.5) * host.clientWidth;
-          const y = (-projected.y * 0.5 + 0.5) * host.clientHeight;
-          label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, 13px)`;
-        }
-      });
+      projectLabelItems(stageLabelItems, nodePoints, camera, host);
       renderer.render(scene, camera);
     };
     renderer.setAnimationLoop(animate);
@@ -1476,16 +939,7 @@ export default function ThreeKnowledgeGraph({
       canvas.removeEventListener("dblclick", onDoubleClick);
       canvas.removeEventListener("keydown", onKeyDown);
       canvas.removeEventListener("webglcontextlost", onContextLost);
-      scene.traverse((object) => {
-        if (object instanceof THREE.Mesh || object instanceof THREE.Points || object instanceof THREE.LineSegments) {
-          object.geometry?.dispose();
-          const materials = Array.isArray(object.material) ? object.material : [object.material];
-          materials.forEach((material) => material.dispose());
-        }
-        if (object instanceof THREE.Sprite) {
-          object.material.dispose();
-        }
-      });
+      disposeStage(scene);
       nebulaTexture.dispose();
       pulseTexture.dispose();
       haloGeometry.dispose();
@@ -1522,93 +976,19 @@ export default function ThreeKnowledgeGraph({
         <span>MEMORY CONSTELLATION</span>
         <strong>思考的轨迹，以光连接。</strong>
       </div>
-      <div
-        className="space-graph-search"
-        data-active={normalizedSearchQuery ? "true" : "false"}
-      >
-        <div className="space-graph-search-field">
-          <span aria-hidden="true">⌕</span>
-          <input
-            ref={searchInputRef}
-            type="search"
-            value={searchQuery}
-            onChange={(event) => {
-              setSearchQuery(event.target.value);
-              setSearchCursor(0);
-            }}
-            onKeyDown={handleSearchKeyDown}
-            placeholder="搜索标题与全文"
-            role="combobox"
-            aria-autocomplete="list"
-            aria-label="在关系图中搜索标题与全文"
-            aria-controls="space-graph-search-results"
-            aria-expanded={Boolean(normalizedSearchQuery)}
-          />
-          {searchQuery ? (
-            <button
-              type="button"
-              aria-label="清空关系图搜索"
-              onClick={() => {
-                setSearchQuery("");
-                setSearchCursor(0);
-                searchInputRef.current?.focus();
-              }}
-            >
-              ×
-            </button>
-          ) : (
-            <kbd>/</kbd>
-          )}
-        </div>
-        {normalizedSearchQuery && (
-          <div
-            id="space-graph-search-results"
-            className="space-graph-search-results"
-          >
-            <header>
-              <span>FULL TEXT RADAR</span>
-              <strong>
-                {searchResults.length > 0
-                  ? `${searchResults.length} 个节点命中`
-                  : "没有匹配的节点"}
-              </strong>
-            </header>
-            {searchResults.length > 0 ? (
-              <div role="listbox" aria-label="关系图全文搜索结果">
-                {visibleSearchResults.map((node, visibleIndex) => {
-                  const resultIndex = searchWindowStart + visibleIndex;
-                  return (
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={resultIndex === searchCursor}
-                      key={node.id}
-                      data-active={resultIndex === searchCursor ? "true" : "false"}
-                      style={{ "--search-accent": node.color } as CSSProperties}
-                      onMouseEnter={() => setSearchCursor(resultIndex)}
-                      onClick={() => selectSearchResult(resultIndex)}
-                    >
-                      <i aria-hidden="true" />
-                      <span>
-                        <strong>{node.title}</strong>
-                        <small>{node.kindLabel} · {node.groupLabel}</small>
-                      </span>
-                      <b>{resultIndex + 1}</b>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <p>尝试更短的关键词，或搜索正文中的日语、公司名和技术词。</p>
-            )}
-            <footer>
-              <span><kbd>↑</kbd><kbd>↓</kbd> 切换</span>
-              <span><kbd>Enter</kbd> 飞向节点</span>
-              <span><kbd>Esc</kbd> 清空</span>
-            </footer>
-          </div>
-        )}
-      </div>
+      <StageSearchRadar
+        inputRef={searchInputRef}
+        search={search}
+        meta={(node) => `${node.kindLabel} · ${node.groupLabel}`}
+        resultsId="space-graph-search-results"
+        placeholder="搜索标题与全文"
+        inputAriaLabel="在关系图中搜索标题与全文"
+        listAriaLabel="关系图全文搜索结果"
+        clearAriaLabel="清空关系图搜索"
+        hitUnit="节点"
+        enterLabel="飞向节点"
+        emptyHint="尝试更短的关键词，或搜索正文中的日语、公司名和技术词。"
+      />
       {activeNode && !selectedNode && (
         <div
           className="space-graph-node-card space-graph-node-peek"
@@ -1728,69 +1108,41 @@ export default function ThreeKnowledgeGraph({
         </aside>
       )}
       {openingNode && (
-        <div
-          className="space-graph-portal"
-          style={{ "--node-accent": openingNode.color } as CSSProperties}
-          role="status"
-          aria-live="assertive"
-        >
-          <div className="space-graph-portal-rings" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-            <b />
-          </div>
-          <div>
-            <span>MEMORY GATE · SYNCHRONIZING</span>
-            <strong>{openingNode.title}</strong>
-            <small>正在展开完整记忆</small>
-          </div>
-        </div>
+        <StagePortal
+          accent={openingNode.color}
+          kicker="MEMORY GATE · SYNCHRONIZING"
+          title={openingNode.title}
+          note="正在展开完整记忆"
+        />
       )}
-      <div className="space-graph-controls">
-        <button
-          type="button"
-          aria-label={fullscreen ? "退出全屏" : "全屏查看星图，快捷键 F"}
-          onClick={() => void toggleFullscreen()}
-        >
-          {fullscreen ? "退出全屏" : "全屏"} <kbd>F</kbd>
-        </button>
-        <button type="button" onClick={() => resetViewRef.current()}>
-          回到全景
-        </button>
-        <button
-          type="button"
-          aria-pressed={paused}
-          onClick={() => setPaused((value) => !value)}
-        >
-          {paused ? "继续呼吸" : "暂停动态"}
-        </button>
-        <button
-          type="button"
-          aria-expanded={shortcutHelp}
-          onClick={() => setShortcutHelp((current) => !current)}
-        >
-          快捷键 <kbd>?</kbd>
-        </button>
-      </div>
+      <StageControls
+        fullscreen={fullscreen}
+        fullscreenAriaLabel="全屏查看星图，快捷键 F"
+        onToggleFullscreen={() => void toggleFullscreen()}
+        resetLabel="回到全景"
+        onResetView={() => resetViewRef.current()}
+        paused={paused}
+        onTogglePaused={() => setPaused((value) => !value)}
+        shortcutHelp={shortcutHelp}
+        onToggleShortcuts={() => setShortcutHelp((current) => !current)}
+      />
       {shortcutHelp && (
-        <aside className="space-graph-shortcuts" aria-label="星图快捷键">
-          <header>
-            <div><span>COMMAND DECK</span><strong>星图快捷键</strong></div>
-            <button type="button" onClick={() => setShortcutHelp(false)} aria-label="关闭快捷键">×</button>
-          </header>
-          <div>
-            <span><kbd>/</kbd><b>全文搜索</b></span>
-            <span><kbd>F</kbd><b>全屏</b></span>
-            <span><kbd>D</kbd><b>档案居中／停靠</b></span>
-            <span><kbd>O</kbd><b>打开完整记忆</b></span>
-            <span><kbd>＋</kbd><kbd>－</kbd><b>文字缩放</b></span>
-            <span><kbd>0</kbd><b>恢复 100%</b></span>
-            <span><kbd>←</kbd><kbd>→</kbd><b>切换节点</b></span>
-            <span><kbd>P</kbd><b>暂停／继续动态</b></span>
-            <span><kbd>R</kbd><b>回到全景</b></span>
-          </div>
-        </aside>
+        <StageShortcuts
+          title="星图快捷键"
+          ariaLabel="星图快捷键"
+          onClose={() => setShortcutHelp(false)}
+          entries={[
+            { keys: ["/"], label: "全文搜索" },
+            { keys: ["F"], label: "全屏" },
+            { keys: ["D"], label: "档案居中／停靠" },
+            { keys: ["O"], label: "打开完整记忆" },
+            { keys: ["＋", "－"], label: "文字缩放" },
+            { keys: ["0"], label: "恢复 100%" },
+            { keys: ["←", "→"], label: "切换节点" },
+            { keys: ["P"], label: "暂停／继续动态" },
+            { keys: ["R"], label: "回到全景" },
+          ]}
+        />
       )}
       <div className="space-graph-caption">
         <span>单击锁定 · 拖动探索 · 双击穿越</span>
