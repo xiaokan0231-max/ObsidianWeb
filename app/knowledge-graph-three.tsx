@@ -65,13 +65,20 @@ type Props = {
   onFallback: () => void;
 };
 
+// 分区中心刻意在 z 轴上错层（关于我最近、系统最深），配合更大的节点纵深抖动，
+// 让星图进场即有前后景——早期版本五个分区几乎同深，正对镜头时是一张平面散点图。
 const GROUP_CENTERS: Record<string, [number, number, number]> = {
-  self: [-3.8, 2.15, 0.6],
-  career: [3.8, 2.05, -0.2],
-  study: [-3.65, -2.45, -0.15],
-  analysis: [3.7, -2.35, 0.7],
-  system: [0, 0, -1.25],
+  self: [-3.8, 2.15, 1.9],
+  career: [3.8, 2.05, -0.9],
+  study: [-3.65, -2.45, 0.7],
+  analysis: [3.7, -2.35, -2.1],
+  system: [0, 0, -3.4],
 };
+
+// 常驻机位带一点右上方的 3/4 侧角：正对 z 轴的机位没有视差，纵深读不出来。
+const HOME_DIRECTION = new THREE.Vector3(0.17, 0.14, 1).normalize();
+// 首次进场的出发机位方向（另一侧高处），俯冲到常驻机位的运镜由飞行控制器完成。
+const ENTRY_DIRECTION = new THREE.Vector3(-0.85, 0.55, 1).normalize();
 
 export default function ThreeKnowledgeGraph({
   nodes,
@@ -93,6 +100,8 @@ export default function ThreeKnowledgeGraph({
   });
   const pauseRef = useRef(false);
   const dossierModeRef = useRef<"dock" | "focus">("dock");
+  // 开场运镜只在本次会话第一次装载星图时播放；分区筛选会重建场景，不该重播。
+  const entryPlayedRef = useRef(false);
   const onFallbackRef = useRef(onFallback);
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -249,7 +258,7 @@ export default function ThreeKnowledgeGraph({
     const { renderer, canvas } = stage;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x101b17, 0.035);
+    scene.fog = new THREE.FogExp2(0x101b17, 0.042);
 
     const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 80);
     const root = new THREE.Group();
@@ -282,7 +291,7 @@ export default function ThreeKnowledgeGraph({
       const position = new THREE.Vector3(
         centerX + Math.cos(angle) * radius,
         centerY + Math.sin(angle) * radius * 0.66,
-        centerZ + (seeded(`${node.id}:depth`) - 0.5) * 2.45,
+        centerZ + (seeded(`${node.id}:depth`) - 0.5) * 4.2,
       );
       const color = new THREE.Color(node.color);
       positions.set(position.toArray(), index * 3);
@@ -559,7 +568,7 @@ export default function ThreeKnowledgeGraph({
       dustPositions.set([
         center[0] + Math.cos(angle) * radius,
         center[1] + Math.sin(angle) * radius * 0.56,
-        center[2] - 0.45 + (seeded(`dust:${index}:depth`) - 0.5) * 1.7,
+        center[2] - 0.45 + (seeded(`dust:${index}:depth`) - 0.5) * 2.8,
       ], index * 3);
       const groupColor = new THREE.Color(
         nodes.find((node) => node.group === group)?.color ?? "#9fb5a8",
@@ -601,7 +610,7 @@ export default function ThreeKnowledgeGraph({
       size: boundsSize,
     });
     let homeCamera = homeTarget.clone().add(
-      new THREE.Vector3(0, 0, fitHomeDistance(camera.aspect)),
+      HOME_DIRECTION.clone().multiplyScalar(fitHomeDistance(camera.aspect)),
     );
     camera.position.copy(homeCamera);
 
@@ -639,6 +648,21 @@ export default function ThreeKnowledgeGraph({
         baseOpacity: 0.48,
       },
     });
+
+    // 首次进场的开场运镜：从另一侧高处俯冲到常驻机位，让视差在第一秒
+    // 就把星图的纵深立起来。分区筛选导致的场景重建不重复播放，减弱动态时跳过。
+    if (!entryPlayedRef.current) {
+      entryPlayedRef.current = true;
+      if (!reducedMotion) {
+        camera.position.copy(
+          homeTarget.clone().add(
+            ENTRY_DIRECTION.clone().multiplyScalar(fitHomeDistance(camera.aspect) * 1.42),
+          ),
+        );
+        controls.update();
+        flightController.start(homeCamera.clone(), homeTarget.clone(), 1650);
+      }
+    }
 
     const relationCurve = (link: KnowledgeGraphSceneLink) => {
       const source = positionById.get(link.source)!;
@@ -850,7 +874,7 @@ export default function ThreeKnowledgeGraph({
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       homeCamera = homeTarget.clone().add(
-        new THREE.Vector3(0, 0, fitHomeDistance(camera.aspect)),
+        HOME_DIRECTION.clone().multiplyScalar(fitHomeDistance(camera.aspect)),
       );
       if (!selectedRef.current) {
         camera.position.copy(homeCamera);
@@ -896,10 +920,10 @@ export default function ThreeKnowledgeGraph({
       flightController.tick(now);
 
       if (!pauseRef.current && !reducedMotion && !selectedRef.current) {
-        root.rotation.y = Math.sin(seconds * 0.11) * 0.055;
-        root.rotation.x = Math.cos(seconds * 0.08) * 0.018;
+        root.rotation.y = Math.sin(seconds * 0.11) * 0.08;
+        root.rotation.x = Math.cos(seconds * 0.08) * 0.028;
         starfield.points.rotation.y = seconds * 0.004;
-        galaxyDust.rotation.z = Math.sin(seconds * 0.07) * 0.025;
+        galaxyDust.rotation.z = Math.sin(seconds * 0.07) * 0.032;
       }
 
       focusArtifact.tick(seconds, !pauseRef.current && !reducedMotion);

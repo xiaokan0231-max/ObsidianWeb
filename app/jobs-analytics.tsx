@@ -475,22 +475,38 @@ export default function JobsAnalytics({
 
   return (
     <div className="analytics">
-      <dl className="analytics-head-glance page-stat-strip module-stat-strip" aria-label="当前求职进展摘要">
-        <div>
-          <dt>进行中</dt>
-          <dd>{inFlight}</dd>
+      <dl className="analytics-head-glance" aria-label="当前求职进展摘要">
+        <div data-tone="active">
+          <dt>
+            进行中
+            <small>ACTIVE PIPELINE</small>
+          </dt>
+          <dd><strong>{inFlight}</strong><small>件</small></dd>
+          <span aria-hidden="true">01</span>
         </div>
-        <div>
-          <dt>面试阶段</dt>
-          <dd>{interviewCount}</dd>
+        <div data-tone="interview">
+          <dt>
+            面试阶段
+            <small>INTERVIEW</small>
+          </dt>
+          <dd><strong>{interviewCount}</strong><small>件</small></dd>
+          <span aria-hidden="true">02</span>
         </div>
-        <div>
-          <dt>结果等待</dt>
-          <dd>{resultWaiting}</dd>
+        <div data-tone="waiting">
+          <dt>
+            结果等待
+            <small>WAITING</small>
+          </dt>
+          <dd><strong>{resultWaiting}</strong><small>件</small></dd>
+          <span aria-hidden="true">03</span>
         </div>
-        <div>
-          <dt>可応募</dt>
-          <dd>{readyToApply}</dd>
+        <div data-tone="ready">
+          <dt>
+            可応募
+            <small>READY TO APPLY</small>
+          </dt>
+          <dd><strong>{readyToApply}</strong><small>件</small></dd>
+          <span aria-hidden="true">04</span>
         </div>
       </dl>
 
