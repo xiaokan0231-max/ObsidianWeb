@@ -35,7 +35,17 @@ test("server-renders the Memory Atlas shell", async () => {
   assert.match(html, /<link rel="icon" href="\/favicon\.svg"/i);
   assert.match(html, /正在重建你的记忆关系/);
   assert.match(html, /搜索记忆、公司、日语错误/);
-  assert.match(html, /日语训练/);
+  for (const navigationLabel of [
+    "总览",
+    "求职进展",
+    "岗位机会",
+    "日历",
+    "面试作战",
+    "训练中心",
+    "资料库",
+  ]) {
+    assert.match(html, new RegExp(navigationLabel));
+  }
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 

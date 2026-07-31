@@ -88,7 +88,7 @@ export default function InterviewSharedAsset({
   const visibleIndexes = doc.sections
     .map((_, index) => index)
     .filter((index) => !needle || hits[index] > 0);
-  const companySpecific = target.scope === "company";
+  const roundSpecific = target.scope === "round" || target.scope === "company";
 
   return (
     <div className="shared-asset-view">
@@ -96,13 +96,13 @@ export default function InterviewSharedAsset({
         <div>
           <p className="eyebrow">
             <i />
-            {companySpecific ? "THIS INTERVIEW · COMPANY MOTIVATION" : "COMMON INTERVIEW ASSET"}
+            {roundSpecific ? "THIS ROUND · MOTIVATION" : "COMMON INTERVIEW ASSET"}
           </p>
           <h1>{target.label}</h1>
           <p>
             {target.hint}。
-            {companySpecific
-              ? "内容来自本场面试准备的公司专属回答。"
+            {roundSpecific
+              ? "内容来自当前所选轮次，不会串到同公司的其他轮次。"
               : "内容来自 Obsidian 共通资产，网页只重新整理阅读结构。"}
           </p>
         </div>
@@ -126,8 +126,8 @@ export default function InterviewSharedAsset({
               setQuery("");
               event.currentTarget.blur();
             }}
-            placeholder={companySpecific ? "搜索这份回答（/ 聚焦）" : "搜索这份资产（/ 聚焦）"}
-            aria-label={companySpecific ? "搜索本场志望動機" : "搜索共通资产"}
+            placeholder={roundSpecific ? "搜索这份回答（/ 聚焦）" : "搜索这份资产（/ 聚焦）"}
+            aria-label={roundSpecific ? "搜索本轮志望動機" : "搜索共通资产"}
           />
           {query && (
             <button type="button" onClick={() => setQuery("")} aria-label="清除搜索">×</button>

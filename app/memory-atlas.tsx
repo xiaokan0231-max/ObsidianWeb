@@ -2,6 +2,8 @@
 
 import {
   Fragment,
+  lazy,
+  Suspense,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -20,7 +22,12 @@ import JapaneseTraining from "./japanese-training";
 import LanguageExpressionCourses from "./language-expression-courses";
 import JobsAnalytics from "./jobs-analytics";
 import JobsView from "./jobs-view";
-import { compareJobs, jobSection, normalizeJobStatus, toJobCard } from "@/lib/jobs";
+import type {
+  KnowledgeGraphSceneLink,
+  KnowledgeGraphSceneNode,
+} from "./knowledge-graph-three";
+import { buildFocusBrief, focusDateLabel } from "@/lib/focus-action";
+import { compareJobs, jobSection, toJobCard } from "@/lib/jobs";
 import {
   parseAnnotations,
   parseSeirikou,
@@ -46,6 +53,8 @@ import {
   type Note,
 } from "@/lib/notes";
 
+const ThreeKnowledgeGraph = lazy(() => import("./knowledge-graph-three"));
+
 export type { Note };
 
 type VaultResponse = {
@@ -56,6 +65,28 @@ type VaultResponse = {
 };
 
 type View = "overview" | "session" | "prep" | "review" | "language" | "topics" | "jobs" | "analytics" | "todo" | "graph" | "calendar" | "timeline" | "library";
+type PrimaryNavId =
+  | "overview"
+  | "progress"
+  | "opportunities"
+  | "calendar"
+  | "interview"
+  | "training"
+  | "resources";
+
+type PrimaryNavigationItem = {
+  id: PrimaryNavId;
+  label: string;
+  mobileLabel: string;
+  glyph: string;
+  target: View;
+  views: View[];
+};
+
+type SecondaryNavigationItem = {
+  id: View;
+  label: string;
+};
 
 type CalendarEvent = {
   id: string;
@@ -120,23 +151,103 @@ const GROUPS = {
 } as const;
 
 type GroupKey = keyof typeof GROUPS;
+type LibraryScope = "all" | "evidence" | "action" | "interview" | "language" | "analysis";
+type LibrarySort = "recent" | "connections" | "title";
 
-// 顺序 = 求职推进的顺序：找岗位 → 排进度 → 备面试。关系图和记忆库是回查用的底层，放最后。
-const NAVIGATION: { id: View; label: string; glyph: string }[] = [
-  { id: "overview", label: "总览", glyph: "⌂" },
-  { id: "jobs", label: "AI 推荐岗位", glyph: "★" },
-  { id: "analytics", label: "求职分析", glyph: "◑" },
-  { id: "todo", label: "待办事项", glyph: "✓" },
-  { id: "calendar", label: "日历", glyph: "▦" },
-  { id: "session", label: "本场面试", glyph: "戦" },
-  { id: "prep", label: "面试准备", glyph: "答" },
-  { id: "review", label: "面试复盘", glyph: "復" },
-  { id: "language", label: "日语训练", glyph: "語" },
-  { id: "topics", label: "专项训练", glyph: "組" },
-  { id: "timeline", label: "时间线", glyph: "◷" },
-  { id: "graph", label: "关系图", glyph: "✣" },
-  { id: "library", label: "记忆库", glyph: "▤" },
+const LIBRARY_SCOPES: { id: LibraryScope; label: string }[] = [
+  { id: "all", label: "全部内容" },
+  { id: "evidence", label: "权威与证据" },
+  { id: "action", label: "案件与行动" },
+  { id: "interview", label: "面试资料" },
+  { id: "language", label: "训练资料" },
+  { id: "analysis", label: "AI 分析" },
 ];
+
+const LIBRARY_PAGE_SIZE = 24;
+
+// 一级菜单表达用户目标，不再逐页暴露实现视图。顺序先处理已在进行的案件，再寻找新机会。
+const NAVIGATION: PrimaryNavigationItem[] = [
+  {
+    id: "overview",
+    label: "总览",
+    mobileLabel: "总览",
+    glyph: "⌂",
+    target: "overview",
+    views: ["overview", "todo"],
+  },
+  {
+    id: "progress",
+    label: "求职进展",
+    mobileLabel: "进展",
+    glyph: "◑",
+    target: "analytics",
+    views: ["analytics"],
+  },
+  {
+    id: "opportunities",
+    label: "岗位机会",
+    mobileLabel: "岗位",
+    glyph: "★",
+    target: "jobs",
+    views: ["jobs"],
+  },
+  {
+    id: "calendar",
+    label: "日历",
+    mobileLabel: "日历",
+    glyph: "▦",
+    target: "calendar",
+    views: ["calendar"],
+  },
+  {
+    id: "interview",
+    label: "面试作战",
+    mobileLabel: "面试",
+    glyph: "戦",
+    target: "session",
+    views: ["session", "prep", "review"],
+  },
+  {
+    id: "training",
+    label: "训练中心",
+    mobileLabel: "训练",
+    glyph: "語",
+    target: "language",
+    views: ["language", "topics"],
+  },
+  {
+    id: "resources",
+    label: "资料库",
+    mobileLabel: "资料",
+    glyph: "▤",
+    target: "library",
+    views: ["library", "timeline", "graph"],
+  },
+];
+
+const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigationItem[]>> = {
+  interview: [
+    { id: "session", label: "当前面试" },
+    { id: "prep", label: "通用准备" },
+    { id: "review", label: "面试复盘" },
+  ],
+  training: [
+    { id: "language", label: "日语训练" },
+    { id: "topics", label: "专项训练" },
+  ],
+  resources: [
+    { id: "library", label: "全部资料" },
+    { id: "timeline", label: "时间线" },
+    { id: "graph", label: "关系图" },
+  ],
+};
+
+const MOBILE_PRIMARY_NAV_IDS = new Set<PrimaryNavId>([
+  "overview",
+  "progress",
+  "opportunities",
+  "interview",
+]);
 
 /**
  * 侧栏折叠态存在 `<html data-rail>` 上而不是 React state：
@@ -352,27 +463,53 @@ function typeLabel(type: string) {
     company: "公司卷宗",
     review: "复盘证据",
     transcript: "逐字稿",
+    "transcript-study": "逐字稿研究",
+    "study-annotation": "逐字稿批注",
     study: "学习资料",
     "ai-report": "AI 观点",
+    "ai_review_request": "AI 审查请求",
+    "ai_review_result": "AI 审查结果",
+    analysis: "综合分析",
+    "deep-thought-evidence": "深度思考证据",
+    "deep-thought-opinion": "独立分析观点",
     "interview-answer-review": "回答质量复盘",
     "interview-answer-practice": "回答重练队列",
     "interview-answer-feedback": "回答质量批注",
     "interview-prep-library": "面试标准回答库",
-    "interview-prep": "单场面接准备",
+    "interview-prep": "面试轮次准备",
     policy: "规则",
+    "policy-change": "规则变更",
     material: "素材",
     "training-profile": "训练画像",
     "training-lesson": "训练教材",
     "training-log": "训练记录",
+    "language-curriculum": "训练课程",
+    "language-bank": "语言素材库",
+    "language-session-log": "训练会话",
+    "language-coach-log": "教练记录",
+    "language-batch-log": "训练批次",
     "language-expression-course-progress": "专项训练进度",
     "practice-log": "教练练习",
     "exam-log": "考试记录",
     [JOB_CASE_TYPE]: "应募案件",
+    "excluded-job": "已排除岗位",
+    "job-audit": "案件审计",
+    "job-queue": "岗位队列",
+    job_platform_sync: "平台同步",
+    application_log: "应募记录",
+    "outbound-draft": "联络草稿",
+    application_documents: "应募材料",
+    application_documents_review: "材料审查",
+    application_documents_changelog: "材料变更记录",
+    application_document_strategy: "材料策略",
+    mail: "邮件证据",
+    "review-request": "复盘请求",
+    ledger: "台账",
     todo: "待办",
     moc: "索引",
     note: "笔记",
   };
-  return labels[type] ?? type;
+  return labels[type] ?? type.replace(/[-_]+/g, " ");
 }
 
 function trustLayer(note: Note) {
@@ -387,6 +524,60 @@ function trustLayer(note: Note) {
     return { label: "分析 / 假设", className: "trust-analysis" };
   }
   return { label: "导航 / 素材", className: "trust-reference" };
+}
+
+function libraryScopeMatches(note: Note, scope: LibraryScope) {
+  const type = getType(note);
+  if (scope === "all") return true;
+  if (scope === "evidence") {
+    return ["trust-authority", "trust-evidence"].includes(trustLayer(note).className);
+  }
+  if (scope === "action") {
+    return [
+      JOB_CASE_TYPE,
+      "todo",
+      "job-queue",
+      "job-audit",
+      "application_log",
+      "outbound-draft",
+    ].includes(type);
+  }
+  if (scope === "interview") {
+    return [
+      "review",
+      "transcript",
+      "transcript-study",
+      "study-annotation",
+      "interview-prep",
+      "interview-prep-library",
+      "interview-answer-review",
+      "interview-answer-practice",
+      "interview-answer-feedback",
+    ].includes(type);
+  }
+  if (scope === "language") {
+    return getGroup(note.path) === "study" || type.startsWith("language-") || type.startsWith("training-");
+  }
+  return getGroup(note.path) === "analysis" || [
+    "ai-report",
+    "analysis",
+    "deep-thought-evidence",
+    "deep-thought-opinion",
+    "ai_review_request",
+    "ai_review_result",
+  ].includes(type);
+}
+
+function notePreview(note: Note) {
+  const text = stripMarkdown(note.content).replace(/\s+/g, " ").trim();
+  const title = stripMarkdown(getTitle(note)).replace(/\s+/g, " ").trim();
+  const withoutRepeatedTitle = text.startsWith(title) ? text.slice(title.length).trim() : text;
+  return withoutRepeatedTitle || "这篇记忆暂时没有可预览的正文。";
+}
+
+function noteFolder(path: string) {
+  const folders = path.split("/").slice(0, -1);
+  return folders.length ? folders.join(" / ") : "Vault 根目录";
 }
 
 function extractLinks(content: string) {
@@ -437,25 +628,6 @@ function localDateKey(date = new Date()) {
 }
 
 const ACTIVE_JOB_STATUSES = new Set(["応募済", "書類通過", "面接中"]);
-
-function nextActionDate(note: Note) {
-  return getString(note.frontmatter.next_action).match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1] ?? "9999-12-31";
-}
-
-function comparePriorityCases(left: Note, right: Note) {
-  const leftAction = getString(left.frontmatter.next_action);
-  const rightAction = getString(right.frontmatter.next_action);
-  const star = Number(rightAction.startsWith("⭐")) - Number(leftAction.startsWith("⭐"));
-  if (star) return star;
-  const byActionDate = nextActionDate(left).localeCompare(nextActionDate(right));
-  if (byActionDate) return byActionDate;
-  const stageRank: Record<string, number> = { 面接中: 0, 書類通過: 1, 応募済: 2 };
-  const leftStatus = normalizeJobStatus(getString(left.frontmatter.status)) ?? "";
-  const rightStatus = normalizeJobStatus(getString(right.frontmatter.status)) ?? "";
-  const byStage = (stageRank[leftStatus] ?? 9) - (stageRank[rightStatus] ?? 9);
-  if (byStage) return byStage;
-  return getString(right.frontmatter.status_updated).localeCompare(getString(left.frontmatter.status_updated));
-}
 
 function buildReviewPreview(notes: Note[]): ReviewPreview {
   const studies = notes.filter((note) => getType(note) === "transcript-study");
@@ -549,20 +721,25 @@ function buildCalendarEvents(notes: Note[]): CalendarEvent[] {
       addEvent(note, frontmatterDate, getTitle(note), type === "review" ? 4 : 3);
     }
 
-    // エージェント面談・説明会など単一案件に紐づかない予定は todo の next_action が正本
+    // エージェント面談・説明会など単一案件に紐づかない予定は todo の next_event_at が正本。
+    // 旧 next_action は移行中の互換入力としてだけ残す。
     //（2026-07-24 ワークポート面談が job-case 側に存在せず日历から漏れた実証）。
     // todo 本文は経緯メモが多く誤検出するので frontmatter しか読まない。完了済みは予定ではない。
     if (type === "todo" && todoStatus(note) !== "完了") {
-      const line = getString(note.frontmatter.next_action);
+      const line =
+        getString(note.frontmatter.next_event_at) ||
+        getString(note.frontmatter.next_action);
       const date = line.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
       if (date) addEvent(note, date, line, 3);
       return;
     }
 
-    // 将来日程は状態正本である job-case／todo の next_action だけから作る。
+    // 確定日程は next_event_at を正本にする。自由文 next_action の日付を正本扱いすると、
+    // 「7/29 に返信済み」のような履歴日を未来の締切・面接日に誤認するため。
     // company 本文を再走査すると、同じ面接が証拠記述と案件で二重表示される。
     if (type !== JOB_CASE_TYPE) return;
     const sources = [
+      { line: getString(note.frontmatter.next_event_at), priority: 4, trusted: true },
       { line: getString(note.frontmatter.next_action), priority: 3, trusted: true },
       ...stripFrontmatter(note.content)
         .split("\n")
@@ -619,11 +796,17 @@ function MemoryAtlas() {
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [groupFilter, setGroupFilter] = useState<GroupKey | "all">("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // 模块间切换不继承上一页的滚动位置，否则新页面会从标题或工具栏中段开始。
+  useEffect(() => {
+    window.scrollTo({ left: 0, top: 0 });
+  }, [view]);
 
   const loadVault = useCallback(async () => {
     setLoading(true);
@@ -850,13 +1033,6 @@ function MemoryAtlas() {
     [notes, notesByBasename],
   );
 
-  const filteredNotes = useMemo(() => {
-    return notes.filter((note) => {
-      const groupMatch = groupFilter === "all" || getGroup(note.path) === groupFilter;
-      return groupMatch && noteMatches(note, query);
-    });
-  }, [notes, query, groupFilter]);
-
   const searchResults = useMemo(
     () => notes.filter((note) => noteMatches(note, query)).slice(0, 8),
     [notes, query],
@@ -885,13 +1061,6 @@ function MemoryAtlas() {
       .filter((item) => item.date)
       .sort((left, right) => right.date.localeCompare(left.date));
     const calendarEvents = buildCalendarEvents(notes);
-    const actionableCases = cases.filter((note) => getString(note.frontmatter.next_action));
-    const priority =
-      actionableCases
-        .filter((note) => ACTIVE_JOB_STATUSES.has(normalizeJobStatus(getString(note.frontmatter.status)) ?? ""))
-        .sort(comparePriorityCases)[0] ??
-      actionableCases.sort(comparePriorityCases)[0] ??
-      null;
     const errorDictionary = notes.find((note) => noteBasename(note.path) === "誤用辞典");
     const promotedCorrections = notes.find(
       (note) => noteBasename(note.path) === "日本語矯正_精選",
@@ -932,7 +1101,6 @@ function MemoryAtlas() {
       reviews,
       timeline,
       calendarEvents,
-      priority,
       totalErrors,
       highPriorityErrors,
       promoted,
@@ -950,6 +1118,28 @@ function MemoryAtlas() {
     setSearchOpen(false);
   };
 
+  const navigateToView = (nextView: View) => {
+    if (nextView === "review") setReviewInitialKey(null);
+    // ナビから直接来た時は分析画面由来のフィルタを持ち越さない。
+    if (nextView === "jobs") setJobsInitialStatuses(null);
+    setMobileMoreOpen(false);
+    setView(nextView);
+  };
+
+  const activeNavigation =
+    NAVIGATION.find((item) => item.views.includes(view)) ?? NAVIGATION[0];
+  const secondaryNavigation =
+    SECONDARY_NAVIGATION[activeNavigation.id] ?? [];
+  const mobilePrimaryNavigation = NAVIGATION.filter((item) =>
+    MOBILE_PRIMARY_NAV_IDS.has(item.id),
+  );
+  const mobileMoreNavigation = NAVIGATION.filter(
+    (item) => !MOBILE_PRIMARY_NAV_IDS.has(item.id),
+  );
+  const mobileMoreActive = mobileMoreNavigation.some((item) =>
+    item.views.includes(view),
+  );
+
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="主导航">
@@ -965,14 +1155,9 @@ function MemoryAtlas() {
           {NAVIGATION.map((item) => (
             <button
               key={item.id}
-              className={view === item.id ? "active" : ""}
-              onClick={() => {
-                if (item.id === "review") setReviewInitialKey(null);
-                // ナビから直接来た時は分析画面由来のフィルタを持ち越さない。
-                if (item.id === "jobs") setJobsInitialStatuses(null);
-                setView(item.id);
-              }}
-              aria-current={view === item.id ? "page" : undefined}
+              className={item.views.includes(view) ? "active" : ""}
+              onClick={() => navigateToView(item.target)}
+              aria-current={item.views.includes(view) ? "page" : undefined}
               // 折叠态把文字视觉隐藏，靠这个属性画出 hover 提示气泡。
               data-label={item.label}
             >
@@ -1042,117 +1227,157 @@ function MemoryAtlas() {
         ) : loading && notes.length === 0 ? (
           <LoadingState />
         ) : (
-          <div className="view-container">
-            {view === "overview" && (
-              <Overview
-                notes={notes}
-                derived={derived}
-                onOpen={openNote}
-                onView={setView}
-                onQuery={runSavedQuery}
-                onOpenReview={(key) => {
-                  setReviewInitialKey(key ?? null);
-                  setView("review");
-                }}
-              />
+          <>
+            {secondaryNavigation.length > 0 && (
+              <nav className="section-nav" aria-label={`${activeNavigation.label}二级导航`}>
+                <span>{activeNavigation.label}</span>
+                <div>
+                  {secondaryNavigation.map((item) => (
+                    <button
+                      key={item.id}
+                      className={view === item.id ? "active" : ""}
+                      onClick={() => navigateToView(item.id)}
+                      aria-current={view === item.id ? "page" : undefined}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </nav>
             )}
-            {view === "review" && (
-              <InterviewReview
-                notes={notes}
-                onVaultChanged={loadVault}
-                initialSelectedKey={reviewInitialKey}
-              />
-            )}
-            {view === "session" && (
-              <InterviewSession
-                notes={notes}
-                onOpen={openNote}
-                onOpenWiki={openWikiLink}
-                onOpenCard={openPrepCard}
-                onOpenAsset={openSharedAsset}
-              />
-            )}
-            {view === "prep" && (
-              <InterviewPrep
-                notes={notes}
-                onOpen={openNote}
-              />
-            )}
-            {view === "language" && (
-              <JapaneseTraining onVaultChanged={loadVault} />
-            )}
-            {view === "topics" && (
-              <LanguageExpressionCourses
-                notes={notes}
-                onVaultChanged={loadVault}
-              />
-            )}
-            {view === "jobs" && (
-              <JobsView
-                notes={notes}
-                onOpen={openNote}
-                onVaultChanged={loadVault}
-                initialStatuses={jobsInitialStatuses}
-              />
-            )}
-            {view === "analytics" && (
-              <JobsAnalytics
-                notes={notes}
-                onOpen={openNote}
-                onViewJobs={(statuses) => {
-                  setJobsInitialStatuses(statuses ?? null);
-                  setView("jobs");
-                }}
-              />
-            )}
-            {view === "todo" && (
-              <TodoView notes={notes} onOpen={openNote} />
-            )}
-            {view === "graph" && (
-              <GraphView
-                notes={notes}
-                filter={groupFilter}
-                onFilter={setGroupFilter}
-                onOpen={openNote}
-              />
-            )}
-            {view === "calendar" && (
-              <CalendarView events={derived.calendarEvents} onOpen={openNote} />
-            )}
-            {view === "timeline" && (
-              <TimelineView items={derived.timeline} onOpen={openNote} />
-            )}
-            {view === "library" && (
-              <LibraryView
-                notes={filteredNotes}
-                total={notes.length}
-                filter={groupFilter}
-                query={query}
-                onFilter={setGroupFilter}
-                onQuery={setQuery}
-                onOpen={openNote}
-              />
-            )}
-          </div>
+            <div className="view-container">
+              {view === "overview" && (
+                <Overview
+                  notes={notes}
+                  derived={derived}
+                  onOpen={openNote}
+                  onView={setView}
+                  onQuery={runSavedQuery}
+                  onOpenReview={(key) => {
+                    setReviewInitialKey(key ?? null);
+                    setView("review");
+                  }}
+                />
+              )}
+              {view === "review" && (
+                <InterviewReview
+                  notes={notes}
+                  onVaultChanged={loadVault}
+                  initialSelectedKey={reviewInitialKey}
+                />
+              )}
+              {view === "session" && (
+                <InterviewSession
+                  notes={notes}
+                  onOpen={openNote}
+                  onOpenWiki={openWikiLink}
+                  onOpenCard={openPrepCard}
+                  onOpenAsset={openSharedAsset}
+                />
+              )}
+              {view === "prep" && (
+                <InterviewPrep
+                  notes={notes}
+                  onOpen={openNote}
+                />
+              )}
+              {view === "language" && (
+                <JapaneseTraining onVaultChanged={loadVault} />
+              )}
+              {view === "topics" && (
+                <LanguageExpressionCourses
+                  notes={notes}
+                  onVaultChanged={loadVault}
+                />
+              )}
+              {view === "jobs" && (
+                <JobsView
+                  notes={notes}
+                  onOpen={openNote}
+                  onVaultChanged={loadVault}
+                  initialStatuses={jobsInitialStatuses}
+                />
+              )}
+              {view === "analytics" && (
+                <JobsAnalytics
+                  notes={notes}
+                  onOpen={openNote}
+                  onViewJobs={(statuses) => {
+                    setJobsInitialStatuses(statuses ?? null);
+                    setView("jobs");
+                  }}
+                />
+              )}
+              {view === "todo" && (
+                <TodoView notes={notes} onOpen={openNote} />
+              )}
+              {view === "graph" && (
+                <GraphView
+                  notes={notes}
+                  filter={groupFilter}
+                  onFilter={setGroupFilter}
+                  onOpen={openNote}
+                />
+              )}
+              {view === "calendar" && (
+                <CalendarView events={derived.calendarEvents} onOpen={openNote} />
+              )}
+              {view === "timeline" && (
+                <TimelineView items={derived.timeline} onOpen={openNote} />
+              )}
+              {view === "library" && (
+                <LibraryView
+                  notes={notes}
+                  filter={groupFilter}
+                  query={query}
+                  onFilter={setGroupFilter}
+                  onQuery={setQuery}
+                  onOpen={openNote}
+                />
+              )}
+            </div>
+          </>
         )}
       </main>
 
       <nav className="mobile-nav" aria-label="移动端主导航">
-        {NAVIGATION.map((item) => (
+        {mobilePrimaryNavigation.map((item) => (
           <button
             key={item.id}
-            className={view === item.id ? "active" : ""}
-            onClick={() => {
-              if (item.id === "review") setReviewInitialKey(null);
-              if (item.id === "jobs") setJobsInitialStatuses(null);
-              setView(item.id);
-            }}
+            className={item.views.includes(view) ? "active" : ""}
+            onClick={() => navigateToView(item.target)}
+            aria-current={item.views.includes(view) ? "page" : undefined}
           >
             <span aria-hidden="true">{item.glyph}</span>
-            {item.label}
+            {item.mobileLabel}
           </button>
         ))}
+        <button
+          className={mobileMoreActive || mobileMoreOpen ? "active" : ""}
+          onClick={() => setMobileMoreOpen((open) => !open)}
+          aria-expanded={mobileMoreOpen}
+          aria-controls="mobile-more-menu"
+        >
+          <span aria-hidden="true">•••</span>
+          更多
+        </button>
       </nav>
+
+      {mobileMoreOpen && (
+        <nav id="mobile-more-menu" className="mobile-more-menu" aria-label="移动端更多导航">
+          <small>更多功能</small>
+          {mobileMoreNavigation.map((item) => (
+            <button
+              key={item.id}
+              className={item.views.includes(view) ? "active" : ""}
+              onClick={() => navigateToView(item.target)}
+            >
+              <span aria-hidden="true">{item.glyph}</span>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
       {sharedAssetOverlay && sharedAssetNote && (
         <SharedAssetOverlay
@@ -1251,7 +1476,6 @@ type DerivedData = {
   reviews: Note[];
   timeline: { note: Note; date: string }[];
   calendarEvents: CalendarEvent[];
-  priority: Note | null;
   totalErrors: number;
   highPriorityErrors: number;
   promoted: number;
@@ -1290,9 +1514,9 @@ function Overview({
   const recentChanges = jobs
     .filter((job) => !ACTIVE_JOB_STATUSES.has(job.status) && job.status !== "未応募")
     .slice(0, 3);
-  const priorityAction = derived.priority
-    ? getString(derived.priority.frontmatter.next_action).replace(/^⭐\s*/, "")
-    : "暂无明确的下一步行动";
+  const focusBrief = useMemo(() => buildFocusBrief(notes), [notes]);
+  const primaryFocus = focusBrief.primary;
+  const waitingFocus = focusBrief.waiting[0] ?? null;
 
   const openJobs = jobs
     .filter((job) => job.status === "未応募")
@@ -1302,7 +1526,12 @@ function Overview({
     .filter((value) => value > 0)
     .sort((left, right) => right - left)[0];
   const openTodos = notes
-    .filter((note) => getType(note) === "todo" && todoStatus(note) !== "完了")
+    .filter(
+      (note) =>
+        getType(note) === "todo" &&
+        todoAudience(note) === "user" &&
+        todoStatus(note) !== "完了",
+    )
     .sort(
       (left, right) =>
         (TODO_PRIORITY[todoPriority(left)]?.rank ?? 9) - (TODO_PRIORITY[todoPriority(right)]?.rank ?? 9) ||
@@ -1316,31 +1545,69 @@ function Overview({
 
   return (
     <div className="overview-view">
-      <section className="memory-hero">
-        <div className="eyebrow"><span /> TODAY&apos;S BRIEF</div>
-        <div className="hero-grid">
-          <div className="hero-message">
-            <h1>今天先推进<br />最重要的一步。</h1>
-            <p>
-              选考、面试与复盘都已汇总在这里；先处理有时限、会影响下一轮结果的行动。
-            </p>
-            <button
-              className="primary-action"
-              onClick={() => derived.priority && onOpen(derived.priority)}
-              disabled={!derived.priority}
-            >
-              打开当前重点 <span>→</span>
-            </button>
-          </div>
-          <div className="hero-focus">
-            <div className="focus-number">01</div>
-            <span className="focus-label">现在最重要</span>
-            <h2>{priorityAction}</h2>
-            <div className="focus-meta">
-              <span>{currentCases.length} 个应募案件进行中</span>
-              <span>{derived.reviews.filter((note) => getString(note.frontmatter.result) === "待ち").length} 个结果待回填</span>
+      <section className="memory-hero feature-shell">
+        <div className="eyebrow"><span /> TODAY&apos;S BRIEF · {formatDate(localDateKey())}</div>
+        <div className="hero-layout">
+          <div className="hero-primary">
+            <div className="hero-primary-topline">
+              <span>现在先完成这一件事</span>
+              {primaryFocus && <small>{primaryFocus.context}</small>}
+            </div>
+            <h1>{primaryFocus?.action ?? "当前没有可执行的重点行动"}</h1>
+            {primaryFocus ? (
+              <>
+                <div className="hero-primary-reason">
+                  <span>{primaryFocus.reason}</span>
+                  <i>{primaryFocus.status}</i>
+                </div>
+                <p>
+                  {primaryFocus.detail ||
+                    "这项行动来自未完成待办；完整背景和执行清单保留在 Vault 原文中。"}
+                </p>
+              </>
+            ) : (
+              <p>外部等待不会冒充成你的行动。可以检查行动清单，或继续观察正在推进的案件。</p>
+            )}
+            <div className="hero-primary-actions">
+              <button
+                className="primary-action"
+                onClick={() => primaryFocus && onOpen(primaryFocus.note)}
+                disabled={!primaryFocus}
+              >
+                {primaryFocus?.cta ?? "查看待办"} <span>→</span>
+              </button>
+              <button className="hero-secondary-action" onClick={() => onView("todo")}>
+                查看全部行动
+              </button>
             </div>
           </div>
+
+          <aside className="hero-watch">
+            <div className="hero-watch-head">
+              <span>等待对方</span>
+              <small>{focusBrief.waiting.length} 件观察中</small>
+            </div>
+            {waitingFocus ? (
+              <button type="button" onClick={() => onOpen(waitingFocus.note)}>
+                <small>{waitingFocus.company || waitingFocus.waitingFor}</small>
+                <strong>{waitingFocus.label}</strong>
+                <span>
+                  {waitingFocus.followUpAt
+                    ? `${focusDateLabel(waitingFocus.followUpAt)}后未回复则跟进`
+                    : `${waitingFocus.waitingFor}行动中`}
+                </span>
+              </button>
+            ) : (
+              <div className="hero-watch-empty">
+                <strong>没有外部回复需要盯住</strong>
+                <span>等待事项会与本人可执行行动分开展示。</span>
+              </div>
+            )}
+            <footer>
+              <span>{currentCases.length} 个应募案件进行中</span>
+              {focusBrief.waiting.length > 1 && <span>另有 {focusBrief.waiting.length - 1} 件等待</span>}
+            </footer>
+          </aside>
         </div>
         <div className="hero-stats">
           <Stat value={openJobs.length} label="条待应募岗位" />
@@ -1418,13 +1685,13 @@ function Overview({
         <article className="panel todo-preview-panel">
           <PanelHeading
             kicker="NEXT ACTIONS"
-            title="待办事项"
-            action="全部待办"
+            title="行动清单"
+            action="全部行动"
             onAction={() => onView("todo")}
           />
           <div className="todo-preview-list">
             {openTodos.length === 0 ? (
-              <p className="panel-empty">待办都清空了。</p>
+              <p className="panel-empty">当前没有需要推进的行动。</p>
             ) : (
               openTodos.slice(0, 5).map((note) => (
                 <button key={note.path} onClick={() => onOpen(note)}>
@@ -1432,7 +1699,7 @@ function Overview({
                     {TODO_PRIORITY[todoPriority(note)]?.label ?? todoPriority(note)}
                   </span>
                   <span className="todo-preview-body">
-                    <strong>{getTitle(note)}</strong>
+                    <strong>{todoAction(note)}</strong>
                     <small>{getString(note.frontmatter.category)}</small>
                   </span>
                   <span className={`todo-status st-${todoStatus(note)}`}>{todoStatus(note)}</span>
@@ -1675,6 +1942,66 @@ function MiniGraph({ notes }: { notes: Note[] }) {
   );
 }
 
+function buildKnowledgeGraphScene(
+  notes: Note[],
+  filter: GroupKey | "all",
+): {
+  nodes: KnowledgeGraphSceneNode[];
+  links: KnowledgeGraphSceneLink[];
+} {
+  const visibleNotes = notes.filter(
+    (note) => filter === "all" || getGroup(note.path) === filter,
+  );
+  const visiblePaths = new Set(visibleNotes.map((note) => note.path));
+  const titleIndex = new Map<string, Note>();
+  notes.forEach((note) => {
+    const basename = noteBasename(note.path);
+    titleIndex.set(basename, note);
+    titleIndex.set(note.path.replace(/\.md$/i, ""), note);
+  });
+
+  const links: KnowledgeGraphSceneLink[] = [];
+  const linkKeys = new Set<string>();
+  const degree = new Map<string, number>();
+  visibleNotes.forEach((source) => {
+    extractLinks(source.content).forEach((rawTarget) => {
+      const target = titleIndex.get(rawTarget) ?? titleIndex.get(noteBasename(rawTarget));
+      if (!target || target.path === source.path || !visiblePaths.has(target.path)) return;
+      // 双链的往返引用在视觉上是一条边。去重后，节点大小也不会被同一事实重复放大。
+      const key = [source.path, target.path].sort().join("\u0000");
+      if (linkKeys.has(key)) return;
+      linkKeys.add(key);
+      links.push({ source: source.path, target: target.path });
+      degree.set(source.path, (degree.get(source.path) ?? 0) + 1);
+      degree.set(target.path, (degree.get(target.path) ?? 0) + 1);
+    });
+  });
+
+  return {
+    nodes: visibleNotes.map((note) => {
+      const group = getGroup(note.path);
+      const excerpt = stripMarkdown(stripFrontmatter(note.content))
+        .replace(/[ \t]+/g, " ")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+      return {
+        id: note.path,
+        title: getTitle(note),
+        group,
+        groupLabel: GROUPS[group].label,
+        color: GROUPS[group].color,
+        degree: degree.get(note.path) ?? 0,
+        path: note.path.replace(/\.md$/i, ""),
+        kindLabel: typeLabel(getType(note)),
+        updatedLabel: formatDate(note.stat.mtime, true),
+        outbound: extractLinks(note.content).length,
+        excerpt,
+      };
+    }),
+    links,
+  };
+}
+
 function GraphView({
   notes,
   filter,
@@ -1686,16 +2013,66 @@ function GraphView({
   onFilter: (filter: GroupKey | "all") => void;
   onOpen: (note: Note) => void;
 }) {
+  const [renderer, setRenderer] = useState<"space" | "map">("space");
+  const scene = useMemo(
+    () => buildKnowledgeGraphScene(notes, filter),
+    [notes, filter],
+  );
+  const noteByPath = useMemo(
+    () => new Map(notes.map((note) => [note.path, note])),
+    [notes],
+  );
+  const openSceneNode = useCallback((id: string) => {
+    const note = noteByPath.get(id);
+    if (note) onOpen(note);
+  }, [noteByPath, onOpen]);
+  const fallBackToMap = useCallback(() => setRenderer("map"), []);
+
   return (
     <section className="graph-view">
-      <div className="section-intro">
-        <div><span className="eyebrow"><i /> KNOWLEDGE GRAPH</span><h1>记忆关系图</h1><p>节点大小代表被引用程度。点击任意节点，查看它的事实层级、原文和反向链接。</p></div>
+      <div className="module-control-row">
         <GroupFilters value={filter} onChange={onFilter} />
+        <div className="graph-renderer-toggle" aria-label="关系图显示方式">
+          <button
+            type="button"
+            className={renderer === "space" ? "active" : ""}
+            aria-pressed={renderer === "space"}
+            onClick={() => setRenderer("space")}
+          >
+            3D 星图
+          </button>
+          <button
+            type="button"
+            className={renderer === "map" ? "active" : ""}
+            aria-pressed={renderer === "map"}
+            onClick={() => setRenderer("map")}
+          >
+            简洁模式
+          </button>
+        </div>
       </div>
-      <div className="graph-layout">
-        <KnowledgeGraph notes={notes} filter={filter} onOpen={onOpen} />
+      <div className="graph-layout" data-renderer={renderer}>
+        {renderer === "space" ? (
+          <Suspense
+            fallback={(
+              <div className="space-graph-loading space-graph-loading-shell" role="status">
+                <i />
+                <span>正在载入星图引擎</span>
+              </div>
+            )}
+          >
+            <ThreeKnowledgeGraph
+              nodes={scene.nodes}
+              links={scene.links}
+              onOpen={openSceneNode}
+              onFallback={fallBackToMap}
+            />
+          </Suspense>
+        ) : (
+          <CanvasKnowledgeGraph notes={notes} filter={filter} onOpen={onOpen} />
+        )}
         <aside className="graph-legend">
-          <span>图例</span>
+          <span>{renderer === "space" ? "星系图例" : "图例"}</span>
           {(Object.keys(GROUPS) as GroupKey[]).map((group) => (
             <button key={group} onClick={() => onFilter(group)}>
               <i style={{ background: GROUPS[group].color }} />
@@ -1741,7 +2118,7 @@ function seeded(path: string) {
   return ((hash >>> 0) % 10000) / 10000;
 }
 
-function KnowledgeGraph({ notes, filter, onOpen }: { notes: Note[]; filter: GroupKey | "all"; onOpen: (note: Note) => void }) {
+function CanvasKnowledgeGraph({ notes, filter, onOpen }: { notes: Note[]; filter: GroupKey | "all"; onOpen: (note: Note) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointsRef = useRef<GraphPoint[]>([]);
   const [hovered, setHovered] = useState<GraphPoint | null>(null);
@@ -1797,6 +2174,17 @@ function KnowledgeGraph({ notes, filter, onOpen }: { notes: Note[]; filter: Grou
     });
     pointsRef.current = points;
     const pointByPath = new Map(points.map((point) => [point.note.path, point]));
+    const labelLimit = filter === "all" ? 3 : 12;
+    const labelPaths = new Set(
+      (filter === "all" ? (Object.keys(GROUPS) as GroupKey[]) : [filter])
+        .flatMap((group) =>
+          points
+            .filter((point) => point.group === group)
+            .toSorted((left, right) => right.degree - left.degree)
+            .slice(0, labelLimit)
+            .map((point) => point.note.path),
+        ),
+    );
 
     context.clearRect(0, 0, size.width, size.height);
     context.fillStyle = "#18231e";
@@ -1832,14 +2220,14 @@ function KnowledgeGraph({ notes, filter, onOpen }: { notes: Note[]; filter: Grou
       context.fillStyle = GROUPS[point.group].color; context.fill();
       context.strokeStyle = active ? "#fff" : "rgba(255,255,255,.45)";
       context.lineWidth = active ? 2 : 1; context.stroke();
-      if (point.degree >= 2 || active) {
+      if (labelPaths.has(point.note.path) || active) {
         context.font = `${active ? 600 : 500} ${active ? 13 : 11}px system-ui, sans-serif`;
         context.fillStyle = active ? "#ffffff" : "rgba(244,245,238,.78)";
         context.textAlign = "center";
         context.fillText(getTitle(point.note).slice(0, 18), point.x, point.y + point.radius + 17);
       }
     });
-  }, [visibleNotes, notes, size, hovered]);
+  }, [visibleNotes, notes, size, hovered, filter]);
 
   const findPoint = (event: {
     currentTarget: HTMLCanvasElement;
@@ -1914,18 +2302,6 @@ function CalendarView({ events, onOpen }: { events: CalendarEvent[]; onOpen: (no
 
   return (
     <section className="calendar-view">
-      <div className="section-intro calendar-intro">
-        <div>
-          <span className="eyebrow"><i /> INTERVIEW CALENDAR</span>
-          <h1>求职日历</h1>
-          <p>把未来面谈和历史面试放回同一条时间坐标，日程直接来自 Obsidian 中的明确日期记录。</p>
-        </div>
-        <div className="calendar-summary" aria-label="日程统计">
-          <span><strong>{upcomingAll.length}</strong> 个未来安排</span>
-          <span><strong>{events.filter((event) => event.phase === "past").length}</strong> 条历史记录</span>
-        </div>
-      </div>
-
       <div className="calendar-layout">
         <div className="calendar-board">
           <div className="calendar-toolbar">
@@ -2034,7 +2410,6 @@ function TimelineView({ items, onOpen }: { items: { note: Note; date: string }[]
   }, [items]);
   return (
     <section className="timeline-view">
-      <div className="section-intro"><div><span className="eyebrow"><i /> EVIDENCE TIMELINE</span><h1>记忆时间线</h1><p>按发生日期排列面试、复盘与 AI 分析。修改时间不会覆盖事件本身的时间。</p></div></div>
       <div className="timeline">
         {groups.map(([date, dateItems]) => (
           <div className="timeline-day" key={date}>
@@ -2071,9 +2446,16 @@ function todoPriority(note: Note) {
 function todoStatus(note: Note) {
   return getString(note.frontmatter.status) || "未着手";
 }
+function todoAudience(note: Note) {
+  return getString(note.frontmatter.audience) === "system" ? "system" : "user";
+}
+function todoAction(note: Note) {
+  return getString(note.frontmatter.action) || getTitle(note);
+}
 
 function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => void }) {
   const [tab, setTab] = useState<string>("all");
+  const [audience, setAudience] = useState<"user" | "system">("user");
   const todos = notes
     .filter((note) => getType(note) === "todo")
     .sort((a, b) => {
@@ -2083,29 +2465,49 @@ function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => vo
       return TODO_STATUS.indexOf(todoStatus(a)) - TODO_STATUS.indexOf(todoStatus(b));
     });
 
-  const open = todos.filter((n) => todoStatus(n) !== "完了");
-  const visible = tab === "all" ? todos : todos.filter((n) => todoStatus(n) === tab);
-  const statuses = TODO_STATUS.filter((st) => todos.some((n) => todoStatus(n) === st));
+  const scopedTodos = todos.filter((note) => todoAudience(note) === audience);
+  const open = scopedTodos.filter((n) => todoStatus(n) !== "完了");
+  const visible =
+    tab === "all" ? scopedTodos : scopedTodos.filter((n) => todoStatus(n) === tab);
+  const statuses = TODO_STATUS.filter((st) => scopedTodos.some((n) => todoStatus(n) === st));
+  const systemCount = todos.filter((note) => todoAudience(note) === "system" && todoStatus(note) !== "完了").length;
+  const highPriorityOpen = open.filter((note) => todoPriority(note) === "high").length;
 
   return (
     <section className="todo-view">
-      <div className="section-intro">
+      <div className="section-intro page-head page-head-simple">
         <div>
-          <span className="eyebrow"><i /> NEXT ACTIONS</span>
-          <h1>待办事项</h1>
-          <p>求职推进中需要处理的事项。数据来自 Vault 的 <code>20_求職/_TODO/</code>，在 Obsidian 里改 frontmatter 的 status 即可更新状态。</p>
+          <span className="eyebrow"><i /> {audience === "user" ? "ACTION LIST" : "INTERNAL MAINTENANCE"}</span>
+          <h1>{audience === "user" ? "行动清单" : "系统维护"}</h1>
+          <p>
+            {audience === "user"
+              ? "这里保留全部可执行行动，日常决策仍从总览的“现在先完成这一件事”开始。"
+              : "数据补账、同步修复等内部工作只供维护和追溯，不参与首页重点排序。"}
+          </p>
         </div>
         <div className="jobs-stat">
           <div><strong>{open.length}</strong><span>未完了</span></div>
-          <div><strong>{todos.filter((n) => todoPriority(n) === "high" && todoStatus(n) !== "完了").length}</strong><span>高优先</span></div>
+          <div><strong>{audience === "user" ? highPriorityOpen : scopedTodos.length}</strong><span>{audience === "user" ? "高优先" : "内部记录"}</span></div>
         </div>
       </div>
 
+      {audience === "system" && (
+        <button
+          className="todo-back-to-actions"
+          onClick={() => {
+            setAudience("user");
+            setTab("all");
+          }}
+        >
+          ← 返回行动清单
+        </button>
+      )}
+
       <div className="jobs-controls">
-        <button className={tab === "all" ? "active" : ""} onClick={() => setTab("all")}>全部 <small>{todos.length}</small></button>
+        <button className={tab === "all" ? "active" : ""} onClick={() => setTab("all")}>全部 <small>{scopedTodos.length}</small></button>
         {statuses.map((st) => (
           <button key={st} className={tab === st ? "active" : ""} onClick={() => setTab(st)}>
-            {st} <small>{todos.filter((n) => todoStatus(n) === st).length}</small>
+            {st} <small>{scopedTodos.filter((n) => todoStatus(n) === st).length}</small>
           </button>
         ))}
       </div>
@@ -2121,7 +2523,7 @@ function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => vo
               <header className="todo-head">
                 <div className="todo-titles">
                   <span className={`todo-pri pri-${pri}`}>{TODO_PRIORITY[pri]?.label ?? pri}</span>
-                  <h2>{getTitle(note)}</h2>
+                  <h2>{todoAction(note)}</h2>
                 </div>
                 <span className={`todo-status st-${st}`}>{st}</span>
               </header>
@@ -2148,20 +2550,36 @@ function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => vo
         })}
       </div>
 
-      {todos.length === 0 && (
+      {audience === "user" && systemCount > 0 && (
+        <details className="todo-maintenance-entry">
+          <summary>管理工具</summary>
+          <div>
+            <span>数据补账、同步修复等内部事项</span>
+            <button
+              onClick={() => {
+                setAudience("system");
+                setTab("all");
+              }}
+            >
+              查看系统维护 <small>{systemCount}</small> →
+            </button>
+          </div>
+        </details>
+      )}
+
+      {scopedTodos.length === 0 && (
         <div className="jobs-empty">
-          <p>待办事项还没有。</p>
+          <p>{audience === "user" ? "当前没有行动。" : "当前没有系统维护事项。"}</p>
           <small>在 Vault 的 <code>20_求職/_TODO/</code> 下新建 <code>type: todo</code> 的笔记即可显示。</small>
         </div>
       )}
-      {todos.length > 0 && visible.length === 0 && <div className="jobs-empty"><p>该状态下没有事项。</p></div>}
+      {scopedTodos.length > 0 && visible.length === 0 && <div className="jobs-empty"><p>该状态下没有事项。</p></div>}
     </section>
   );
 }
 
 function LibraryView({
   notes,
-  total,
   filter,
   query,
   onFilter,
@@ -2169,45 +2587,184 @@ function LibraryView({
   onOpen,
 }: {
   notes: Note[];
-  total: number;
   filter: GroupKey | "all";
   query: string;
   onFilter: (filter: GroupKey | "all") => void;
   onQuery: (query: string) => void;
   onOpen: (note: Note) => void;
 }) {
+  const [scope, setScope] = useState<LibraryScope>("all");
+  const [sort, setSort] = useState<LibrarySort>("recent");
+  const [visibleLimit, setVisibleLimit] = useState(LIBRARY_PAGE_SIZE);
+
+  const queryMatched = useMemo(
+    () => notes.filter((note) => noteMatches(note, query)),
+    [notes, query],
+  );
+  const groupMatched = useMemo(
+    () => queryMatched.filter((note) => filter === "all" || getGroup(note.path) === filter),
+    [queryMatched, filter],
+  );
+  const scopeCounts = useMemo(
+    () => Object.fromEntries(
+      LIBRARY_SCOPES.map((item) => [
+        item.id,
+        groupMatched.filter((note) => libraryScopeMatches(note, item.id)).length,
+      ]),
+    ) as Record<LibraryScope, number>,
+    [groupMatched],
+  );
+  const scopeMatched = useMemo(
+    () => queryMatched.filter((note) => libraryScopeMatches(note, scope)),
+    [queryMatched, scope],
+  );
+  const groupCounts = useMemo(() => {
+    const counts = Object.fromEntries(
+      (Object.keys(GROUPS) as GroupKey[]).map((group) => [
+        group,
+        scopeMatched.filter((note) => getGroup(note.path) === group).length,
+      ]),
+    ) as Record<GroupKey, number>;
+    return { ...counts, all: scopeMatched.length };
+  }, [scopeMatched]);
+  const orderedNotes = useMemo(() => {
+    const result = groupMatched.filter((note) => libraryScopeMatches(note, scope));
+    return result.toSorted((left, right) => {
+      if (sort === "connections") {
+        return extractLinks(right.content).length - extractLinks(left.content).length ||
+          right.stat.mtime - left.stat.mtime;
+      }
+      if (sort === "title") {
+        return getTitle(left).localeCompare(getTitle(right), "zh-CN");
+      }
+      return right.stat.mtime - left.stat.mtime;
+    });
+  }, [groupMatched, scope, sort]);
+  const visibleNotes = orderedNotes.slice(0, visibleLimit);
+  const activeScopeLabel = LIBRARY_SCOPES.find((item) => item.id === scope)?.label ?? "全部内容";
+  const hasFilters = Boolean(query) || filter !== "all" || scope !== "all";
+
+  const resetFilters = () => {
+    onQuery("");
+    onFilter("all");
+    setScope("all");
+    setVisibleLimit(LIBRARY_PAGE_SIZE);
+  };
+
   return (
     <section className="library-view">
-      <div className="section-intro library-intro">
-        <div><span className="eyebrow"><i /> MEMORY LIBRARY</span><h1>全部记忆</h1><p>用关键词或字段组合查询原始内容。结果直接来自本机 Obsidian，不建立第二份数据库。</p></div>
-        <div className="library-count"><strong>{notes.length}</strong><span>/ {total} 篇</span></div>
-      </div>
-      <div className="library-controls">
-        <GroupFilters value={filter} onChange={onFilter} />
-        {(query || filter !== "all") && <button className="clear-filter" onClick={() => { onQuery(""); onFilter("all"); }}>清除筛选 ×</button>}
-      </div>
-      <div className="note-grid">
-        {notes.map((note) => {
-          const group = getGroup(note.path);
-          const trust = trustLayer(note);
-          return (
-            <button className="note-card" key={note.path} onClick={() => onOpen(note)}>
-              <div className="note-card-top">
-                <span className="note-group" style={{ color: GROUPS[group].color }}>{GROUPS[group].label}</span>
-                <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
-              </div>
-              <h2>{getTitle(note)}</h2>
-              <p>{stripMarkdown(note.content).slice(0, 165)}</p>
-              <div className="note-card-foot">
-                <span>{typeLabel(getType(note))}</span>
-                <span>{extractLinks(note.content).length} 条关联</span>
-                <span>{formatDate(note.stat.mtime)}</span>
-              </div>
+      <div className="library-workspace">
+        <aside className="library-facets" aria-label="记忆筛选">
+          <div className="library-facet-block">
+            <div className="library-facet-title"><span>内容分区</span><small>按来源目录</small></div>
+            <div className="library-group-list">
+              <button
+                className={filter === "all" ? "active" : ""}
+                onClick={() => { onFilter("all"); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
+              >
+                <span><i className="all" />全部分区</span><strong>{groupCounts.all}</strong>
+              </button>
+              {(Object.keys(GROUPS) as GroupKey[]).map((group) => (
+                <button
+                  key={group}
+                  className={filter === group ? "active" : ""}
+                  onClick={() => { onFilter(group); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
+                >
+                  <span><i style={{ background: GROUPS[group].color }} />{GROUPS[group].label}</span>
+                  <strong>{groupCounts[group]}</strong>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="library-facet-block">
+            <div className="library-facet-title"><span>使用场景</span><small>可交叉筛选</small></div>
+            <div className="library-scope-list">
+              {LIBRARY_SCOPES.map((item) => (
+                <button
+                  key={item.id}
+                  className={scope === item.id ? "active" : ""}
+                  onClick={() => { setScope(item.id); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
+                >
+                  <span>{item.label}</span><strong>{scopeCounts[item.id]}</strong>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="library-query-help">
+            <span>精确搜索</span>
+            <p>顶部搜索框支持 <code>type:</code>、<code>status:</code> 和 <code>folder:</code>。</p>
+          </div>
+        </aside>
+
+        <div className="library-results">
+          <div className="library-result-head">
+            <div>
+              <small>{query ? `搜索 “${query}”` : `${filter === "all" ? "全部分区" : GROUPS[filter].label} · ${activeScopeLabel}`}</small>
+              <h2>{orderedNotes.length} 篇记忆</h2>
+            </div>
+            <div className="library-result-actions">
+              <label>
+                <span>排序</span>
+                <select value={sort} onChange={(event) => setSort(event.target.value as LibrarySort)}>
+                  <option value="recent">最近更新</option>
+                  <option value="connections">关联最多</option>
+                  <option value="title">标题顺序</option>
+                </select>
+              </label>
+              {hasFilters && <button className="clear-filter" onClick={resetFilters}>重置筛选</button>}
+            </div>
+          </div>
+
+          <div className="note-grid">
+            {visibleNotes.map((note) => {
+              const group = getGroup(note.path);
+              const trust = trustLayer(note);
+              const links = extractLinks(note.content).length;
+              return (
+                <button
+                  className="note-card"
+                  key={note.path}
+                  onClick={() => onOpen(note)}
+                  style={{ "--note-accent": GROUPS[group].color } as CSSProperties}
+                >
+                  <div className="note-card-top">
+                    <span className="note-group"><i />{GROUPS[group].label}</span>
+                    <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
+                  </div>
+                  <h2>{getTitle(note)}</h2>
+                  <p>{notePreview(note).slice(0, 190)}</p>
+                  <div className="note-card-source">{noteFolder(note.path)}</div>
+                  <div className="note-card-foot">
+                    <span>{typeLabel(getType(note))}</span>
+                    <span>{links ? `${links} 条关联` : "暂无关联"}</span>
+                    <time dateTime={new Date(note.stat.mtime).toISOString()}>{formatDate(note.stat.mtime)}</time>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {visibleNotes.length < orderedNotes.length && (
+            <button
+              className="library-load-more"
+              onClick={() => setVisibleLimit((current) => current + LIBRARY_PAGE_SIZE)}
+            >
+              再显示 {Math.min(LIBRARY_PAGE_SIZE, orderedNotes.length - visibleNotes.length)} 篇
+              <span>还有 {orderedNotes.length - visibleNotes.length} 篇</span>
             </button>
-          );
-        })}
+          )}
+
+          {orderedNotes.length === 0 && (
+            <div className="library-empty">
+              <strong>没有符合当前条件的记忆</strong>
+              <p>尝试减少关键词，或重置分区与使用场景。</p>
+              {hasFilters && <button onClick={resetFilters}>重置筛选</button>}
+            </div>
+          )}
+        </div>
       </div>
-      {notes.length === 0 && <div className="library-empty">没有符合当前条件的记忆。</div>}
     </section>
   );
 }
