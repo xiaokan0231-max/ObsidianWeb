@@ -1499,6 +1499,8 @@ canvas:focus-visible {
   display: none;
 }
 
+/* 以下 .space-graph-* 舞台 chrome 同时服务两个 3D 视图：记忆星图（关系图）
+   与时之航道（时间线）。改动任何一条规则前，两个视图都要过一遍。 */
 .space-graph-stage,
 .space-graph-loading-shell,
 .space-graph-empty {
@@ -2998,6 +3000,149 @@ canvas:focus-visible {
 .space-graph-index > div small {
   color: rgba(255, 255, 255, .35);
   text-align: right;
+}
+
+/* ===== 时之航道（3D 时间线）专属部件 ===== */
+/* 舞台 chrome 复用上方 .space-graph-*；这里只放航道独有的：布局壳、
+   月份密度 scrubber、标签池（日期站牌／月份大字／日程旗）。 */
+
+/* 时间线的控制行只有渲染方式切换，与关系图一样靠右放。 */
+.timeline-view .module-control-row {
+  justify-content: flex-end;
+}
+
+.time-corridor-layout {
+  min-width: 0;
+  min-height: 640px;
+  background: #18231e;
+}
+
+/* 月份密度条：既是活动直方图（求职冲刺期一眼可见），也是跳转按钮和进度条。 */
+.time-corridor-scrubber {
+  position: absolute;
+  bottom: 34px;
+  left: 50%;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: min(62%, 680px);
+  padding: 8px 10px 5px;
+  border: 1px solid rgba(255, 255, 255, .11);
+  background: rgba(15, 29, 23, .68);
+  backdrop-filter: blur(10px);
+  transform: translateX(-50%);
+}
+
+/* --corridor-progress 由渲染循环逐帧写在舞台元素上，这里只消费。 */
+.time-corridor-scrubber-progress {
+  position: relative;
+  display: block;
+  height: 2px;
+  background: rgba(255, 255, 255, .12);
+}
+
+.time-corridor-scrubber-progress::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: calc(var(--corridor-progress, 0) * 100%);
+  width: 7px;
+  height: 7px;
+  background: #e66d45;
+  border-radius: 50%;
+  box-shadow: 0 0 9px rgba(230, 109, 69, .85);
+  transform: translate(-50%, -50%);
+}
+
+.time-corridor-scrubber > div {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.time-corridor-scrubber button {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 46px;
+  border: 0;
+  padding: 2px 6px;
+  background: transparent;
+  color: rgba(242, 244, 238, .5);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  letter-spacing: .06em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.time-corridor-scrubber button i {
+  width: 100%;
+  height: calc(5px + 22px * var(--bucket-scale, 0));
+  background: linear-gradient(180deg, rgba(154, 223, 198, .74), rgba(154, 223, 198, .16));
+  transition: background 160ms ease;
+}
+
+.time-corridor-scrubber button:hover {
+  color: #fff;
+}
+
+.time-corridor-scrubber button:hover i {
+  background: linear-gradient(180deg, rgba(214, 245, 232, .92), rgba(154, 223, 198, .3));
+}
+
+.time-corridor-scrubber button[data-active="true"] {
+  color: #ffb08d;
+}
+
+.time-corridor-scrubber button[data-active="true"] i {
+  background: linear-gradient(180deg, rgba(230, 109, 69, .95), rgba(230, 109, 69, .22));
+}
+
+/* 站牌与日程旗随纵深衰减：WebGL 的雾管不到 HTML 层，
+   --label-depth-fade 由标签池在重绑时写入。 */
+.space-graph-label-layer .time-corridor-date-label[data-visible="true"],
+.space-graph-label-layer .time-corridor-event-flag[data-visible="true"] {
+  opacity: calc(.72 * var(--label-depth-fade, 1));
+}
+
+/* 站牌：沿用共享标签层的基础样式，只补一个星期角标。 */
+.space-graph-label-layer .time-corridor-date-label small {
+  flex: 0 0 auto;
+  color: rgba(238, 243, 239, .36);
+  font-size: 7px;
+  letter-spacing: .1em;
+}
+
+/* 月份大字：雾中浮现的界碑，宋体拉开与站牌的层级差。 */
+.space-graph-label-layer .time-corridor-month-label b {
+  overflow: visible;
+  color: rgba(154, 223, 198, .82);
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 17px;
+  font-weight: 620;
+  letter-spacing: .3em;
+  text-shadow: 0 0 20px rgba(121, 215, 184, .5), 0 2px 7px #07110d;
+}
+
+/* 日程旗：面接等事件的胶囊标记，将来暖橙、过去灰。 */
+.space-graph-label-layer .time-corridor-event-flag {
+  border: 1px solid rgba(230, 109, 69, .5);
+  padding: 3px 6px;
+  background: rgba(15, 29, 23, .78);
+  color: rgba(255, 197, 168, .92);
+  font-size: 7px;
+  letter-spacing: .08em;
+}
+
+.space-graph-label-layer .time-corridor-event-flag[data-phase="past"] {
+  border-color: rgba(160, 168, 164, .34);
+  color: rgba(202, 208, 204, .62);
 }
 
 .graph-canvas-wrap {
@@ -5535,6 +5680,12 @@ canvas:focus-visible {
   .space-graph-caption > span { display: none; }
   .space-graph-caption { justify-content: flex-end; }
   .space-graph-index { bottom: 34px; left: 14px; }
+  .time-corridor-layout { min-height: 540px; }
+  /* 窄屏上密度条压缩成纯柱状：月份文字让位给触控热区。 */
+  .time-corridor-scrubber { max-width: calc(100% - 24px); bottom: 30px; }
+  .time-corridor-scrubber button { min-width: 26px; padding: 2px 3px; }
+  .time-corridor-scrubber button span { display: none; }
+  .space-graph-label-layer .time-corridor-month-label b { font-size: 13px; letter-spacing: .2em; }
   .timeline-day { grid-template-columns: 85px 24px minmax(0, 1fr); }
   .timeline-date strong { font-size: 16px; }
   .timeline-items { padding-left: 10px; }
