@@ -156,7 +156,8 @@ export const GRAPH_RELATION_LABELS: Record<GraphRelation, string> = {
   references: "普通引用",
 };
 
-function graphGroup(path: string): GraphGroup {
+/** パス先頭の番号が分区の正本。星図・图书馆・图谱が同じ一本を使う。 */
+export function graphGroup(path: string): GraphGroup {
   if (path.startsWith("10_")) return "self";
   if (path.startsWith("20_")) return "career";
   if (path.startsWith("30_")) return "study";
