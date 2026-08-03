@@ -18,26 +18,34 @@ function courseContent() {
     const id = item("c", index + 1);
     return `### ${id}｜語句${index + 1}
 - 级别:: ${index < 16 ? "core" : "extended"}
+- 来源类型:: ${index === 0 ? "真实错误" : "基础巩固"}
 - 日语:: 表現${index + 1}
 - 读音:: ひょうげん${index + 1}
 - 中文功能:: 中文${index + 1}
+- 基础解释:: 面试中高频使用的基础词块。
 - 固定搭配:: 搭配A／搭配B
 - 例句:: 短い例です。
 - 近义表达:: 言い換えA／言い換えB
 - 主题:: AI活用／組織
 - 事实边界:: ${index === 0 ? "仅可作为观点表达" : "无"}
+- 证据:: [[面談_整理稿#q01|q01]]
 `;
   }).join("\n");
   const patterns = Array.from({ length: 18 }, (_, index) => {
     const id = item("s", index + 1);
     return `### ${id}｜句型${index + 1}
 - 级别:: ${index < 12 ? "core" : "extended"}
+- 来源类型:: ${index === 0 ? "自然度升级" : "基础巩固"}
 - 功能:: 组织观点
+- 基础解释:: 先给出判断，再补充依据。
 - 句型:: 〜と考えています
 - 槽位:: 〜替换成自己的判断
+- 易错对比:: 〜だと考えています → 〜と考えています
+- 更自然:: 〜と認識しております／〜という考えです
 - 例句:: 一つの要因だと考えています。
 - 例句:: 段階的に進める必要があると考えています。
 - 主题:: 原因／对策
+- 证据:: [[面談_整理稿#q02|q02]]
 `;
   }).join("\n");
   return `# AI活用推進
@@ -96,7 +104,19 @@ test("专项课程解析稳定 ID、词块、句型和关联", () => {
   assert.ok(course);
   assert.equal(course.chunks.length, 28);
   assert.equal(course.chunks.filter((entry) => entry.level === "core").length, 16);
+  assert.equal(course.chunks[0].learningBasis, "observed-error");
+  assert.equal(course.chunks[0].explanationZh, "面试中高频使用的基础词块。");
+  assert.deepEqual(course.chunks[0].evidenceRefs, ["[[面談_整理稿#q01|q01]]"]);
   assert.equal(course.patterns.length, 18);
+  assert.equal(course.patterns[0].learningBasis, "natural-upgrade");
+  assert.equal(
+    course.patterns[0].contrastJa,
+    "〜だと考えています → 〜と考えています",
+  );
+  assert.deepEqual(course.patterns[0].alternativesJa, [
+    "〜と認識しております",
+    "〜という考えです",
+  ]);
   assert.deepEqual(course.ideaCards[0].relatedChunkIds, ["c01", "c02"]);
   assert.equal(course.corrections[0].correctedJa, "明確に");
   assert.deepEqual(course.corrections[0].evidenceRefs, [

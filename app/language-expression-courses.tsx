@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   deriveLanguageExpressionProgress,
   findLanguageExpressionCourses,
@@ -8,11 +8,14 @@ import {
   parseLanguageExpressionProgress,
   type CorrectionCard,
   type ExpressionChunk,
+  type LearningBasis,
   type LanguageExpressionCourse,
   type LanguageExpressionExercise,
   type SafeRewriteCard,
 } from "@/lib/language-expression-course";
+import { parseInline } from "@/lib/interview-prep-doc";
 import type { Note } from "@/lib/notes";
+import { Inlines } from "./prep-doc-render";
 
 type PracticeMode =
   | "recall"
@@ -43,6 +46,30 @@ type SaveProgress = (
   exercise: LanguageExpressionExercise,
   action: "completed" | "reopened",
 ) => Promise<boolean>;
+type MoveQuestion = (length: number, direction: -1 | 1) => void;
+
+type ChunkLevel = "core" | "extended";
+type PracticeCursor = Record<PracticeMode, number>;
+type StudyPosition = {
+  mode: PracticeMode;
+  chunkLevel: ChunkLevel;
+  cursor: PracticeCursor;
+  updatedAt: string;
+};
+type StoredStudyState = {
+  version: 1;
+  activeCourseId: string;
+  positions: Record<string, StudyPosition>;
+};
+
+const STUDY_POSITION_STORAGE_KEY = "echo:language-expression-position:v1";
+const DEFAULT_CURSOR: PracticeCursor = {
+  recall: 0,
+  collocation: 0,
+  substitution: 0,
+  improv: 0,
+  rewrite: 0,
+};
 
 const MODES: Array<{
   id: PracticeMode;
@@ -87,6 +114,74 @@ const EMPTY_PROGRESS: ProgressState = {
   improvCount: 0,
 };
 
+function isPracticeMode(value: unknown): value is PracticeMode {
+  return MODES.some((mode) => mode.id === value);
+}
+
+function storedCursor(value: unknown): PracticeCursor {
+  const source = value && typeof value === "object"
+    ? value as Partial<Record<PracticeMode, unknown>>
+    : {};
+  return Object.fromEntries(
+    MODES.map(({ id }) => {
+      const cursor = source[id];
+      return [id, typeof cursor === "number" && Number.isFinite(cursor) && cursor >= 0
+        ? Math.floor(cursor)
+        : 0];
+    }),
+  ) as PracticeCursor;
+}
+
+function readStoredStudyState(): StoredStudyState {
+  const fallback: StoredStudyState = {
+    version: 1,
+    activeCourseId: "",
+    positions: {},
+  };
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(STUDY_POSITION_STORAGE_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<StoredStudyState>;
+    const positions: Record<string, StudyPosition> = {};
+    if (parsed.positions && typeof parsed.positions === "object") {
+      for (const [courseId, position] of Object.entries(parsed.positions)) {
+        if (!position || typeof position !== "object") continue;
+        const candidate = position as Partial<StudyPosition>;
+        positions[courseId] = {
+          mode: isPracticeMode(candidate.mode) ? candidate.mode : "recall",
+          chunkLevel: candidate.chunkLevel === "extended" ? "extended" : "core",
+          cursor: storedCursor(candidate.cursor),
+          updatedAt: typeof candidate.updatedAt === "string" ? candidate.updatedAt : "",
+        };
+      }
+    }
+    return {
+      version: 1,
+      activeCourseId: typeof parsed.activeCourseId === "string"
+        ? parsed.activeCourseId
+        : "",
+      positions,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
+  );
+}
+
+function allowsRevealShortcut(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return true;
+  const interactive = target.closest("button, a, [role='button']");
+  return !interactive || interactive.classList.contains("expression-reveal-button");
+}
+
 function completionKey(exercise: LanguageExpressionExercise, itemId: string) {
   return `${exercise}:${itemId}`;
 }
@@ -95,15 +190,32 @@ function levelLabel(level: "core" | "extended") {
   return level === "core" ? "核心" : "扩展";
 }
 
+function learningBasisLabel(basis?: LearningBasis) {
+  if (basis === "observed-error") return "真实错误";
+  if (basis === "natural-upgrade") return "自然度升级";
+  if (basis === "foundation") return "基础巩固";
+  return "";
+}
+
 function evidenceLabel(reference: string) {
   const inner = reference.match(/^\[\[(.+)\]\]$/u)?.[1] ?? reference;
   const alias = inner.split("|").at(-1)?.trim();
   return alias || inner;
 }
 
-function nextIndex(current: number, length: number) {
+function EvidenceRefs({ references }: { references: string[] }) {
+  if (!references.length) return null;
+  return (
+    <p className="expression-evidence">
+      <b>来自面试稿</b>
+      {references.map(evidenceLabel).join(" ／ ")}
+    </p>
+  );
+}
+
+function movedIndex(current: number, length: number, direction: -1 | 1) {
   if (length <= 1) return 0;
-  return (current + 1) % length;
+  return (current + direction + length) % length;
 }
 
 function randomIndex(length: number, previous = -1) {
@@ -149,6 +261,69 @@ function courseProgress(course: LanguageExpressionCourse, notes: Note[]): Progre
   );
 }
 
+function sequentialQuestionCount(
+  course: LanguageExpressionCourse,
+  mode: PracticeMode,
+  chunkLevel: ChunkLevel,
+) {
+  if (mode === "recall") {
+    return course.chunks.filter((chunk) => chunk.level === chunkLevel).length;
+  }
+  if (mode === "collocation") {
+    return course.chunks.filter(
+      (chunk) => chunk.level === chunkLevel && chunk.collocations.length > 0,
+    ).length;
+  }
+  if (mode === "substitution") return course.patterns.length;
+  if (mode === "rewrite") {
+    return course.corrections.length + course.safeRewrites.length;
+  }
+  return 0;
+}
+
+function currentSequentialQuestion(
+  course: LanguageExpressionCourse,
+  mode: PracticeMode,
+  chunkLevel: ChunkLevel,
+  cursor: PracticeCursor,
+): {
+  itemId: string;
+  exercise: LanguageExpressionExercise;
+  length: number;
+} | null {
+  if (mode === "recall" || mode === "collocation") {
+    const chunks = course.chunks.filter(
+      (chunk) =>
+        chunk.level === chunkLevel &&
+        (mode !== "collocation" || chunk.collocations.length > 0),
+    );
+    const item = chunks[cursor[mode] % Math.max(chunks.length, 1)];
+    return item
+      ? { itemId: item.id, exercise: mode, length: chunks.length }
+      : null;
+  }
+  if (mode === "substitution") {
+    const item = course.patterns[
+      cursor.substitution % Math.max(course.patterns.length, 1)
+    ];
+    return item
+      ? {
+          itemId: item.id,
+          exercise: "substitution",
+          length: course.patterns.length,
+        }
+      : null;
+  }
+  if (mode === "rewrite") {
+    const items = [...course.corrections, ...course.safeRewrites];
+    const item = items[cursor.rewrite % Math.max(items.length, 1)];
+    return item
+      ? { itemId: item.id, exercise: "rewrite", length: items.length }
+      : null;
+  }
+  return null;
+}
+
 export default function LanguageExpressionCourses({
   notes,
   onVaultChanged,
@@ -158,20 +333,69 @@ export default function LanguageExpressionCourses({
 }) {
   const courses = useMemo(() => findLanguageExpressionCourses(notes), [notes]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
+  const [storedStudyState, setStoredStudyState] = useState<StoredStudyState | null>(null);
+
+  useEffect(() => {
+    setStoredStudyState(readStoredStudyState());
+  }, []);
+
+  useEffect(() => {
+    if (!storedStudyState) return;
+    try {
+      window.localStorage.setItem(
+        STUDY_POSITION_STORAGE_KEY,
+        JSON.stringify(storedStudyState),
+      );
+    } catch {
+      // 保存領域が使えない環境でも、当日の練習操作そのものは止めない。
+    }
+  }, [storedStudyState]);
+
+  const rememberPosition = useCallback((
+    courseId: string,
+    position: StudyPosition,
+  ) => {
+    setStoredStudyState((current) => {
+      const base = current ?? {
+        version: 1 as const,
+        activeCourseId: courseId,
+        positions: {},
+      };
+      return {
+        ...base,
+        activeCourseId: courseId,
+        positions: {
+          ...base.positions,
+          [courseId]: position,
+        },
+      };
+    });
+  }, []);
+
+  const chooseCourse = (courseId: string) => {
+    setSelectedCourseId(courseId);
+    setStoredStudyState((current) => ({
+      ...(current ?? {
+        version: 1 as const,
+        activeCourseId: courseId,
+        positions: {},
+      }),
+      activeCourseId: courseId,
+    }));
+  };
 
   const selected =
-    courses.find((course) => course.courseId === selectedCourseId) ?? courses[0];
+    courses.find(
+      (course) =>
+        course.courseId === (
+          selectedCourseId ||
+          storedStudyState?.activeCourseId
+        ),
+    ) ?? courses[0];
 
   if (!selected) {
     return (
       <div className="expression-courses-view">
-        <header className="expression-hero">
-          <div>
-            <span className="eyebrow"><i /> LANGUAGE EXPRESSION LAB</span>
-            <h1>专项训练</h1>
-            <p>通过词块、句型和短表达，提高面试现场的自由组装能力。</p>
-          </div>
-        </header>
         <section className="expression-empty">
           <b>語</b>
           <div>
@@ -186,19 +410,6 @@ export default function LanguageExpressionCourses({
 
   return (
     <div className="expression-courses-view">
-      <header className="expression-hero">
-        <div>
-          <span className="eyebrow"><i /> LANGUAGE EXPRESSION LAB</span>
-          <h1>专项训练</h1>
-          <p>不背整段台本。用词块、固定搭配和句型骨架，练习现场自由表达。</p>
-        </div>
-        <div className="expression-hero-principle">
-          <small>TRAINING PRINCIPLE</small>
-          <strong>短素材，反复提取，自由组合</strong>
-          <p>示例只用于确认用法；每次练习都由你自己组织观点。</p>
-        </div>
-      </header>
-
       <div className="expression-course-shell">
         <aside className="expression-catalog" aria-label="专项课程目录">
           <div className="expression-catalog-heading">
@@ -210,7 +421,7 @@ export default function LanguageExpressionCourses({
               type="button"
               key={course.courseId}
               className={course.courseId === selected.courseId ? "active" : ""}
-              onClick={() => setSelectedCourseId(course.courseId)}
+              onClick={() => chooseCourse(course.courseId)}
             >
               <span>{course.topic}</span>
               <strong>{course.title}</strong>
@@ -226,6 +437,9 @@ export default function LanguageExpressionCourses({
           course={selected}
           notes={notes}
           onVaultChanged={onVaultChanged}
+          positionReady={storedStudyState !== null}
+          initialPosition={storedStudyState?.positions[selected.courseId]}
+          onPositionChange={rememberPosition}
         />
       </div>
     </div>
@@ -236,10 +450,16 @@ function CourseWorkbench({
   course,
   notes,
   onVaultChanged,
+  positionReady,
+  initialPosition,
+  onPositionChange,
 }: {
   course: LanguageExpressionCourse;
   notes: Note[];
   onVaultChanged: () => Promise<void>;
+  positionReady: boolean;
+  initialPosition?: StudyPosition;
+  onPositionChange: (courseId: string, position: StudyPosition) => void;
 }) {
   const derivedProgress = useMemo(
     () => courseProgress(course, notes),
@@ -248,14 +468,9 @@ function CourseWorkbench({
   const [localProgress, setLocalProgress] = useState<ProgressState | null>(null);
   const progress = localProgress ?? derivedProgress;
   const [mode, setMode] = useState<PracticeMode>("recall");
-  const [chunkLevel, setChunkLevel] = useState<"core" | "extended">("core");
-  const [cursor, setCursor] = useState<Record<PracticeMode, number>>({
-    recall: 0,
-    collocation: 0,
-    substitution: 0,
-    improv: 0,
-    rewrite: 0,
-  });
+  const [chunkLevel, setChunkLevel] = useState<ChunkLevel>("core");
+  const [cursor, setCursor] = useState<PracticeCursor>({ ...DEFAULT_CURSOR });
+  const [positionRestored, setPositionRestored] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const [resourceOpen, setResourceOpen] = useState(false);
   const [improvSelection, setImprovSelection] = useState({
@@ -266,6 +481,33 @@ function CourseWorkbench({
   const [busyKey, setBusyKey] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!positionReady || positionRestored) return;
+    if (initialPosition) {
+      setMode(initialPosition.mode);
+      setChunkLevel(initialPosition.chunkLevel);
+      setCursor(initialPosition.cursor);
+    }
+    setPositionRestored(true);
+  }, [course.courseId, initialPosition, positionReady, positionRestored]);
+
+  useEffect(() => {
+    if (!positionRestored) return;
+    onPositionChange(course.courseId, {
+      mode,
+      chunkLevel,
+      cursor,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [
+    chunkLevel,
+    course.courseId,
+    cursor,
+    mode,
+    onPositionChange,
+    positionRestored,
+  ]);
 
   const completed = useMemo(
     () => new Set(progress.completedKeys),
@@ -338,17 +580,21 @@ function CourseWorkbench({
     setError("");
   };
 
-  const move = (modeKey: PracticeMode, length: number) => {
+  const move = useCallback((
+    modeKey: PracticeMode,
+    length: number,
+    direction: -1 | 1 = 1,
+  ) => {
     setCursor((current) => ({
       ...current,
-      [modeKey]: nextIndex(current[modeKey], length),
+      [modeKey]: movedIndex(current[modeKey], length, direction),
     }));
     setRevealed(false);
     setResourceOpen(false);
     setMessage("");
-  };
+  }, []);
 
-  const changeChunkLevel = (level: "core" | "extended") => {
+  const changeChunkLevel = (level: ChunkLevel) => {
     setChunkLevel(level);
     setCursor((current) => ({ ...current, recall: 0, collocation: 0 }));
     setRevealed(false);
@@ -366,11 +612,90 @@ function CourseWorkbench({
     }));
     setCursor((current) => ({
       ...current,
-      improv: nextIndex(current.improv, Math.max(improvRecipes(course).length, 1)),
+      improv: movedIndex(
+        current.improv,
+        Math.max(improvRecipes(course).length, 1),
+        1,
+      ),
     }));
     setResourceOpen(false);
     setMessage("");
   };
+
+  const questionCount = useMemo(
+    () => sequentialQuestionCount(course, mode, chunkLevel),
+    [chunkLevel, course, mode],
+  );
+  const currentQuestion = useMemo(
+    () => currentSequentialQuestion(course, mode, chunkLevel, cursor),
+    [chunkLevel, course, cursor, mode],
+  );
+
+  useEffect(() => {
+    if (
+      !positionRestored ||
+      busyKey ||
+      mode === "improv" ||
+      questionCount <= 0
+    ) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        isEditableTarget(event.target)
+      ) {
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        move(mode, questionCount, -1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        if (!currentQuestion) return;
+        const advance = async () => {
+          const key = completionKey(
+            currentQuestion.exercise,
+            currentQuestion.itemId,
+          );
+          if (!completed.has(key)) {
+            const saved = await save(
+              currentQuestion.itemId,
+              currentQuestion.exercise,
+              "completed",
+            );
+            if (!saved) return;
+          }
+          move(mode, currentQuestion.length, 1);
+        };
+        void advance();
+      } else if (
+        (event.key === " " || event.code === "Space") &&
+        !revealed &&
+        allowsRevealShortcut(event.target)
+      ) {
+        event.preventDefault();
+        setRevealed(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    busyKey,
+    completed,
+    currentQuestion,
+    mode,
+    move,
+    positionRestored,
+    questionCount,
+    revealed,
+    save,
+  ]);
 
   return (
     <main className="expression-workbench">
@@ -378,7 +703,7 @@ function CourseWorkbench({
         <div>
           <small>{course.topic} · FLEXIBLE OUTPUT</small>
           <h2>{course.title}</h2>
-          <p>先主动回忆，再查看短素材。勾选只表示“练过”，随时可以重新打开。</p>
+          <p>不背整段台本；系统会记住上次位置。← 返回上一题，→ 自动标记当前题并前进，Space 查看答案。</p>
         </div>
         <dl>
           <div><dt>核心词块</dt><dd>{recallDone}<span>/{coreChunks.length}</span></dd></div>
@@ -418,7 +743,7 @@ function CourseWorkbench({
           completed={completed}
           busyKey={busyKey}
           onReveal={() => setRevealed(true)}
-          onMove={(length) => move("recall", length)}
+          onMove={(length, direction) => move("recall", length, direction)}
           onSave={save}
         />
       )}
@@ -433,7 +758,7 @@ function CourseWorkbench({
           completed={completed}
           busyKey={busyKey}
           onReveal={() => setRevealed(true)}
-          onMove={(length) => move("collocation", length)}
+          onMove={(length, direction) => move("collocation", length, direction)}
           onSave={save}
         />
       )}
@@ -446,7 +771,7 @@ function CourseWorkbench({
           completed={completed}
           busyKey={busyKey}
           onReveal={() => setRevealed(true)}
-          onMove={(length) => move("substitution", length)}
+          onMove={(length, direction) => move("substitution", length, direction)}
           onSave={save}
         />
       )}
@@ -472,7 +797,7 @@ function CourseWorkbench({
           completed={completed}
           busyKey={busyKey}
           onReveal={() => setRevealed(true)}
-          onMove={(length) => move("rewrite", length)}
+          onMove={(length, direction) => move("rewrite", length, direction)}
           onSave={save}
         />
       )}
@@ -532,7 +857,51 @@ function PracticeHeader({
   );
 }
 
-function CompleteAndNextButton({
+function QuestionNavigation({
+  onPrevious,
+  disabled = false,
+}: {
+  onPrevious: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="expression-question-navigation" aria-label="题目导航">
+      <button
+        type="button"
+        disabled={disabled}
+        aria-keyshortcuts="ArrowLeft"
+        title="快捷键：←"
+        onClick={onPrevious}
+      >
+        <kbd aria-hidden="true">←</kbd>
+        上一题
+      </button>
+    </div>
+  );
+}
+
+function RevealButton({
+  onClick,
+  children,
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="expression-reveal-button"
+      aria-keyshortcuts="Space"
+      title="快捷键：Space"
+      onClick={onClick}
+    >
+      {children}
+      <kbd aria-hidden="true">Space</kbd>
+    </button>
+  );
+}
+
+function NextQuestionButton({
   itemId,
   exercise,
   completed,
@@ -565,10 +934,12 @@ function CompleteAndNextButton({
         type="button"
         className={`expression-complete expression-complete-next ${done ? "done" : ""}`}
         disabled={Boolean(busyKey)}
+        aria-keyshortcuts="ArrowRight"
+        title="进入下一题，并自动把当前题标记为已练"
         onClick={() => void completeAndNext()}
       >
-        <span aria-hidden="true">{done ? "✓" : "○"}</span>
-        {busy ? "正在保存…" : done ? "已练，下一条" : "标记已练并下一条"}
+        <span aria-hidden="true">✓</span>
+        {busy ? "正在保存…" : "下一题"}
         {!busy && <span aria-hidden="true">→</span>}
       </button>
       {/* 「已练」を取り消す唯一の導線。押し間違いや練習し直しで戻せないと、
@@ -609,7 +980,7 @@ function RecallPractice({
   completed: Set<string>;
   busyKey: string;
   onReveal: () => void;
-  onMove: (length: number) => void;
+  onMove: MoveQuestion;
   onSave: SaveProgress;
 }) {
   const pool = chunks.filter((chunk) => chunk.level === level);
@@ -628,7 +999,11 @@ function RecallPractice({
         total={pool.length}
       />
       <article className="expression-prompt-card">
-        <span className="expression-item-badge">{levelLabel(chunk.level)} · {chunk.id}</span>
+        <span className="expression-item-badge">
+          {[levelLabel(chunk.level), learningBasisLabel(chunk.learningBasis), chunk.id]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
         <small>中文功能</small>
         <h4>{chunk.meaningZh}</h4>
         <p className="expression-topic-line">{chunk.topics.join(" · ")}</p>
@@ -638,6 +1013,14 @@ function RecallPractice({
             <small>日语词块</small>
             <strong lang="ja">{chunk.japanese}</strong>
             {chunk.reading && <p lang="ja">{chunk.reading}</p>}
+            {chunk.explanationZh && (
+              <p className="expression-learning-note">
+                <b>基础解释</b>{chunk.explanationZh}
+              </p>
+            )}
+            <p className="expression-example" lang="ja">
+              <b>例句</b>{chunk.exampleJa}
+            </p>
             <div className="expression-mini-columns">
               <div>
                 <b>常见搭配</b>
@@ -645,27 +1028,34 @@ function RecallPractice({
               </div>
               <div>
                 <b>可替换表达</b>
-                <ul>{chunk.alternativesJa.slice(0, 3).map((item) => <li key={item} lang="ja">{item}</li>)}</ul>
+                <ul>
+                  {chunk.alternativesJa.slice(0, 3).map((item) => (
+                    <li key={item} lang="ja"><Inlines nodes={parseInline(item)} /></li>
+                  ))}
+                </ul>
               </div>
             </div>
             {chunk.factBoundary && (
               <p className="expression-boundary"><b>事实边界</b>{chunk.factBoundary}</p>
             )}
+            <EvidenceRefs references={chunk.evidenceRefs} />
           </div>
         ) : (
-          <button type="button" className="expression-reveal-button" onClick={onReveal}>
-            我已经说过了，查看词块
-          </button>
+          <RevealButton onClick={onReveal}>我已经说过了，查看词块</RevealButton>
         )}
       </article>
       <footer className="expression-practice-actions">
-        <CompleteAndNextButton
+        <QuestionNavigation
+          disabled={Boolean(busyKey)}
+          onPrevious={() => onMove(pool.length, -1)}
+        />
+        <NextQuestionButton
           itemId={chunk.id}
           exercise="recall"
           completed={completed}
           busyKey={busyKey}
           onSave={onSave}
-          onNext={() => onMove(pool.length)}
+          onNext={() => onMove(pool.length, 1)}
         />
       </footer>
     </section>
@@ -703,7 +1093,7 @@ function CollocationPractice({
   completed: Set<string>;
   busyKey: string;
   onReveal: () => void;
-  onMove: (length: number) => void;
+  onMove: MoveQuestion;
   onSave: SaveProgress;
 }) {
   const pool = chunks.filter(
@@ -725,7 +1115,11 @@ function CollocationPractice({
         total={pool.length}
       />
       <article className="expression-prompt-card expression-cloze-card">
-        <span className="expression-item-badge">{levelLabel(chunk.level)} · {chunk.id}</span>
+        <span className="expression-item-badge">
+          {[levelLabel(chunk.level), learningBasisLabel(chunk.learningBasis), chunk.id]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
         <small>{chunk.meaningZh}</small>
         <h4 lang="ja">{clozeCollocation(chunk, collocation)}</h4>
         {revealed ? (
@@ -736,19 +1130,21 @@ function CollocationPractice({
             <p className="expression-hint">再把主题替换成：{chunk.topics.slice(0, 3).join("／")}</p>
           </div>
         ) : (
-          <button type="button" className="expression-reveal-button" onClick={onReveal}>
-            查看搭配
-          </button>
+          <RevealButton onClick={onReveal}>查看搭配</RevealButton>
         )}
       </article>
       <footer className="expression-practice-actions">
-        <CompleteAndNextButton
+        <QuestionNavigation
+          disabled={Boolean(busyKey)}
+          onPrevious={() => onMove(pool.length, -1)}
+        />
+        <NextQuestionButton
           itemId={chunk.id}
           exercise="collocation"
           completed={completed}
           busyKey={busyKey}
           onSave={onSave}
-          onNext={() => onMove(pool.length)}
+          onNext={() => onMove(pool.length, 1)}
         />
       </footer>
     </section>
@@ -771,7 +1167,7 @@ function SubstitutionPractice({
   completed: Set<string>;
   busyKey: string;
   onReveal: () => void;
-  onMove: (length: number) => void;
+  onMove: MoveQuestion;
   onSave: SaveProgress;
 }) {
   const patterns = course.patterns;
@@ -792,7 +1188,11 @@ function SubstitutionPractice({
         total={patterns.length}
       />
       <article className="expression-prompt-card expression-pattern-card">
-        <span className="expression-item-badge">{levelLabel(pattern.level)} · {pattern.id}</span>
+        <span className="expression-item-badge">
+          {[levelLabel(pattern.level), learningBasisLabel(pattern.learningBasis), pattern.id]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
         <small>{pattern.functionZh}</small>
         <h4 lang="ja">{pattern.patternJa}</h4>
         <p className="expression-slots">{pattern.slotsZh}</p>
@@ -806,26 +1206,44 @@ function SubstitutionPractice({
         </div>
         {revealed ? (
           <div className="expression-reveal expression-short-examples">
-            <small>只确认句型用法</small>
+            <small>规则与短例</small>
+            {pattern.explanationZh && (
+              <p className="expression-learning-note">
+                <b>基础解释</b>{pattern.explanationZh}
+              </p>
+            )}
+            {pattern.contrastJa && (
+              <p className="expression-contrast" lang="ja">
+                <b>易错对比</b>{pattern.contrastJa}
+              </p>
+            )}
             {pattern.examplesJa.slice(0, 2).map((example) => (
-              <p key={example} lang="ja">{example}</p>
+              <p className="expression-pattern-example" key={example} lang="ja">{example}</p>
             ))}
+            {pattern.alternativesJa.length > 0 && (
+              <p className="expression-natural-options" lang="ja">
+                <b>更自然</b>{pattern.alternativesJa.slice(0, 2).join(" ／ ")}
+              </p>
+            )}
+            <EvidenceRefs references={pattern.evidenceRefs} />
             <p className="expression-hint">不要复述示例；换成上面的关键词再说一遍。</p>
           </div>
         ) : (
-          <button type="button" className="expression-reveal-button" onClick={onReveal}>
-            查看两个短例
-          </button>
+          <RevealButton onClick={onReveal}>查看两个短例</RevealButton>
         )}
       </article>
       <footer className="expression-practice-actions">
-        <CompleteAndNextButton
+        <QuestionNavigation
+          disabled={Boolean(busyKey)}
+          onPrevious={() => onMove(patterns.length, -1)}
+        />
+        <NextQuestionButton
           itemId={pattern.id}
           exercise="substitution"
           completed={completed}
           busyKey={busyKey}
           onSave={onSave}
-          onNext={() => onMove(patterns.length)}
+          onNext={() => onMove(patterns.length, 1)}
         />
       </footer>
     </section>
@@ -999,7 +1417,7 @@ function RewritePractice({
   completed: Set<string>;
   busyKey: string;
   onReveal: () => void;
-  onMove: (length: number) => void;
+  onMove: MoveQuestion;
   onSave: SaveProgress;
 }) {
   const items: RewriteItem[] = [
@@ -1040,26 +1458,26 @@ function RewritePractice({
               <b>替换练习</b>
               <span>{practice}</span>
             </div>
-            {current.kind === "correction" && current.item.evidenceRefs.length > 0 && (
-              <p className="expression-evidence">
-                证据：{current.item.evidenceRefs.map(evidenceLabel).join(" · ")}
-              </p>
+            {current.kind === "correction" && (
+              <EvidenceRefs references={current.item.evidenceRefs} />
             )}
           </div>
         ) : (
-          <button type="button" className="expression-reveal-button" onClick={onReveal}>
-            我已经改写，查看短句
-          </button>
+          <RevealButton onClick={onReveal}>我已经改写，查看短句</RevealButton>
         )}
       </article>
       <footer className="expression-practice-actions">
-        <CompleteAndNextButton
+        <QuestionNavigation
+          disabled={Boolean(busyKey)}
+          onPrevious={() => onMove(items.length, -1)}
+        />
+        <NextQuestionButton
           itemId={current.item.id}
           exercise="rewrite"
           completed={completed}
           busyKey={busyKey}
           onSave={onSave}
-          onNext={() => onMove(items.length)}
+          onNext={() => onMove(items.length, 1)}
         />
       </footer>
     </section>

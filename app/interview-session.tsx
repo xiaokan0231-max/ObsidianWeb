@@ -7,9 +7,17 @@ import {
   prepBlockText,
   prepInlineText,
   shortLabel,
-  splitPrepDocsByDate,
   type InterviewPrepDoc,
+  type PrepExternalLink,
 } from "@/lib/interview-prep-doc";
+import {
+  groupInterviewPrepDocs,
+  interviewPrepSeriesForDoc,
+  interviewPrepTemporalStatus,
+  mergePrepExternalLinks,
+  prepDocsThroughRound,
+  selectRelevantInterviewPrepDoc,
+} from "@/lib/interview-prep-index";
 import { formatDate, getString, getType, noteBasename, type Note } from "@/lib/notes";
 import { parseInterviewAnswerReview, REVIEW_DIMENSION_META } from "@/lib/review-deep";
 import {
@@ -23,7 +31,7 @@ import {
 } from "@/lib/interview-shared-assets";
 import { Blocks } from "./prep-doc-render";
 
-// 「このタイミングでこの会社を面接する」ための画面。
+// 会社／応募案件を選び、その中の各回を履歴のまま読む画面。
 // 回答库（面试准备）は平時に引く辞書、こちらは当日に読む一枚。用途が違うので分けている。
 // 共通の話術は各社ノートに ![[…]] で埋め込まれており、ここで展開済みの本文として読める。
 
@@ -83,6 +91,10 @@ function countdownLabel(date: string) {
   if (days === 1) return "明天";
   if (days > 1) return `${days} 天后`;
   return `${-days} 天前`;
+}
+
+function hasInterviewDate(date: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(date);
 }
 
 function buildDigest(notes: Note[]) {
@@ -367,23 +379,29 @@ function DocReader({
   );
 }
 
-function ExternalSources({ doc }: { doc: InterviewPrepDoc }) {
+function ExternalSources({
+  links,
+  roundCount,
+}: {
+  links: PrepExternalLink[];
+  roundCount: number;
+}) {
   const featured = [
-    ...doc.externalLinks.filter((link) => link.starred),
-    ...doc.externalLinks.filter((link) => !link.starred),
+    ...links.filter((link) => link.starred),
+    ...links.filter((link) => !link.starred),
   ].slice(0, 3);
-  const groups = [...new Set(doc.externalLinks.map((link) => link.group))];
-  if (doc.externalLinks.length === 0) return null;
+  const groups = [...new Set(links.map((link) => link.group))];
+  if (links.length === 0) return null;
 
   return (
-    <section className="session-sources" aria-label="外部资料">
+    <section className="session-sources" aria-label="案件共用外部资料">
       <header>
-        <span>外部资料</span>
-        <p>准备时实际参考的网页，可直接打开原文核对</p>
+        <span>案件共用资料</span>
+        <p>截至本轮累计 {roundCount} 轮；不会混入之后才获得的资料</p>
       </header>
       <div className="session-source-featured">
         {featured.map((link) => (
-          <a key={link.href} href={link.href} target="_blank" rel="noopener noreferrer">
+          <a key={link.href} href={link.href} title={link.href} target="_blank" rel="noopener noreferrer">
             <small>{link.group}</small>
             <strong>{link.label}</strong>
             <i aria-hidden="true">↗</i>
@@ -391,18 +409,26 @@ function ExternalSources({ doc }: { doc: InterviewPrepDoc }) {
         ))}
       </div>
       <details>
-        <summary>查看全部 {doc.externalLinks.length} 条 URL</summary>
+        <summary>展开全部 {links.length} 个链接</summary>
         <div className="session-source-groups">
           {groups.map((group) => (
             <section key={group}>
               <h3>{group}</h3>
-              {doc.externalLinks.filter((link) => link.group === group).map((link) => (
-                <a key={link.href} href={link.href} target="_blank" rel="noopener noreferrer">
-                  {link.starred && <b>★</b>}
-                  <span>{link.label}</span>
-                  <small>{link.href}</small>
-                </a>
-              ))}
+              <div className="session-source-links">
+                {links.filter((link) => link.group === group).map((link) => (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    title={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {link.starred && <b>★</b>}
+                    <span>{link.label}</span>
+                    <i aria-hidden="true">↗</i>
+                  </a>
+                ))}
+              </div>
             </section>
           ))}
         </div>
@@ -425,16 +451,40 @@ export default function InterviewSession({
   onOpenAsset: (asset: SharedAssetTarget) => void;
 }) {
   const docs = useMemo(() => findInterviewPrepDocs(notes), [notes]);
-  const { upcoming, past } = useMemo(() => splitPrepDocsByDate(docs, todayKey()), [docs]);
+  const today = todayKey();
+  const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
   const digest = useMemo(() => buildDigest(notes), [notes]);
-  // 既定で開くのは「次の面接」。無ければ直近に終わったもの
+  // 既定で開くのは「次の確定面接 → 日程調整中の次回 → 直近の終了回」。
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const selected =
-    docs.find((doc) => doc.note.path === selectedPath) ?? upcoming[0] ?? past[0] ?? null;
-  const motivationAsset = useMemo(
-    () => (selected ? companyMotivationAssetTarget(selected) : null),
-    [selected],
-  );
+    docs.find((doc) => doc.note.path === selectedPath) ??
+    selectRelevantInterviewPrepDoc(docs, today);
+  const selectedSeries = selected
+    ? interviewPrepSeriesForDoc(series, selected)
+    : null;
+  const sourceDocs =
+    selected && selectedSeries
+      ? prepDocsThroughRound(selectedSeries, selected)
+      : selected
+        ? [selected]
+        : [];
+  const externalLinks = mergePrepExternalLinks(sourceDocs);
+  const duplicateCompanyNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of series) {
+      counts.set(item.company, (counts.get(item.company) ?? 0) + 1);
+    }
+    return counts;
+  }, [series]);
+  const motivationAsset = selected
+    ? companyMotivationAssetTarget(selected)
+    : null;
+  const selectedRoundIndex =
+    selected && selectedSeries
+      ? selectedSeries.rounds.findIndex(
+          (doc) => doc.note.path === selected.note.path,
+        )
+      : -1;
 
   // 当日は文書をすぐ読みたいので、既定は1行に畳んでおく。中身は展開すれば出る
   const digestBand = digest && (
@@ -487,12 +537,12 @@ export default function InterviewSession({
           <h1>还没有单场面试的准备文档</h1>
           <p>
             这里读取 vault 里 <code>type: interview-prep</code> 的笔记
-            （<code>20_求職/&lt;会社&gt;/面接準備_&lt;日付&gt;.md</code>）。
+            （每轮一份，例如 <code>20_求職/&lt;会社&gt;/面接準備_案件_s02_一次面接.md</code>）。
           </p>
           <p>
             要新建一份，把面接連絡邮件或求人 URL 交给 AI，说「帮我准备〇〇社的面试」即可
-            —— <code>japan-interview-prep</code> skill 会读 vault 已有的资产，只写这家公司特有的部分。
-            需要告诉它的是：<strong>日期时间・形式（対面／Teams）・面接官の氏名・对应哪个 job-case</strong>。
+            —— <code>japan-interview-prep</code> skill 会先读同一案件的旧轮次和复盘，再新建本轮笔记。
+            日程未定也可以先进入 <code>preparing</code>，不会覆盖上一轮。
           </p>
         </div>
       </div>
@@ -504,15 +554,25 @@ export default function InterviewSession({
       {selected && (
         <>
           {/* 当日に開く画面なので、見出しは1つだけ・文書をできるだけ上に出す */}
-          <header className="session-hero">
+          <header className="session-hero feature-shell feature-shell-light">
             <div className="session-hero-main">
               <p className="eyebrow">
                 <i />
                 THIS INTERVIEW
-                <b className={daysFromToday(selected.date) !== null && daysFromToday(selected.date)! >= 0 ? "future" : ""}>
+                <b
+                  className={
+                    ["preparing", "scheduled", "upcoming"].includes(
+                      interviewPrepTemporalStatus(selected, today),
+                    )
+                      ? "future"
+                      : ""
+                  }
+                >
                   {countdownLabel(selected.date)}
                 </b>
-                {selected.date && <span>{formatDate(selected.date, true)}</span>}
+                {hasInterviewDate(selected.date) && (
+                  <span>{formatDate(selected.date, true)}</span>
+                )}
               </p>
               <h1>{selected.company || selected.title}</h1>
               <p className="session-meta">
@@ -520,36 +580,124 @@ export default function InterviewSession({
               </p>
             </div>
             <div className="session-hero-side">
-              {docs.length > 1 && (
-                <select
-                  aria-label="別の面接に切り替える"
-                  value={selected.note.path}
-                  onChange={(event) => setSelectedPath(event.target.value)}
-                >
-                  {[...upcoming, ...past].map((doc) => (
-                    <option key={doc.note.path} value={doc.note.path}>
-                      {countdownLabel(doc.date)}｜{doc.company || doc.title}
-                    </option>
-                  ))}
-                </select>
+              {series.length > 1 && (
+                <label className="session-company-switch">
+                  <span>公司／应募案件</span>
+                  <select
+                    aria-label="切换公司或应募案件"
+                    value={selectedSeries?.key ?? ""}
+                    onChange={(event) => {
+                      const nextSeries = series.find(
+                        (item) => item.key === event.target.value,
+                      );
+                      const next = nextSeries
+                        ? selectRelevantInterviewPrepDoc(nextSeries.rounds, today)
+                        : null;
+                      if (next) setSelectedPath(next.note.path);
+                    }}
+                  >
+                    {series.map((item) => (
+                      <option key={item.key} value={item.key}>
+                        {item.company}
+                        {duplicateCompanyNames.get(item.company)! > 1 && item.caseLink
+                          ? `｜${item.caseLink}`
+                          : ""}
+                        {`（${item.rounds.length}轮）`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               )}
-              <button type="button" className="prep-source" onClick={() => onOpen(selected.note)}>
-                打开 Obsidian 原笔记 ↗
-              </button>
-              {selected.caseLink && (
-                <button type="button" className="prep-source" onClick={() => onOpenWiki(selected.caseLink)}>
-                  打开案件正本 ↗
+              <div className="session-hero-actions">
+                <button type="button" className="prep-source" onClick={() => onOpen(selected.note)}>
+                  打开 Obsidian 原笔记 ↗
                 </button>
-              )}
+                {selected.caseLink && (
+                  <button type="button" className="prep-source" onClick={() => onOpenWiki(selected.caseLink)}>
+                    打开案件正本 ↗
+                  </button>
+                )}
+              </div>
             </div>
+
+            <nav className="session-rounds" aria-label="切换这家公司的面试轮次">
+              <div className="session-rounds-heading">
+                <span>选考轨迹</span>
+                <small>
+                  {selectedSeries?.rounds.length ?? 0} 场记录
+                  {selectedRoundIndex >= 0 && ` · 当前第 ${selectedRoundIndex + 1} 场`}
+                </small>
+              </div>
+              <div className="session-round-track">
+                {selectedSeries?.rounds.map((doc, index) => {
+                  const active = doc.note.path === selected.note.path;
+                  const status = interviewPrepTemporalStatus(doc, today);
+                  const order = doc.sessionOrder ?? index + 1;
+                  return (
+                    <button
+                      key={doc.note.path}
+                      type="button"
+                      className={`${active ? "active" : ""} ${status}`}
+                      aria-current={active ? "step" : undefined}
+                      onClick={() => setSelectedPath(doc.note.path)}
+                      title={`${doc.round || `第${index + 1}轮`} · ${
+                        hasInterviewDate(doc.date)
+                          ? formatDate(doc.date, true)
+                          : "日程待定"
+                      }`}
+                    >
+                      <span className="session-round-number">
+                        {String(order).padStart(2, "0")}
+                      </span>
+                      <span className="session-round-copy">
+                        <strong>{doc.round || "轮次未命名"}</strong>
+                        <small>
+                          {status === "preparing" ? (
+                            "准备中 · 日程待定"
+                          ) : (
+                            <>
+                              {status === "cancelled" && "已取消 · "}
+                              {hasInterviewDate(doc.date) ? (
+                                <time dateTime={doc.date}>{formatDate(doc.date)}</time>
+                              ) : (
+                                "日程待定"
+                              )}
+                            </>
+                          )}
+                        </small>
+                      </span>
+                    </button>
+                  );
+                })}
+                <span className="session-round-tail">
+                  <i aria-hidden="true" />
+                  <small>后续轮次会在这里继续保留</small>
+                </span>
+              </div>
+              <p className="session-round-policy">
+                <strong>
+                  {series.length > 1
+                    ? `${series.length} 个应募系列`
+                    : "轮次独立保存"}
+                </strong>
+                <span>
+                  {series.length > 1
+                    ? `${docs.length} 场准备可切换查看`
+                    : "切换轮次不会覆盖历史准备"}
+                </span>
+              </p>
+            </nav>
           </header>
 
           {digestBand}
 
-          <ExternalSources doc={selected} />
+          <ExternalSources
+            links={externalLinks}
+            roundCount={sourceDocs.length}
+          />
 
-          <section className="session-assets" aria-label="本场专属与全社共通的面试话术">
-            <span>本场专属</span>
+          <section className="session-assets" aria-label="本轮专属与全局共用的面试话术">
+            <span>本轮专属</span>
             {motivationAsset ? (
               <button
                 type="button"
@@ -571,7 +719,7 @@ export default function InterviewSession({
               </button>
             )}
             <i className="session-assets-separator" aria-hidden="true" />
-            <span>共通资产</span>
+            <span>全局共用</span>
             {SHARED_ASSETS.map((asset) => (
               <button
                 key={"cardId" in asset ? asset.cardId : asset.note}

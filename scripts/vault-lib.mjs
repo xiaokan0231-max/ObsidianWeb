@@ -95,6 +95,34 @@ export async function listMarkdownFiles(dir = VAULT) {
   return out;
 }
 
+/** 参照キーの正規化。lib/knowledge-graph.ts の normalizeIndexKey と同じ規則にする。 */
+export function vaultRefKey(value) {
+  return String(value).normalize("NFKC").trim().replace(/\.md$/iu, "");
+}
+
+/**
+ * vault に実在する全ファイルの参照キー（相対パスと basename の両方）。
+ *
+ * listMarkdownFiles は 90_归档・99_系统/模板・AGENTS.md を意図的に落とすが、
+ * それらは Obsidian からは普通に辿れる実体で、リンクは切れていない。画像や PDF も同じ。
+ * 「グラフの対象外」を「参照先が無い」と報告すると、スクショを1枚貼っただけで
+ * vault:check が落ち、Stop hook が毎回のターンを止め pre-commit が無関係な commit を拒む。
+ * 実体の有無で判定するので、本当に消えた添付・改名されたノートは今まで通り検出できる。
+ */
+export async function listVaultFileKeys(dir = VAULT, keys = new Set()) {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith(".")) continue;
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await listVaultFileKeys(path, keys);
+      continue;
+    }
+    keys.add(vaultRefKey(path.slice(VAULT.length + 1)));
+    keys.add(vaultRefKey(entry.name));
+  }
+  return keys;
+}
+
 /** `owns: [A, B]`（インライン）と `owns:` 直下のリスト、両方の書き方を ID 配列にする。 */
 export function parseOwns(value) {
   if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean);

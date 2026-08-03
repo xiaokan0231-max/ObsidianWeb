@@ -11,29 +11,42 @@ export type LanguageExpressionCourseNote = {
 
 export type ExpressionLevel = "core" | "extended";
 
+export type LearningBasis =
+  | "observed-error"
+  | "foundation"
+  | "natural-upgrade";
+
 export type ExpressionChunk = {
   id: string;
   title: string;
   level: ExpressionLevel;
+  learningBasis?: LearningBasis;
   japanese: string;
   reading: string;
   meaningZh: string;
+  explanationZh: string;
   collocations: string[];
   exampleJa: string;
   alternativesJa: string[];
   topics: string[];
   factBoundary: string;
+  evidenceRefs: string[];
 };
 
 export type SentencePattern = {
   id: string;
   title: string;
   level: ExpressionLevel;
+  learningBasis?: LearningBasis;
   functionZh: string;
+  explanationZh: string;
   patternJa: string;
   slotsZh: string;
+  contrastJa: string;
+  alternativesJa: string[];
   examplesJa: string[];
   topics: string[];
+  evidenceRefs: string[];
 };
 
 export type IdeaCardCategory = "cause" | "solution" | "personal" | "boundary";
@@ -179,6 +192,28 @@ function parseLevel(value: string): ExpressionLevel | undefined {
   return undefined;
 }
 
+function parseLearningBasis(value: string): LearningBasis | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (
+    ["observed-error", "error", "真实错误", "實戰錯誤", "実戦ミス", "誤用"].includes(
+      normalized,
+    )
+  ) {
+    return "observed-error";
+  }
+  if (["foundation", "基础巩固", "基礎定着", "基礎"].includes(normalized)) {
+    return "foundation";
+  }
+  if (
+    ["natural-upgrade", "upgrade", "自然度升级", "自然度昇級", "自然な言い換え"].includes(
+      normalized,
+    )
+  ) {
+    return "natural-upgrade";
+  }
+  return undefined;
+}
+
 function parseIdeaCategory(value: string): IdeaCardCategory | undefined {
   const normalized = value.trim().toLowerCase();
   if (["cause", "原因", "要因"].includes(normalized)) return "cause";
@@ -229,14 +264,19 @@ function chunkFromRaw(item: RawItem): ExpressionChunk {
     id: item.id,
     title: item.title || field(item, "日语", "日本語", "词块", "語句"),
     level: parseLevel(field(item, "级别", "レベル", "level")) ?? "core",
+    learningBasis: parseLearningBasis(
+      field(item, "来源类型", "來源類型", "学習根拠", "learning_basis"),
+    ),
     japanese: field(item, "日语", "日本語", "词块", "語句", "表現"),
     reading: field(item, "读音", "読み", "ふりがな"),
     meaningZh: field(item, "中文", "中文功能", "意味", "中国語"),
+    explanationZh: field(item, "基础解释", "基礎説明", "解释", "説明"),
     collocations: fields(item, "搭配", "固定搭配", "コロケーション", "組み合わせ"),
     exampleJa: field(item, "例句", "例文", "短例文"),
     alternativesJa: fields(item, "近义", "近义表达", "言い換え", "類似表現"),
     topics: fields(item, "主题", "テーマ", "適用テーマ"),
     factBoundary: field(item, "事实边界", "事実境界", "边界", "注意"),
+    evidenceRefs: wikiLinkFields(item, "证据", "証拠", "来源", "出典"),
   };
 }
 
@@ -245,14 +285,21 @@ function patternFromRaw(item: RawItem): SentencePattern {
     id: item.id,
     title: item.title || field(item, "功能", "機能", "句型"),
     level: parseLevel(field(item, "级别", "レベル", "level")) ?? "core",
+    learningBasis: parseLearningBasis(
+      field(item, "来源类型", "來源類型", "学習根拠", "learning_basis"),
+    ),
     functionZh: field(item, "功能", "中文功能", "機能", "用途"),
+    explanationZh: field(item, "基础解释", "基礎説明", "解释", "説明"),
     patternJa: field(item, "句型", "パターン", "型", "日本語"),
     slotsZh: field(item, "槽位", "スロット", "替换位置", "置換箇所"),
+    contrastJa: field(item, "易错对比", "誤用対比", "对比", "対比"),
+    alternativesJa: fields(item, "更自然", "自然表达", "言い換え", "類似表現"),
     // 例文は「文」なので区切り文字で割らない（rawFields）。`まず試し、結果を確認します。`を
     // splitList に通すと 1 文が 2 断片になり、表示が壊れるうえ §363 の「两个例句」検証を
     // 1 文の半分ずつで満たしてしまう。複数example は行を分けて書く。
     examplesJa: rawFields(item, "例句", "例文", "短例文", "例句1", "例句2"),
     topics: fields(item, "主题", "テーマ", "適用テーマ"),
+    evidenceRefs: wikiLinkFields(item, "证据", "証拠", "来源", "出典"),
   };
 }
 

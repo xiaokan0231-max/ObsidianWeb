@@ -1,8 +1,10 @@
 import { tokyoParts } from "@/lib/dojo/utils";
 import {
+  composeJobStatus,
   isJobStatus,
   JOB_CASE_ROOT,
   JOB_CASE_TYPE,
+  jobStatusNoteError,
   statusRequiresChannel,
 } from "@/lib/jobs";
 import { errorResponse, readJson } from "@/lib/server/api";
@@ -11,6 +13,8 @@ import { readNote, writeNote } from "@/lib/server/obsidian";
 type Body = {
   path?: string;
   status?: string;
+  /** 括弧に入る注記。空なら括弧ごと落ちる＝前の理由が新しい状態に居残らない。 */
+  statusNote?: string;
 };
 
 const FRONTMATTER = /^---\n([\s\S]*?)\n---(\r?\n|$)/;
@@ -37,6 +41,7 @@ export async function POST(request: Request) {
     const body = await readJson<Body>(request);
     const path = (body.path ?? "").trim();
     const status = (body.status ?? "").trim();
+    const statusNote = (body.statusNote ?? "").trim();
 
     if (!path.startsWith(JOB_CASE_ROOT) || !path.toLowerCase().endsWith(".md") || path.includes("..")) {
       throw new Error(`只允许修改 ${JOB_CASE_ROOT} 下的应募案件。`);
@@ -44,21 +49,32 @@ export async function POST(request: Request) {
     if (!isJobStatus(status)) {
       throw new Error(`未知的应募状态：${status || "(空)"}`);
     }
+    const noteError = jobStatusNoteError(statusNote);
+    if (noteError) throw new Error(noteError);
+
+    const value = composeJobStatus(status, statusNote);
 
     const note = await readNote(path);
     if (note.frontmatter.type !== JOB_CASE_TYPE) {
       throw new Error("这条笔记不是应募案件，拒绝写入。");
     }
+    // channel を要求するのは台帳が経路別の面接到達率をこの値で集計しているから
+    // （scripts/vault-stats.mjs）。空の channel を通すと集計に無名のバケツが生えて、
+    // generated 区块の数字が静かに壊れる。だから緩めず、代わりに逃げ道を文言で示す。
     if (statusRequiresChannel(status) && !String(note.frontmatter.channel ?? "").trim()) {
-      throw new Error("进入応募后的状态必须先记录实际投递渠道 channel，不能用求人来源代替。");
+      throw new Error(
+        `「${status}」是応募之后的状态，必须有 channel 记录实际投递渠道（source 是求人来源，不能代替）。` +
+          `这条案件还没有 channel＝系统里没有应募记录。真投过就先在笔记里补 channel；` +
+          `没投过（例如募集終了・取扱終了）就选「保留」，把理由写进括号。`,
+      );
     }
-    if (note.frontmatter.status === status) {
-      return Response.json({ ok: true, path, status, unchanged: true });
+    if (note.frontmatter.status === value) {
+      return Response.json({ ok: true, path, status: value, unchanged: true });
     }
 
     const { date } = tokyoParts();
-    await writeNote(path, applyStatus(note.content, status, date));
-    return Response.json({ ok: true, path, status, statusUpdated: date });
+    await writeNote(path, applyStatus(note.content, value, date));
+    return Response.json({ ok: true, path, status: value, statusUpdated: date });
   } catch (error) {
     return errorResponse(error, "更新应募状态失败");
   }

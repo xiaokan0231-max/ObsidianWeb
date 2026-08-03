@@ -11,16 +11,19 @@ import {
 } from "react";
 import {
   compareJobs,
+  daysBetween,
   intakeLabel,
   intakeRelative,
   isJobStatus,
   jobIntake,
   jobMatchesQuery,
   jobMatchesRatingBands,
+  jobStatusNoteError,
   JOB_INTAKES,
   JOB_RATING_BANDS,
   JOB_SORTS,
   JOB_STATUSES,
+  JOB_STATUS_NOTE_MAX,
   normalizeDay,
   OFFICIAL_APPLY_LABEL,
   toJobCard,
@@ -32,6 +35,8 @@ import {
   type JobStatus,
   type JobVerification,
 } from "@/lib/jobs";
+import { parseAppliedLedger } from "@/lib/job-stats.mjs";
+import { opportunityAppliedOn } from "@/lib/job-opportunity";
 import { JOB_CASE_TYPE } from "@/lib/vault-boundary.mjs";
 import {
   formatDate,
@@ -100,6 +105,16 @@ const EMPTY_FILTERS: Filters = {
   verifications: [],
   intakes: [],
   remoteOnly: false,
+};
+
+/**
+ * 「岗位机会」は新しい応募先を選ぶ画面。終了案件まで含む全75件を既定表示すると、
+ * 高得点の不採用案件が先頭を占めて「次に投る先」が見えなくなる。
+ * 全件は状態 chip を外せば見られるため、入口だけ未応募に絞る。
+ */
+const DEFAULT_OPPORTUNITY_FILTERS: Filters = {
+  ...EMPTY_FILTERS,
+  statuses: ["未応募"],
 };
 
 function toggle<T>(list: T[], value: T): T[] {
@@ -199,6 +214,23 @@ function dayLabel(raw: string) {
  */
 function eventDay(job: JobCard) {
   return job.statusUpdated || job.date;
+}
+
+/** `2026-07-20` → `7/20`。年は今の運用（数か月単位）では邪魔なだけなので落とす。 */
+function shortDay(day: string) {
+  const match = day.match(/^\d{4}-(\d{2})-(\d{2})$/);
+  return match ? `${Number(match[1])}/${Number(match[2])}` : day;
+}
+
+/**
+ * 応募からの経過。**「何日待っているか」は催促の判断に直結する**ので、
+ * 相対表示だけにして絶対日付は title に回す（一覧をスキャンしている時に効くのは日数のほう）。
+ */
+function elapsedLabel(appliedOn: string, today: string) {
+  const days = daysBetween(appliedOn, today);
+  if (days === null) return "";
+  if (days <= 0) return "今日";
+  return `${days}日経過`;
 }
 
 /** 时间线上的事件文案由状态推导 —— 状态与日期是笔记里的证据，不是 AI 的假设。 */
@@ -319,7 +351,9 @@ export default function JobsView({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<JobSort>("rating");
   const [filters, setFilters] = useState<Filters>(() =>
-    initialStatuses?.length ? { ...EMPTY_FILTERS, statuses: initialStatuses } : EMPTY_FILTERS,
+    initialStatuses?.length
+      ? { ...EMPTY_FILTERS, statuses: initialStatuses }
+      : DEFAULT_OPPORTUNITY_FILTERS,
   );
   const [viewMode, setViewMode] = useState<ViewMode>("card");
   const [weekOffset, setWeekOffset] = useState(0);
@@ -328,11 +362,32 @@ export default function JobsView({
   const [detailPath, setDetailPath] = useState<string | null>(null);
   const [comparePaths, setComparePaths] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
-  // 状态写回 Vault 期间先本地生效，刷新拿到新笔记后再清掉。
-  const [statusDraft, setStatusDraft] = useState<Record<string, string>>({});
   const [savingPaths, setSavingPaths] = useState<string[]>([]);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  /**
+   * 🔴 書込み失敗は **path をキーにここへ持つ**。操作部品（StatusPicker）の中に持つと、
+   * 応答が返る前に抽屉を閉じられた瞬間に部品ごとアンマウントされ、`setFailure` が
+   * React の静かな no-op になってエラーが消える。抽屉は背景クリック・×・Esc の
+   * どれでも閉じられ、どれも書込み中を待たない。
+   */
+  const [statusErrors, setStatusErrors] = useState<Record<string, string>>({});
   const searchRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * 応募日の**正本**は `20_求職/_応募日台帳.md`。status から拾えるのは `応募済` の間だけで、
+   * 先へ進むと同じ位置が段階の日付に変わる（jobs.ts の `jobAppliedOn` 参照）。
+   * 台帳に載っていれば不採用になった後でも応募日が残るので、そちらを優先する。
+   * 照合は会社名（台帳の「照合名」列があればそれ）。
+   */
+  const appliedByCompany = useMemo(() => {
+    const ledger = notes.find((note) => note.path.endsWith("_応募日台帳.md"));
+    const map = new Map<string, string>();
+    for (const row of parseAppliedLedger(ledger?.content ?? "")) {
+      // 同一社に複数応募がある場合は**最初の応募日**を残す（経過日数を短く見せない）。
+      const key = row.matchName;
+      if (!map.has(key) || row.appliedOn < (map.get(key) ?? "")) map.set(key, row.appliedOn);
+    }
+    return map;
+  }, [notes]);
 
   const jobs = useMemo(() => {
     return notes
@@ -340,11 +395,17 @@ export default function JobsView({
       .map(toJobCard)
       .map((job) => ({
         ...job,
-        status: statusDraft[job.path] ?? job.status,
+        // 台帳は会社単位の照合なので、同じ会社の別求人へ応募日が移る可能性がある。
+        // 未応募に応募日が出るのは論理矛盾なので、この状態では台帳補完を使わない。
+        appliedOn: opportunityAppliedOn(
+          job.status,
+          job.appliedOn,
+          appliedByCompany.get(job.company),
+        ),
         // 笔记里同一个技術スタック 可能写重复，不去重会撞 React key，facet 计数也会比结果多。
         stack: Array.from(new Set(job.stack)),
       }));
-  }, [notes, statusDraft]);
+  }, [notes, appliedByCompany]);
 
   /**
    * facet 计数是「联动」的：每组的数字都算在**其它所有条件已生效**的前提下。
@@ -495,6 +556,7 @@ export default function JobsView({
   const jobPaths = useMemo(() => new Set(jobs.map((job) => job.path)), [jobs]);
   const detail = jobs.find((job) => job.path === detailPath) ?? null;
   const detailOpen = detail !== null;
+
   // 笔记被删掉 / 移出 AI 推薦目录后，comparePaths 里会留下失效路径；
   // 一切判断都走这份已对账的 compared，免得幽灵岗位占着对比名额。
   const compared = comparePaths
@@ -514,7 +576,7 @@ export default function JobsView({
     (filters.remoteOnly ? 1 : 0);
 
   const resetFilters = () => {
-    setFilters(EMPTY_FILTERS);
+    setFilters(DEFAULT_OPPORTUNITY_FILTERS);
     setQuery("");
   };
 
@@ -529,32 +591,50 @@ export default function JobsView({
     if (compared.length <= 2 && compared.some((job) => job.path === path)) setCompareOpen(false);
   };
 
+  /**
+   * 🔴 楽観更新はしない。以前は即座に新 status を当てていたが、既定のフィルタが
+   * `statuses: ["未応募"]` なので、その瞬間にカードが `visible` から外れて StatusPicker ごと
+   * アンマウントされ、書込みが失敗しても**エラーを出す相手がもう居ない**。
+   * 抽屉は `visible` を経由しないので抽屉だけエラーが出る、という非対称が実際に起きた
+   * （2026-07-30 ミロク情報サービス）。`saving` が「写入中…」を出すので楽観更新は元々不要。
+   *
+   * 失敗理由は `statusErrors[path]` に積む（部品ローカルに持てない理由はそこのコメント）。
+   * 戻り値は呼び出し元が「注記エディタを閉じてよいか」を判断するためだけのもの。
+   */
+  const dismissStatusError = useCallback((path: string) => {
+    setStatusErrors((current) => {
+      if (!(path in current)) return current;
+      const next = { ...current };
+      delete next[path];
+      return next;
+    });
+  }, []);
+
   const changeStatus = useCallback(
-    async (path: string, status: string) => {
+    async (path: string, status: string, statusNote = ""): Promise<string | null> => {
       setSavingPaths((current) => current.includes(path) ? current : [...current, path]);
-      setSaveError(null);
-      setStatusDraft((current) => ({ ...current, [path]: status }));
+      setStatusErrors((current) => {
+        if (!(path in current)) return current;
+        const next = { ...current };
+        delete next[path];
+        return next;
+      });
       try {
         const response = await fetch("/api/jobs/status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path, status }),
+          body: JSON.stringify({ path, status, statusNote }),
         });
         const payload = (await response.json()) as { ok?: boolean; error?: string };
         if (!response.ok || !payload.ok) throw new Error(payload.error || "写入 Vault 失败");
+        // 再取得が終わるまで savingPaths を落とさない（finally は await の後）。
+        // そうしないと一瞬だけ古い値に戻って、書けたのか失敗したのか読めなくなる。
         await onVaultChanged?.();
-        setStatusDraft((current) => {
-          const next = { ...current };
-          delete next[path];
-          return next;
-        });
+        return null;
       } catch (error) {
-        setStatusDraft((current) => {
-          const next = { ...current };
-          delete next[path];
-          return next;
-        });
-        setSaveError(error instanceof Error ? error.message : "写入 Vault 失败");
+        const message = error instanceof Error ? error.message : "写入 Vault 失败";
+        setStatusErrors((current) => ({ ...current, [path]: message }));
+        return message;
       } finally {
         setSavingPaths((current) => current.filter((item) => item !== path));
       }
@@ -592,41 +672,80 @@ export default function JobsView({
     };
   }, []);
 
-  const topRated = jobs.filter((job) => job.rating >= 8).length;
-  const notApplied = jobs.filter((job) => job.status === "未応募").length;
-  const salaryTop = jobs
-    .map((job) => job.salary.max ?? 0)
-    .filter((value) => value > 0)
-    .sort((left, right) => right - left)[0];
+  const notAppliedJobs = jobs.filter((job) => job.status === "未応募");
+  const readyJobs = notAppliedJobs
+    .filter((job) => job.rating >= 7)
+    .sort((left, right) => compareJobs(left, right, "rating"));
+  const nextPick =
+    readyJobs[0] ??
+    [...notAppliedJobs].sort((left, right) => compareJobs(left, right, "rating"))[0] ??
+    null;
+  const recentNotApplied = notAppliedJobs.filter((job) =>
+    ["today", "d3", "d7"].includes(jobIntake(job.date, today)),
+  ).length;
+  const verifiedNotApplied = notAppliedJobs.filter((job) => job.verification === "verified").length;
 
   const isJobList = viewMode !== "weekly";
 
   return (
     <section className="jobs-view">
-      <div className="section-intro jobs-intro">
-        <div>
-          <span className="eyebrow"><i /> AI JOB MATCH</span>
-          <h1>AI 推荐岗位</h1>
-          <p>
-            基于 <strong>技術スタック</strong> 与 <strong>求職硬性約束</strong> 的匹配结果。
-            这一层是 <em>分析 / 假设</em>，不是权威事实 —— 是否应募由本人判断。
-          </p>
-        </div>
-        <div className="jobs-stat">
-          <div><strong>{jobs.length}</strong><span>条推荐</span></div>
-          <div><strong>{topRated}</strong><span>8 点以上</span></div>
-          <div><strong>{notApplied}</strong><span>未应募</span></div>
-          <div><strong>{salaryTop ? `${salaryTop}万` : "—"}</strong><span>最高年収</span></div>
-        </div>
+      <div className="jobs-stat page-stat-strip module-stat-strip" aria-label="当前岗位机会摘要">
+        <div><strong>{notAppliedJobs.length}</strong><span>未应募</span></div>
+        <div><strong>{readyJobs.length}</strong><span>7 分以上待判断</span></div>
+        <div><strong>{recentNotApplied}</strong><span>7 日内新增</span></div>
+        <div><strong>{verifiedNotApplied}</strong><span>原文已核对</span></div>
       </div>
 
+      {nextPick && (
+        <section className="jobs-next-pick" aria-label="下一项応募判断">
+          <span className={`jobs-next-score rate-${rateTone(nextPick.rating)}`}>
+            <strong>{nextPick.rating}</strong>
+            <small>/ 10</small>
+          </span>
+          <div className="jobs-next-copy">
+            <span>NEXT DECISION</span>
+            <h2>{nextPick.company}</h2>
+            <p>{nextPick.position}</p>
+            <small>
+              {readyJobs.length > 0
+                ? clip(nextPick.reason || "达到当前可投线，打开详情确认硬性条件与风险。", 110)
+                : "当前没有达到 7 分线的未应募岗位；先复核最高分候选，不自动建议投递。"}
+            </small>
+          </div>
+          <dl className="jobs-next-facts">
+            <div>
+              <dt>年収</dt>
+              <dd>{salaryLabel(nextPick)}</dd>
+            </div>
+            <div>
+              <dt>原文</dt>
+              <dd>{VERIFICATION_LABEL[nextPick.verification]}</dd>
+            </div>
+          </dl>
+          <button type="button" onClick={() => setDetailPath(nextPick.path)}>
+            判断是否応募 <span aria-hidden="true">→</span>
+          </button>
+        </section>
+      )}
+
       <div className="jobs-body">
-        <aside className="jobs-filter-panel" aria-label="岗位筛选">
+        <details className="jobs-filter-panel">
+          <summary>
+            <span>
+              <b>筛选条件</b>
+              <small>
+                {activeFilterCount > 0
+                  ? `已启用 ${activeFilterCount} 项${filters.statuses.length === 1 && filters.statuses[0] === "未応募" ? " · 默认只看未応募" : ""}`
+                  : "当前显示全部岗位"}
+              </small>
+            </span>
+            <em aria-hidden="true" />
+          </summary>
           <div className="jobs-filter-sticky">
             <div className="jobs-filter-head">
-              <span>筛选 · FILTERS</span>
+              <span>组合筛选 · FILTERS</span>
               <button type="button" className="jobs-filter-reset" onClick={resetFilters}>
-                重置{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+                恢复默认
               </button>
             </div>
 
@@ -743,7 +862,7 @@ export default function JobsView({
               />
             </div>
           </div>
-        </aside>
+        </details>
 
         <div className="jobs-results">
           <div className="jobs-toolbar">
@@ -785,8 +904,6 @@ export default function JobsView({
             </div>
           </div>
 
-          {saveError && <p className="job-save-error">状态写入失败：{saveError}</p>}
-
           {isJobList && (
             <div className="jobs-result-bar">
               <span>
@@ -799,7 +916,7 @@ export default function JobsView({
 
           {jobs.length === 0 && (
             <div className="jobs-empty">
-              <p>还没有 AI 推荐岗位。</p>
+              <p>还没有可以展示的岗位机会。</p>
               <small>在 Vault 的 <code>20_求職/</code> 下新建 <code>type: job-case</code> 的应募案件即可显示；AI 推荐只是 <code>origin</code> 的一种。</small>
             </div>
           )}
@@ -824,7 +941,7 @@ export default function JobsView({
                   saving={savingPaths.includes(job.path)}
                   onDetail={() => setDetailPath(job.path)}
                   onCompare={() => toggleCompare(job.path)}
-                  onStatus={(status) => void changeStatus(job.path, status)}
+                  onStatus={(status, note) => changeStatus(job.path, status, note)}
                 />
               ))}
             </div>
@@ -885,7 +1002,7 @@ export default function JobsView({
           compared={comparePaths.includes(detail.path)}
           compareFull={compareFull}
           onClose={() => setDetailPath(null)}
-          onStatus={(status) => void changeStatus(detail.path, status)}
+          onStatus={(status, note) => changeStatus(detail.path, status, note)}
           onCompare={() => toggleCompare(detail.path)}
           onOpenNote={() => onOpen(detail.note)}
         />
@@ -897,39 +1014,121 @@ export default function JobsView({
           setDetailPath(path);
         }} />
       )}
+
+      {/*
+        🔴 書込み失敗の表示は**ここ一箇所だけ**。操作部品の隣に出す案を2回試して2回とも
+        見えなくなった：①部品ローカル state → 応答前に抽屉を閉じるとアンマウントで消える
+        ②カードにインライン → そのカードがスクロール外なら結局見えない。
+        描画場所を増やすたびに「見えない条件」が増えるので、
+        マウント状態にもスクロール位置にもビュー種別にも依存しない固定層に集約する。
+        会社名を必ず添えるので、部品から離れてもどの案件か 迷わない。
+      */}
+      {Object.keys(statusErrors).length > 0 && (
+        <div className="job-status-orphan-alerts" role="alert">
+          {Object.entries(statusErrors).map(([path, message]) => (
+            <p key={path}>
+              <b>{jobs.find((job) => job.path === path)?.company ?? noteBasename(path)}</b>
+              <span>没有写入。{message}</span>
+              <button type="button" onClick={() => dismissStatusError(path)} aria-label="关闭提示">×</button>
+            </p>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
 
+/**
+ * 状態と**その理由**を1つの操作にまとめる。7 枚举だけでは「募集終了」「推薦不可」「取扱終了」が
+ * 全部ただの `不採用` に潰れ、後から死因を追えなくなる（2026-07-30 ミロク情報サービスの
+ * 募集終了で表面化）。プルダウンは今までどおり1操作で確定し、理由は任意で足す形にしてある。
+ */
 function StatusPicker({
   value,
+  note,
+  today,
   saving,
   onChange,
 }: {
   value: string;
+  note: string;
+  today: string;
   saving: boolean;
-  onChange: (status: string) => void;
+  onChange: (status: string, note: string) => Promise<string | null>;
 }) {
   const customValue = value && !isJobStatus(value) ? value : null;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const draftError = jobStatusNoteError(draft);
+
+  const openEditor = () => {
+    // 既存注記があれば編集、無ければ vault 表記（日付が先頭）の書き出しを置いておく。
+    setDraft(note || `${today}・`);
+    setEditing(true);
+  };
+
+  const submit = async () => {
+    if (draftError) return;
+    if (!(await onChange(value, draft))) setEditing(false);
+  };
+
   return (
-    <label
-      className={`job-status-picker tone-${statusTone(value)}${saving ? " saving" : ""}`}
-      title={customValue ?? undefined}
-    >
-      <select
-        value={value}
-        disabled={saving}
-        aria-label="应募状态"
-        onClick={(event) => event.stopPropagation()}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {customValue && <option value={customValue}>{customValue}</option>}
-        {JOB_STATUSES.map((status) => (
-          <option key={status} value={status}>{status}</option>
-        ))}
-      </select>
-      <span aria-hidden="true">{saving ? "写入中…" : value}</span>
-    </label>
+    <div className="job-status-control" onClick={(event) => event.stopPropagation()}>
+      <div className="job-status-row">
+        <label
+          className={`job-status-picker tone-${statusTone(value)}${saving ? " saving" : ""}`}
+          title={customValue ?? undefined}
+        >
+          <select
+            value={value}
+            disabled={saving}
+            aria-label="应募状态"
+            onChange={(event) => void onChange(event.target.value, "")}
+          >
+            {customValue && <option value={customValue}>{customValue}</option>}
+            {JOB_STATUSES.map((status) => (
+              <option key={status} value={status}>{status}</option>
+            ))}
+          </select>
+          <span aria-hidden="true">{saving ? "写入中…" : value}</span>
+        </label>
+        <button
+          type="button"
+          className={`job-status-note-toggle${note ? " filled" : ""}`}
+          disabled={saving}
+          aria-expanded={editing}
+          title={note ? `理由：${note}` : "给这个状态补一句理由"}
+          onClick={() => (editing ? setEditing(false) : openEditor())}
+        >
+          {note ? "✎" : "＋"}
+        </button>
+      </div>
+
+      {note && !editing && <p className="job-status-note">{note}</p>}
+
+      {editing && (
+        <div className="job-status-note-edit">
+          <input
+            type="text"
+            value={draft}
+            autoFocus
+            maxLength={JOB_STATUS_NOTE_MAX}
+            placeholder="例：2026-07-30・募集終了で応募機会なし"
+            aria-label="状态理由"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") { event.preventDefault(); void submit(); }
+              if (event.key === "Escape") setEditing(false);
+            }}
+          />
+          <button type="button" disabled={saving || Boolean(draftError)} onClick={() => void submit()}>
+            保存
+          </button>
+          <button type="button" onClick={() => setEditing(false)}>取消</button>
+          {draftError && <small className="job-status-note-error">{draftError}</small>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -952,7 +1151,7 @@ function JobCardView({
   saving: boolean;
   onDetail: () => void;
   onCompare: () => void;
-  onStatus: (status: string) => void;
+  onStatus: (status: string, note: string) => Promise<string | null>;
 }) {
   return (
     <article className={`job-card${compared ? " compared" : ""}`} onClick={onDetail}>
@@ -987,6 +1186,14 @@ function JobCardView({
         >
           入库 {intakeLabel(job.date, today)}
         </span>
+        {/* 応募日は「投げてから何日たったか」を出すために入库日とは別に見せる。
+            入库日で代用すると 7/20 に入って 7/24 に投げた案件が4日ずれる。 */}
+        {job.appliedOn && (
+          <span className="job-applied" title={`応募日 ${job.appliedOn}`}>
+            応募 {shortDay(job.appliedOn)}
+            <em>{elapsedLabel(job.appliedOn, today)}</em>
+          </span>
+        )}
         {job.employment && <span>{job.employment}</span>}
         {job.location && <span><Highlight text={job.location} query={query} /></span>}
         {job.remote && <span className="job-remote">リモート可</span>}
@@ -994,7 +1201,8 @@ function JobCardView({
 
       {job.stack.length > 0 && (
         <div className="job-stack">
-          {job.stack.map((tag) => <span key={tag}><Highlight text={tag} query={query} /></span>)}
+          {job.stack.slice(0, 7).map((tag) => <span key={tag}><Highlight text={tag} query={query} /></span>)}
+          {job.stack.length > 7 && <span className="job-stack-more">+{job.stack.length - 7}</span>}
         </div>
       )}
 
@@ -1006,7 +1214,13 @@ function JobCardView({
       )}
 
       <footer className="job-card-foot" onClick={(event) => event.stopPropagation()}>
-        <StatusPicker value={job.status} saving={saving} onChange={onStatus} />
+        <StatusPicker
+              value={job.status}
+              note={job.statusNote}
+              today={today}
+              saving={saving}
+              onChange={onStatus}
+            />
         <button
           type="button"
           className={compared ? "job-compare-toggle active" : "job-compare-toggle"}
@@ -1441,7 +1655,7 @@ function JobDrawer({
   compared: boolean;
   compareFull: boolean;
   onClose: () => void;
-  onStatus: (status: string) => void;
+  onStatus: (status: string, note: string) => Promise<string | null>;
   onCompare: () => void;
   onOpenNote: () => void;
 }) {
@@ -1472,7 +1686,13 @@ function JobDrawer({
           </div>
 
           <div className="job-detail-actions">
-            <StatusPicker value={job.status} saving={saving} onChange={onStatus} />
+            <StatusPicker
+              value={job.status}
+              note={job.statusNote}
+              today={today}
+              saving={saving}
+              onChange={onStatus}
+            />
             {/* 列表 / 看板 / 周复盘视图里没有对比按钮，都从详情这里加入。 */}
             <button
               type="button"

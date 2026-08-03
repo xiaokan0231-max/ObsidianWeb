@@ -8,7 +8,7 @@
 //   3) vault-lib.mjs の列挙定数（status / channel の正）
 // CSV に既にある会社は 2) 側を無視する（二重計上を避ける）。
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import {
   APPLIED_LEDGER,
   CHANNEL_REQUIRED_FROM,
@@ -21,6 +21,7 @@ import {
   QUEUE,
   REJECTIONS_CSV,
   TRENDS,
+  VAULT,
   baseStatus,
   listMarkdownFiles,
   parseCsv,
@@ -28,7 +29,8 @@ import {
   readJobCases,
   replaceGenerated,
 } from "./vault-lib.mjs";
-import { JOB_CASE_ORIGINS } from "../lib/vault-boundary.mjs";
+import { isGeneratedNote, JOB_CASE_ORIGINS } from "../lib/vault-boundary.mjs";
+import { buildKnowledgeGraph, graphHealth } from "../lib/knowledge-graph.ts";
 import { parseQueue, queueStats } from "../lib/job-queue.mjs";
 import { parseInterviewAnswerReview } from "../lib/review-deep.ts";
 import {
@@ -269,9 +271,22 @@ const enumTable = [
 
 // vault 全体の type 分布。90_归档・99_系统/模板 の除外は listMarkdownFiles 側の責務。
 const typeCounts = new Map();
-for (const path of await listMarkdownFiles()) {
-  const type = parseFrontmatter(await readFile(path, "utf8")).type;
+const operationalFiles = await listMarkdownFiles();
+const graphNotes = [];
+let generatedBytes = 0;
+for (const path of operationalFiles) {
+  const content = await readFile(path, "utf8");
+  const frontmatter = parseFrontmatter(content);
+  const type = frontmatter.type;
   if (typeof type === "string" && type) typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1);
+  if (isGeneratedNote({ frontmatter })) generatedBytes += (await stat(path)).size;
+  graphNotes.push({
+    path: path.slice(VAULT.length + 1),
+    stat: { ctime: 0, mtime: 0, size: content.length },
+    tags: [],
+    frontmatter,
+    content,
+  });
 }
 const censusTable = [
   "| type | 件数 |",
@@ -279,6 +294,17 @@ const censusTable = [
   ...[...typeCounts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([type, count]) => `| \`${type}\` | ${count} |`),
+].join("\n");
+const health = graphHealth(buildKnowledgeGraph(graphNotes));
+const graphHealthTable = [
+  "| 項目 | 値 |",
+  "|---|---|",
+  `| 语义节点 | ${health.semanticNodes} |`,
+  `| 强类型关系 | ${health.semanticEdges} |`,
+  `| 普通双链关系 | ${health.referenceEdges} |`,
+  `| 无法解析的关系 | ${health.unresolved} |`,
+  `| 默认语义图孤点 | ${health.defaultIsolates} |`,
+  `| operational 生成物体积 | ${(generatedBytes / 1024 / 1024).toFixed(1)} MB |`,
 ].join("\n");
 
 // 探索キューの残数。「見つけただけ」と「精読して起票済み」を混ぜないための進捗表示。
@@ -371,6 +397,7 @@ const targets = [
     blocks: {
       "field-enums": enumTable,
       "type-census": censusTable,
+      "graph-health": graphHealthTable,
     },
   },
   {
