@@ -11,9 +11,11 @@ import {
   VAULT,
   baseStatus,
   listMarkdownFiles,
+  listVaultFileKeys,
   parseFrontmatter,
   parseOwns,
   readJobCases,
+  vaultRefKey,
 } from "./vault-lib.mjs";
 import { JOB_CASE_ORIGINS } from "../lib/vault-boundary.mjs";
 import { listEmbeds, listHeadings, sliceSection, stripFrontmatter } from "../lib/interview-prep-embed.mjs";
@@ -168,12 +170,22 @@ const graphNotes = files.map((path) => {
   };
 });
 const graphIndex = buildGraphNoteIndex(graphNotes);
-for (const collision of [...graphIndex.collisions].sort()) {
-  problems.push(`basename / alias「${collision}」が複数ノートを指していて曖昧`);
-}
 const knowledgeGraph = buildKnowledgeGraph(graphNotes);
+// 同名ノートが2つあること自体は Obsidian では合法（パスで消歧できる）。
+// 実際に曖昧なリンクが飛んで初めて問題なので、collisions は単独では報告しない。
+const vaultFileKeys = await listVaultFileKeys();
 for (const unresolved of knowledgeGraph.unresolved) {
+  const key = vaultRefKey(unresolved.target);
   const field = unresolved.sourceField ? ` (${unresolved.sourceField})` : "";
+  // 曖昧判定を実体判定より先に置く。同名が2つある時はどちらも実在するので、
+  // 先に実体で通すと「どっちを指しているか決められない」参照が黙って素通りする。
+  if (graphIndex.collisions.has(key)) {
+    problems.push(
+      `${unresolved.sourcePath}: ${unresolved.relation}${field} の [[${unresolved.target}]] は同名ノートが複数あって決められない。パスまで書く`,
+    );
+    continue;
+  }
+  if (vaultFileKeys.has(key)) continue;
   problems.push(
     `${unresolved.sourcePath}: ${unresolved.relation}${field} の参照先が無い [[${unresolved.target}]]`,
   );
