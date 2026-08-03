@@ -22,6 +22,12 @@ import {
   isLanguageExpressionCourseNote,
   parseLanguageExpressionCourse,
 } from "../lib/language-expression-course.ts";
+import {
+  buildGraphNoteIndex,
+  buildKnowledgeGraph,
+  parseConfirmedSkillTable,
+} from "../lib/knowledge-graph.ts";
+import { GENERATED_LIFECYCLES, markerJson } from "../lib/vault-compact.mjs";
 
 const REQUIRED = ["case_id", "company", "status", "origin"];
 const PREP_REQUIRED = ["company", "round", "format", "interviewers", "case"];
@@ -31,6 +37,16 @@ const TODO_PRIORITIES = ["high", "medium", "low"];
 const TODO_AUDIENCES = ["user", "system"];
 const SYSTEM_TODO_CATEGORIES = ["台帳整合", "観測基盤"];
 const WAITING_FOR = ["self", "company", "agent", "platform"];
+const VERSIONED_ARTIFACT_TYPES = new Set(["language-bank", "language-curriculum"]);
+// ai-review も分析層。fingerprint・ai_author の規約は ai-report と同じものを課す。
+const ANALYSIS_TYPES = new Set(["ai-report", "analysis", "ai-review"]);
+const REVIEW_VERDICTS = new Set(["agree", "partially_agree", "disagree", "needs_evidence"]);
+const AI_AUTHOR_REQUIRED_FROM = "2026-08-03";
+const GENERIC_AI_AUTHORS = new Set(["ai", "人工智能", "unknown", "不明", "未记录"]);
+const CURRICULUM_START = "<!-- language-curriculum-json:start -->";
+const CURRICULUM_END = "<!-- language-curriculum-json:end -->";
+const BATCH_START = "<!-- language-batch-json:start -->";
+const BATCH_END = "<!-- language-batch-json:end -->";
 
 const problems = [];
 const notes = await readJobCases();
@@ -141,10 +157,121 @@ for (const path of files) {
   }
 }
 
+const graphNotes = files.map((path) => {
+  const content = contents.get(path);
+  return {
+    path: relative(VAULT, path),
+    stat: { ctime: 0, mtime: 0, size: content.length },
+    tags: [],
+    frontmatter: parseFrontmatter(content),
+    content,
+  };
+});
+const graphIndex = buildGraphNoteIndex(graphNotes);
+for (const collision of [...graphIndex.collisions].sort()) {
+  problems.push(`basename / alias「${collision}」が複数ノートを指していて曖昧`);
+}
+const knowledgeGraph = buildKnowledgeGraph(graphNotes);
+for (const unresolved of knowledgeGraph.unresolved) {
+  const field = unresolved.sourceField ? ` (${unresolved.sourceField})` : "";
+  problems.push(
+    `${unresolved.sourcePath}: ${unresolved.relation}${field} の参照先が無い [[${unresolved.target}]]`,
+  );
+}
+
+const currentArtifacts = new Map();
+const versionedArtifactCounts = new Map();
+const curriculumFingerprints = new Set();
+const activeBatchReferences = [];
+const skillIds = new Map();
+
 for (const path of files) {
   const content = contents.get(path);
   const frontmatter = parseFrontmatter(content);
   const relativePath = relative(VAULT, path);
+  const type = String(frontmatter.type ?? "");
+  if (VERSIONED_ARTIFACT_TYPES.has(type)) {
+    versionedArtifactCounts.set(type, (versionedArtifactCounts.get(type) ?? 0) + 1);
+    const lifecycle = String(frontmatter.lifecycle ?? "");
+    if (!GENERATED_LIFECYCLES.includes(lifecycle)) {
+      problems.push(`${relativePath}: ${type} lifecycle は ${GENERATED_LIFECYCLES.join(" / ")} のいずれかが必須`);
+    }
+    if (String(frontmatter.schema_version ?? "") !== "2") {
+      problems.push(`${relativePath}: ${type} schema_version は 2 が必須`);
+    }
+    if (!frontmatter.source_fingerprint || !frontmatter.content_fingerprint) {
+      problems.push(`${relativePath}: ${type} には source_fingerprint / content_fingerprint が必須`);
+    }
+    if (lifecycle === "current") {
+      const currentPaths = currentArtifacts.get(type) ?? [];
+      currentPaths.push(relativePath);
+      currentArtifacts.set(type, currentPaths);
+    }
+    if (type === "language-curriculum") {
+      // draft batch 保存的是实际课程内容版本，不能用输入源 fingerprint 代替。
+      if (frontmatter.content_fingerprint) curriculumFingerprints.add(String(frontmatter.content_fingerprint));
+      const curriculum = markerJson(content, CURRICULUM_START, CURRICULUM_END);
+      if (!curriculum) problems.push(`${relativePath}: language-curriculum JSON 区块が読めない`);
+    }
+  }
+  if (ANALYSIS_TYPES.has(type)) {
+    const lifecycle = String(frontmatter.lifecycle ?? "");
+    if (!GENERATED_LIFECYCLES.includes(lifecycle)) {
+      problems.push(`${relativePath}: ${type} lifecycle は ${GENERATED_LIFECYCLES.join(" / ")} のいずれかが必須`);
+    }
+    if (String(frontmatter.schema_version ?? "") !== "2") {
+      problems.push(`${relativePath}: ${type} schema_version は 2 が必須`);
+    }
+    if (!frontmatter.source_fingerprint || !frontmatter.content_fingerprint) {
+      problems.push(`${relativePath}: ${type} には source_fingerprint / content_fingerprint が必須`);
+    }
+    const reportDate = String(frontmatter.date ?? "").slice(0, 10);
+    const aiAuthor = String(frontmatter.ai_author ?? "").trim();
+    if (reportDate >= AI_AUTHOR_REQUIRED_FROM && !aiAuthor) {
+      problems.push(`${relativePath}: ${AI_AUTHOR_REQUIRED_FROM} 以降の ${type} には ai_author が必須`);
+    }
+    if (aiAuthor && GENERIC_AI_AUTHORS.has(aiAuthor.toLocaleLowerCase("ja"))) {
+      problems.push(`${relativePath}: ai_author は「AI」ではなく Codex / Claude 等の具体名にする`);
+    }
+  }
+  if (type === "ai-review") {
+    // 相互レビューは「誰が誰の何を評価したか」が辿れないと、後から根拠として使えない。
+    const target = String(frontmatter.reviews ?? "").trim();
+    if (!/\[\[[^\]]+\]\]/u.test(target)) {
+      problems.push(`${relativePath}: ai-review には reviews: "[[対象ノート]]" が必須（リンク切れは図の unresolved で検出）`);
+    }
+    const reviewed = String(frontmatter.reviewed_author ?? "").trim();
+    if (!reviewed) problems.push(`${relativePath}: ai-review には reviewed_author（原文の書き手）が必須`);
+    const verdict = String(frontmatter.verdict ?? "").trim();
+    if (!REVIEW_VERDICTS.has(verdict)) {
+      problems.push(`${relativePath}: ai-review の verdict は ${[...REVIEW_VERDICTS].join(" / ")} のいずれか`);
+    }
+    const author = String(frontmatter.ai_author ?? "").trim();
+    if (author && reviewed && author === reviewed) {
+      problems.push(`${relativePath}: ai-review の ai_author と reviewed_author が同一。自己レビューは相互検証にならない`);
+    }
+  }
+  if (type === "language-batch-log") {
+    const batch = markerJson(content, BATCH_START, BATCH_END);
+    if (!batch) problems.push(`${relativePath}: language-batch JSON 区块が読めない`);
+    else if (batch.phase !== "completed" && frontmatter.status !== "completed") {
+      activeBatchReferences.push({ relativePath, fingerprint: String(batch.curriculumFingerprint ?? "") });
+    }
+  }
+  if (relativePath === "10_关于我/技術スタック.md") {
+    const confirmedSkills = parseConfirmedSkillTable(content);
+    if (confirmedSkills.length === 0) {
+      problems.push(`${relativePath}: 経験年数の確定表に skill_id 列が無い、または解析できない`);
+    }
+    for (const skill of confirmedSkills) {
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(skill.id)) {
+        problems.push(`${relativePath}: skill_id「${skill.id}」は小文字英数字とハイフンだけにする`);
+      }
+      const labels = skillIds.get(skill.id) ?? [];
+      labels.push(skill.label);
+      skillIds.set(skill.id, labels);
+    }
+  }
   if (frontmatter.type === "company" && frontmatter.status) {
     problems.push(`${relativePath}: company は応募 status を持てない。対応する job-case へ移す`);
   }
@@ -387,6 +514,26 @@ for (const [id, files] of ownersById) {
 for (const [courseId, coursePaths] of languageExpressionCoursePathsById) {
   if (coursePaths.length > 1) {
     problems.push(`表現専門コース course_id「${courseId}」が重複: ${coursePaths.join(" と ")}`);
+  }
+}
+for (const type of VERSIONED_ARTIFACT_TYPES) {
+  const paths = currentArtifacts.get(type) ?? [];
+  if ((versionedArtifactCounts.get(type) ?? 0) > 0 && paths.length !== 1) {
+    problems.push(`${type} の lifecycle: current は全庫で1件必須（現在 ${paths.length}件: ${paths.join(" / ") || "なし"}）`);
+  }
+}
+for (const reference of activeBatchReferences) {
+  if (!reference.fingerprint) {
+    problems.push(`${reference.relativePath}: 未完了 batch に curriculumFingerprint が無い`);
+  } else if (!curriculumFingerprints.has(reference.fingerprint)) {
+    problems.push(
+      `${reference.relativePath}: 未完了 batch が参照する curriculum ${reference.fingerprint} が operational 区に無い`,
+    );
+  }
+}
+for (const [skillId, labels] of skillIds) {
+  if (labels.length > 1) {
+    problems.push(`技術スタックの skill_id「${skillId}」が重複: ${labels.join(" / ")}`);
   }
 }
 for (const [sessionId, sessionPaths] of prepSessionIds) {

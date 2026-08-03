@@ -16,6 +16,7 @@
     "db:generate": "drizzle-kit generate",
     "vault:check": "node scripts/vault-check.mjs",
     "vault:stats": "node scripts/vault-stats.mjs",
+    "vault:compact": "node scripts/vault-compact.mjs",
     "vault:verify": "node scripts/vault-check.mjs && node scripts/vault-stats.mjs --check"
   },
   "dependencies": {
