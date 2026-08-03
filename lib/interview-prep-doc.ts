@@ -6,7 +6,7 @@ import {
   sliceSection,
 } from "./interview-prep-embed.mjs";
 
-// 単場面接の準備ドキュメント（type: interview-prep）を Web で読める構造に落とす。
+// 面接1回分の準備ドキュメント（type: interview-prep）を Web で読める構造に落とす。
 //
 // なぜ独自パーサなのか：この文書は普通の Markdown ではなく、面接準備専用の記法を持つ。
 //   `漢字（かな）`  → 頭上のルビ（口に出すための注音。プレーンテキストだと読めない）
@@ -112,6 +112,9 @@ export type InterviewPrepDoc = {
   company: string;
   date: string;
   round: string;
+  sessionId: string;
+  sessionOrder: number | null;
+  sessionStatus: InterviewPrepSessionStatus | "";
   format: string;
   interviewers: string;
   caseLink: string;
@@ -121,6 +124,21 @@ export type InterviewPrepDoc = {
 };
 
 export const INTERVIEW_PREP_TYPE = "interview-prep";
+export type InterviewPrepSessionStatus =
+  | "preparing"
+  | "scheduled"
+  | "completed"
+  | "cancelled";
+
+/**
+ * `[[案件#節|表示名]]` から関連付けに使うノート名だけを取る。
+ * 表示名を含んだままでは、同じ case を指す各回が別シリーズに分裂してしまう。
+ */
+export function prepWikiTarget(value: string) {
+  const raw = value.trim().replace(/^["']|["']$/g, "");
+  const inner = raw.match(/^\[\[([^\]]+)\]\]$/)?.[1] ?? raw;
+  return inner.split("|")[0].split("#")[0].trim();
+}
 
 // 汉字/拉丁字母 + 「纯假名括号」→ ruby。括号内に仮名以外が混ざる場合は注音ではなく
 // 普通の補足（例「（約70%）」「（Azure）」）なので変換しない。build_interview_html.py と同じ判定。
@@ -537,9 +555,27 @@ export function parseInterviewPrepDoc(note: Note, notes: Note[]): InterviewPrepD
     company: getString(note.frontmatter.company),
     date: getString(note.frontmatter.date),
     round: getString(note.frontmatter.round),
+    sessionId: getString(note.frontmatter.session_id),
+    sessionOrder: (() => {
+      const source = note.frontmatter.session_order ?? note.frontmatter.round_order;
+      const value = Number(source);
+      return source !== undefined && Number.isFinite(value) ? value : null;
+    })(),
+    sessionStatus: (() => {
+      const value = getString(
+        note.frontmatter.session_status ?? note.frontmatter.schedule_status,
+      );
+      if (value === "pending") return "preparing";
+      return value === "preparing" ||
+        value === "scheduled" ||
+        value === "completed" ||
+        value === "cancelled"
+        ? value
+        : "";
+    })(),
     format: getString(note.frontmatter.format),
     interviewers: getString(note.frontmatter.interviewers),
-    caseLink: getString(note.frontmatter.case).replace(/\[\[|\]\]/g, ""),
+    caseLink: prepWikiTarget(getString(note.frontmatter.case)),
     sections,
     embeds,
     externalLinks: collectPrepExternalLinks(sections),

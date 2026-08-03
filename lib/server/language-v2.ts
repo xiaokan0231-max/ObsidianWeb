@@ -675,7 +675,8 @@ export function buildLanguageCurriculum(notes: ObsidianNote[]): LanguageCurricul
 }
 
 export function renderLanguageCurriculum(curriculum: LanguageCurriculum) {
-  return `---\ntype: language-curriculum\ngenerated_at: ${curriculum.generatedAt}\nsource_fingerprint: ${curriculum.sourceFingerprint}\n---\n\n# 面试证据驱动的日语集中训练课程\n\n${curriculum.summaryZh}\n\n> 本文件由 Web 生成。训练项目必须从整理稿、本人批注、回答质量复盘和活跃岗位上游重建，不手改。\n\n${CURRICULUM_START}\n\`\`\`json\n${JSON.stringify(curriculum, null, 2)}\n\`\`\`\n${CURRICULUM_END}\n`;
+  const contentFingerprint = curriculum.contentFingerprint ?? curriculum.sourceFingerprint;
+  return `---\ntype: language-curriculum\nlifecycle: current\nschema_version: 2\ngenerated_at: ${curriculum.generatedAt}\nsource_fingerprint: ${curriculum.sourceFingerprint}\ncontent_fingerprint: ${contentFingerprint}\n---\n\n# 面试证据驱动的日语集中训练课程\n\n${curriculum.summaryZh}\n\n> 本文件由 Web 生成。训练项目必须从整理稿、本人批注、回答质量复盘和活跃岗位上游重建，不手改。\n\n${CURRICULUM_START}\n\`\`\`json\n${JSON.stringify(curriculum, null, 2)}\n\`\`\`\n${CURRICULUM_END}\n`;
 }
 
 export function renderLanguageBatch(batch: LanguageBatch) {
@@ -683,19 +684,27 @@ export function renderLanguageBatch(batch: LanguageBatch) {
   return `---\ntype: language-batch-log\ndate: ${batch.date}\nstatus: ${completed ? "completed" : "draft"}\nbatch_id: ${yamlString(batch.id)}\n---\n\n# ${batch.date} 日语集中训练\n\n- 目标项目：${batch.targetSize}\n- 当前阶段：${batch.phase}\n- 已保存动作：${batch.actions.length}\n\n> 本文件是自动保存的训练状态。请通过 Web 继续，不手改生成区块。\n\n${BATCH_START}\n\`\`\`json\n${JSON.stringify(batch, null, 2)}\n\`\`\`\n${BATCH_END}\n`;
 }
 
+export function languageCurriculumEntries(notes: ObsidianNote[]) {
+  return notes.flatMap((note) => {
+    if (text(note.frontmatter.type) !== "language-curriculum") return [];
+    const curriculum = markerJson<LanguageCurriculum>(note.content, CURRICULUM_START, CURRICULUM_END);
+    return curriculum ? [{ note, curriculum }] : [];
+  });
+}
+
+export function latestLanguageCurriculumEntry(notes: ObsidianNote[]) {
+  return languageCurriculumEntries(notes)
+    .toSorted((left, right) => right.curriculum.generatedAt.localeCompare(left.curriculum.generatedAt))[0];
+}
+
 function latestCurriculum(notes: ObsidianNote[]) {
-  return notes
-    .filter((note) => text(note.frontmatter.type) === "language-curriculum")
-    .map((note) => markerJson<LanguageCurriculum>(note.content, CURRICULUM_START, CURRICULUM_END))
-    .filter((value): value is LanguageCurriculum => Boolean(value))
-    .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt))[0];
+  return latestLanguageCurriculumEntry(notes)?.curriculum;
 }
 
 export function languageCurriculumByFingerprint(notes: ObsidianNote[], fingerprint: string) {
-  return notes
-    .filter((note) => text(note.frontmatter.type) === "language-curriculum")
-    .map((note) => markerJson<LanguageCurriculum>(note.content, CURRICULUM_START, CURRICULUM_END))
-    .find((value) => value?.contentFingerprint === fingerprint || value?.sourceFingerprint === fingerprint);
+  return languageCurriculumEntries(notes)
+    .map((entry) => entry.curriculum)
+    .find((value) => value.contentFingerprint === fingerprint || value.sourceFingerprint === fingerprint);
 }
 
 function allBatches(notes: ObsidianNote[]) {
