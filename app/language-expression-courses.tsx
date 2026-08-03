@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   deriveLanguageExpressionProgress,
   findLanguageExpressionCourses,
@@ -168,6 +174,56 @@ function readStoredStudyState(): StoredStudyState {
   }
 }
 
+// 学習位置は localStorage が出所なので、React ステートに写し取らず外部ストアとして購読する。
+// useEffect + setState で読み込むと「初回レンダー → setState → 再レンダー」のカスケードになり、
+// SSR とハイドレーションの食い違いも自前で面倒を見ることになる。
+// useSyncExternalStore なら「まだ読んでいない = null」をサーバーと初回ハイドレーションに返し、
+// マウント後の切り替えを React 側が担保してくれる。
+const EMPTY_STUDY_STATE: StoredStudyState = {
+  version: 1,
+  activeCourseId: "",
+  positions: {},
+};
+
+const studyStateListeners = new Set<() => void>();
+// null = まだ localStorage を読んでいない。
+let studyStateSnapshot: StoredStudyState | null = null;
+
+function subscribeStudyState(listener: () => void) {
+  studyStateListeners.add(listener);
+  // subscribe はマウント後にしか走らないので、ここで読めばハイドレーションは崩れない。
+  // 値が null から変わったことは、React が subscribe 直後のスナップショット比較で拾う。
+  if (studyStateSnapshot === null) {
+    studyStateSnapshot = readStoredStudyState();
+  }
+  return () => {
+    studyStateListeners.delete(listener);
+  };
+}
+
+function getStudyStateSnapshot() {
+  return studyStateSnapshot;
+}
+
+function getServerStudyStateSnapshot(): StoredStudyState | null {
+  return null;
+}
+
+function updateStudyState(
+  update: (current: StoredStudyState) => StoredStudyState,
+) {
+  studyStateSnapshot = update(studyStateSnapshot ?? EMPTY_STUDY_STATE);
+  try {
+    window.localStorage.setItem(
+      STUDY_POSITION_STORAGE_KEY,
+      JSON.stringify(studyStateSnapshot),
+    );
+  } catch {
+    // 保存領域が使えない環境でも、当日の練習操作そのものは止めない。
+  }
+  for (const listener of studyStateListeners) listener();
+}
+
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   return (
@@ -333,53 +389,30 @@ export default function LanguageExpressionCourses({
 }) {
   const courses = useMemo(() => findLanguageExpressionCourses(notes), [notes]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
-  const [storedStudyState, setStoredStudyState] = useState<StoredStudyState | null>(null);
-
-  useEffect(() => {
-    setStoredStudyState(readStoredStudyState());
-  }, []);
-
-  useEffect(() => {
-    if (!storedStudyState) return;
-    try {
-      window.localStorage.setItem(
-        STUDY_POSITION_STORAGE_KEY,
-        JSON.stringify(storedStudyState),
-      );
-    } catch {
-      // 保存領域が使えない環境でも、当日の練習操作そのものは止めない。
-    }
-  }, [storedStudyState]);
+  const storedStudyState = useSyncExternalStore(
+    subscribeStudyState,
+    getStudyStateSnapshot,
+    getServerStudyStateSnapshot,
+  );
 
   const rememberPosition = useCallback((
     courseId: string,
     position: StudyPosition,
   ) => {
-    setStoredStudyState((current) => {
-      const base = current ?? {
-        version: 1 as const,
-        activeCourseId: courseId,
-        positions: {},
-      };
-      return {
-        ...base,
-        activeCourseId: courseId,
-        positions: {
-          ...base.positions,
-          [courseId]: position,
-        },
-      };
-    });
+    updateStudyState((current) => ({
+      ...current,
+      activeCourseId: courseId,
+      positions: {
+        ...current.positions,
+        [courseId]: position,
+      },
+    }));
   }, []);
 
   const chooseCourse = (courseId: string) => {
     setSelectedCourseId(courseId);
-    setStoredStudyState((current) => ({
-      ...(current ?? {
-        version: 1 as const,
-        activeCourseId: courseId,
-        positions: {},
-      }),
+    updateStudyState((current) => ({
+      ...current,
       activeCourseId: courseId,
     }));
   };
@@ -433,7 +466,9 @@ export default function LanguageExpressionCourses({
         </aside>
 
         <CourseWorkbench
-          key={selected.courseId}
+          // 保存位置が読めた時点で別インスタンスとして作り直す。effect で setState して
+          // 復元すると「既定表示 → 復元表示」のカスケードレンダーになる。
+          key={`${selected.courseId}:${storedStudyState ? "restored" : "initial"}`}
           course={selected}
           notes={notes}
           onVaultChanged={onVaultChanged}
@@ -467,10 +502,17 @@ function CourseWorkbench({
   );
   const [localProgress, setLocalProgress] = useState<ProgressState | null>(null);
   const progress = localProgress ?? derivedProgress;
-  const [mode, setMode] = useState<PracticeMode>("recall");
-  const [chunkLevel, setChunkLevel] = useState<ChunkLevel>("core");
-  const [cursor, setCursor] = useState<PracticeCursor>({ ...DEFAULT_CURSOR });
-  const [positionRestored, setPositionRestored] = useState(false);
+  // initialPosition はマウント時の初期値としてだけ使う。以降に変わっても追わない
+  // （保存位置が届いた時は、呼び出し側が key を変えてこのコンポーネントを作り直す）。
+  const [mode, setMode] = useState<PracticeMode>(
+    initialPosition?.mode ?? "recall",
+  );
+  const [chunkLevel, setChunkLevel] = useState<ChunkLevel>(
+    initialPosition?.chunkLevel ?? "core",
+  );
+  const [cursor, setCursor] = useState<PracticeCursor>(
+    () => initialPosition?.cursor ?? { ...DEFAULT_CURSOR },
+  );
   const [revealed, setRevealed] = useState(false);
   const [resourceOpen, setResourceOpen] = useState(false);
   const [improvSelection, setImprovSelection] = useState({
@@ -482,18 +524,10 @@ function CourseWorkbench({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  // positionReady が false の間は書かない。localStorage を読み終える前に既定値を
+  // 書き戻すと、保存済みの位置を読む前に潰してしまう。
   useEffect(() => {
-    if (!positionReady || positionRestored) return;
-    if (initialPosition) {
-      setMode(initialPosition.mode);
-      setChunkLevel(initialPosition.chunkLevel);
-      setCursor(initialPosition.cursor);
-    }
-    setPositionRestored(true);
-  }, [course.courseId, initialPosition, positionReady, positionRestored]);
-
-  useEffect(() => {
-    if (!positionRestored) return;
+    if (!positionReady) return;
     onPositionChange(course.courseId, {
       mode,
       chunkLevel,
@@ -506,7 +540,7 @@ function CourseWorkbench({
     cursor,
     mode,
     onPositionChange,
-    positionRestored,
+    positionReady,
   ]);
 
   const completed = useMemo(
@@ -633,7 +667,7 @@ function CourseWorkbench({
 
   useEffect(() => {
     if (
-      !positionRestored ||
+      !positionReady ||
       busyKey ||
       mode === "improv" ||
       questionCount <= 0
@@ -691,7 +725,7 @@ function CourseWorkbench({
     currentQuestion,
     mode,
     move,
-    positionRestored,
+    positionReady,
     questionCount,
     revealed,
     save,
