@@ -3,8 +3,9 @@
 
 import { execFileSync } from "node:child_process";
 import { access, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative } from "node:path";
-import { applyCompactFrontmatter, planVaultCompaction, wikiTargets } from "../lib/vault-compact.mjs";
+import { dirname, join, relative } from "node:path";
+import { applyCompactFrontmatter, planVaultCompaction } from "../lib/vault-compact.mjs";
+import { buildKnowledgeGraph } from "../lib/knowledge-graph.ts";
 import { VAULT, listMarkdownFiles, parseFrontmatter } from "./vault-lib.mjs";
 
 const apply = process.argv.includes("--apply");
@@ -31,19 +32,24 @@ const archivedBytes = plan.candidates.reduce(
   0,
 );
 
-// 90_归档 は listMarkdownFiles の対象外。運用区から張られたリンクは移した瞬間に切れ、
-// vault:check の未解決参照が赤くなる＝Stop hook が毎回止まる。候補同士のリンクは
-// まとめて出ていくので許し、それ以外から引かれていたら apply を拒む。
-const candidateNames = new Map(
-  plan.candidates.map((candidate) => [basename(candidate.path).replace(/\.md$/iu, ""), candidate.path]),
-);
-const incomingLinks = candidateNames.size === 0 ? [] : notes.flatMap((note) => {
-  if (candidatePaths.has(note.relativePath)) return [];
-  return wikiTargets(note.content).flatMap((target) => {
-    const archived = candidateNames.get(basename(target).replace(/\.md$/iu, ""));
-    return archived ? [`${note.relativePath} → ${archived}`] : [];
-  });
-});
+// 「まだ誰かが指しているか」は正文の [[…]] だけでは答えにならない。source_note /
+// related / evidence_inputs / reviews のような frontmatter の関係フィールドからも
+// 引かれる。手でフィールドを並べると必ず取り零すので、判定は vault:check と同じ
+// buildKnowledgeGraph に訊く。候補同士のリンクはまとめて出ていくので許す。
+const incomingLinks = candidatePaths.size === 0 ? [] : [...new Set(
+  buildKnowledgeGraph(notes.map((note) => ({
+    path: note.relativePath,
+    stat: { ctime: 0, mtime: 0, size: note.size },
+    tags: [],
+    frontmatter: note.frontmatter,
+    content: note.content,
+  }))).edges
+    .filter((edge) => candidatePaths.has(edge.target) && !candidatePaths.has(edge.source))
+    .map((edge) => {
+      const field = edge.sourceField ? `(${edge.sourceField})` : "";
+      return `${edge.source} --${edge.relation}${field}→ ${edge.target}`;
+    }),
+)];
 
 const output = {
   mode: apply ? "apply" : "dry-run",

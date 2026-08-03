@@ -214,6 +214,23 @@ test("compact apply refuses while an operational note still links to a candidate
   await assert.rejects(access(join(root, "90_归档/80_AI分析/日本語訓練/old.md")));
 });
 
+test("compact apply also sees references that live only in frontmatter", async (t) => {
+  const root = await fixtureVault();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  // 正文には一切出てこず、構造化フィールドからだけ引かれている状態。
+  // 本文しか見ない守衛はこれを取り零す（vault:check は frontmatter 関係も見る）。
+  await writeFile(
+    join(root, "参照元.md"),
+    "---\ntype: material\nrelated: \"[[old]]\"\n---\n# 参照元\n\n本文にリンクは無い。\n",
+  );
+  const applied = runCompact(root, "--apply");
+  assert.notEqual(applied.status, 0);
+  assert.match(applied.stderr, /未解析引用/u);
+  assert.match(applied.stderr, /related/u, "どのフィールドから引かれているかを示す");
+  await access(join(root, "80_AI分析/日本語訓練/old.md"));
+  await assert.rejects(access(join(root, "90_归档/80_AI分析/日本語訓練/old.md")));
+});
+
 test("compact apply refuses an existing archive target before writing metadata", async (t) => {
   const root = await fixtureVault();
   t.after(() => rm(root, { recursive: true, force: true }));
