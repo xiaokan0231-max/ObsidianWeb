@@ -1445,6 +1445,68 @@ canvas:focus-visible {
   border-radius: 50%;
 }
 
+/* 当前视图下的节点数。0 のときは押しても空なので、押す前に分かるようにする。 */
+.group-filters button b {
+  min-width: 15px;
+  padding: 1px 4px;
+  background: #ebe8df;
+  border-radius: 3px;
+  color: #7b817d;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.group-filters button.empty { opacity: 0.5; }
+.group-filters button.empty b { background: transparent; color: #a8ada9; }
+.group-filters button.active b { background: rgba(255, 255, 255, 0.28); color: inherit; }
+
+/* 分区が空のときの説明。3D 星図の上に重ねる。 */
+.graph-empty-note {
+  position: absolute;
+  z-index: 6;
+  top: 50%;
+  left: 50%;
+  width: min(430px, calc(100% - 40px));
+  transform: translate(-50%, -50%);
+  padding: 22px 24px;
+  background: rgba(251, 250, 246, 0.97);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  box-shadow: 0 18px 48px rgba(18, 29, 24, 0.16);
+  text-align: center;
+}
+
+.graph-empty-note strong {
+  display: block;
+  margin-bottom: 9px;
+  font-family: "Songti SC", serif;
+  font-size: 15px;
+}
+
+.graph-empty-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.85;
+}
+
+.graph-empty-note button {
+  margin-top: 14px;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--orange);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: #b34d2d;
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.graph-empty-note button:hover { background: rgba(230, 109, 69, 0.1); }
+
 .group-filters button:hover,
 .group-filters button.active {
   border-color: var(--ink);
@@ -1455,6 +1517,13 @@ canvas:focus-visible {
 .graph-view .module-control-row {
   justify-content: space-between;
   gap: 12px;
+}
+
+.graph-control-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .graph-renderer-toggle {
@@ -1484,6 +1553,7 @@ canvas:focus-visible {
 }
 
 .graph-layout {
+  position: relative; /* .graph-empty-note の位置基準 */
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px;
   min-height: 640px;
@@ -2215,6 +2285,8 @@ canvas:focus-visible {
 
 .space-graph-dossier-neighbors button {
   --neighbor-accent: #fff;
+  display: grid;
+  gap: 2px;
   max-width: 100%;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--neighbor-accent), transparent 76%);
@@ -2223,15 +2295,37 @@ canvas:focus-visible {
   color: rgba(255, 255, 255, .63);
   font-family: inherit;
   font-size: 7px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.space-graph-dossier-neighbors button span {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
+}
+
+.space-graph-dossier-neighbors button small {
+  color: color-mix(in srgb, var(--neighbor-accent), transparent 34%);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 6px;
+  letter-spacing: .04em;
 }
 
 .space-graph-dossier-neighbors button:hover {
   border-color: var(--neighbor-accent);
   color: #fff;
   box-shadow: 0 0 14px color-mix(in srgb, var(--neighbor-accent), transparent 74%);
+}
+
+.space-graph-entity-hint {
+  border-top: 1px solid rgba(255, 255, 255, .08);
+  padding: 13px 18px;
+  color: rgba(255, 255, 255, .38);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  letter-spacing: .08em;
+  text-align: center;
 }
 
 .space-graph-dossier > code {
@@ -3245,6 +3339,21 @@ canvas:focus-visible {
   font-size: 8px;
 }
 
+.graph-relation-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid rgba(255, 255, 255, .08);
+  padding: 12px 0;
+  color: rgba(255, 255, 255, .45);
+  font-size: 8px;
+}
+
+.graph-relation-summary strong {
+  color: rgba(255, 255, 255, .82);
+  font-family: var(--font-geist-mono), monospace;
+}
+
 .legend-rule {
   display: flex;
   align-items: center;
@@ -4192,6 +4301,124 @@ canvas:focus-visible {
   animation: slide-in 240ms ease;
 }
 
+/* ===== 记忆库笔记：全屏阅读 =====
+   基类 .note-drawer / .drawer-backdrop は jobs-view の岗位抽屉と共用しているため、
+   全屏化は必ず --full 修飾子側だけに書く。素の抽屉挙動を壊さないこと。 */
+
+.drawer-backdrop--full {
+  justify-content: center;
+  background: var(--paper);
+  backdrop-filter: none;
+}
+
+.note-drawer--full {
+  width: 100vw;
+  max-width: 100vw;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  box-shadow: none;
+  animation: fade-in 180ms ease;
+}
+
+.note-drawer--full .drawer-header {
+  flex: 0 0 auto;
+  gap: 14px;
+  padding-inline: clamp(20px, 4vw, 52px);
+  background: rgba(243, 240, 232, 0.94);
+  backdrop-filter: blur(10px);
+}
+
+/* パスを伸ばして、ヒントと×を右端へ寄せる */
+.note-drawer--full .drawer-header > div:first-child { flex: 1; }
+
+.drawer-esc-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #8d928e;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.drawer-esc-hint kbd {
+  padding: 2px 5px;
+  border: 1px solid #d5d2c8;
+  border-radius: 4px;
+  background: var(--surface);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+}
+
+.note-drawer--full .drawer-scroll {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  padding: clamp(28px, 4.5vh, 56px) clamp(20px, 5vw, 60px) 140px;
+}
+
+/* 本文は読める幅で止める。全屏でも1行が伸び切らないようにする。 */
+.drawer-reading {
+  width: min(880px, 100%);
+  margin: 0 auto;
+}
+
+/* 全屏では読書用に一段大きく */
+.note-drawer--full .drawer-scroll > .drawer-reading > h1 {
+  font-size: clamp(32px, 3.2vw, 44px);
+  line-height: 1.35;
+}
+
+.note-drawer--full .markdown-document p,
+.note-drawer--full .md-list-item {
+  font-size: 13.5px;
+  line-height: 2.05;
+}
+
+.note-drawer--full .markdown-document h2 {
+  margin-top: 46px;
+  font-size: 26px;
+}
+
+.note-drawer--full .markdown-document h3 { font-size: 19px; }
+.note-drawer--full .markdown-document h4 { font-size: 14.5px; }
+
+.note-drawer--full .markdown-document blockquote {
+  font-size: 12.5px;
+  line-height: 1.9;
+}
+
+.note-drawer--full .markdown-document pre { font-size: 10.5px; }
+.note-drawer--full .md-table-row span { padding: 10px; font-size: 10.5px; }
+
+/* frontmatter は既定で畳む（指紋や schema_version は読む妨げ） */
+.frontmatter-fold {
+  margin: 22px 0;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.frontmatter-fold > summary {
+  padding: 9px 14px;
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  list-style: none;
+}
+
+.frontmatter-fold > summary::-webkit-details-marker { display: none; }
+
+.frontmatter-fold > summary::before {
+  content: "▸ ";
+  color: var(--orange);
+}
+
+.frontmatter-fold[open] > summary::before { content: "▾ "; }
+.frontmatter-fold > summary:hover { color: var(--ink); }
+.frontmatter-fold .frontmatter-grid { margin: 0; border: 0; border-top: 1px solid var(--line); }
+
 .drawer-header {
   height: 67px;
   display: flex;
@@ -4351,6 +4578,21 @@ canvas:focus-visible {
   color: #626a65;
   font-size: 11px;
   line-height: 1.8;
+}
+
+/* 連続した > 行は1つの引用の中で改行して並べる */
+.markdown-document blockquote > span {
+  display: block;
+}
+
+.markdown-document blockquote > span + span {
+  margin-top: 6px;
+}
+
+.markdown-document hr {
+  margin: 34px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
 }
 
 .markdown-document pre {
@@ -5704,6 +5946,13 @@ canvas:focus-visible {
   .note-drawer { width: 100vw; }
   .drawer-header { padding-inline: 18px; }
   .drawer-scroll { padding: 30px 20px 80px; }
+  /* 全屏変体は専用セレクタで上書きしているので、狭幅もそちらで指定し直す */
+  .note-drawer--full .drawer-scroll { padding: 26px 18px 90px; }
+  .note-drawer--full .drawer-scroll > .drawer-reading > h1 { font-size: 30px; }
+  .note-drawer--full .markdown-document p,
+  .note-drawer--full .md-list-item { font-size: 12.5px; line-height: 1.95; }
+  .note-drawer--full .markdown-document h2 { font-size: 22px; margin-top: 36px; }
+  .drawer-esc-hint { display: none; }
   .frontmatter-grid { grid-template-columns: 1fr; }
   .markdown-document p, .md-list-item { font-size: 11px; }
   .dojo-hero { padding: 30px 22px; }

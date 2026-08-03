@@ -42,6 +42,7 @@ import {
 export type KnowledgeGraphSceneNode = {
   id: string;
   title: string;
+  nodeKind: "note" | "company" | "skill";
   group: string;
   groupLabel: string;
   color: string;
@@ -51,11 +52,15 @@ export type KnowledgeGraphSceneNode = {
   updatedLabel: string;
   outbound: number;
   excerpt: string;
+  openable: boolean;
 };
 
 export type KnowledgeGraphSceneLink = {
   source: string;
   target: string;
+  relation: string;
+  relationLabel: string;
+  directed: boolean;
 };
 
 type Props = {
@@ -128,7 +133,7 @@ export default function ThreeKnowledgeGraph({
     () => new Map(nodes.map((node) => [node.id, node])),
     [nodes],
   );
-  const canOpen = useCallback((id: string) => nodeById.has(id), [nodeById]);
+  const canOpen = useCallback((id: string) => Boolean(nodeById.get(id)?.openable), [nodeById]);
   const { openingId, openNode } = useStagePortal({ stageRef, onOpen, canOpen });
   const pickSearchResult = useCallback((id: string) => selectNodeRef.current(id), []);
   const searchTiebreak = useCallback(
@@ -146,18 +151,31 @@ export default function ThreeKnowledgeGraph({
   const openingNode = nodeById.get(openingId ?? "") ?? null;
   const selectedNeighbors = useMemo(() => {
     if (!selectedId) return [];
-    const neighborIds = new Set<string>();
+    const neighbors = new Map<string, {
+      node: KnowledgeGraphSceneNode;
+      relationLabel: string;
+      direction: "out" | "in" | "both";
+    }>();
     links.forEach((link) => {
-      if (link.source === selectedId) neighborIds.add(link.target);
-      if (link.target === selectedId) neighborIds.add(link.source);
+      const neighborId = link.source === selectedId
+        ? link.target
+        : link.target === selectedId
+          ? link.source
+          : "";
+      const node = nodeById.get(neighborId);
+      if (!node) return;
+      const direction = link.directed
+        ? link.source === selectedId ? "out" : "in"
+        : "both";
+      const key = `${neighborId}\u0000${link.relation}`;
+      neighbors.set(key, { node, relationLabel: link.relationLabel, direction });
     });
-    return [...neighborIds]
-      .flatMap((id) => {
-        const node = nodeById.get(id);
-        return node ? [node] : [];
+    return [...neighbors.values()]
+      .toSorted((left, right) => {
+        const byDegree = right.node.degree - left.node.degree;
+        return byDegree || left.relationLabel.localeCompare(right.relationLabel, "zh-CN");
       })
-      .toSorted((left, right) => right.degree - left.degree)
-      .slice(0, 4);
+      .slice(0, 8);
   }, [links, nodeById, selectedId]);
 
   const changeDossierZoom = useCallback((amount: number) => {
@@ -384,9 +402,10 @@ export default function ThreeKnowledgeGraph({
       const label = document.createElement("span");
       label.style.setProperty("--label-accent", node.color);
       const dot = document.createElement("i");
-      const text = document.createElement("b");
-      text.textContent = node.title.length > 22 ? `${node.title.slice(0, 22)}…` : node.title;
-      label.append(dot, text);
+      const titleElement = document.createElement("b");
+      titleElement.textContent = node.title.length > 22 ? `${node.title.slice(0, 22)}…` : node.title;
+      label.appendChild(dot);
+      label.appendChild(titleElement);
       labelLayer.appendChild(label);
       return [{ node, position, label }];
     });
@@ -1097,14 +1116,17 @@ export default function ThreeKnowledgeGraph({
               <div className="space-graph-dossier-neighbors">
                 <span>最近的记忆轨道</span>
                 <div>
-                  {selectedNeighbors.map((neighbor) => (
+                  {selectedNeighbors.map(({ node: neighbor, relationLabel, direction }) => (
                     <button
                       type="button"
-                      key={neighbor.id}
+                      key={`${neighbor.id}:${relationLabel}:${direction}`}
                       onClick={() => selectNodeRef.current(neighbor.id)}
                       style={{ "--neighbor-accent": neighbor.color } as CSSProperties}
                     >
-                      {neighbor.title}
+                      <span>{neighbor.title}</span>
+                      <small>
+                        {direction === "out" ? "→" : direction === "in" ? "←" : "↔"} {relationLabel}
+                      </small>
                     </button>
                   ))}
                 </div>
@@ -1112,19 +1134,29 @@ export default function ThreeKnowledgeGraph({
             )}
             <code>{selectedNode.path}</code>
           </div>
-          <button
-            type="button"
-            className="space-graph-enter-memory"
-            onClick={() => openNode(selectedNode.id)}
-          >
-            <span>
-              <small>ENTER MEMORY</small>
-              展开完整记忆
-            </span>
-            <b aria-hidden="true">→</b>
-          </button>
+          {selectedNode.openable ? (
+            <button
+              type="button"
+              className="space-graph-enter-memory"
+              onClick={() => openNode(selectedNode.id)}
+            >
+              <span>
+                <small>ENTER MEMORY</small>
+                展开完整记忆
+              </span>
+              <b aria-hidden="true">→</b>
+            </button>
+          ) : (
+            <div className="space-graph-entity-hint">
+              派生实体 · 请选择关系节点继续探索
+            </div>
+          )}
           <footer>
-            <span>双击节点或按 <kbd>Enter</kbd> 也可穿越</span>
+            <span>
+              {selectedNode.openable
+                ? <>双击节点或按 <kbd>Enter</kbd> 也可穿越</>
+                : "实体由 Vault 的结构化字段实时生成"}
+            </span>
             <button type="button" onClick={() => setShortcutHelp(true)}>
               查看快捷键 <kbd>?</kbd>
             </button>

@@ -57,6 +57,14 @@ import {
   stripMarkdown,
   type Note,
 } from "@/lib/notes";
+import {
+  buildKnowledgeGraph,
+  GRAPH_RELATION_LABELS,
+  selectKnowledgeGraphView,
+  type GraphNodeKind,
+  type GraphViewMode,
+  type KnowledgeGraph,
+} from "@/lib/knowledge-graph";
 
 const ThreeKnowledgeGraph = lazy(() => import("./knowledge-graph-three"));
 const ThreeTimeCorridor = lazy(() => import("./timeline-three"));
@@ -1953,62 +1961,58 @@ function MiniGraph({ notes }: { notes: Note[] }) {
 }
 
 function buildKnowledgeGraphScene(
-  notes: Note[],
+  graph: KnowledgeGraph,
+  mode: GraphViewMode,
   filter: GroupKey | "all",
+  kind: GraphNodeKind | "all",
 ): {
   nodes: KnowledgeGraphSceneNode[];
   links: KnowledgeGraphSceneLink[];
 } {
-  const visibleNotes = notes.filter(
-    (note) => filter === "all" || getGroup(note.path) === filter,
-  );
-  const visiblePaths = new Set(visibleNotes.map((note) => note.path));
-  const titleIndex = new Map<string, Note>();
-  notes.forEach((note) => {
-    const basename = noteBasename(note.path);
-    titleIndex.set(basename, note);
-    titleIndex.set(note.path.replace(/\.md$/i, ""), note);
-  });
-
-  const links: KnowledgeGraphSceneLink[] = [];
-  const linkKeys = new Set<string>();
+  const view = selectKnowledgeGraphView(graph, { mode, group: filter, kind });
   const degree = new Map<string, number>();
-  visibleNotes.forEach((source) => {
-    extractLinks(source.content).forEach((rawTarget) => {
-      const target = titleIndex.get(rawTarget) ?? titleIndex.get(noteBasename(rawTarget));
-      if (!target || target.path === source.path || !visiblePaths.has(target.path)) return;
-      // 双链的往返引用在视觉上是一条边。去重后，节点大小也不会被同一事实重复放大。
-      const key = [source.path, target.path].sort().join("\u0000");
-      if (linkKeys.has(key)) return;
-      linkKeys.add(key);
-      links.push({ source: source.path, target: target.path });
-      degree.set(source.path, (degree.get(source.path) ?? 0) + 1);
-      degree.set(target.path, (degree.get(target.path) ?? 0) + 1);
-    });
+  const outbound = new Map<string, number>();
+  view.edges.forEach((edge) => {
+    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
+    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
+    outbound.set(edge.source, (outbound.get(edge.source) ?? 0) + 1);
   });
 
   return {
-    nodes: visibleNotes.map((note) => {
-      const group = getGroup(note.path);
-      const excerpt = stripMarkdown(stripFrontmatter(note.content))
-        .replace(/[ \t]+/g, " ")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
+    nodes: view.nodes.map((node) => {
+      const group = node.group as GroupKey;
+      const entityColor = node.kind === "company"
+        ? "#54b990"
+        : node.kind === "skill"
+          ? "#e48a58"
+          : GROUPS[group].color;
       return {
-        id: note.path,
-        title: getTitle(note),
+        id: node.id,
+        title: node.label,
+        nodeKind: node.kind,
         group,
         groupLabel: GROUPS[group].label,
-        color: GROUPS[group].color,
-        degree: degree.get(note.path) ?? 0,
-        path: note.path.replace(/\.md$/i, ""),
-        kindLabel: typeLabel(getType(note)),
-        updatedLabel: formatDate(note.stat.mtime, true),
-        outbound: extractLinks(note.content).length,
-        excerpt,
+        color: entityColor,
+        degree: degree.get(node.id) ?? 0,
+        path: node.pathLabel,
+        kindLabel: node.kind === "company"
+          ? "公司实体"
+          : node.kind === "skill"
+            ? "技能实体"
+            : typeLabel(node.noteType ?? "note"),
+        updatedLabel: node.kind === "note" ? formatDate(node.updatedAt, true) : "实时派生",
+        outbound: outbound.get(node.id) ?? 0,
+        excerpt: node.excerpt,
+        openable: node.openable,
       };
     }),
-    links,
+    links: view.edges.map((edge) => ({
+      source: edge.source,
+      target: edge.target,
+      relation: edge.relation,
+      relationLabel: GRAPH_RELATION_LABELS[edge.relation],
+      directed: edge.directed,
+    })),
   };
 }
 
@@ -2024,10 +2028,31 @@ function GraphView({
   onOpen: (note: Note) => void;
 }) {
   const [renderer, setRenderer] = useState<"space" | "map">("space");
+  const [mode, setMode] = useState<GraphViewMode>("semantic");
+  const [kind, setKind] = useState<GraphNodeKind | "all">("all");
+  const graph = useMemo(() => buildKnowledgeGraph(notes), [notes]);
   const scene = useMemo(
-    () => buildKnowledgeGraphScene(notes, filter),
-    [notes, filter],
+    () => buildKnowledgeGraphScene(graph, mode, filter, kind),
+    [filter, graph, kind, mode],
   );
+  // 分区ボタンには「今のモードで何件出るか」を出す。0 のまま押せると
+  // 「データが入っていない」と誤解する（日本語学習・系统が既定ビューで丸ごと消えていた）。
+  const modeCounts = useMemo(() => {
+    const counts = Object.fromEntries(
+      (Object.keys(GROUPS) as GroupKey[]).map((group) => [group, 0]),
+    ) as Record<GroupKey, number>;
+    for (const node of selectKnowledgeGraphView(graph, { mode, group: "all", kind }).nodes) {
+      counts[node.group as GroupKey] += 1;
+    }
+    return counts;
+  }, [graph, kind, mode]);
+  const emptyGroup = filter !== "all" && scene.nodes.length === 0;
+  // 「全部关系」に切り替えれば実際に出るときだけ、そう案内する。
+  // 空の原因が节点类型フィルタ側のときに「双链だから」と説明すると帰因を誤る。
+  const recoverableInAllMode = useMemo(() => {
+    if (!emptyGroup || mode !== "semantic") return false;
+    return selectKnowledgeGraphView(graph, { mode: "all", group: filter, kind }).nodes.length > 0;
+  }, [emptyGroup, filter, graph, kind, mode]);
   const noteByPath = useMemo(
     () => new Map(notes.map((note) => [note.path, note])),
     [notes],
@@ -2041,27 +2066,42 @@ function GraphView({
   return (
     <section className="graph-view">
       <div className="module-control-row">
-        <GroupFilters value={filter} onChange={onFilter} />
-        <div className="graph-renderer-toggle" aria-label="关系图显示方式">
-          <button
-            type="button"
-            className={renderer === "space" ? "active" : ""}
-            aria-pressed={renderer === "space"}
-            onClick={() => setRenderer("space")}
-          >
-            3D 星图
-          </button>
-          <button
-            type="button"
-            className={renderer === "map" ? "active" : ""}
-            aria-pressed={renderer === "map"}
-            onClick={() => setRenderer("map")}
-          >
-            简洁模式
-          </button>
+        <GroupFilters value={filter} onChange={onFilter} counts={modeCounts} />
+        <div className="graph-control-cluster">
+          <div className="graph-renderer-toggle" aria-label="关系范围">
+            <button type="button" className={mode === "semantic" ? "active" : ""} onClick={() => setMode("semantic")} title="只看 frontmatter 声明的强类型关系（关于公司・派生自・要求技能…）">语义关系</button>
+            <button type="button" className={mode === "all" ? "active" : ""} onClick={() => setMode("all")} title="语义关系＋正文里的普通双链，全部显示">全部关系</button>
+          </div>
+          <div className="graph-renderer-toggle" aria-label="节点类型">
+            {(["all", "note", "company", "skill"] as const).map((value) => (
+              <button key={value} type="button" className={kind === value ? "active" : ""} onClick={() => setKind(value)}>
+                {{ all: "全部", note: "笔记", company: "公司", skill: "技能" }[value]}
+              </button>
+            ))}
+          </div>
+          <div className="graph-renderer-toggle" aria-label="关系图显示方式">
+            <button type="button" className={renderer === "space" ? "active" : ""} onClick={() => setRenderer("space")}>3D 星图</button>
+            <button type="button" className={renderer === "map" ? "active" : ""} onClick={() => setRenderer("map")}>简洁模式</button>
+          </div>
         </div>
       </div>
       <div className="graph-layout" data-renderer={renderer}>
+        {emptyGroup && (
+          <div className="graph-empty-note" role="status">
+            <strong>「{GROUPS[filter as GroupKey].label}」在当前视图下没有节点</strong>
+            {recoverableInAllMode ? (
+              <>
+                <p>
+                  这个分区的笔记之间只有正文里的普通双链，没有 frontmatter 声明的强类型关系，
+                  所以「语义关系」视图不会显示它们。
+                </p>
+                <button type="button" onClick={() => setMode("all")}>切到「全部关系」查看</button>
+              </>
+            ) : (
+              <p>换一个分区，或把「节点类型」切回「全部」再看。</p>
+            )}
+          </div>
+        )}
         {renderer === "space" ? (
           <Suspense
             fallback={(
@@ -2079,7 +2119,7 @@ function GraphView({
             />
           </Suspense>
         ) : (
-          <CanvasKnowledgeGraph notes={notes} filter={filter} onOpen={onOpen} />
+          <CanvasKnowledgeGraph nodes={scene.nodes} links={scene.links} onOpen={openSceneNode} />
         )}
         <aside className="graph-legend">
           <span>{renderer === "space" ? "星系图例" : "图例"}</span>
@@ -2087,9 +2127,13 @@ function GraphView({
             <button key={group} onClick={() => onFilter(group)}>
               <i style={{ background: GROUPS[group].color }} />
               <span>{GROUPS[group].label}</span>
-              <strong>{notes.filter((note) => getGroup(note.path) === group).length}</strong>
+              <strong>{scene.nodes.filter((node) => node.group === group).length}</strong>
             </button>
           ))}
+          <div className="graph-relation-summary">
+            <span>{mode === "semantic" ? "强类型关系" : "全部关系"}</span>
+            <strong>{scene.links.length}</strong>
+          </div>
           <div className="legend-rule"><span>小</span><i /><i /><i /><span>被引用多</span></div>
         </aside>
       </div>
@@ -2097,21 +2141,34 @@ function GraphView({
   );
 }
 
-function GroupFilters({ value, onChange }: { value: GroupKey | "all"; onChange: (value: GroupKey | "all") => void }) {
+function GroupFilters({ value, onChange, counts }: {
+  value: GroupKey | "all";
+  onChange: (value: GroupKey | "all") => void;
+  counts?: Record<GroupKey, number>;
+}) {
   return (
     <div className="group-filters" aria-label="按分区筛选">
       <button className={value === "all" ? "active" : ""} onClick={() => onChange("all")}>全部</button>
-      {(Object.keys(GROUPS) as GroupKey[]).map((group) => (
-        <button key={group} className={value === group ? "active" : ""} onClick={() => onChange(group)}>
-          <i style={{ background: GROUPS[group].color }} />{GROUPS[group].label}
-        </button>
-      ))}
+      {(Object.keys(GROUPS) as GroupKey[]).map((group) => {
+        const count = counts?.[group];
+        return (
+          <button
+            key={group}
+            className={`${value === group ? "active" : ""}${count === 0 ? " empty" : ""}`}
+            onClick={() => onChange(group)}
+            title={count === 0 ? `当前视图下该分区没有节点` : undefined}
+          >
+            <i style={{ background: GROUPS[group].color }} />{GROUPS[group].label}
+            {count !== undefined && <b>{count}</b>}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
 type GraphPoint = {
-  note: Note;
+  node: KnowledgeGraphSceneNode;
   x: number;
   y: number;
   radius: number;
@@ -2128,16 +2185,19 @@ function seeded(path: string) {
   return ((hash >>> 0) % 10000) / 10000;
 }
 
-function CanvasKnowledgeGraph({ notes, filter, onOpen }: { notes: Note[]; filter: GroupKey | "all"; onOpen: (note: Note) => void }) {
+function CanvasKnowledgeGraph({
+  nodes,
+  links,
+  onOpen,
+}: {
+  nodes: KnowledgeGraphSceneNode[];
+  links: KnowledgeGraphSceneLink[];
+  onOpen: (id: string) => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointsRef = useRef<GraphPoint[]>([]);
   const [hovered, setHovered] = useState<GraphPoint | null>(null);
   const [size, setSize] = useState({ width: 900, height: 620 });
-
-  const visibleNotes = useMemo(
-    () => notes.filter((note) => filter === "all" || getGroup(note.path) === filter),
-    [notes, filter],
-  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -2151,7 +2211,7 @@ function CanvasKnowledgeGraph({ notes, filter, onOpen }: { notes: Note[]; filter
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || visibleNotes.length === 0) return;
+    if (!canvas || nodes.length === 0) return;
     const ratio = window.devicePixelRatio || 1;
     canvas.width = Math.round(size.width * ratio);
     canvas.height = Math.round(size.height * ratio);
@@ -2162,37 +2222,31 @@ function CanvasKnowledgeGraph({ notes, filter, onOpen }: { notes: Note[]; filter
     const centers: Record<GroupKey, [number, number]> = {
       self: [0.26, 0.28], career: [0.7, 0.3], study: [0.28, 0.72], analysis: [0.7, 0.72], system: [0.5, 0.5],
     };
-    const titleIndex = new Map<string, Note>();
-    notes.forEach((note) => titleIndex.set(noteBasename(note.path), note));
-    const incoming = new Map<string, number>();
-    notes.forEach((note) => extractLinks(note.content).forEach((link) => incoming.set(link, (incoming.get(link) ?? 0) + 1)));
-
-    const points: GraphPoint[] = visibleNotes.map((note, index) => {
-      const group = getGroup(note.path);
+    const points: GraphPoint[] = nodes.map((node, index) => {
+      const group = node.group as GroupKey;
       const [centerX, centerY] = centers[group];
-      const angle = seeded(note.path) * Math.PI * 2;
-      const ring = 38 + (index % 5) * 21 + seeded(`${note.path}-r`) * 18;
-      const degree = (incoming.get(noteBasename(note.path)) ?? 0) + extractLinks(note.content).length;
+      const angle = seeded(node.id) * Math.PI * 2;
+      const ring = 38 + (index % 5) * 21 + seeded(`${node.id}-r`) * 18;
       return {
-        note,
+        node,
         group,
         x: centerX * size.width + Math.cos(angle) * ring,
         y: centerY * size.height + Math.sin(angle) * ring * 0.72,
-        radius: 4.5 + Math.min(8, degree * 1.25),
-        degree,
+        radius: 4.5 + Math.min(8, node.degree * 1.25),
+        degree: node.degree,
       };
     });
     pointsRef.current = points;
-    const pointByPath = new Map(points.map((point) => [point.note.path, point]));
-    const labelLimit = filter === "all" ? 3 : 12;
+    const pointByPath = new Map(points.map((point) => [point.node.id, point]));
+    const labelLimit = nodes.length > 80 ? 4 : 12;
     const labelPaths = new Set(
-      (filter === "all" ? (Object.keys(GROUPS) as GroupKey[]) : [filter])
+      (Object.keys(GROUPS) as GroupKey[])
         .flatMap((group) =>
           points
             .filter((point) => point.group === group)
             .toSorted((left, right) => right.degree - left.degree)
             .slice(0, labelLimit)
-            .map((point) => point.note.path),
+            .map((point) => point.node.id),
         ),
     );
 
@@ -2207,37 +2261,37 @@ function CanvasKnowledgeGraph({ notes, filter, onOpen }: { notes: Note[]; filter
     }
 
     context.lineWidth = 1;
-    points.forEach((source) => {
-      extractLinks(source.note.content).forEach((link) => {
-        const targetNote = titleIndex.get(link);
-        const target = targetNote ? pointByPath.get(targetNote.path) : undefined;
-        if (!target) return;
-        context.beginPath();
-        context.moveTo(source.x, source.y);
-        context.lineTo(target.x, target.y);
-        context.strokeStyle = "rgba(208, 223, 213, .17)";
-        context.stroke();
-      });
+    links.forEach((link) => {
+      const source = pointByPath.get(link.source);
+      const target = pointByPath.get(link.target);
+      if (!source || !target) return;
+      context.beginPath();
+      context.moveTo(source.x, source.y);
+      context.lineTo(target.x, target.y);
+      context.strokeStyle = link.relation === "references"
+        ? "rgba(208, 223, 213, .12)"
+        : "rgba(208, 238, 220, .28)";
+      context.stroke();
     });
 
     points.forEach((point) => {
-      const active = hovered?.note.path === point.note.path;
+      const active = hovered?.node.id === point.node.id;
       if (active) {
         context.beginPath(); context.arc(point.x, point.y, point.radius + 8, 0, Math.PI * 2);
         context.fillStyle = "rgba(255,255,255,.12)"; context.fill();
       }
       context.beginPath(); context.arc(point.x, point.y, point.radius, 0, Math.PI * 2);
-      context.fillStyle = GROUPS[point.group].color; context.fill();
+      context.fillStyle = point.node.color; context.fill();
       context.strokeStyle = active ? "#fff" : "rgba(255,255,255,.45)";
       context.lineWidth = active ? 2 : 1; context.stroke();
-      if (labelPaths.has(point.note.path) || active) {
+      if (labelPaths.has(point.node.id) || active) {
         context.font = `${active ? 600 : 500} ${active ? 13 : 11}px system-ui, sans-serif`;
         context.fillStyle = active ? "#ffffff" : "rgba(244,245,238,.78)";
         context.textAlign = "center";
-        context.fillText(getTitle(point.note).slice(0, 18), point.x, point.y + point.radius + 17);
+        context.fillText(point.node.title.slice(0, 18), point.x, point.y + point.radius + 17);
       }
     });
-  }, [visibleNotes, notes, size, hovered, filter]);
+  }, [hovered, links, nodes, size]);
 
   const findPoint = (event: {
     currentTarget: HTMLCanvasElement;
@@ -2255,20 +2309,20 @@ function CanvasKnowledgeGraph({ notes, filter, onOpen }: { notes: Note[]; filter
       <canvas
         ref={canvasRef}
         role="img"
-        aria-label={`Obsidian 记忆关系图，共 ${visibleNotes.length} 个节点`}
+        aria-label={`Obsidian 记忆关系图，共 ${nodes.length} 个节点、${links.length} 条关系`}
         onPointerMove={(event) => setHovered(findPoint(event))}
         onPointerLeave={() => setHovered(null)}
         onClick={(event) => {
           const point = findPoint(event);
-          if (point) onOpen(point.note);
+          if (point?.node.openable) onOpen(point.node.id);
         }}
       />
-      <div className="graph-caption"><span>移动鼠标探索节点</span><strong>{visibleNotes.length} 个节点</strong></div>
+      <div className="graph-caption"><span>移动鼠标探索节点</span><strong>{nodes.length} 个节点 · {links.length} 条关系</strong></div>
       {hovered && (
         <div className="graph-tooltip">
-          <span style={{ color: GROUPS[hovered.group].color }}>{GROUPS[hovered.group].label}</span>
-          <strong>{getTitle(hovered.note)}</strong>
-          <small>{hovered.degree} 条关系 · 点击查看</small>
+          <span style={{ color: hovered.node.color }}>{hovered.node.kindLabel} · {hovered.node.groupLabel}</span>
+          <strong>{hovered.node.title}</strong>
+          <small>{hovered.degree} 条关系{hovered.node.openable ? " · 点击查看" : " · 派生实体"}</small>
         </div>
       )}
     </div>
@@ -2898,6 +2952,19 @@ function NoteDrawer({
   const trust = trustLayer(note);
   const basename = noteBasename(note.path);
   const backlinks = allNotes.filter((candidate) => extractLinks(candidate.content).includes(basename));
+  const frontmatterEntries = Object.entries(note.frontmatter);
+
+  // 全屏で読むので背面はスクロールさせない。閉じたときに元の位置へ戻す。
+  useEffect(() => {
+    const bodyOverflow = document.body.style.overflow;
+    const rootOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = bodyOverflow;
+      document.documentElement.style.overflow = rootOverflow;
+    };
+  }, []);
 
   useEffect(() => {
     if (!section) return;
@@ -2914,40 +2981,47 @@ function NoteDrawer({
   }, [note.path, section]);
 
   return (
-    <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <aside className="note-drawer" aria-label="记忆详情" aria-modal="true" role="dialog">
+    <div className="drawer-backdrop drawer-backdrop--full">
+      <aside className="note-drawer note-drawer--full" aria-label="记忆详情" aria-modal="true" role="dialog">
         <header className="drawer-header">
           <div><span style={{ color: GROUPS[group].color }}>{GROUPS[group].label}</span><small>{note.path}</small></div>
+          <span className="drawer-esc-hint"><kbd>Esc</kbd> 返回</span>
           <button onClick={onClose} aria-label="关闭详情">×</button>
         </header>
         <div className="drawer-scroll" ref={scrollRef}>
-          <div className="drawer-title-row">
-            <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
-            <span>{typeLabel(getType(note))}</span>
-          </div>
-          <h1>{getTitle(note)}</h1>
-          <div className="drawer-meta">
-            <span>更新于 {formatDate(note.stat.mtime, true)}</span>
-            <span>{Math.round(note.stat.size / 1024 * 10) / 10} KB</span>
-            <span>{extractLinks(note.content).length} 条外链</span>
-            <span>{backlinks.length} 条反链</span>
-          </div>
-          {Object.keys(note.frontmatter).length > 0 && (
-            <div className="frontmatter-grid">
-              {Object.entries(note.frontmatter).map(([key, value]) => (
-                <div key={key}><span>{key}</span><strong>{Array.isArray(value) ? value.join(" · ") : getString(value) || "—"}</strong></div>
-              ))}
+          <div className="drawer-reading">
+            <div className="drawer-title-row">
+              <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
+              <span>{typeLabel(getType(note))}</span>
             </div>
-          )}
-          <MarkdownDocument content={note.content} onWikiLink={onOpenWiki} />
-          {backlinks.length > 0 && (
-            <section className="backlinks">
-              <span>BACKLINKS · 反向链接</span>
-              {backlinks.map((backlink) => (
-                <button key={backlink.path} onClick={() => onOpen(backlink)}><strong>{getTitle(backlink)}</strong><small>{GROUPS[getGroup(backlink.path)].label} ↗</small></button>
-              ))}
-            </section>
-          )}
+            <h1>{getTitle(note)}</h1>
+            <div className="drawer-meta">
+              <span>更新于 {formatDate(note.stat.mtime, true)}</span>
+              <span>{Math.round(note.stat.size / 1024 * 10) / 10} KB</span>
+              <span>{extractLinks(note.content).length} 条外链</span>
+              <span>{backlinks.length} 条反链</span>
+            </div>
+            {frontmatterEntries.length > 0 && (
+              // 指纹や schema_version は読む妨げにしかならないので、既定では畳む。
+              <details className="frontmatter-fold" open={frontmatterEntries.length <= 4}>
+                <summary>属性 {frontmatterEntries.length} 项</summary>
+                <div className="frontmatter-grid">
+                  {frontmatterEntries.map(([key, value]) => (
+                    <div key={key}><span>{key}</span><strong>{Array.isArray(value) ? value.join(" · ") : getString(value) || "—"}</strong></div>
+                  ))}
+                </div>
+              </details>
+            )}
+            <MarkdownDocument content={note.content} onWikiLink={onOpenWiki} />
+            {backlinks.length > 0 && (
+              <section className="backlinks">
+                <span>BACKLINKS · 反向链接</span>
+                {backlinks.map((backlink) => (
+                  <button key={backlink.path} onClick={() => onOpen(backlink)}><strong>{getTitle(backlink)}</strong><small>{GROUPS[getGroup(backlink.path)].label} ↗</small></button>
+                ))}
+              </section>
+            )}
+          </div>
         </div>
       </aside>
     </div>
@@ -2964,10 +3038,11 @@ function normalizeHeading(text: string) {
 }
 
 function renderInline(text: string, onWikiLink: (target: string, section?: string) => void): ReactNode[] {
-  const pieces = text.split(/(\[\[[^\]]+\]\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+  // 埋め込み記法 ![[…]] も同じリンクとして扱う。`!` を先に食わないと裸で残る。
+  const pieces = text.split(/(!?\[\[[^\]]+\]\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
   return pieces.map((piece, index) => {
-    if (piece.startsWith("[[") && piece.endsWith("]]")) {
-      const body = piece.slice(2, -2);
+    if (piece.startsWith("[[") || piece.startsWith("![[")) {
+      const body = piece.replace(/^!?\[\[/, "").replace(/\]\]$/, "");
       const [targetWithHeading, alias] = body.split("|");
       const [target, section] = targetWithHeading.split("#");
       return (
@@ -2993,8 +3068,26 @@ function MarkdownDocument({
   const blocks: ReactNode[] = [];
   let codeLines: string[] = [];
   let inCode = false;
+  // 連続する > 行は1つの引用にまとめる。1行ごとに箱を作ると、
+  // 数行の注意書きが分断されて読めなくなる。
+  let quoteLines: string[] = [];
+  let quoteStart = 0;
+  let seenTitle = false;
+  const flushQuote = () => {
+    if (!quoteLines.length) return;
+    const buffered = quoteLines;
+    quoteLines = [];
+    blocks.push(
+      <blockquote key={`quote-${quoteStart}`}>
+        {buffered.map((quoted, offset) => (
+          <span key={offset}>{renderInline(quoted, onWikiLink)}</span>
+        ))}
+      </blockquote>,
+    );
+  };
   lines.forEach((line, index) => {
     if (line.startsWith("```")) {
+      flushQuote();
       if (inCode) {
         blocks.push(<pre key={`code-${index}`}><code>{codeLines.join("\n")}</code></pre>);
         codeLines = [];
@@ -3003,18 +3096,30 @@ function MarkdownDocument({
       return;
     }
     if (inCode) { codeLines.push(line); return; }
+    if (line.startsWith(">")) {
+      if (!quoteLines.length) quoteStart = index;
+      quoteLines.push(line.replace(/^>\s?/, ""));
+      return;
+    }
+    flushQuote();
     if (!line.trim()) return;
-    const heading = line.match(/^(#{2,4})\s+(.+)/);
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      blocks.push(<hr key={index} />);
+      return;
+    }
+    const heading = line.match(/^(#{1,4})\s+(.+)/);
     if (heading) {
       const level = heading[1].length;
       const data = { "data-md-heading": normalizeHeading(heading[2]) };
-      if (level === 2) blocks.push(<h2 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h2>);
+      // 冒頭の H1 は Obsidian 慣例でノート題名＝drawer が既に大きく出しているので捨てる。
+      // 2つ目以降の H1 は本文の見出しなので h2 として出す。
+      if (level === 1) {
+        if (!seenTitle) { seenTitle = true; return; }
+        blocks.push(<h2 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h2>);
+      }
+      else if (level === 2) blocks.push(<h2 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h2>);
       else if (level === 3) blocks.push(<h3 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h3>);
       else blocks.push(<h4 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h4>);
-      return;
-    }
-    if (line.startsWith(">")) {
-      blocks.push(<blockquote key={index}>{renderInline(line.replace(/^>\s?/, ""), onWikiLink)}</blockquote>);
       return;
     }
     const listItem = line.match(/^\s*(?:[-*]|\d+\.)\s+(.+)/);
@@ -3029,6 +3134,7 @@ function MarkdownDocument({
     }
     blocks.push(<p key={index}>{renderInline(line, onWikiLink)}</p>);
   });
+  flushQuote();
   return <article className="markdown-document">{blocks}</article>;
 }
 
