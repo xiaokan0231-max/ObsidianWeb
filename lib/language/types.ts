@@ -76,6 +76,8 @@ export type LanguageBank = {
   generatedAt: string;
   model: string;
   sourceFingerprint: string;
+  /** 旧 bank との後方互換のため optional。読み込み時に内容から補完する。 */
+  contentFingerprint?: string;
   sourceCount: number;
   summaryZh: string;
   immediateAdviceZh: string;

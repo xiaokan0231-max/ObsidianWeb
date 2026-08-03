@@ -90,6 +90,28 @@ test("language bank rebuild preserves stable ids and enforces the minimum bank s
   assert.ok(bridge.includes("Vault 没有写入任何不完整内容"));
 });
 
+test("generated language artifacts use content fingerprints and do not duplicate unchanged versions", async () => {
+  const [bankRoute, expandRoute, curriculumRoute, store, curriculum, artifact] = await Promise.all([
+    readFile("app/api/language/rebuild/route.ts", "utf8"),
+    readFile("app/api/language/expand/route.ts", "utf8"),
+    readFile("app/api/language/v2/rebuild/route.ts", "utf8"),
+    readFile("lib/server/language-store.ts", "utf8"),
+    readFile("lib/server/language-v2.ts", "utf8"),
+    readFile("lib/server/generated-artifact.ts", "utf8"),
+  ]);
+  for (const route of [bankRoute, expandRoute, curriculumRoute]) {
+    assert.ok(route.includes("unchanged: true"));
+    assert.ok(route.includes("latest"));
+    assert.ok(route.indexOf("await writeNote(path") < route.indexOf("await supersedeCurrentArtifacts"));
+  }
+  for (const renderer of [store, curriculum]) {
+    assert.ok(renderer.includes("lifecycle: current"));
+    assert.ok(renderer.includes("schema_version: 2"));
+    assert.ok(renderer.includes("content_fingerprint"));
+  }
+  assert.ok(artifact.includes('lifecycle: "superseded"'));
+});
+
 test("the dev launcher selects a free bridge port when the default is occupied", async () => {
   const source = await readFile("scripts/dev-with-obsidian.sh", "utf8");
   assert.ok(source.includes('error.code !== "EADDRINUSE"'));
