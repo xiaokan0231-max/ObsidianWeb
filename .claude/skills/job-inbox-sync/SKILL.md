@@ -225,18 +225,29 @@ C 类不直接建 job-case：建案必须按 `_ルール_求人探索と採点` 
    受理邮件**一封可含多社**（实例：7/20 一封3社）、**一线程可含多封**（实例：7/21 一线程4封），
    必须逐封逐社解析；**求人No 是案件同一性的照合键**（同 No 两次受理＝重复手续，
    不是第二个案件）；RA 書類結果由担当者以「（書類）選考結果のご連絡」人工发送，一封一社。
-2. 改 frontmatter（前三件必改；第四件在日程确定时必改）：
+2. 改 frontmatter（前三件必改；日程・等待字段按事象写，字段字典是正本）：
    - `status`：括号前必须是 7 枚举之一，括号内补日期・阶段・渠道，
      例 `不採用（2026-07-21・書類選考／公式HRMOS）`
    - `status_updated`：**取事象发生日，不是今天**。メール由来ならメール日付、
      Green 画面由来なら画面表示の日時（`YYYY/MM/DD HH:MM`）。両方あれば**画面側を正**。
      台帳「通知日」直接引用这里。
    - `channel`：**以受理邮件为准**（source ≠ channel，两者不同是正常的）。
-   - `next_action`：邮件里出现**确定的面接/面談日時**时必写，格式
-     `YYYY-MM-DD HH:MM 内容`（例 `2026-07-28 10:00 一次面接（Teams）`）。
-     **Web 日历只读 job-case 和 todo 的 `next_action`**，不写＝系统里没有这个日程
-     （2026-07-23 实证：ワークポート面談只记在 todo 正文里，日历一直显示「预定なし」）。
-     日程过后或作废时更新/清除。
+   - `next_event_at`：邮件里出现**确定的面接/面談日時**时必写，格式
+     `YYYY-MM-DD HH:MM`（无时刻时可只写日期）。**Web 日历只读 job-case 和 todo 的
+     `next_event_at`**，不写＝系统里没有这个日程（2026-07-23 实证：ワークポート面談
+     只记在 todo 正文里，日历一直显示「预定なし」）。日程过后或作废时更新/清除。
+     旧笔记的 `next_action` 里带日期只是迁移期兼容——**本 skill 不再往 `next_action` 写日期**，
+     碰到旧格式时顺手迁到 `next_event_at`。
+   - `next_action`：案件下一状态的**纯文本短句**（例 `一次面接の準備`），不承载日程、
+     不驱动首页排序。
+   - `waiting_for` / `waiting_label`：球在谁手里（`self / company / agent / platform`）
+     ＋等待事项短标签，例结果待ち＝`waiting_for: company`・`waiting_label: 書類選考の結果待ち`。
+     外部等待只进首页观察区；本人要动手的事不用这对字段——那是 todo 的领域（步骤 5）。
+     案件终结（不採用・辞退等）时连同 `follow_up_*` 一起清除。
+   - `follow_up_at` / `follow_up_action`：邮件/画面里出现**明示的回复期限**
+     （「1週間以内に結果」等）时写跟进日和到期动作，例 `follow_up_at: 2026-08-07`・
+     `follow_up_action: 無音なら状況確認を起票`。到期后 Web 自动把它纳入首页重点候选——
+     「企業の無音」从此不再靠人記憶。`vault:check` 强制 `follow_up_at` 必须伴随 `waiting_for`。
 3. 秩序规则：
    - 邮件日期 ≤ 案件现有 `status_updated` → 不改，列入报告
      （防止增量扫描迟到的旧邮件把状态倒退）。
@@ -246,24 +257,31 @@ C 类不直接建 job-case：建案必须按 `_ルール_求人探索と採点` 
 
 ### 5. 录入待办（B/C 类）
 
-落点 `20_求職/_TODO/`，frontmatter 跟随现有约定：
+落点 `20_求職/_TODO/`，frontmatter 跟随数据字典的「todo frontmatter 字段字典」：
 
 ```yaml
 type: todo
-status: 未着手        # 未着手/進行中/完了/保留
+status: 未着手        # 未着手/進行中/保留/完了。前两种才进首页重点候选
 priority: high        # high/medium/low
-category: 応募経路    # 简短分类
+audience: user        # 本 skill 录的都是本人要动手的事＝user（缺省）。system 是维护用
+action: 88字内的动作短句  # 首页・待办页显示用；纯文本不含 Markdown 记号，背景写正文
+category: 応募経路    # 简短分类（「台帳整合」「観測基盤」保留给 audience: system）
+case_id: <case_id>    # 挂在具体案件上时必写（vault:check 验证案件存在），不能只靠公司名
+due: YYYY-MM-DD       # 回复期限等本人行动期限，有才写；不是期限的日期别塞这里
 updated: YYYY-MM-DD
 ```
+
+`focus` / `focus_until`（人工置顶）不由本 skill 写。`blocks_next_stage: true` 只在
+该待办完成前下一轮选考走不下去时写（日程返信・適性検査受検等），且必须带 `case_id`。
 
 正文结构参照现有笔记（如 `Daijobスカウト確認.md`）：
 `## 事実`（受信日时・账号・件名——这是溯源键）／`## やること`／`## 関連`（wikilink 相关正本）。
 
 🔴 **确定了日時的预定必须让 Web 日历看得见**：エージェント面談・説明会等不挂在单一
 job-case 上的日程，在 todo frontmatter 里补 `company:`（日历显示的主体名）和
-`next_action: YYYY-MM-DD HH:MM 内容`——日历只读 frontmatter，写在正文里等于没写
+`next_event_at: YYYY-MM-DD HH:MM`——日历只读 frontmatter，写在正文里等于没写
 （2026-07-23 ワークポート面談漏出实证）。挂在具体案件上的面接写回该 job-case 的
-`next_action`（步骤 4），不要两处都写造成双重显示。
+`next_event_at`（步骤 4），不要两处都写造成双重显示。
 
 判重：建新待办前先查 `_TODO/` 里是否已有同一邮件/同一事项的笔记（**含已完了的**）——
 有就不重建，必要时在原笔记追記。
@@ -285,6 +303,7 @@ npm run vault:check && npm run vault:stats
   **メールに無く画面にしか無かった事実 N 件**（0 件なら「0 件」と書く）
 - Workport eコンシェル：全 N 件（応募済 n・書類提出 n・推薦不可 n）/ 前回からの変化 N 件
 - 状態更新（N件）：| 案件 | 旧→新 | 証拠（**メール or Green画面**・日時） |
+- 外部等待（N件）：| 案件 | waiting_for | follow_up_at |（本轮写入/更新的等待・跟进字段，0 件也写）
 - 新規待办（N件）：标题＋优先度
 - スカウト（N件）：来源＋已建待办
 - 未能归类（N件，需要人裁决）：件名＋为什么无法归类
