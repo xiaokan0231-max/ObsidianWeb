@@ -426,8 +426,15 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
     // 「7/29 に返信済み」のような履歴日を未来の締切・面接日に誤認するため。
     // company 本文を再走査すると、同じ面接が証拠記述と案件で二重表示される。
     if (type !== JOB_CASE_TYPE) return;
+    // next_event_at は「確定日程しか書かない」構造化フィールドで、job-inbox-sync が
+    // 指示する書式は純粋な YYYY-MM-DD HH:MM。ここに面接などの語を要求すると、
+    // 書式どおりに書いた予定が日历から丸ごと消える。todo 側も job-progress 側も
+    // 語を要求していないので、案件側の日历だけが黙って落ちていた。
+    const scheduled = getString(note.frontmatter.next_event_at);
+    const scheduledDate = scheduled.match(/\b(20\d{2}-\d{2}-\d{2})\b/u)?.[1];
+    if (scheduledDate) addEvent(note, scheduledDate, scheduled, 4);
+
     const sources = [
-      { line: getString(note.frontmatter.next_event_at), priority: 4, trusted: true },
       { line: getString(note.frontmatter.next_action), priority: 3, trusted: true },
       ...stripFrontmatter(note.content)
         .split("\n")

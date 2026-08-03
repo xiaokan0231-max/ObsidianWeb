@@ -46,6 +46,18 @@ test("日历：todo の next_event_at は単一案件に紐づかない予定の
   assert.equal(events[0].phase, "upcoming");
 });
 
+test("日历：job-case の next_event_at は面接などの語を含まなくても予定になる", () => {
+  const events = buildCalendarEvents([
+    note("20_求職/Acme/Acme_Data.md", "job-case", {
+      company: "Acme",
+      next_event_at: "2026-08-10 14:30",
+    }, "- 2026-08-10 一次面接の話が出ている"),
+  ], NOW);
+  // job-inbox-sync が指示する書式は純粋な日時。語を要求すると書いた予定が黙って消える。
+  assert.deepEqual(dates(events), ["2026-08-10 14:30"]);
+  assert.equal(events[0].phase, "upcoming");
+});
+
 test("日历：本文は面接行だけ拾い、お礼・通知・準備の行は予定にしない", () => {
   const events = buildCalendarEvents([
     note("20_求職/Acme/Acme_Data.md", "job-case", { company: "Acme" }, [
