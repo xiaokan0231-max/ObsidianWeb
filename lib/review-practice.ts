@@ -1,7 +1,7 @@
 // 回答品質復盤から本人が選んだ「重练キュー」を読むための小さな形式。
 // AI の改善回答そのものではなく、それを練習対象に選んだという本人の行為を保存する。
 
-export type InterviewPracticeEntry = {
+type InterviewPracticeEntry = {
   blockId: string;
   status: "queued";
   queuedAt: string;

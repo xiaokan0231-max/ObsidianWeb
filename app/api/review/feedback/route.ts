@@ -2,8 +2,13 @@ import {
   parseReviewFeedback,
   type ReviewFeedbackKind,
 } from "@/lib/review-feedback";
+import { getString as text, noteBasename as basename } from "@/lib/notes";
 import { parseInterviewAnswerReview } from "@/lib/review-deep";
-import { appendNote, noteExists, readNote, writeNote } from "@/lib/server/obsidian";
+import { isReviewNotePath, reviewSiblingPath } from "@/lib/review-paths";
+import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
+import { appendNote, readNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
+import { createSerialQueue } from "@/lib/server/serial-queue";
+import { tokyoParts, yamlScalar } from "@/lib/dojo/utils";
 
 type Body = {
   notePath?: string;
@@ -13,36 +18,10 @@ type Body = {
 };
 
 const KINDS = new Set<ReviewFeedbackKind>(["agree", "disagree", "context"]);
-let feedbackQueue = Promise.resolve();
-
-async function inFeedbackQueue<T>(operation: () => Promise<T>) {
-  const previous = feedbackQueue;
-  let release = () => {};
-  feedbackQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    return await operation();
-  } finally {
-    release();
-  }
-}
-
-function text(value: unknown) {
-  return typeof value === "string" || typeof value === "number" ? String(value) : "";
-}
-
-function basename(path: string) {
-  return path.split("/").pop()?.replace(/\.md$/i, "") ?? path;
-}
-
-function yamlString(value: string) {
-  return JSON.stringify(value);
-}
+const inFeedbackQueue = createSerialQueue();
 
 function todayInTokyo() {
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
+  return tokyoParts().date;
 }
 
 export async function POST(request: Request) {
@@ -50,7 +29,7 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as Body;
   } catch {
-    return Response.json({ error: "请求体不是合法 JSON" }, { status: 400 });
+    return badRequest("请求体不是合法 JSON");
   }
 
   const notePath = body.notePath ?? "";
@@ -58,28 +37,24 @@ export async function POST(request: Request) {
   const kind = body.kind ?? "agree";
   const feedbackText = (body.text ?? "").replace(/\s*\n\s*/g, "；").trim();
   const storedText = feedbackText || "同意该项 AI 评价";
-  if (
-    !notePath.startsWith("20_求職/") ||
-    !notePath.endsWith("_整理稿.md") ||
-    notePath.includes("..")
-  ) {
-    return Response.json({ error: "notePath 不是面试整理稿" }, { status: 400 });
+  if (!isReviewNotePath(notePath, "seirikou")) {
+    return badRequest("notePath 不是面试整理稿");
   }
   if (!/^q\d+$/.test(blockId)) {
-    return Response.json({ error: "blockId 格式不对" }, { status: 400 });
+    return badRequest("blockId 格式不对");
   }
   if (!KINDS.has(kind)) {
-    return Response.json({ error: "kind 必须是 agree/disagree/context" }, { status: 400 });
+    return badRequest("kind 必须是 agree/disagree/context");
   }
   if ((kind === "disagree" || kind === "context") && !feedbackText) {
-    return Response.json({ error: "请说明不同意的理由或要补充的事实" }, { status: 400 });
+    return badRequest("请说明不同意的理由或要补充的事实");
   }
   if (feedbackText.length > 2000) {
-    return Response.json({ error: "反馈内容过长" }, { status: 400 });
+    return badRequest("反馈内容过长");
   }
 
-  const reviewPath = notePath.replace(/_整理稿\.md$/, "_回答品質復盤.md");
-  const feedbackPath = notePath.replace(/_整理稿\.md$/, "_回答品質批注.md");
+  const reviewPath = reviewSiblingPath(notePath, "answerReview");
+  const feedbackPath = reviewSiblingPath(notePath, "answerFeedback");
 
   try {
     const [source, reviewNote] = await Promise.all([readNote(notePath), readNote(reviewPath)]);
@@ -92,10 +67,10 @@ export async function POST(request: Request) {
     }
 
     const result = await inFeedbackQueue(async () => {
-      const exists = await noteExists(feedbackPath);
-      let current = "";
-      if (exists) {
-        current = (await readNote(feedbackPath)).content;
+      // 存在判定と本文読みは同じ 1 往復で足りる。noteExists を挟むと同じ GET を 2 回打つ。
+      const existing = await readNoteOrNull(feedbackPath);
+      const current = existing?.content ?? "";
+      if (existing) {
         const duplicate = parseReviewFeedback(current).find(
           (entry) => entry.blockId === blockId && entry.kind === kind && entry.text === storedText,
         );
@@ -107,7 +82,7 @@ export async function POST(request: Request) {
       }
       const id = `f${String(maxId + 1).padStart(3, "0")}`;
       const entry = `\n- **${id}｜${blockId}｜${kind}｜${todayInTokyo()}**\n    - 我:: ${storedText}\n`;
-      if (exists) {
+      if (existing) {
         await appendNote(feedbackPath, entry);
       } else {
         const company = text(source.frontmatter.company);
@@ -115,15 +90,13 @@ export async function POST(request: Request) {
         const round = text(source.frontmatter.round);
         await writeNote(
           feedbackPath,
-          `---\ntype: interview-answer-feedback\ncompany: ${yamlString(company)}\ndate: ${yamlString(date)}\nround: ${yamlString(round)}\nsource_note: ${yamlString(`[[${basename(notePath)}]]`)}\nreview_note: ${yamlString(`[[${basename(reviewPath)}]]`)}\nlayer: human-feedback\n---\n# ${date} ${company} 回答品質批注\n\n> 本人对 AI 回答质量复盘的同意、反对与事实补充。追记のみ。再生成时作为约束输入。\n\n## フィードバック\n${entry}`,
+          `---\ntype: interview-answer-feedback\ncompany: ${yamlScalar(company)}\ndate: ${yamlScalar(date)}\nround: ${yamlScalar(round)}\nsource_note: ${yamlScalar(`[[${basename(notePath)}]]`)}\nreview_note: ${yamlScalar(`[[${basename(reviewPath)}]]`)}\nlayer: human-feedback\n---\n# ${date} ${company} 回答品質批注\n\n> 本人对 AI 回答质量复盘的同意、反对与事实补充。追记のみ。再生成时作为约束输入。\n\n## フィードバック\n${entry}`,
         );
       }
       return { id, deduplicated: false };
     });
     return Response.json({ ok: true, path: feedbackPath, ...result });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "AI 评价反馈写入失败";
-    const status = message.includes("returned 404") ? 404 : 502;
-    return Response.json({ error: message }, { status });
+    return obsidianErrorResponse(error, "AI 评价反馈写入失败");
   }
 }

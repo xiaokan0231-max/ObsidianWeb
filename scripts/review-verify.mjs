@@ -14,6 +14,7 @@ import {
   parseAnnotations,
   parseSeirikou,
 } from "../lib/review.ts";
+import { reviewSiblingPath } from "../lib/review-paths.ts";
 
 const VAULT = process.env.OBSIDIAN_VAULT_PATH ?? "/Users/kanxiao/obsidian/xiaokan";
 
@@ -39,7 +40,9 @@ if (!seirikouArg) {
 const seirikouPath = resolvePath(seirikouArg);
 const annotationPath = process.argv[3]
   ? resolvePath(process.argv[3])
-  : seirikouPath.replace(/_整理稿\.md$/, "_批注.md");
+  // ここは resolvePath 後の絶対パス。純粋な置換なので使えるが、
+  // vault 相対を前提にする isReviewNotePath はここでは使えない。
+  : reviewSiblingPath(seirikouPath, "annotation");
 
 const errors = [];
 const warnings = [];

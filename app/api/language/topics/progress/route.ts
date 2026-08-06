@@ -10,6 +10,7 @@ import {
   type LanguageExpressionProgressAction,
   type LanguageExpressionProgressEvent,
 } from "@/lib/language-expression-course";
+import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
 import {
   appendNote,
   noteExists,
@@ -17,6 +18,7 @@ import {
   readNote,
   writeNote,
 } from "@/lib/server/obsidian";
+import { createSerialQueue } from "@/lib/server/serial-queue";
 
 type Body = {
   eventId?: string;
@@ -36,21 +38,7 @@ const EXERCISES = new Set<LanguageExpressionExercise>([
 const ACTIONS = new Set<LanguageExpressionProgressAction>(["completed", "reopened"]);
 
 // 「同じ eventId が既にあるか読む→追記する」を一本化し、連打時にも二重計上させない。
-let progressQueue = Promise.resolve();
-
-async function inProgressQueue<T>(operation: () => Promise<T>): Promise<T> {
-  const previous = progressQueue;
-  let release = () => {};
-  progressQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    return await operation();
-  } finally {
-    release();
-  }
-}
+const inProgressQueue = createSerialQueue();
 
 function supportsExercise(itemId: string, exercise: LanguageExpressionExercise) {
   const kind = itemId[0];
@@ -60,16 +48,12 @@ function supportsExercise(itemId: string, exercise: LanguageExpressionExercise) 
   return kind === "e" || kind === "n";
 }
 
-function invalid(message: string) {
-  return Response.json({ error: message }, { status: 400 });
-}
-
 export async function POST(request: Request) {
   let body: Body;
   try {
     body = (await request.json()) as Body;
   } catch {
-    return invalid("请求体不是合法 JSON。");
+    return badRequest("请求体不是合法 JSON。");
   }
 
   const eventId = body.eventId?.trim() ?? "";
@@ -79,18 +63,18 @@ export async function POST(request: Request) {
   const action = body.action?.trim() as LanguageExpressionProgressAction;
 
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(eventId)) {
-    return invalid("eventId 格式不正确。");
+    return badRequest("eventId 格式不正确。");
   }
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/u.test(courseId)) {
-    return invalid("courseId 格式不正确。");
+    return badRequest("courseId 格式不正确。");
   }
   if (!/^[csienr]\d+$/u.test(itemId)) {
-    return invalid("itemId 格式不正确。");
+    return badRequest("itemId 格式不正确。");
   }
-  if (!EXERCISES.has(exercise)) return invalid("exercise 不受支持。");
-  if (!ACTIONS.has(action)) return invalid("action 不受支持。");
+  if (!EXERCISES.has(exercise)) return badRequest("exercise 不受支持。");
+  if (!ACTIONS.has(action)) return badRequest("action 不受支持。");
   if (!supportsExercise(itemId, exercise)) {
-    return invalid("练习方式与项目类型不匹配。");
+    return badRequest("练习方式与项目类型不匹配。");
   }
 
   try {
@@ -108,7 +92,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "指定笔记不是专项课程。" }, { status: 404 });
     }
     if (!course.itemIds.includes(itemId)) {
-      return invalid("课程中不存在这个项目。");
+      return badRequest("课程中不存在这个项目。");
     }
 
     const result = await inProgressQueue(async () => {
@@ -153,8 +137,6 @@ export async function POST(request: Request) {
 
     return Response.json({ ok: true, ...result });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "专项训练进度写入失败。";
-    const status = message.includes("returned 404") ? 404 : 502;
-    return Response.json({ error: message }, { status });
+    return obsidianErrorResponse(error, "专项训练进度写入失败。");
   }
 }

@@ -31,5 +31,9 @@ test("review UI connects evidence jumps and the durable practice API", async () 
   assert.match(route, /interview-answer-practice/);
   assert.match(route, /parseInterviewPractice/);
   assert.match(route, /deduplicated: true/);
+  // 追記の暦日は東京。UTC の瞬間に戻すと JST 未明の「重练」だけ前日に記録され、
+  // 同じ晩の批注・フィードバック（todayInTokyo）と別の日に割れる。
+  assert.match(route, /queuedAtInTokyo\(\)/);
+  assert.doesNotMatch(route, /queuedAt: new Date\(\)\.toISOString\(\)/);
   assert.match(route, /改善回答は AI 草稿/);
 });

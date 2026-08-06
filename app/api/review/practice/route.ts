@@ -1,43 +1,25 @@
+import { tokyoParts, yamlScalar } from "@/lib/dojo/utils";
+import { getString as text, noteBasename as basename } from "@/lib/notes";
 import { parseInterviewAnswerReview } from "@/lib/review-deep";
 import {
   parseInterviewPractice,
   renderInterviewPracticeEntry,
 } from "@/lib/review-practice";
-import {
-  appendNote,
-  noteExists,
-  readNote,
-  writeNote,
-} from "@/lib/server/obsidian";
+import { isReviewNotePath, reviewSiblingPath } from "@/lib/review-paths";
+import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
+import { appendNote, readNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
+import { createSerialQueue } from "@/lib/server/serial-queue";
 
 type Body = { notePath?: string; blockId?: string };
 
-let practiceQueue = Promise.resolve();
+const inPracticeQueue = createSerialQueue();
 
-async function inPracticeQueue<T>(operation: () => Promise<T>) {
-  const previous = practiceQueue;
-  let release = () => {};
-  practiceQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    return await operation();
-  } finally {
-    release();
-  }
-}
-
-function text(value: unknown) {
-  return typeof value === "string" || typeof value === "number" ? String(value) : "";
-}
-
-function basename(path: string) {
-  return path.split("/").pop()?.replace(/\.md$/i, "") ?? path;
-}
-
-function yamlString(value: string) {
-  return JSON.stringify(value);
+// 追記の暦日は東京で揃える。UTC の瞬間をそのまま書くと JST 00:00–09:00 の操作だけ
+// 前日の日付になり、同じ晩に押した「重练」と批注・フィードバックが別の日に記録される。
+// 時刻は「本人がいつ選んだか」という行為の記録なので落とさない。日本に DST は無く +09:00 は固定。
+function queuedAtInTokyo() {
+  const { date, time } = tokyoParts();
+  return `${date}T${time}+09:00`;
 }
 
 export async function POST(request: Request) {
@@ -45,24 +27,20 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as Body;
   } catch {
-    return Response.json({ error: "请求体不是合法 JSON" }, { status: 400 });
+    return badRequest("请求体不是合法 JSON");
   }
 
   const notePath = body.notePath ?? "";
   const blockId = body.blockId ?? "";
-  if (
-    !notePath.startsWith("20_求職/") ||
-    !notePath.endsWith("_整理稿.md") ||
-    notePath.includes("..")
-  ) {
-    return Response.json({ error: "notePath 不是面试整理稿" }, { status: 400 });
+  if (!isReviewNotePath(notePath, "seirikou")) {
+    return badRequest("notePath 不是面试整理稿");
   }
   if (!/^q\d+$/.test(blockId)) {
-    return Response.json({ error: "blockId 格式不对" }, { status: 400 });
+    return badRequest("blockId 格式不对");
   }
 
-  const reviewPath = notePath.replace(/_整理稿\.md$/, "_回答品質復盤.md");
-  const practicePath = notePath.replace(/_整理稿\.md$/, "_回答練習.md");
+  const reviewPath = reviewSiblingPath(notePath, "answerReview");
+  const practicePath = reviewSiblingPath(notePath, "practice");
 
   try {
     const [source, reviewNote] = await Promise.all([readNote(notePath), readNote(reviewPath)]);
@@ -78,10 +56,10 @@ export async function POST(request: Request) {
     if (!block.improvedAnswerJa) throw new Error("这个问题还没有可练习的改善回答。");
 
     const result = await inPracticeQueue(async () => {
-      const exists = await noteExists(practicePath);
-      if (exists) {
-        const current = await readNote(practicePath);
-        const duplicate = parseInterviewPractice(current.content).find(
+      // 存在判定と本文読みは同じ 1 往復で足りる。noteExists を挟むと同じ GET を 2 回打つ。
+      const existing = await readNoteOrNull(practicePath);
+      if (existing) {
+        const duplicate = parseInterviewPractice(existing.content).find(
           (entry) => entry.blockId === blockId && entry.status === "queued",
         );
         if (duplicate) return { deduplicated: true };
@@ -90,12 +68,12 @@ export async function POST(request: Request) {
       const entry = renderInterviewPracticeEntry({
         blockId,
         status: "queued",
-        queuedAt: new Date().toISOString(),
+        queuedAt: queuedAtInTokyo(),
         questionTitle: block.questionTitle,
         improvedAnswerJa: block.improvedAnswerJa,
         evidenceSentenceIds: block.evidenceSentenceIds,
       });
-      if (exists) {
+      if (existing) {
         await appendNote(practicePath, entry);
       } else {
         const company = text(source.frontmatter.company);
@@ -103,7 +81,7 @@ export async function POST(request: Request) {
         const round = text(source.frontmatter.round);
         await writeNote(
           practicePath,
-          `---\ntype: interview-answer-practice\ncompany: ${yamlString(company)}\ndate: ${yamlString(date)}\nround: ${yamlString(round)}\nsource_note: ${yamlString(`[[${basename(notePath)}]]`)}\nreview_note: ${yamlString(`[[${basename(reviewPath)}]]`)}\nlayer: user-action\n---\n# ${date} ${company} 回答練習\n\n> 本人が「重练」に選んだ質問のキュー。改善回答は AI 草稿であり、本人の事実や確定台本ではない。\n\n## 重练キュー\n${entry}`,
+          `---\ntype: interview-answer-practice\ncompany: ${yamlScalar(company)}\ndate: ${yamlScalar(date)}\nround: ${yamlScalar(round)}\nsource_note: ${yamlScalar(`[[${basename(notePath)}]]`)}\nreview_note: ${yamlScalar(`[[${basename(reviewPath)}]]`)}\nlayer: user-action\n---\n# ${date} ${company} 回答練習\n\n> 本人が「重练」に選んだ質問のキュー。改善回答は AI 草稿であり、本人の事実や確定台本ではない。\n\n## 重练キュー\n${entry}`,
         );
       }
       return { deduplicated: false };
@@ -111,8 +89,6 @@ export async function POST(request: Request) {
 
     return Response.json({ ok: true, path: practicePath, ...result });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "重练队列写入失败";
-    const status = message.includes("returned 404") ? 404 : 502;
-    return Response.json({ error: message }, { status });
+    return obsidianErrorResponse(error, "重练队列写入失败");
   }
 }
