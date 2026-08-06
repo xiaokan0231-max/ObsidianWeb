@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  buildPrepKillQuestions,
+  extractPrepKillMap,
+  extractPrepTalentMap,
   findInterviewPrepDocs,
   groupPrepSections,
   prepBlockText,
@@ -9,6 +12,8 @@ import {
   shortLabel,
   type InterviewPrepDoc,
   type PrepExternalLink,
+  type PrepKillQuestion,
+  type PrepSection,
 } from "@/lib/interview-prep-doc";
 import {
   groupInterviewPrepDocs,
@@ -29,7 +34,7 @@ import {
   companyMotivationAssetTarget,
   type SharedAssetTarget,
 } from "@/lib/interview-shared-assets";
-import { Blocks } from "./prep-doc-render";
+import { Blocks, Inlines } from "./prep-doc-render";
 
 // 会社／応募案件を選び、その中の各回を履歴のまま読む画面。
 // 回答库（面试准备）は平時に引く辞書、こちらは当日に読む一枚。用途が違うので分けている。
@@ -134,6 +139,112 @@ function sectionTabLabel(title: string) {
   return SECTION_TAB_LABELS[number] ?? shortLabel(normalized.replace(/^\d+[.、]\s*/, ""), 10);
 }
 
+/**
+ * 「殺傷質問7題」を、当日これ1画面で回せる形に組む。
+ * 索引だけ（どの節を見ろ）では7回ジャンプすることになるので、
+ * 問い・読み上げる答案・なぜそう答えるかを1枚に並べる。答案は各所の正本からの参照。
+ */
+function KillMapPage({
+  questions,
+  onOpenCard,
+  onOpenWiki,
+  query,
+}: {
+  questions: PrepKillQuestion[];
+  onOpenCard: (cardId: string) => void;
+  onOpenWiki: (target: string, section?: string) => void;
+  query: string;
+}) {
+  // 当日の使い方：一問ずつ声に出す。読み終えたら「言えた」を押して次へ。
+  const [done, setDone] = useState<ReadonlySet<string>>(new Set());
+  const [openWhy, setOpenWhy] = useState<ReadonlySet<string>>(new Set());
+  const refs = { onOpenCard, onOpenWiki, query };
+  const toggle = (set: ReadonlySet<string>, id: string) => {
+    const next = new Set(set);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  };
+
+  return (
+    <div className="kill-map">
+      <header className="kill-map-head">
+        <div>
+          <strong>{done.size} / {questions.length}</strong>
+          <span>声に出して確認できた数</span>
+        </div>
+        <i aria-hidden="true"><em style={{ width: `${(done.size / questions.length) * 100}%` }} /></i>
+        {done.size > 0 && (
+          <button type="button" onClick={() => setDone(new Set())}>リセット</button>
+        )}
+      </header>
+
+      {questions.map((question, index) => (
+        <section
+          key={question.id}
+          className={`kill-card ${done.has(question.id) ? "done" : ""}`}
+          aria-label={question.ask}
+        >
+          <header>
+            <b>{index + 1}</b>
+            <div>
+              <h3>{question.ask}</h3>
+              {question.meta && <small>{question.meta}</small>}
+            </div>
+            <button
+              type="button"
+              className={done.has(question.id) ? "on" : ""}
+              onClick={() => setDone((current) => toggle(current, question.id))}
+            >{done.has(question.id) ? "✓ 言えた" : "言えた"}</button>
+          </header>
+
+          {question.resolved ? (
+            <div className="kill-answer">
+              <Blocks blocks={question.answer} refs={refs} />
+            </div>
+          ) : (
+            // 参照が外れたら黙って空にしない——当日「答案が無い」ことに気づけないのが最悪
+            <p className="kill-missing">
+              ⚠️ 答案「{question.source}」がこの準備稿の中に見つかりません。
+              vault 側の <code>答案::</code> と見出しがずれています。
+            </p>
+          )}
+
+          {question.followUp.length > 0 && (
+            <details className="kill-followup">
+              <summary>追問されたら <i aria-hidden="true">⌄</i></summary>
+              <Blocks blocks={question.followUp} refs={refs} />
+            </details>
+          )}
+
+          {question.mine && (
+            <p className="kill-mine">
+              <span>地雷</span>
+              <Inlines nodes={question.mine} refs={refs} />
+            </p>
+          )}
+
+          {question.why.length > 0 && (
+            <div className="kill-why">
+              <button
+                type="button"
+                aria-expanded={openWhy.has(question.id)}
+                onClick={() => setOpenWhy((current) => toggle(current, question.id))}
+              >
+                なぜこう答えるか <i aria-hidden="true">{openWhy.has(question.id) ? "−" : "＋"}</i>
+              </button>
+              {openWhy.has(question.id) &&
+                question.why.map((nodes, whyIndex) => (
+                  <p key={whyIndex}><Inlines nodes={nodes} refs={refs} /></p>
+                ))}
+            </div>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function DocReader({
   doc,
   onOpenCard,
@@ -147,8 +258,33 @@ function DocReader({
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLElement>(null);
-  const groups = useMemo(() => groupPrepSections(doc.sections), [doc.sections]);
-  const current = doc.sections[active];
+  // §6 の「殺傷質問7題・当日の型」と「人材育成」は、当日その一枚を直接開きたいので
+  // 表示層で第7・第8主模块に昇格させる。vault は12節契約のままで、実体は §6 の小節のコピー。
+  const killMap = useMemo(() => extractPrepKillMap(doc.sections), [doc.sections]);
+  const killQuestions = useMemo(() => buildPrepKillQuestions(doc.sections), [doc.sections]);
+  const talentMap = useMemo(() => extractPrepTalentMap(doc.sections), [doc.sections]);
+  const virtualSections = useMemo(
+    () => [killMap, talentMap].filter((section): section is PrepSection => section !== null),
+    [killMap, talentMap],
+  );
+  const sections = useMemo(
+    () => [...doc.sections, ...virtualSections],
+    [doc.sections, virtualSections],
+  );
+  const groups = useMemo(() => {
+    const base = groupPrepSections(doc.sections);
+    return [
+      ...base,
+      ...virtualSections.map((section, offset) => ({
+        id: section.id,
+        label: section.navLabel,
+        sectionIndexes: [doc.sections.length + offset],
+      })),
+    ];
+  }, [doc.sections, virtualSections]);
+  const current = sections[active];
+  const isKillMap =
+    Boolean(killMap) && active === doc.sections.length && killQuestions.length > 0;
   const activeGroupIndex = Math.max(
     0,
     groups.findIndex((group) => group.sectionIndexes.includes(active)),
@@ -158,14 +294,21 @@ function DocReader({
   const keyword = query.trim();
 
   // 節ごとの素テキスト。1節しか描画しない＝Ctrl+F が使えないので、検索は自前で持つ
+  // 第7・第8模块は §6 の小節の写しなので、検索索引には入れない（同じ文が2回ヒットする）。
+  // 検索は本体である §6 に当て、7・8 はあくまで当日用のショートカット表示に留める。
   const plain = useMemo(
-    () => doc.sections.map((section) => section.blocks.map(prepBlockText).join("\n").toLocaleLowerCase()),
-    [doc],
+    () =>
+      sections.map((section, index) =>
+        index >= doc.sections.length
+          ? ""
+          : section.blocks.map(prepBlockText).join("\n").toLocaleLowerCase(),
+      ),
+    [sections, doc.sections.length],
   );
   const hits = useMemo(() => {
     if (!keyword) return [];
     const needle = keyword.toLocaleLowerCase();
-    return doc.sections
+    return sections
       .map((section, index) => ({
         index,
         title: section.title,
@@ -173,7 +316,7 @@ function DocReader({
         count: plain[index].split(needle).length - 1,
       }))
       .filter((item) => item.count > 0);
-  }, [doc, keyword, plain]);
+  }, [sections, keyword, plain]);
   const totalHits = hits.reduce((sum, item) => sum + item.count, 0);
 
   // 長い節は小節へ直接飛べないと使えない（単語文法帳＝6,600px・10小節）。
@@ -300,7 +443,7 @@ function DocReader({
           <nav className="prep-doc-section-tabs" aria-label={`${currentGroup.label}の子項目`}>
             <span>{currentGroup.label}</span>
             {currentGroup.sectionIndexes.map((sectionIndex) => {
-              const section = doc.sections[sectionIndex];
+              const section = sections[sectionIndex];
               return (
                 <button
                   key={section.id}
@@ -341,6 +484,15 @@ function DocReader({
 
       <article className="prep-doc-body" ref={bodyRef}>
         <h2>{current.title}</h2>
+        {isKillMap ? (
+          <KillMapPage
+            questions={killQuestions}
+            onOpenCard={onOpenCard}
+            onOpenWiki={onOpenWiki}
+            query={keyword}
+          />
+        ) : (
+          <>
         {needsSubnav && subheads.length >= 3 && (
           <nav className="prep-doc-subnav" aria-label="小节">
             {subheads.map((item) => (
@@ -357,6 +509,8 @@ function DocReader({
           </nav>
         )}
         <Blocks blocks={current.blocks} refs={{ onOpenCard, onOpenWiki, query: keyword }} />
+          </>
+        )}
       </article>
 
       <div className="prep-doc-pager">

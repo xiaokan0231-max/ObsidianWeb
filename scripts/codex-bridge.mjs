@@ -6,6 +6,16 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import {
+  DEDUCTION_SEVERITY_BANDS,
+  REVIEW_COMPREHENSION_VALUES,
+  REVIEW_DIMENSION_WEIGHTS,
+  REVIEW_LIMITS,
+  REVIEW_QUALITY_VALUES,
+  REVIEW_RELEVANCE_VALUES,
+  REVIEW_STRATEGY_TAGS,
+} from "../lib/review-contract.mjs";
+
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.CODEX_BRIDGE_PORT || 43127);
 const TOKEN = process.env.CODEX_BRIDGE_TOKEN;
@@ -125,12 +135,33 @@ const languageDimensions = {
   },
 };
 
+// 五維の key は契約側の並び順をそのまま使う。schema の required と properties を
+// 別々に手書きしていると、片方だけ増えた時に静かな required 漏れになる。
+const REVIEW_DIMENSION_KEYS = Object.keys(REVIEW_DIMENSION_WEIGHTS);
+
+// 扣分明細。score は返させない——100 − Σpoints をサーバが計算するので、
+// 「説明できない減点」は構造的に存在できなくなる。
+const reviewDeduction = {
+  type: "object",
+  additionalProperties: false,
+  required: ["blockId", "points", "severity", "labelZh", "detailZh", "fixZh", "evidenceSentenceIds"],
+  properties: {
+    blockId: string,
+    points: number,
+    severity: { type: "string", enum: Object.keys(DEDUCTION_SEVERITY_BANDS) },
+    labelZh: string,
+    detailZh: string,
+    fixZh: string,
+    evidenceSentenceIds: { type: "array", items: string },
+  },
+};
+
 const reviewDimension = {
   type: "object",
   additionalProperties: false,
-  required: ["score", "rationaleZh", "evidenceBlockIds"],
+  required: ["deductions", "rationaleZh", "evidenceBlockIds"],
   properties: {
-    score: number,
+    deductions: { type: "array", items: reviewDeduction },
     rationaleZh: string,
     evidenceBlockIds: { type: "array", items: string },
   },
@@ -290,24 +321,19 @@ const schemas = {
       dimensions: {
         type: "object",
         additionalProperties: false,
-        required: [
-          "questionUnderstanding",
-          "coverage",
-          "directness",
-          "evidenceCredibility",
-          "riskControl",
-        ],
-        properties: {
-          questionUnderstanding: reviewDimension,
-          coverage: reviewDimension,
-          directness: reviewDimension,
-          evidenceCredibility: reviewDimension,
-          riskControl: reviewDimension,
-        },
+        required: [...REVIEW_DIMENSION_KEYS],
+        properties: Object.fromEntries(
+          REVIEW_DIMENSION_KEYS.map((key) => [key, reviewDimension]),
+        ),
       },
       summaryZh: string,
       strengths: { type: "array", items: string },
       weaknesses: { type: "array", items: string },
+      // 個数上限はここに書けない：strict な構造化出力スキーマは maxItems/minItems を
+      // 受け付けない。このファイルの 5 タスクがどれも type/enum/items だけで出来ていて、
+      // 「36個」「alternativesJa最多2条」といった個数がすべて prompt 側にしか無いのは
+      // そのため。上限は prompt の「最多N个」と、正本側の
+      // texts(..., REVIEW_LIMITS.priorityBlockIds) の二重で担保する。
       priorityBlockIds: { type: "array", items: string },
       blocks: {
         type: "array",
@@ -337,32 +363,12 @@ const schemas = {
             askedPoints: { type: "array", items: string },
             answeredPoints: { type: "array", items: string },
             missedPoints: { type: "array", items: string },
-            comprehension: {
-              type: "string",
-              enum: ["clear", "partial", "likely_missed"],
-            },
-            relevance: {
-              type: "string",
-              enum: ["direct", "partial", "off_target"],
-            },
-            quality: {
-              type: "string",
-              enum: ["strong", "mixed", "weak", "neutral"],
-            },
+            comprehension: { type: "string", enum: [...REVIEW_COMPREHENSION_VALUES] },
+            relevance: { type: "string", enum: [...REVIEW_RELEVANCE_VALUES] },
+            quality: { type: "string", enum: [...REVIEW_QUALITY_VALUES] },
             strategyTags: {
               type: "array",
-              items: {
-                type: "string",
-                enum: [
-                  "compound-question-miss",
-                  "no-conclusion-first",
-                  "negative-oversharing",
-                  "weak-evidence",
-                  "over-absolute",
-                  "role-mismatch",
-                  "numbers-confusion",
-                ],
-              },
+              items: { type: "string", enum: [...REVIEW_STRATEGY_TAGS] },
             },
             evidenceSentenceIds: { type: "array", items: string },
             evaluationZh: string,
@@ -379,13 +385,18 @@ schemas.expand_language_category = schemas.rebuild_language_bank;
 
 const commonInstruction = `你是“日语面试训练场”的受限分析器。你不能调用工具、访问文件或执行命令；只能使用 INPUT_JSON 中的资料。解释和反馈用简体中文，需要用户练习或直接使用的面试表达用自然、可在压力下说出口的日语。严格区分资料可信度：self 是本人确认的权威事实；transcript/review/company/policy 是证据；material 和 ai-report 只能是候选线索，未经 self 或 transcript/review 支持不得写成用户已做过的事实。不得虚构经历、数字、公司要求。`;
 
+// 帯の数値だけ契約から差し込む。散文は手書きのまま——prompt の言い回しを変えると
+// モデルの出力品質が動くので、ここで揃えたいのは「数字だけが別々に育つこと」。
+const severityBand = (severity) =>
+  `${severity}=${DEDUCTION_SEVERITY_BANDS[severity].min}〜${DEDUCTION_SEVERITY_BANDS[severity].max}`;
+
 function buildPrompt(task, payload) {
   const instructions = {
     rebuild_language_bank: `建立独立的个性化日语训练库，重点是主动词汇、读音、语法、搭配、面试表达、必要商务表达和卡顿救场，不生成完整面试答案课程。生成36个不重复、高价值单元，不得用通用JLPT内容凑数；八个category都要根据资料覆盖。每个单元的drills必须返回空数组，服务器会根据targetJa和reading自动建立两道固定练习；questionBank也必须返回空数组，服务器会自动建立客观题，并为语法、搭配、面试表达、商务表达、卡顿救场补充开放造句题。不要生成任何题目内容。内容务求短而可训练：meaningZh、usageZh、errorReasonZh、cautionZh各1句，alternativesJa最多2条，evidence最多2条。INPUT_JSON.previousUnits 中同一能力点必须原样复用canonicalKey。个人经历、数字、薪资、项目或公司事实只能引用authority/evidence路径，并将exampleKind设为personal、factSensitive设为true、factSourcePaths列出来源；material/study/ai-report只可用于发现错误或通用语言知识，不得升级为个人事实。旧笔记中的10亿件、600万円、YOLO等若没有权威或直接证据，绝不能进入个人例句。relatedDojoItemIds只能使用输入提供的真实道场ID。`,
     expand_language_category: `只扩充 INPUT_JSON.category 指定的一个日语训练分类，生成 INPUT_JSON.requestedCount 个与 existingUnits 不重复的新单元。优先覆盖用户技术栈、逐字稿缺词、近期目标公司和真实面试需要；专业词汇不仅要有产品名，还要覆盖架构、设计、开发、测试、运维、性能、AI/GPU和管理沟通中确实相关的术语。不得为了数量生成低价值近义重复。每个单元的 drills 和顶层 questionBank 都必须返回空数组，由服务器生成练习。meaningZh、usageZh、errorReasonZh、cautionZh各1句，alternativesJa最多2条，evidence最多2条。canonicalKey必须是新的稳定短英文键；不得复用 existingUnits 中已有的canonicalKey或targetJa。个人经历和数字仍严格执行事实层级；没有权威证据时只能用general例句，不能说成用户做过。relatedDojoItemIds只能使用输入提供的真实ID。summaryZh简要说明本次扩充重点，immediateAdviceZh给出本类最先学习的方向。`,
     coach_language_output: `一次性检查本次训练中用户写的全部造句。逐单元判断原意、语法、自然度、面试/商务语域、可说出口程度和事实安全，各维度1-5分。只使用附带单元和已确认来源，不补全经历。发现意思反转、数字错误、虚构经历或把候选事实当本人事实时criticalError和factualRisk必须为true。每个句子给简短中文反馈和一条自然日语改写。`,
     grade_language_exam: `一次性批改全部日语训练开放题。六个维度各打1-5分，score为0-100。保持原意、语法、自然度、面试或商务语域、压力下可说出口和事实安全都要评价。事实错误、虚构经历、意思反转、高风险数字或明显不适合面试的表达必须criticalError=true。反馈用简体中文并给可直接复练的自然日语。`,
-    review_interview_answers: `Use $review-interview-answers in Bridge mode. 对一场已完成人工证据裁定的面试做“回答质量复盘”。这不是语法纠错：核心是识别面试官真正问了什么、一个问题包含哪些子问、候选人实际覆盖了哪些、遗漏了哪些、是否答非所问，以及回答策略在日本面试中是否制造不必要风险。必须逐个分析 INPUT_JSON.blocks 中有实质问答的块；寒暄、流程确认和纯结束语可以给 neutral，但不得编造问题。重点检查复合问题和追问链：如果面试官同时问 AI、MCP、DDD，而回答只覆盖 DDD，必须明确列出 AI/MCP 为 missedPoints，并结合本人批注判断 likely_missed 或 partial。只能引用 INPUT_JSON 的逐句证据、本人批注和 humanFeedback；humanFeedback 中的 disagree/补充事实优先于旧 AI 结论，必须明确重新核对，不能机械重复被否定的判断。existingReview 只是旧分析线索，不能覆盖逐字证据。评价好坏都列 evidenceSentenceIds。improvedAnswerJa 应短、直接、先回答全部子问，再补证据；没有必要改写的块返回空字符串。每个问题按实际情况附 strategyTags，只能使用给定枚举，不能为了填标签而滥加。日本面试风险关注主动暴露负面材料、贬低前同事/领导、过度绝对化、薪资与转职理由、缺少结论先行等回答策略，但不要把文化刻板印象当事实。dimensions 必须分别评价问题理解、覆盖完整度、直接性、证据可信度、风险控制，每项0-100，并用 rationaleZh 解释、用 evidenceBlockIds 引用 qNN；五项等权，服务器会据此计算总分，不要另行输出总分。priorityBlockIds 只列最值得重听和重练的块，最多8个。`,
+    review_interview_answers: `Use $review-interview-answers in Bridge mode. 对一场已完成人工证据裁定的面试做“回答质量复盘”。这不是语法纠错：核心是识别面试官真正问了什么、一个问题包含哪些子问、候选人实际覆盖了哪些、遗漏了哪些、是否答非所问，以及回答策略在日本面试中是否制造不必要风险。必须逐个分析 INPUT_JSON.blocks 中有实质问答的块；寒暄、流程确认和纯结束语可以给 neutral，但不得编造问题。重点检查复合问题和追问链：如果面试官同时问 AI、MCP、DDD，而回答只覆盖 DDD，必须明确列出 AI/MCP 为 missedPoints，并结合本人批注判断 likely_missed 或 partial。只能引用 INPUT_JSON 的逐句证据、本人批注和 humanFeedback；humanFeedback 中的 disagree/补充事实优先于旧 AI 结论，必须明确重新核对，不能机械重复被否定的判断。existingReview 只是旧分析线索，不能覆盖逐字证据。评价好坏都列 evidenceSentenceIds。improvedAnswerJa 应短、直接、先回答全部子问，再补证据；没有必要改写的块返回空字符串。每个问题按实际情况附 strategyTags，只能使用给定枚举，不能为了填标签而滥加。日本面试风险关注主动暴露负面材料、贬低前同事/领导、过度绝对化、薪资与转职理由、缺少结论先行等回答策略，但不要把文化刻板印象当事实。dimensions 必须分别评价问题理解、覆盖完整度、直接性、证据可信度、风险控制。**不要输出任何分数**：每一维只输出 deductions（扣分明细）、rationaleZh（整体判断）和 evidenceBlockIds（qNN）。维度分＝100 − 该维 deductions 的 points 之和，总分＝五维等权平均，都由服务器计算。这意味着扣分必须逐条举证：说不出扣在哪一题、扣多少、为什么，就不能扣分。deductions 每条包含 blockId（本场真实 qNN）、severity、points、labelZh（一句话说清扣在哪，如「複合質問の AI・MCP に未回答」）、detailZh（现场实际发生了什么，以及为什么这会影响面试官的判断）、fixZh（下次具体怎么做就不会再扣，要可执行、可练）、evidenceSentenceIds（该块内的 sNN）。severity 决定 points 区间，越界会被服务器夹回：${severityBand("major")}（核心子问漏答、答非所问、明确的招聘风险表达）、${severityBand("moderate")}（答到了但明显不完整，或要对方追问才对齐）、${severityBand("minor")}（点状瑕疵，不改变面试官判断）、${severityBand("opportunity")}（没做错，只是白白少赚一次加分）。一场里同一件事影响两个维度时可以分别记，但要各自写清该维度受损的原因，不要复制粘贴。每维 deductions 最多${REVIEW_LIMITS.deductionsPerDimension}条，这是上限不是目标：同一维里反复出现的同一个毛病合并成一条、按更高的 severity 记，不要把一件事拆成几条去凑数；写到接近${REVIEW_LIMITS.deductionsPerDimension}条通常说明该归并的没归并。超出的条目会被丢弃，丢掉扣分等于把这一维的分数抬高，所以宁可合并也不要溢出。找不到可举证的扣分点就返回空数组＝100分：满分是起点，不是奖赏，不要为了让分数「看起来合理」而编造扣分，也不要用泛泛的一句话吃掉十几分。カジュアル面談・エージェント面談等对方主要在说明的场合，对话场面之外没展开自我推销只能记 opportunity，不能记 major。priorityBlockIds 只列最值得重听和重练的块，最多${REVIEW_LIMITS.priorityBlockIds}个。`,
   }[task];
   return `${commonInstruction}\n\nTASK_INSTRUCTION:\n${instructions}\n\nINPUT_JSON:\n${JSON.stringify(payload)}`;
 }

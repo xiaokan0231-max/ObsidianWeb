@@ -2,25 +2,28 @@
 
 import { readFile } from "node:fs/promises";
 
-const DIMENSIONS = [
-  "questionUnderstanding",
-  "coverage",
-  "directness",
-  "evidenceCredibility",
-  "riskControl",
-];
-const TAGS = new Set([
-  "compound-question-miss",
-  "no-conclusion-first",
-  "negative-oversharing",
-  "weak-evidence",
-  "over-absolute",
-  "role-mismatch",
-  "numbers-confusion",
-]);
-const COMPREHENSION = new Set(["clear", "partial", "likely_missed"]);
-const RELEVANCE = new Set(["direct", "partial", "off_target"]);
-const QUALITY = new Set(["strong", "mixed", "weak", "neutral"]);
+// 契約値は skill の中に閉じた ./review-contract.mjs から取る。
+// リポジトリ外（../../../lib/…）を参照すると、skill だけ別の場所へコピーして
+// 走らせた時に import が解決できず、校验器そのものが起動しなくなる。
+// lib/review-contract.mjs との同値は tests/review-contract.test.mjs が見ている。
+import {
+  DEDUCTION_SEVERITY_BANDS,
+  REVIEW_COMPREHENSION_VALUES,
+  REVIEW_DIMENSION_WEIGHTS,
+  REVIEW_LIMITS,
+  REVIEW_QUALITY_VALUES,
+  REVIEW_RELEVANCE_VALUES,
+  REVIEW_STRATEGY_TAGS,
+} from "./review-contract.mjs";
+
+// 等重みであることが、下で総分を単純平均にしている前提。
+// REVIEW_DIMENSION_WEIGHTS が等重みでなくなったら、この平均は正本側の加重平均と
+// 一致しなくなる——しかもどちらもエラーを出さない。
+const DIMENSIONS = Object.keys(REVIEW_DIMENSION_WEIGHTS);
+const TAGS = new Set(REVIEW_STRATEGY_TAGS);
+const COMPREHENSION = new Set(REVIEW_COMPREHENSION_VALUES);
+const RELEVANCE = new Set(REVIEW_RELEVANCE_VALUES);
+const QUALITY = new Set(REVIEW_QUALITY_VALUES);
 
 function usage() {
   console.error("Usage: node validate-review.mjs --review <review.md|review.json|-> [--source <整理稿.md>]");
@@ -98,6 +101,7 @@ async function main() {
   }
 
   const dimensionScores = [];
+  const deductionRefs = [];
   for (const key of DIMENSIONS) {
     const item = review?.dimensions?.[key];
     if (!item || typeof item !== "object") {
@@ -114,6 +118,63 @@ async function main() {
     }
     if (!isStringArray(item.evidenceBlockIds) || item.evidenceBlockIds.length === 0) {
       fail(`dimensions.${key}.evidenceBlockIds must contain qNN evidence`);
+    }
+
+    // schema v2 の旧レポートには deductions が無い。あるときだけ厳格に検査する。
+    if (item.deductions === undefined) {
+      warnings.push(`dimensions.${key} has no deduction ledger (schema v2 report; regenerate to get one)`);
+      continue;
+    }
+    if (!Array.isArray(item.deductions)) {
+      fail(`dimensions.${key}.deductions must be an array`);
+      continue;
+    }
+    // 上限を超えた分は正本側（lib/review-deep.ts）で黙って切り捨てられ、
+    // 切られた扣分のぶんだけ維度分が上がる。しかも切られた後の JSON は
+    // score = 100 − Σ(残った扣分) で完全に自洽するので、落ちた後からは気づけない。
+    // だから手書き稿・正規化前の JSON がここを通る時点で赤くする。
+    if (item.deductions.length > REVIEW_LIMITS.deductionsPerDimension) {
+      fail(
+        `dimensions.${key}.deductions has ${item.deductions.length} entries, `
+          + `more than the ${REVIEW_LIMITS.deductionsPerDimension} allowed (merge duplicates instead of listing them)`,
+      );
+    }
+    let lost = 0;
+    for (const [index, entry] of item.deductions.entries()) {
+      const prefix = `dimensions.${key}.deductions[${index}]`;
+      if (!entry || typeof entry !== "object") {
+        fail(`${prefix} must be an object`);
+        continue;
+      }
+      const band = DEDUCTION_SEVERITY_BANDS[entry.severity];
+      if (!band) {
+        fail(`${prefix}.severity is invalid: ${entry.severity}`);
+      }
+      if (typeof entry.points !== "number" || !Number.isInteger(entry.points)) {
+        fail(`${prefix}.points must be an integer`);
+      } else {
+        lost += entry.points;
+        if (band && (entry.points < band.min || entry.points > band.max)) {
+          fail(`${prefix}.points ${entry.points} is outside the ${entry.severity} band ${band.min}–${band.max}`);
+        }
+      }
+      // 扣分点が「どこで何点」を言えないと、この契約の目的そのものが失われる。
+      for (const field of ["labelZh", "detailZh", "fixZh"]) {
+        if (typeof entry[field] !== "string" || !entry[field].trim()) {
+          fail(`${prefix}.${field} is empty`);
+        }
+      }
+      if (typeof entry.blockId !== "string" || !/^q\d+$/.test(entry.blockId)) {
+        fail(`${prefix}.blockId must be qNN`);
+      }
+      if (!isStringArray(entry.evidenceSentenceIds) || entry.evidenceSentenceIds.length === 0) {
+        fail(`${prefix}.evidenceSentenceIds must cite at least one sNN`);
+      }
+      deductionRefs.push({ prefix, blockId: entry.blockId, sentenceIds: entry.evidenceSentenceIds });
+    }
+    const expected = Math.max(0, 100 - lost);
+    if (typeof item.score === "number" && item.score !== expected) {
+      fail(`dimensions.${key}.score ${item.score} does not equal 100 − ${lost} = ${expected}`);
     }
   }
 
@@ -180,10 +241,26 @@ async function main() {
     }
   }
 
+  for (const ref of deductionRefs) {
+    if (!blockIds.has(ref.blockId)) {
+      fail(`${ref.prefix} cites unknown block ${ref.blockId}`);
+      continue;
+    }
+    if (!sourceQuestions) continue;
+    const allowedSentences = sourceQuestions.get(ref.blockId) ?? new Set();
+    for (const sentenceId of Array.isArray(ref.sentenceIds) ? ref.sentenceIds : []) {
+      if (!allowedSentences.has(sentenceId)) {
+        fail(`${ref.prefix} cites ${sentenceId}, which does not belong to ${ref.blockId}`);
+      }
+    }
+  }
+
   if (!isStringArray(review.priorityBlockIds)) {
     fail("priorityBlockIds must be a string array");
   } else {
-    if (review.priorityBlockIds.length > 8) fail("priorityBlockIds may contain at most 8 blocks");
+    if (review.priorityBlockIds.length > REVIEW_LIMITS.priorityBlockIds) {
+      fail(`priorityBlockIds may contain at most ${REVIEW_LIMITS.priorityBlockIds} blocks`);
+    }
     for (const blockId of review.priorityBlockIds) {
       if (!blockIds.has(blockId)) fail(`priorityBlockIds contains unknown block ${blockId}`);
     }
@@ -201,6 +278,7 @@ async function main() {
   const result = {
     ok: errors.length === 0,
     computedOverallScore,
+    deductions: deductionRefs.length,
     reviewedBlocks: blockIds.size,
     sourceBlocks: sourceQuestions?.size ?? null,
     errors,

@@ -19,10 +19,14 @@ import {
 } from "@/lib/review";
 import { getString, getType, type Note } from "@/lib/notes";
 import {
+  allDeductions,
+  DEDUCTION_SEVERITY_META,
+  hasDeductionLedger,
   parseInterviewAnswerReview,
   REVIEW_DIMENSION_META,
   type AnswerStrategyTag,
   type InterviewAnswerReview,
+  type ReviewDeduction,
   type ReviewDimensionKey,
 } from "@/lib/review-deep";
 import { parseInterviewPractice } from "@/lib/review-practice";
@@ -55,9 +59,7 @@ type ReviewDoc = {
   listeningMarks: Map<string, "×" | "△">;
   decisionTasks: ReviewDecisionTask[];
   deepReview?: InterviewAnswerReview;
-  practicePath: string;
   practiceBlockIds: Set<string>;
-  feedbackPath: string;
   feedbackByBlock: Map<string, ReviewFeedbackEntry[]>;
 };
 
@@ -193,13 +195,11 @@ function buildDocs(notes: Note[]): ReviewDoc[] {
         deepReview: deepReviewNote
           ? parseInterviewAnswerReview(deepReviewNote.content) ?? undefined
           : undefined,
-        practicePath: practiceNote?.path ?? note.path.replace(/_整理稿\.md$/, "_回答練習.md"),
         practiceBlockIds: new Set(
           practiceNote
             ? parseInterviewPractice(practiceNote.content).map((entry) => entry.blockId)
             : [],
         ),
-        feedbackPath: feedbackNote?.path ?? note.path.replace(/_整理稿\.md$/, "_回答品質批注.md"),
         feedbackByBlock,
       };
     })
@@ -225,14 +225,21 @@ export default function InterviewReview({
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [errOpen, setErrOpen] = useState<Set<string>>(new Set());
   const [rawOpen, setRawOpen] = useState<Set<string>>(new Set());
-  const [noting, setNoting] = useState<string | null>(null);
-  const [noteDraft, setNoteDraft] = useState("");
+  /**
+   * 「正在批注哪一句」和草稿正文合成一个对象，是为了让清空只能是原子的。
+   * 句子 ID 形如 s1/s2/s5，每场整理稿都从 s1 重新编号，**跨场必然重号**；
+   * 拆成两个 state 时漏清任何一个，B 场的同号句就会顶着 A 场的草稿把编辑器打开。
+   */
+  const [annotationDraft, setAnnotationDraft] = useState<
+    { sentenceId: string; draft: string } | null
+  >(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [deepBusy, setDeepBusy] = useState(false);
   const [practiceBusy, setPracticeBusy] = useState<string | null>(null);
   const [feedbackBusy, setFeedbackBusy] = useState<string | null>(null);
   const [deepOpen, setDeepOpen] = useState(false);
   const [deepFocusBlockId, setDeepFocusBlockId] = useState<string | null>(null);
+  const [deepFocusDimension, setDeepFocusDimension] = useState<ReviewDimensionKey | null>(null);
   const [evidenceFocus, setEvidenceFocus] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   /**
@@ -254,6 +261,29 @@ export default function InterviewReview({
     window.localStorage.setItem(MODE_KEY, next);
     window.dispatchEvent(new Event(MODE_EVENT));
   };
+
+  /**
+   * 深度报告的三个 focus 是一组：blockId / dimension / evidence 说的都是「现在看的是哪一场的哪一处」。
+   * 换场时只清其中一部分，残留的那个会在报告下次挂载时把滚动位置抢走——
+   * 而且 dimension 的定位比 blockId 多等一帧（双 rAF vs 单 rAF），残留的维度反而盖过刚点开的那一问。
+   * 所以只留这一个通道：新增入口照着调用即可，不会再出现「补了两个、忘了第三个」。
+   */
+  const focusDeepReview = (blockId: string | null) => {
+    setDeepOpen(Boolean(blockId));
+    setDeepFocusBlockId(blockId);
+    setDeepFocusDimension(null);
+    setEvidenceFocus(null);
+  };
+
+  /**
+   * 批注草稿是**另一组**状态，故意不并进 `focusDeepReview`：那边说的是「报告看到哪儿」，
+   * 纯展示；这边攥着一段还没落盘的用户输入，清不掉是会写坏数据的。
+   * 写入走 `submitAnnotation(target, ...)` 里的 `target.annotationPath`，
+   * 而 target 永远是**当前显示的那场**——换场时草稿不清，A 场没保存的文字就会被
+   * 送进 B 场的 _批注.md，挂到一个同号但毫不相干的句子上。
+   * 两组语义不同，但要求一样：换场的入口两个都得调。
+   */
+  const resetAnnotationDraft = () => setAnnotationDraft(null);
 
   const doc = docs.find((item) => item.key === selectedKey) ?? null;
 
@@ -334,8 +364,7 @@ export default function InterviewReview({
         if (!response.ok || !payload.ok) {
           throw new Error(payload.error ?? `写入失败（${response.status}）`);
         }
-        setNoting(null);
-        setNoteDraft("");
+        setAnnotationDraft(null);
         await onVaultChanged();
       } catch (error) {
         noteWriteFailure(
@@ -479,9 +508,8 @@ export default function InterviewReview({
             setRevealed(new Set());
             setErrOpen(new Set());
             setRawOpen(new Set());
-            setDeepOpen(Boolean(reviewBlockId));
-            setDeepFocusBlockId(reviewBlockId ?? null);
-            setEvidenceFocus(null);
+            focusDeepReview(reviewBlockId ?? null);
+            resetAnnotationDraft();
             window.scrollTo({ top: 0 });
           }}
         />
@@ -601,7 +629,8 @@ export default function InterviewReview({
           className="rv-back"
           onClick={() => {
             setSelectedKey(null);
-            setDeepFocusBlockId(null);
+            focusDeepReview(null);
+            resetAnnotationDraft();
             window.scrollTo({ top: 0 });
           }}
         >← 面接一覧</button>
@@ -736,21 +765,54 @@ export default function InterviewReview({
           <section className="rv-score-glance" aria-label="五维评分概览">
             <header>
               <strong>五维评分</strong>
-              <span>各占 20% · 横条越长表现越好</span>
+              <span>
+                {hasDeductionLedger(doc.deepReview.dimensions)
+                  ? "每维都从 100 起扣 · 点开任意一维看扣在哪一题"
+                  : "各占 20% · 旧格式报告没有扣分明细，重新生成后可见"}
+              </span>
             </header>
             <div>
               {(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).map((key) => {
-                const score = Math.round(doc.deepReview?.dimensions?.[key].score ?? 0);
+                const dimension = doc.deepReview?.dimensions?.[key];
+                const score = Math.round(dimension?.score ?? 0);
                 const band = score >= 80 ? "high" : score >= 65 ? "mid" : "low";
+                const deductions = dimension?.deductions;
+                const top = (deductions ?? []).slice(0, 2);
                 return (
-                  <article key={key} aria-label={`${REVIEW_DIMENSION_META[key].label} ${score} 分`}>
-                    <div>
-                      <span>{REVIEW_DIMENSION_META[key].label}</span>
-                      <strong>{score}</strong>
-                    </div>
-                    <i className="rv-dimension-track" aria-hidden="true">
-                      <em className={band} style={{ width: `${score}%` }} />
-                    </i>
+                  <article key={key}>
+                    <button
+                      type="button"
+                      disabled={!deductions}
+                      aria-label={`${REVIEW_DIMENSION_META[key].label} ${score} 分，查看扣分明细`}
+                      onClick={() => {
+                        setDeepOpen(true);
+                        setDeepFocusDimension(key);
+                      }}
+                    >
+                      <div>
+                        <span>{REVIEW_DIMENSION_META[key].label}</span>
+                        <strong>{score}</strong>
+                      </div>
+                      <i className="rv-dimension-track" aria-hidden="true">
+                        <em className={band} style={{ width: `${score}%` }} />
+                      </i>
+                      {deductions && (deductions.length === 0 ? (
+                        <p className="rv-glance-clean">没有找到扣分点</p>
+                      ) : (
+                        <ul className="rv-glance-deductions">
+                          {top.map((item, index) => (
+                            <li key={`${item.blockId}-${index}`}>
+                              <b>−{item.points}</b>
+                              {item.blockId && <i>{item.blockId}</i>}
+                              <span>{item.labelZh}</span>
+                            </li>
+                          ))}
+                          {deductions.length > top.length && (
+                            <li className="more">还有 {deductions.length - top.length} 项 →</li>
+                          )}
+                        </ul>
+                      ))}
+                    </button>
                   </article>
                 );
               })}
@@ -767,6 +829,7 @@ export default function InterviewReview({
           feedbackByBlock={doc.feedbackByBlock}
           feedbackBusy={feedbackBusy}
           focusBlockId={deepFocusBlockId}
+          focusDimension={deepFocusDimension}
           onEvidenceClick={jumpToEvidence}
           onQueuePractice={(blockId) => void queuePractice(doc, blockId)}
           onFeedback={(blockId, kind, feedbackText) =>
@@ -865,19 +928,16 @@ export default function InterviewReview({
                     revealed={revealed.has(sentence.id)}
                     errored={errOpen.has(sentence.id)}
                     rawShown={rawOpen.has(sentence.id)}
-                    noting={noting === sentence.id}
-                    noteDraft={noteDraft}
+                    noting={annotationDraft?.sentenceId === sentence.id}
+                    noteDraft={annotationDraft?.draft ?? ""}
                     busy={busy === sentence.id}
                     evidenceFocused={evidenceFocus === sentence.id}
                     onReveal={() => setRevealed((current) => toggleSet(current, sentence.id))}
                     onToggleErrors={() => setErrOpen((current) => toggleSet(current, sentence.id))}
                     onToggleRaw={() => setRawOpen((current) => toggleSet(current, sentence.id))}
-                    onStartNote={() => {
-                      setNoting(sentence.id);
-                      setNoteDraft("");
-                    }}
-                    onCancelNote={() => setNoting(null)}
-                    onDraft={setNoteDraft}
+                    onStartNote={() => setAnnotationDraft({ sentenceId: sentence.id, draft: "" })}
+                    onCancelNote={() => setAnnotationDraft(null)}
+                    onDraft={(draft) => setAnnotationDraft({ sentenceId: sentence.id, draft })}
                     onSubmit={(kind, text, decisionTarget) =>
                       void submitAnnotation(doc, sentence.id, kind, text, decisionTarget)
                     }
@@ -953,6 +1013,51 @@ function ReviewWriteAlerts({
 }
 
 
+/** 一条扣分：多少分・什么档・哪一题・为什么・下次怎么办・证据句。 */
+function DeductionRow({
+  item,
+  dimensionLabel,
+  onBlockClick,
+  onEvidenceClick,
+}: {
+  item: ReviewDeduction;
+  dimensionLabel?: string;
+  onBlockClick: (blockId: string) => void;
+  onEvidenceClick: (sentenceId: string) => void;
+}) {
+  return (
+    <li className={`sev-${item.severity}`}>
+      <div className="rv-deduction-head">
+        <b>−{item.points}</b>
+        <em title={DEDUCTION_SEVERITY_META[item.severity].hintZh}>
+          {DEDUCTION_SEVERITY_META[item.severity].label}
+        </em>
+        {dimensionLabel && <u>{dimensionLabel}</u>}
+        {item.blockId && (
+          <button type="button" onClick={() => onBlockClick(item.blockId)}>
+            {item.blockId}
+          </button>
+        )}
+        <strong>{item.labelZh}</strong>
+      </div>
+      {item.detailZh && <p>{item.detailZh}</p>}
+      {item.fixZh && (
+        <p className="rv-deduction-fix"><span>下次</span>{item.fixZh}</p>
+      )}
+      {item.evidenceSentenceIds.length > 0 && (
+        <p className="rv-deduction-evidence">
+          <span>证据句</span>
+          {item.evidenceSentenceIds.map((sentenceId) => (
+            <button key={sentenceId} type="button" onClick={() => onEvidenceClick(sentenceId)}>
+              {sentenceId}
+            </button>
+          ))}
+        </p>
+      )}
+    </li>
+  );
+}
+
 function DeepReviewPanel({
   review,
   queuedBlockIds,
@@ -960,6 +1065,7 @@ function DeepReviewPanel({
   feedbackByBlock,
   feedbackBusy,
   focusBlockId,
+  focusDimension,
   onEvidenceClick,
   onQueuePractice,
   onFeedback,
@@ -970,6 +1076,7 @@ function DeepReviewPanel({
   feedbackByBlock: Map<string, ReviewFeedbackEntry[]>;
   feedbackBusy: string | null;
   focusBlockId: string | null;
+  focusDimension: ReviewDimensionKey | null;
   onEvidenceClick: (sentenceId: string) => void;
   onQueuePractice: (blockId: string) => void;
   onFeedback: (
@@ -984,6 +1091,18 @@ function DeepReviewPanel({
     kind: "disagree" | "context";
   } | null>(null);
   const [feedbackDraft, setFeedbackDraft] = useState("");
+  const [deductionView, setDeductionView] = useState<"dimension" | "rank">("dimension");
+  // 概览里点某一维时要跳到该维的锚点，而排行视图里没有按维度分组的锚点。
+  // 用「props 变化时调整 state」的渲染期写法而不是 effect：effect 里 setState 会多跑一轮渲染，
+  // 滚动就可能发生在视图还没切回来的时候。
+  const [lastFocusDimension, setLastFocusDimension] = useState(focusDimension);
+  if (focusDimension !== lastFocusDimension) {
+    setLastFocusDimension(focusDimension);
+    if (focusDimension) setDeductionView("dimension");
+  }
+  const ledger = hasDeductionLedger(review.dimensions);
+  const flatDeductions = allDeductions(review.dimensions);
+  const lostPoints = flatDeductions.reduce((total, item) => total + item.points, 0);
   const priorities = new Set(review.priorityBlockIds);
   const sortedBlocks = [...review.blocks].sort(
     (left, right) => Number(priorities.has(right.blockId)) - Number(priorities.has(left.blockId)),
@@ -1000,6 +1119,17 @@ function DeepReviewPanel({
       target?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   }, [focusBlockId, showAllBlocks]);
+  // 概览里点了某一维 → 报告展开后滚到那一维的扣分明细。
+  useEffect(() => {
+    if (!focusDimension) return;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById(`rv-dimension-${focusDimension}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+  }, [focusDimension]);
   const jumpToReviewBlock = (blockId: string) => {
     if (!blocks.some((block) => block.blockId === blockId)) setShowAllBlocks(true);
     window.requestAnimationFrame(() => {
@@ -1024,11 +1154,14 @@ function DeepReviewPanel({
         </div>
         <small>{review.model} · {review.generatedAt.slice(0, 10)}</small>
       </header>
-      {review.dimensions && (
+      {review.dimensions && !ledger && (
         <section className="rv-score-source" aria-label="总分来源">
           <header>
             <h3>总分来源</h3>
-            <p>五个维度各占 20%，总分由服务端按等权平均计算。</p>
+            <p>
+              五个维度各占 20%。这份是旧格式报告，只有整体理由、没有逐条扣分；
+              重新生成后每一维都会列出扣在哪一题、扣了几分。
+            </p>
           </header>
           <div>
             {(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).map((key) => {
@@ -1060,6 +1193,97 @@ function DeepReviewPanel({
               );
             })}
           </div>
+        </section>
+      )}
+
+      {review.dimensions && ledger && (
+        <section className="rv-ledger" aria-label="扣分明细">
+          <header>
+            <div>
+              <h3>扣分明细</h3>
+              <p>
+                每一维都从 100 分开始。只有能指到具体问题、具体句子的失分才扣得动分——
+                看不到扣分项，就说明这一维没有被扣。
+              </p>
+            </div>
+            <div className="rv-ledger-total">
+              <b>−{lostPoints}</b>
+              <span>{flatDeductions.length} 项 · 五维合计</span>
+            </div>
+            <div className="rv-ledger-switch" role="group" aria-label="扣分排列方式">
+              <button
+                type="button"
+                className={deductionView === "dimension" ? "on" : ""}
+                onClick={() => setDeductionView("dimension")}
+              >按维度</button>
+              <button
+                type="button"
+                className={deductionView === "rank" ? "on" : ""}
+                onClick={() => setDeductionView("rank")}
+              >按扣分排序</button>
+            </div>
+          </header>
+
+          {deductionView === "dimension" ? (
+            <div className="rv-ledger-dimensions">
+              {(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).map((key) => {
+                const dimension = review.dimensions?.[key];
+                const score = Math.round(dimension?.score ?? 0);
+                const deductions = dimension?.deductions ?? [];
+                return (
+                  <article key={key} id={`rv-dimension-${key}`}>
+                    <header>
+                      <h4>{REVIEW_DIMENSION_META[key].label}</h4>
+                      <p className="rv-ledger-formula">
+                        {/* 减分为零时不写「100 = 100」这种废式子，满分自己会说话 */}
+                        {deductions.length > 0 && (
+                          <>
+                            <span>100</span>
+                            {deductions.map((item, index) => (
+                              <em key={`${item.blockId}-${index}`}>−{item.points}</em>
+                            ))}
+                            <i>=</i>
+                          </>
+                        )}
+                        <strong>{score}</strong>
+                      </p>
+                    </header>
+                    {deductions.length > 0 ? (
+                      <ol className="rv-deduction-list">
+                        {deductions.map((item, index) => (
+                          <DeductionRow
+                            key={`${item.blockId}-${index}`}
+                            item={item}
+                            onBlockClick={jumpToReviewBlock}
+                            onEvidenceClick={onEvidenceClick}
+                          />
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="rv-ledger-clean">这一维没有找到可举证的扣分点，保持满分。</p>
+                    )}
+                    {dimension?.rationaleZh && (
+                      <p className="rv-ledger-rationale">{dimension.rationaleZh}</p>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          ) : flatDeductions.length > 0 ? (
+            <ol className="rv-deduction-list rv-deduction-rank">
+              {flatDeductions.map((item, index) => (
+                <DeductionRow
+                  key={`${item.dimension}-${item.blockId}-${index}`}
+                  item={item}
+                  dimensionLabel={REVIEW_DIMENSION_META[item.dimension].label}
+                  onBlockClick={jumpToReviewBlock}
+                  onEvidenceClick={onEvidenceClick}
+                />
+              ))}
+            </ol>
+          ) : (
+            <p className="rv-ledger-clean">整场没有找到可举证的扣分点。</p>
+          )}
         </section>
       )}
       <div className="rv-deep-overview">
