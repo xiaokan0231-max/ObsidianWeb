@@ -7,6 +7,7 @@ import {
   normalizeJobStatus,
 } from "./job-status";
 import { JOB_CASE_TYPE } from "./vault-boundary.mjs";
+import { JOB_CASE_SECTION, detectVerification } from "./job-case-schema";
 
 export {
   composeJobStatus,
@@ -194,12 +195,9 @@ export function officialApplyStatus(note: Note): OfficialApplyStatus {
 }
 
 export function jobVerification(note: Note): JobVerification {
-  const headings = note.content.match(/^##\s.*$/gm) ?? [];
-  // 历史审计记录可能同时包含旧的「✅ 已确认」和更新后的「⚠️ 要确认」。
-  // 风险提示必须优先，否则卡片会被下面残留的旧结论错误标成「原文確認済」。
-  if (headings.some((line) => /^##\s*⚠️/.test(line)) || /未検証/.test(note.content)) return "warned";
-  if (headings.some((line) => /^##\s*✅/.test(line))) return "verified";
-  return "unchecked";
+  // 判定そのものは lib/job-case-schema.ts に置く。vault:check（書く側）と
+  // ここ（読む側）が同じ関数を見ていないと、「check は通ったのにカードは未核对」が起きる。
+  return detectVerification(note.content) as JobVerification;
 }
 
 export const VERIFICATION_LABEL: Record<JobVerification, string> = {
@@ -302,8 +300,9 @@ export function toJobCard(note: Note): JobCard {
   const location = getString(note.frontmatter.location);
   const source = getString(note.frontmatter.source);
   const stack = jobStack(note);
-  const reason = jobSection(note, "推荐理由") || jobSection(note, "推荐理由（技術面）");
-  const caution = jobSection(note, "注意点");
+  const reason =
+    jobSection(note, JOB_CASE_SECTION.reason) || jobSection(note, JOB_CASE_SECTION.reasonAlias);
+  const caution = jobSection(note, JOB_CASE_SECTION.caution);
 
   return {
     note,
@@ -332,8 +331,8 @@ export function toJobCard(note: Note): JobCard {
     stack,
     reason,
     caution,
-    matches: jobSectionItems(note, "匹配点"),
-    materials: jobSectionItems(note, "主打材料"),
+    matches: jobSectionItems(note, JOB_CASE_SECTION.matches),
+    materials: jobSectionItems(note, JOB_CASE_SECTION.materials),
     verification: jobVerification(note),
     updatedAt: note.stat.mtime,
     haystack: [company, position, salaryText, location, source, stack.join(" "), stripMarkdown(note.content)]

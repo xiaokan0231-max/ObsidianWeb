@@ -5,11 +5,8 @@
 import { readFile } from "node:fs/promises";
 import { relative } from "node:path";
 import {
-  CHANNEL_REQUIRED_FROM,
-  JOB_STATUSES,
-  KNOWN_CHANNELS,
   VAULT,
-  baseStatus,
+  findFrontmatterDefects,
   listMarkdownFiles,
   listVaultFileKeys,
   parseFrontmatter,
@@ -17,7 +14,10 @@ import {
   readJobCases,
   vaultRefKey,
 } from "./vault-lib.mjs";
-import { JOB_CASE_ORIGINS } from "../lib/vault-boundary.mjs";
+import {
+  auditJobCaseCompleteness,
+  validateJobCaseFrontmatter,
+} from "../lib/job-case-schema.ts";
 import { listEmbeds, listHeadings, sliceSection, stripFrontmatter } from "../lib/interview-prep-embed.mjs";
 import { companyMotivationIssues } from "../lib/interview-prep-validation.mjs";
 import {
@@ -31,14 +31,12 @@ import {
 } from "../lib/knowledge-graph.ts";
 import { GENERATED_LIFECYCLES, markerJson } from "../lib/vault-compact.mjs";
 
-const REQUIRED = ["case_id", "company", "status", "origin"];
 const PREP_REQUIRED = ["company", "round", "format", "interviewers", "case"];
 const PREP_SESSION_STATUSES = ["preparing", "scheduled", "completed", "cancelled"];
 const TODO_STATUSES = ["未着手", "進行中", "保留", "完了"];
 const TODO_PRIORITIES = ["high", "medium", "low"];
 const TODO_AUDIENCES = ["user", "system"];
 const SYSTEM_TODO_CATEGORIES = ["台帳整合", "観測基盤"];
-const WAITING_FOR = ["self", "company", "agent", "platform"];
 const VERSIONED_ARTIFACT_TYPES = new Set(["language-bank", "language-curriculum"]);
 // ai-review も分析層。fingerprint・ai_author の規約は ai-report と同じものを課す。
 const ANALYSIS_TYPES = new Set(["ai-report", "analysis", "ai-review"]);
@@ -51,61 +49,31 @@ const BATCH_START = "<!-- language-batch-json:start -->";
 const BATCH_END = "<!-- language-batch-json:end -->";
 
 const problems = [];
+// 警告は exit code を変えない。「直すべきだが、止めると他が全部止まる」もの専用。
+const warnings = [];
 const notes = await readJobCases();
 const caseIds = new Map();
 
+const today = new Date().toLocaleDateString("sv-SE");
+
 for (const note of notes) {
   const fm = note.frontmatter;
-  const at = (message) => problems.push(`${note.name}: ${message}`);
 
-  for (const key of REQUIRED) {
-    if (!fm[key]) at(`frontmatter に \`${key}\` が無い`);
+  // 形の検査は lib/job-case-schema.ts が唯一の正本。ここで条件を書き足さないこと
+  // ——書き足した瞬間に「書く側の規約」と「読む側の規約」がまた分裂する。
+  for (const problem of validateJobCaseFrontmatter(fm)) {
+    problems.push(`${note.name}: ${problem}`);
+  }
+  // 中身の未完了は**止めない**。既存の未採点ノートで Stop hook が固まると、
+  // 他の作業まで巻き添えで止まる。見えるようにするのが目的。
+  for (const warning of auditJobCaseCompleteness(fm, note.content, { today })) {
+    warnings.push(`${note.name}: ${warning}`);
   }
 
   if (fm.case_id) {
     const files = caseIds.get(fm.case_id) ?? [];
     files.push(note.name);
     caseIds.set(fm.case_id, files);
-  }
-  if (fm.origin && !JOB_CASE_ORIGINS.includes(String(fm.origin))) {
-    at(`origin "${fm.origin}" は未知。既知は ${JOB_CASE_ORIGINS.join(" / ")}`);
-  }
-
-  const status = String(fm.status ?? "");
-  const base = baseStatus(status);
-  if (status && !base) {
-    at(`status "${status}" は列挙に無い。使えるのは ${JOB_STATUSES.join(" / ")}（後ろに（補足）は可）`);
-  }
-
-  if (base && CHANNEL_REQUIRED_FROM.includes(base)) {
-    if (!fm.channel) at(`status が「${base}」なら \`channel\` が要る（${KNOWN_CHANNELS.join(" / ")}）`);
-    else if (!KNOWN_CHANNELS.includes(String(fm.channel)))
-      at(`channel "${fm.channel}" は未知。既知は ${KNOWN_CHANNELS.join(" / ")}`);
-  }
-
-  // 「保留」は日付の定まらない状態なので必須にしない（無い日付を作らせないため）。
-  if (base && CHANNEL_REQUIRED_FROM.includes(base) && !fm.status_updated) {
-    at(`status が「${base}」なら \`status_updated\` が要る（YYYY-MM-DD）`);
-  }
-  if (fm.status_updated && !/^\d{4}-\d{2}-\d{2}$/.test(String(fm.status_updated))) {
-    at(`status_updated "${fm.status_updated}" が YYYY-MM-DD ではない`);
-  }
-  if (fm.waiting_for && !WAITING_FOR.includes(String(fm.waiting_for))) {
-    at(`waiting_for "${fm.waiting_for}" は ${WAITING_FOR.join(" / ")} のいずれか`);
-  }
-  if (fm.follow_up_at && !fm.waiting_for) {
-    at("follow_up_at があるなら waiting_for も必要");
-  }
-  if (fm.follow_up_at && !validCalendarDate(String(fm.follow_up_at))) {
-    at(`follow_up_at "${fm.follow_up_at}" が実在する YYYY-MM-DD ではない`);
-  }
-  if (fm.next_event_at && !validCalendarDateTime(String(fm.next_event_at))) {
-    at(`next_event_at "${fm.next_event_at}" は YYYY-MM-DD または YYYY-MM-DD HH:MM ではない`);
-  }
-
-  const rating = Number(fm.rating);
-  if (fm.rating !== undefined && (!Number.isFinite(rating) || rating < 0 || rating > 10)) {
-    at(`rating "${fm.rating}" が 0〜10 の数値ではない`);
   }
 }
 
@@ -151,6 +119,12 @@ function validCalendarDateTime(value) {
 for (const path of files) {
   const content = await readFile(path, "utf8");
   contents.set(path, content);
+  // 🔴 型や必須項目より先に「Obsidian がこの frontmatter を読めるか」を見る。
+  // ここが壊れると type ごと消えるので、以降の検査は全部素通りしてしまう
+  // （2026-08-04：salary 重複で job-case が1件、静かに Web から消えていた）。
+  for (const defect of findFrontmatterDefects(content)) {
+    problems.push(`${relative(VAULT, path)}: ${defect}`);
+  }
   const name = path.split("/").pop().replace(/\.md$/i, "");
   if (bodyByName.has(name)) duplicateNames.add(name);
   else {
@@ -568,11 +542,20 @@ console.log(
     `表現専門コース ${languageExpressionCourseCount} 件を検査`,
 );
 
+if (warnings.length) {
+  console.warn(`\n⚠️  ${warnings.length} 件の未完了（止めない・順次直す）:\n`);
+  for (const warning of warnings) console.warn(`  - ${warning}`);
+  console.warn("");
+}
+
 if (problems.length) {
-  console.error(`\n❌ ${problems.length} 件の問題:\n`);
+  console.error(`❌ ${problems.length} 件の問題:\n`);
   for (const problem of problems) console.error(`  - ${problem}`);
   console.error("");
   process.exit(1);
 }
 
+// 成功メッセージは「止めるべき問題があるか」だけを表す。警告で文言を変えると、
+// これを契約にしている呼び出し側（テスト・hook）が壊れる。
 console.log("✅ 問題なし");
+if (warnings.length) console.log(`（未完了 ${warnings.length} 件は上に出ている）`);

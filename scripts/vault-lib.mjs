@@ -61,6 +61,57 @@ export function parseFrontmatter(text) {
   return out;
 }
 
+/**
+ * 上の parseFrontmatter は寛容で、壊れた YAML も黙って読めてしまう。
+ * 一方 Web 側の実データは Obsidian の**厳格な** YAML パーサを通るので、
+ * 「vault:check は通ったのに Obsidian では frontmatter 全体が無効」が起こりうる。
+ * 2026-08-04 実証：`salary` を二重に書いた job-case が check 通過・Obsidian 側は
+ * キー0個（＝type が消えて案件ごと Web から消滅）。検査器が消費者より甘い、が事故の形。
+ *
+ * ここでは依存を増やさずに、Obsidian が拒否する構造だけを名指しで拾う。
+ * 「YAML として妥当か」ではなく「厳格パーサが落ちる既知の形か」を見る。
+ */
+export function findFrontmatterDefects(text) {
+  const matched = text.match(FRONTMATTER);
+  if (!matched) return [];
+
+  const defects = [];
+  const seen = new Map();
+  let listKey = null;
+  matched[1].split(/\r?\n/).forEach((raw, index) => {
+    const line = index + 1;
+    if (/^\s+-\s+/.test(raw) && listKey) return;
+    const pair = raw.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
+    if (!pair) return;
+    const [, key, value] = pair;
+    listKey = value === "" ? key : null;
+
+    if (seen.has(key)) {
+      defects.push(`frontmatter のキー \`${key}\` が重複（${seen.get(key)} 行目と ${line} 行目）`);
+    } else {
+      seen.set(key, line);
+    }
+
+    // 引用符で囲っていない値の中の `: ` と ` #` は、厳格パーサではマッピング／コメント扱いになる。
+    const quoted = /^(['"]).*\1$/.test(value);
+    if (!quoted && value !== "") {
+      if (/:\s/.test(value)) {
+        defects.push(`\`${key}\` の値に引用符なしの「半角コロン+空白」がある（${line} 行目）`);
+      }
+      if (/\s#/.test(value)) {
+        defects.push(`\`${key}\` の値に引用符なしの「空白+#」がある（${line} 行目）`);
+      }
+      // `|` と `>` は**ブロックスカラー**の正規の書き方なので弾かない
+      // （`next_action: |` の複数行が実在する）。厳格パーサが落ちるのは
+      // アンカー・エイリアス・タグ・ディレクティブ・予約文字の側だけ。
+      if (/^[&*!%@`]/.test(value)) {
+        defects.push(`\`${key}\` の値が YAML 指示子 \`${value[0]}\` で始まっている（${line} 行目）`);
+      }
+    }
+  });
+  return defects;
+}
+
 /** 状態は `不採用（…）` のように補足が付く。括弧の手前だけを見る。 */
 export function baseStatus(value) {
   return normalizeJobStatus(value) ?? "";
