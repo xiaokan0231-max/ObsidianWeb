@@ -58,6 +58,34 @@ test("日历：job-case の next_event_at は面接などの語を含まなく�
   assert.equal(events[0].phase, "upcoming");
 });
 
+test("日历：next_event_at で確定した予定でも種別は next_action から復元する", () => {
+  const events = buildCalendarEvents([
+    note("20_求職/Acme/Acme_Data.md", "job-case", {
+      company: "Acme",
+      next_event_at: "2026-08-05 17:30",
+      next_action: "一次面接（オンライン・Microsoft Teams）",
+    }),
+  ], NOW);
+  // next_event_at は priority 4 で next_action(3) を上書きするが、書式が純粋な日時なので
+  // 種別語を持たない。ラベルまで勝った出所だけで決めると「面谈」へ退化し、
+  // 規約どおり構造化したノートほど日历の表示が悪くなる（2026-08-04 実証）。
+  assert.deepEqual(dates(events), ["2026-08-05 17:30"]);
+  assert.equal(events[0].label, "第一次面试");
+});
+
+test("日历：種別が読める出所が勝った時は next_action で上書きしない", () => {
+  const events = buildCalendarEvents([
+    note("20_求職/Acme/Acme_Data.md", "job-case", {
+      company: "Acme",
+      next_event_at: "2026-08-06 10:00 最終面接",
+      next_action: "一次面接の振り返りをまとめる",
+    }),
+  ], NOW);
+  // next_action は「次にやること」であって予定の種別とは限らない。
+  // source 側から読めるなら、そちらが正。
+  assert.equal(events[0].label, "最终面试");
+});
+
 test("日历：本文は面接行だけ拾い、お礼・通知・準備の行は予定にしない", () => {
   const events = buildCalendarEvents([
     note("20_求職/Acme/Acme_Data.md", "job-case", { company: "Acme" }, [
@@ -160,4 +188,20 @@ test("検索の type: / status: / folder: 前置詞", () => {
   assert.equal(noteMatches(todo, "folder:30_"), false);
   assert.equal(noteMatches(todo, "返信"), true);
   assert.equal(noteMatches(todo, ""), true);
+});
+
+test("値の | は OR、空白区切りの token 同士は AND", () => {
+  const applied = note("20_求職/A社/_A社.md", "job-case", { status: "応募済" });
+  const rejected = note("20_求職/B社/_B社.md", "job-case", { status: "不採用（2026-07-21）" });
+
+  // 「進行中の選考」＝ 7 つの enum のうち 3 つ。OR がないと 1 本のクエリで書けない。
+  assert.equal(noteMatches(applied, "status:応募済|書類通過|面接中"), true);
+  assert.equal(noteMatches(rejected, "status:応募済|書類通過|面接中"), false);
+  assert.equal(noteMatches(rejected, "status:不採用|保留"), true);
+  assert.equal(noteMatches(applied, "type:job-case|todo"), true);
+  assert.equal(noteMatches(applied, "folder:20_求職|30_日本語学習"), true);
+
+  // token をまたぐと従来どおり AND のまま。
+  assert.equal(noteMatches(applied, "type:job-case status:応募済|面接中"), true);
+  assert.equal(noteMatches(applied, "type:todo status:応募済|面接中"), false);
 });

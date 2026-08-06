@@ -117,6 +117,12 @@ const DEFAULT_OPPORTUNITY_FILTERS: Filters = {
   statuses: ["未応募"],
 };
 
+/** 別画面の数字カードから「その数字の中身」へ飛ぶ時に渡す初期フィルタ。 */
+export type JobsInitialFilters = {
+  statuses?: string[];
+  ratings?: JobRatingBand[];
+};
+
 function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
 }
@@ -336,25 +342,34 @@ export default function JobsView({
   notes,
   onOpen,
   onVaultChanged,
-  initialStatuses,
+  initialFilters,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
   onVaultChanged?: () => void | Promise<void>;
   /**
-   * 別画面（求職分析の「進行中 N 件をすべて見る」など）から遷移してきた時の初期状態フィルタ。
+   * 別画面（求職分析の数字カードなど）から遷移してきた時の初期フィルタ。
    * このコンポーネントは view 切替でアンマウントされるので、初期値として一度読むだけでよい。
    * 呼び出し側はナビで直接来た時に null に戻す責任を持つ（memory-atlas.tsx）。
+   *
+   * status だけでなく rating も受けるのは、「可応募」＝ `未応募 かつ rating 7以上` のように
+   * 数字カードの定義が status 単独では表せないため。カードの数字と遷移先の件数が食い違うと、
+   * 画面がそのまま嘘になる。
    */
-  initialStatuses?: string[] | null;
+  initialFilters?: JobsInitialFilters | null;
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<JobSort>("rating");
-  const [filters, setFilters] = useState<Filters>(() =>
-    initialStatuses?.length
-      ? { ...EMPTY_FILTERS, statuses: initialStatuses }
-      : DEFAULT_OPPORTUNITY_FILTERS,
-  );
+  const [filters, setFilters] = useState<Filters>(() => {
+    const seeded = initialFilters?.statuses?.length || initialFilters?.ratings?.length;
+    return seeded
+      ? {
+          ...EMPTY_FILTERS,
+          statuses: initialFilters?.statuses ?? [],
+          ratings: initialFilters?.ratings ?? [],
+        }
+      : DEFAULT_OPPORTUNITY_FILTERS;
+  });
   const [viewMode, setViewMode] = useState<ViewMode>("card");
   const [weekOffset, setWeekOffset] = useState(0);
   // 这个面板常挂着不关，「今天」要在跨天后重新取，否则周复盘会一直停在打开那天的那一周。

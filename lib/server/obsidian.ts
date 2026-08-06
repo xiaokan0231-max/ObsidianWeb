@@ -102,16 +102,27 @@ export async function readAllNotes() {
   return notes.sort((left, right) => right.stat.mtime - left.stat.mtime);
 }
 
-export async function noteExists(path: string) {
+// 「笔记还没建」和「Obsidian 挂了」只能靠 request() 抛出的文案区分。
+// 判定收在这里：散在各 route 时它有 9 份，改一处就等于漏改八处。
+export function isMissingNoteError(error: unknown) {
+  return error instanceof Error && error.message.includes("returned 404");
+}
+
+// 可选读取的唯一入口：只把 404 折成 null，认证失效・连不上・500 一律照原样抛出。
+// 判断放在这里而不是各个调用点，是因为「只吞 404」被抄到第五份时，
+// 迟早有一份会把别的失败也吞掉——而那种失败在页面上跟「笔记还没建」长得一模一样。
+export async function readNoteOrNull(path: string) {
   try {
-    await readNote(path);
-    return true;
+    return await readNote(path);
   } catch (error) {
-    if (error instanceof Error && error.message.includes("returned 404")) {
-      return false;
-    }
+    if (isMissingNoteError(error)) return null;
     throw error;
   }
+}
+
+// 存在与否就是「读不读得到」，往返也一样是一次，所以判定不留第二份。
+export async function noteExists(path: string) {
+  return (await readNoteOrNull(path)) !== null;
 }
 
 export async function writeNote(path: string, content: string) {

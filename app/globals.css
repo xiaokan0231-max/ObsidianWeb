@@ -149,7 +149,25 @@ canvas:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  margin-top: 70px;
+  /* 展开二级项后矮屏会顶出去：先让这段留白跟着屏高收，880px 以上仍是原来的 70px。 */
+  margin-top: clamp(26px, 8vh, 70px);
+  /* 兜底——真装不下时让导航自己滚，别把「收起」和连接状态挤出视口。 */
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+/*
+ * 折叠态不能滚：overflow-y:auto 会把 overflow-x 一并变成 auto（规范如此），
+ * 那条从 66px 图标条向右弹出的 hover 标签就会被裁掉，折叠态又只剩图标，等于没名字。
+ * 折叠态本来就比展开态矮 70px 左右，让它按老样子溢出即可。
+ */
+:root[data-rail="collapsed"] .side-nav {
+  overflow: visible;
+}
+
+.side-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .side-nav button {
@@ -192,14 +210,53 @@ canvas:focus-visible {
   letter-spacing: 0.05em;
 }
 
-.source-status {
-  margin-top: auto;
+/* 当前分区的子项，只在该分区被选中时出现，所以顶层永远只有 7 个目标。 */
+.side-subnav {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 13px 12px;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 8px 21px;
+  padding-left: 11px;
+  border-left: 1px solid var(--line);
+}
+
+.side-subnav button {
+  height: 34px;
+  gap: 9px;
+  padding: 0 9px;
+  color: #7c837e;
+}
+
+.side-subnav .nav-glyph {
+  width: 17px;
+  font-family: "Songti SC", serif;
+  font-size: 15px;
+}
+
+.side-subnav button span:last-child {
+  font-size: 12px;
+  font-weight: 560;
+}
+
+/* 父项已经是整块墨底，子项再来一块就成了两个黑砖；这里只用纸色和朱记做标记。 */
+.side-subnav button.active {
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--ink);
+}
+
+.side-subnav button.active span:last-child {
+  font-weight: 680;
+}
+
+.side-subnav button.active::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 2px;
+  height: 17px;
+  transform: translateY(-50%);
+  background: var(--orange);
 }
 
 /* ===== 侧栏折叠（图标条） ===== */
@@ -247,7 +304,6 @@ canvas:focus-visible {
 }
 
 :root[data-rail="collapsed"] .brand-copy,
-:root[data-rail="collapsed"] .source-status > div,
 :root[data-rail="collapsed"] .rail-toggle span {
   display: none;
 }
@@ -263,6 +319,21 @@ canvas:focus-visible {
 
 :root[data-rail="collapsed"] .side-nav button:hover {
   transform: none;
+}
+
+/* 66px 的图标条里放不下缩进和竖线，子项靠「更小 + 紧跟在墨块下面」表达从属。 */
+:root[data-rail="collapsed"] .side-subnav {
+  margin: 3px 0 7px;
+  padding-left: 0;
+  border-left: 0;
+}
+
+:root[data-rail="collapsed"] .side-subnav button {
+  height: 32px;
+}
+
+:root[data-rail="collapsed"] .side-subnav button.active::before {
+  display: none;
 }
 
 /* 折叠时文字只做视觉隐藏，可访问名与搜索仍然拿得到。 */
@@ -302,11 +373,6 @@ canvas:focus-visible {
   opacity: 1;
 }
 
-:root[data-rail="collapsed"] .source-status {
-  justify-content: center;
-  padding: 13px 0;
-}
-
 :root[data-rail="collapsed"] .rail-toggle i {
   transform: rotate(180deg);
 }
@@ -338,23 +404,6 @@ canvas:focus-visible {
   box-shadow: 0 0 0 4px rgba(203, 88, 69, 0.12);
 }
 
-.source-status div {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.source-status strong {
-  font-size: 10px;
-  font-weight: 680;
-}
-
-.source-status small {
-  margin-top: 3px;
-  color: #868c88;
-  font-size: 9px;
-}
-
 .main-stage {
   min-width: 0;
 }
@@ -366,7 +415,6 @@ canvas:focus-visible {
   height: 76px;
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 18px;
   padding: 0 38px;
   background: rgba(243, 240, 232, 0.9);
@@ -374,113 +422,156 @@ canvas:focus-visible {
   backdrop-filter: blur(18px);
 }
 
+/*
+ * 二级导航按「书页标签」来做：只有选中的那一页和下面的正文连成一张纸，
+ * 靠 bottom: -1px 把 bar 的底线切开一段。所以 active 的底色必须等于正文的 --paper，
+ * bottom: -1px 和 border-bottom: 0 是一套的，只删其一就会看见纸浮起来。
+ */
 .section-nav {
   position: sticky;
   top: 76px;
   z-index: 24;
-  min-height: 48px;
+  min-height: 74px;
   display: flex;
-  align-items: center;
-  gap: 24px;
+  align-items: flex-end;
+  gap: 22px;
   padding: 0 38px;
-  background: rgba(243, 240, 232, 0.94);
-  border-bottom: 1px solid rgba(216, 213, 202, 0.9);
+  background:
+    linear-gradient(180deg, rgba(237, 233, 223, 0.96), rgba(243, 240, 232, 0.97));
+  border-bottom: 1px solid rgba(200, 196, 184, 0.78);
   backdrop-filter: blur(16px);
 }
 
-.section-nav > span {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 8px;
-  font-weight: 750;
-  letter-spacing: .13em;
+/* 面试作战・训练中心的子项在桌面端住左栏，这条带子只留给资料库。 */
+.section-nav[data-placement="rail"] {
+  display: none;
 }
 
-.section-nav > div {
+.section-nav-tabs {
   min-width: 0;
   display: flex;
-  align-self: stretch;
-  gap: 4px;
+  align-items: flex-end;
+  gap: 6px;
 }
 
-.section-nav button {
+.section-nav-tabs button {
   position: relative;
-  border: 0;
-  padding: 0 15px;
+  bottom: -1px;
+  min-width: 0;
+  /* 和选中态同高。高度不一样时因为底对齐，未选中的文字会整体下沉几像素。 */
+  height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 17px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 11px 11px 0 0;
   background: transparent;
   color: var(--muted);
   font-family: inherit;
-  font-size: 11px;
+  text-align: left;
   cursor: pointer;
-  transition: color 150ms ease;
+  transition:
+    color 170ms ease,
+    background-color 170ms ease,
+    border-color 170ms ease;
 }
 
-.section-nav button:hover {
+.section-nav-tabs button i {
+  flex: 0 0 auto;
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50% 50% 50% 10%;
+  color: inherit;
+  font-family: "Songti SC", serif;
+  font-size: 14px;
+  font-style: normal;
+  line-height: 1;
+  opacity: .55;
+  transition: background-color 170ms ease, color 170ms ease, opacity 170ms ease;
+}
+
+.section-nav-tabs button span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.section-nav-tabs button strong {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+
+.section-nav-tabs button small {
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  white-space: nowrap;
+  transition: color 170ms ease;
+}
+
+.section-nav-tabs button:hover {
   color: var(--ink);
+  background: rgba(255, 255, 255, 0.5);
 }
 
-.section-nav button.active {
+.section-nav-tabs button:hover i {
+  opacity: .8;
+}
+
+.section-nav-tabs button.active {
+  border-color: rgba(200, 196, 184, 0.78);
+  background: var(--paper);
   color: var(--ink);
-  font-weight: 680;
+  box-shadow: 0 -6px 18px rgba(28, 37, 32, 0.05);
 }
 
-.section-nav button.active::after {
+/* 顶边的朱线＝这一页就是当前打开的章节。 */
+.section-nav-tabs button.active::before {
   content: "";
   position: absolute;
-  right: 15px;
-  bottom: -1px;
-  left: 15px;
-  height: 2px;
+  top: -1px;
+  right: -1px;
+  left: -1px;
+  height: 3px;
+  border-radius: 11px 11px 0 0;
   background: var(--orange);
+}
+
+.section-nav-tabs button.active strong {
+  font-weight: 700;
+}
+
+.section-nav-tabs button.active small {
+  color: var(--orange);
+}
+
+.section-nav-tabs button.active i {
+  border-color: var(--orange);
+  background: var(--orange);
+  color: #fff;
+  opacity: 1;
 }
 
 .mobile-brand {
   display: none;
 }
 
-.search-wrap {
-  position: relative;
-  width: min(650px, 65%);
-  height: 42px;
-  display: flex;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid #d3d0c6;
-  border-radius: 3px;
-  transition: box-shadow 160ms ease, border-color 160ms ease;
-}
-
-.search-wrap:focus-within {
-  border-color: #a8aaa4;
-  box-shadow: 0 8px 28px rgba(31, 39, 34, 0.08);
-}
-
 .search-icon {
-  margin-left: 14px;
   color: #6e746f;
-  font-size: 23px;
+  font-size: 21px;
   line-height: 1;
 }
 
-.search-wrap input {
-  min-width: 0;
-  flex: 1;
-  height: 100%;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  padding: 0 12px;
-  color: var(--ink);
-  font-size: 12px;
-}
-
-.search-wrap input::placeholder {
-  color: #8c918d;
-}
-
-.search-wrap kbd {
-  margin-right: 9px;
+.search-palette-input kbd {
   padding: 4px 7px;
   border: 1px solid #dad7ce;
   background: #f4f1e9;
@@ -490,37 +581,262 @@ canvas:focus-visible {
   border-radius: 3px;
 }
 
-.sync-button {
-  height: 42px;
+/* ⌘K 浮层。全库检索是导航工具，不该在每页占一条输入框。 */
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  /* 默认的 stretch 会把面板拉到整屏高，结果列表下面留一大块空白。 */
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(40px, 12vh, 120px) 20px 40px;
+  background: rgba(24, 35, 30, 0.26);
+  backdrop-filter: blur(3px);
+}
+
+.search-palette-input {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 54px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.search-palette-input input {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.search-palette-input input::placeholder {
+  color: #8c918d;
+}
+
+/* 资料库自己的检索框，和下面的分区・场景筛选是一组。 */
+.library-search {
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--ink);
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  transition: border-color 160ms ease;
+}
+
+.library-search:focus-within {
+  border-color: #a8aaa4;
+}
+
+.library-search .search-icon {
+  font-size: 18px;
+}
+
+.library-search input {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  border: 0;
+  outline: 0;
   background: transparent;
-  padding: 0 15px;
+  color: var(--ink);
   font-size: 11px;
-  font-weight: 650;
+}
+
+.library-search input::placeholder {
+  color: #8c918d;
+}
+
+.library-search > button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: #8b908c;
+  font-size: 16px;
+  line-height: 1;
   cursor: pointer;
-  transition: background 160ms ease, color 160ms ease;
 }
 
-.sync-button:hover {
-  background: var(--ink);
-  color: #fff;
+.library-search > button:hover {
+  color: var(--orange);
 }
 
-.sync-button:disabled {
-  opacity: 0.55;
+/* ===== 顶栏三段：我在哪 / 下一件 / 数据源 ===== */
+
+.topbar-where {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.topbar-where > span {
+  color: var(--orange);
+  font-family: "Songti SC", serif;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.topbar-where strong {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.topbar-where small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.topbar-where small::before {
+  content: "·";
+  margin-right: 9px;
+}
+
+/* 「下一件」是这一行里唯一有时限的信息，所以给它整行仅有的边框和朱色。 */
+.topbar-next {
+  min-width: 0;
+  height: 42px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--orange);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.topbar-next:hover {
+  border-color: var(--orange);
+  background: var(--surface);
+}
+
+.topbar-next small {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .13em;
+}
+
+.topbar-next em {
+  flex: 0 0 auto;
+  color: var(--orange);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.topbar-next strong {
+  overflow: hidden;
+  max-width: 260px;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-next i {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.topbar-source {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 没有「下一件」时，状态自己顶到右边。 */
+.topbar-next + .topbar-source {
+  margin-left: 0;
+}
+
+.topbar-source:first-of-type {
+  margin-left: auto;
+}
+
+.topbar-source:disabled {
   cursor: wait;
 }
 
+.topbar-source-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar-source-copy strong {
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.topbar-source-copy small {
+  margin-top: 3px;
+  color: #868c88;
+  font-size: 9px;
+}
+
+.topbar-source:hover .topbar-source-copy strong {
+  color: var(--orange);
+}
+
+/* 按钮撤掉后，快捷键就是唯一入口——所以把它们写在明面上。 */
+.topbar-keys {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+}
+
+.topbar-keys span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #939893;
+  font-size: 9px;
+}
+
+.topbar-keys kbd {
+  padding: 3px 6px;
+  border: 1px solid #dad7ce;
+  border-radius: 3px;
+  background: #f4f1e9;
+  color: #7f847f;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+}
+
 .search-panel {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 0;
-  right: 0;
-  z-index: 80;
-  padding: 8px;
+  width: min(640px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* 横向留白由各段自己带（head/saved/results/help 都是 8px），这里留着会把输入框的下边线截断。 */
+  padding: 0 0 8px;
   background: #fbfaf6;
   border: 1px solid #cbc8be;
   box-shadow: var(--shadow);
@@ -566,8 +882,10 @@ canvas:focus-visible {
 }
 
 .search-results {
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .search-results > button {
@@ -5693,23 +6011,29 @@ canvas:focus-visible {
   .topbar { height: auto; min-height: 68px; justify-content: space-between; padding: 11px 16px; }
   .section-nav {
     top: 68px;
-    min-height: 44px;
+    min-height: 58px;
     gap: 0;
     overflow-x: auto;
     padding: 0 12px;
     scrollbar-width: none;
   }
-  .section-nav > span { display: none; }
-  .section-nav > div { min-width: max-content; }
-  .section-nav button { padding-inline: 14px; }
-  .section-nav button.active::after { right: 14px; left: 14px; }
+  /* 移动端没有左栏，所有分区的二级项都回到这条带子里。 */
+  .section-nav[data-placement="rail"] { display: flex; }
+  .section-nav-tabs { min-width: max-content; }
+  .section-nav-tabs button { height: 46px; padding-inline: 12px; }
+  .section-nav-tabs button i { width: 24px; height: 24px; font-size: 13px; }
+  .section-nav-tabs button strong { font-size: 12px; }
+  /* 横向滚动条里 8px 的拉丁小字只会糊成一片，只留还能辨形的汉字印和正标题。 */
+  .section-nav-tabs button small { display: none; }
   .mobile-brand { display: flex; flex: 0 0 auto; }
   .mobile-brand .brand-mark { width: 34px; height: 34px; font-size: 17px; }
   .mobile-brand strong { font-family: "Songti SC", serif; }
-  .search-wrap { width: min(460px, 62%); }
-  .sync-button { width: 42px; padding: 0; justify-content: center; }
-  .sync-button { font-size: 0; }
-  .sync-button span { font-size: 18px; }
+  /* 移动端没有键盘，也没有左栏：位置交给下面的一级标签栏，顶栏只留数据源状态。 */
+  .topbar-where { display: none; }
+  .topbar-keys { display: none; }
+  .topbar-next { margin-left: auto; height: 38px; }
+  .topbar-next small { display: none; }
+  .topbar-next strong { max-width: 96px; }
   .view-container { padding: 22px 16px 92px; }
   .memory-hero { padding: 26px 26px 0; }
   .hero-layout { grid-template-columns: 1fr; padding-top: 22px; }
@@ -5838,11 +6162,11 @@ canvas:focus-visible {
 }
 
 @media (max-width: 580px) {
-  .topbar { flex-wrap: wrap; }
-  .mobile-brand { order: 1; }
-  .sync-button { order: 2; }
-  .search-wrap { order: 3; width: 100%; }
-  .search-panel { position: fixed; left: 10px; right: 10px; top: 118px; }
+  /* 搜索收成 ⌘K 浮层后顶栏一行装得下，不用再换行。 */
+  .search-overlay { padding: 24px 12px; }
+  /* 窄到这里，同步文案要让位给「下一件」——状态只留那颗点，详情在 title 里。 */
+  .topbar-source-copy { display: none; }
+  .topbar-next strong { max-width: 130px; }
   .memory-hero { min-height: 0; }
   .hero-primary { padding: 23px 20px 21px; }
   .hero-primary h1 { font-size: 34px; }
@@ -9762,11 +10086,22 @@ canvas:focus-visible {
 .rv-score-glance > header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 9px; }
 .rv-score-glance > header strong { color: #dbe7e0; font-size: 11px; font-weight: 600; }
 .rv-score-glance > header span { color: rgba(255, 255, 255, 0.46); font-size: 9.5px; }
-.rv-score-glance > div { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
-.rv-score-glance article { min-width: 0; padding: 10px 11px 11px; background: rgba(255, 255, 255, 0.065); }
-.rv-score-glance article > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.rv-score-glance > div { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; align-items: stretch; }
+.rv-score-glance article { display: flex; min-width: 0; background: rgba(255, 255, 255, 0.065); }
+.rv-score-glance article > button { display: block; width: 100%; padding: 10px 11px 11px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.rv-score-glance article > button:disabled { cursor: default; }
+.rv-score-glance article > button:not(:disabled):hover { background: rgba(255, 255, 255, 0.07); }
+.rv-score-glance article > button:focus-visible { outline: 1px solid #a9c7b7; outline-offset: -1px; }
+.rv-score-glance article > button > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .rv-score-glance article span { overflow: hidden; color: rgba(255, 255, 255, 0.68); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .rv-score-glance article strong { color: #fff; font-family: var(--font-geist-mono), monospace; font-size: 18px; font-weight: 500; }
+.rv-glance-deductions { display: flex; flex-direction: column; gap: 3px; margin: 8px 0 0; padding: 0; list-style: none; }
+.rv-glance-deductions li { display: flex; align-items: baseline; gap: 5px; min-width: 0; font-size: 9.5px; line-height: 1.45; }
+.rv-glance-deductions b { flex: 0 0 auto; color: #e8a48d; font-family: var(--font-geist-mono), monospace; font-size: 9.5px; font-weight: 600; }
+.rv-glance-deductions i { flex: 0 0 auto; color: rgba(255, 255, 255, 0.4); font-family: var(--font-geist-mono), monospace; font-size: 8.5px; font-style: normal; }
+.rv-glance-deductions span { color: rgba(255, 255, 255, 0.72); font-size: 9.5px; }
+.rv-glance-deductions li.more { color: rgba(255, 255, 255, 0.42); }
+.rv-glance-clean { margin: 8px 0 0; color: rgba(120, 181, 148, 0.9); font-size: 9.5px; }
 .rv-dimension-track { display: block; height: 5px; overflow: hidden; margin-top: 8px; background: rgba(255, 255, 255, 0.12); }
 .rv-dimension-track em { display: block; height: 100%; transition: width 260ms ease; }
 .rv-dimension-track em.high { background: #78b594; }
@@ -9795,6 +10130,53 @@ canvas:focus-visible {
 .rv-score-source article > small { display: flex; grid-column: 1 / -1; flex-wrap: wrap; align-items: center; gap: 4px; color: rgba(255, 255, 255, 0.4); font-family: var(--font-geist-mono), monospace; font-size: 9px; line-height: 1.5; }
 .rv-score-source article > small button { padding: 0 3px; border: 0; border-bottom: 1px solid rgba(197, 219, 207, 0.45); background: transparent; color: #c5dbcf; font: inherit; cursor: pointer; }
 .rv-score-source article > small button:hover { border-color: #fff; color: #fff; }
+/* 扣分明细：分数是 100 − Σ 推出来的，所以算式和逐条依据必须和分数长在一起 */
+.rv-ledger { margin-top: 18px; }
+.rv-ledger > header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 18px; padding-bottom: 11px; border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
+.rv-ledger > header h3 { margin: 0; color: #c5dbcf; font-size: 12px; font-weight: 500; }
+.rv-ledger > header p { max-width: 640px; margin: 3px 0 0; color: rgba(255, 255, 255, 0.48); font-size: 10.5px; line-height: 1.6; }
+.rv-ledger-total { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.rv-ledger-total b { color: #e8a48d; font-family: var(--font-geist-mono), monospace; font-size: 21px; font-weight: 500; }
+.rv-ledger-total span { color: rgba(255, 255, 255, 0.4); font-size: 9px; }
+.rv-ledger-switch { display: flex; gap: 1px; background: rgba(255, 255, 255, 0.14); }
+.rv-ledger-switch button { padding: 6px 11px; border: 0; background: #202c27; color: rgba(255, 255, 255, 0.6); font-size: 10px; cursor: pointer; }
+.rv-ledger-switch button.on { background: #34473e; color: #f7f4ea; }
+.rv-ledger-switch button:not(.on):hover { color: #fff; }
+.rv-ledger-dimensions { display: flex; flex-direction: column; gap: 1px; margin-top: 1px; background: rgba(255, 255, 255, 0.12); }
+.rv-ledger-dimensions > article { padding: 14px 16px 15px; background: #202c27; scroll-margin-top: 24px; }
+.rv-ledger-dimensions > article > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.rv-ledger-dimensions h4 { margin: 0; color: #dbe7e0; font-size: 13px; font-weight: 600; }
+.rv-ledger-formula { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; margin: 0; font-family: var(--font-geist-mono), monospace; font-size: 11px; }
+.rv-ledger-formula > span { color: rgba(255, 255, 255, 0.42); }
+.rv-ledger-formula em { color: #e8a48d; font-style: normal; }
+.rv-ledger-formula i { color: rgba(255, 255, 255, 0.3); font-style: normal; }
+.rv-ledger-formula strong { color: #f7f4ea; font-size: 17px; font-weight: 500; }
+.rv-ledger-clean { margin: 10px 0 0; color: rgba(120, 181, 148, 0.86); font-size: 11.5px; }
+.rv-ledger-rationale { margin: 11px 0 0; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.56); font-size: 11.5px; line-height: 1.7; }
+.rv-deduction-list { display: flex; flex-direction: column; gap: 8px; margin: 11px 0 0; padding: 0; list-style: none; }
+.rv-deduction-list > li { padding: 10px 13px; border-left: 3px solid #7d8581; background: rgba(255, 255, 255, 0.045); }
+.rv-deduction-list > li.sev-major { border-left-color: #df7d61; }
+.rv-deduction-list > li.sev-moderate { border-left-color: #d6b35c; }
+.rv-deduction-list > li.sev-minor { border-left-color: #8fa79a; }
+.rv-deduction-list > li.sev-opportunity { border-left-color: #7f9fb5; }
+.rv-deduction-rank { margin-top: 14px; }
+.rv-deduction-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.rv-deduction-head b { color: #e8a48d; font-family: var(--font-geist-mono), monospace; font-size: 14px; font-weight: 600; }
+.rv-deduction-head em { padding: 2px 6px; background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.7); font-style: normal; font-size: 8.5px; cursor: help; }
+.sev-major .rv-deduction-head em { background: rgba(223, 125, 97, 0.22); color: #f0b6a2; }
+.sev-opportunity .rv-deduction-head em { background: rgba(127, 159, 181, 0.2); color: #b3cbdb; }
+.rv-deduction-head u { color: rgba(255, 255, 255, 0.45); font-size: 9px; text-decoration: none; }
+.rv-deduction-head > button { padding: 1px 5px; border: 1px solid rgba(197, 219, 207, 0.35); background: transparent; color: #c5dbcf; font-family: var(--font-geist-mono), monospace; font-size: 9px; cursor: pointer; }
+.rv-deduction-head > button:hover { border-color: #fff; color: #fff; }
+.rv-deduction-head strong { flex: 1 1 220px; color: #f2f5f1; font-size: 12.5px; font-weight: 600; line-height: 1.5; }
+.rv-deduction-list > li > p { margin: 6px 0 0; color: rgba(255, 255, 255, 0.7); font-size: 11.5px; line-height: 1.7; }
+.rv-deduction-fix { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; margin-top: 7px !important; padding-top: 7px; border-top: 1px solid rgba(255, 255, 255, 0.08); color: #cfe0d6 !important; }
+.rv-deduction-fix span { color: #a9c7b7; font-size: 9.5px; }
+.rv-deduction-evidence { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 7px !important; }
+.rv-deduction-evidence > span { color: rgba(255, 255, 255, 0.36); font-size: 9px; }
+.rv-deduction-evidence button { padding: 0 4px; border: 0; border-bottom: 1px solid rgba(197, 219, 207, 0.4); background: transparent; color: #c5dbcf; font-family: var(--font-geist-mono), monospace; font-size: 9px; cursor: pointer; }
+.rv-deduction-evidence button:hover { border-color: #fff; color: #fff; }
+
 .rv-deep-overview { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 18px 0; background: rgba(255, 255, 255, 0.1); }
 .rv-deep-overview > div { padding: 16px 18px; background: #202c27; }
 .rv-deep-overview > div.risk { background: #302725; }
@@ -10085,6 +10467,8 @@ canvas:focus-visible {
   .rv-deep-report > header small { display: none; }
   .rv-score-glance > div { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .rv-score-source > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rv-ledger > header { grid-template-columns: minmax(0, 1fr) auto; }
+  .rv-ledger-switch { grid-column: 1 / -1; justify-self: start; }
   .rv-deep-block summary { grid-template-columns: auto minmax(120px, 1fr) auto auto; }
   .rv-deep-block summary > em:nth-of-type(2) { display: none; }
   .rv-stream { grid-template-columns: 1fr; }
@@ -10121,6 +10505,9 @@ canvas:focus-visible {
   .rv-deep-score { padding: 0 0 10px; border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.16); }
   .rv-score-source > header, .rv-answer-trends > header, .rv-ai-feedback > header { align-items: flex-start; flex-direction: column; }
   .rv-score-source > div { grid-template-columns: 1fr; }
+  .rv-ledger > header { grid-template-columns: 1fr; gap: 10px; }
+  .rv-ledger-total { align-items: flex-start; }
+  .rv-ledger-dimensions > article > header { flex-direction: column; }
   .rv-deep-overview, .rv-coverage, .rv-deep-advice { grid-template-columns: 1fr; }
   .rv-deep-block summary { grid-template-columns: auto minmax(0, 1fr) auto; }
   .rv-deep-block summary > em, .rv-deep-block summary > b { display: none; }
@@ -10201,6 +10588,37 @@ canvas:focus-visible {
   width: 4px;
   background: var(--kpi-tone);
   content: "";
+}
+/**
+ * 数字カードのクリック領域。dt/dd の入れ子（定義リストの意味）を壊さずに
+ * 押せるようにするため、カード全体を覆う透明ボタンを重ねる。
+ * 件数 0 のカードは disabled にしてあるので、そこだけ既定カーソルに戻す。
+ */
+.analytics-head-glance .analytics-glance-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.analytics-head-glance .analytics-glance-hit:disabled {
+  cursor: default;
+}
+.analytics-head-glance div:has(.analytics-glance-hit:enabled:hover) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 20px 40px rgba(31, 44, 37, .1),
+    inset 0 1px 0 rgba(255,255,255,.74);
+}
+.analytics-head-glance div:has(.analytics-glance-hit:focus-visible) {
+  outline: 2px solid var(--kpi-tone);
+  outline-offset: 2px;
+}
+.analytics-head-glance div:has(.analytics-glance-hit:enabled) {
+  transition: transform .18s ease, box-shadow .18s ease;
 }
 .analytics-head-glance div[data-tone="active"] {
   --kpi-tone: var(--green);
@@ -11109,6 +11527,82 @@ canvas:focus-visible {
   overflow-x: auto; margin: 12px 0; padding: 14px 16px;
   border: 1px solid var(--line); background: var(--paper);
   font-family: var(--font-geist-mono), monospace; font-size: 11px; line-height: 1.8;
+}
+
+/* 殺傷質問7題：当日これ1画面で回すページ。問い → 読み上げる答案 → なぜ、の順に固定する */
+.kill-map { display: flex; flex-direction: column; gap: 14px; }
+.kill-map-head {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px;
+  padding: 12px 16px; background: var(--paper); border: 1px solid var(--line);
+}
+.kill-map-head > div { display: flex; align-items: baseline; gap: 8px; }
+.kill-map-head strong { color: var(--green); font-family: var(--font-geist-mono), monospace; font-size: 17px; }
+.kill-map-head span { color: var(--muted); font-size: 10.5px; }
+.kill-map-head > i { display: block; height: 4px; background: var(--line); }
+.kill-map-head > i em { display: block; height: 100%; background: var(--green); transition: width 200ms ease; }
+.kill-map-head button { padding: 5px 10px; border: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+
+.kill-card { border: 1px solid var(--line); border-left: 3px solid var(--green); background: #fff; }
+.kill-card.done { border-left-color: #b9c8bf; opacity: .62; }
+.kill-card > header {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 12px;
+  padding: 14px 16px; border-bottom: 1px solid var(--line); background: #fbfaf6;
+}
+.kill-card > header > b {
+  width: 24px; height: 24px; display: grid; place-items: center;
+  background: var(--green); color: #f7f4ea;
+  font-family: var(--font-geist-mono), monospace; font-size: 11px; font-weight: 500;
+}
+.kill-card.done > header > b { background: #b9c8bf; }
+.kill-card > header h3 { margin: 0; color: var(--ink); font-size: 15px; line-height: 1.5; }
+.kill-card > header small { display: block; margin-top: 3px; color: var(--muted); font-size: 10.5px; }
+.kill-card > header > button {
+  padding: 6px 12px; border: 1px solid var(--line); background: transparent;
+  color: var(--muted); font-size: 10.5px; white-space: nowrap; cursor: pointer;
+}
+.kill-card > header > button.on { border-color: var(--green); background: var(--green); color: #f7f4ea; }
+
+/* 答案は「読み上げる文」なので、ここだけ本文より大きくルビの行送りも広く取る */
+.kill-answer { padding: 4px 16px 14px; }
+.kill-answer .prep-doc-say { font-size: 15px; line-height: 2.25; }
+.kill-answer h4 { margin: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 500; }
+.kill-answer > :first-child { margin-top: 12px; }
+.kill-missing { margin: 0; padding: 14px 16px; background: #fff1ec; color: #8d382b; font-size: 12px; line-height: 1.8; }
+
+.kill-followup { margin: 0 16px 12px; border: 1px dashed var(--line); }
+.kill-followup > summary {
+  padding: 9px 12px; color: var(--muted); font-size: 11.5px; cursor: pointer; list-style: none;
+}
+.kill-followup > summary::-webkit-details-marker { display: none; }
+.kill-followup > summary i { font-style: normal; transition: transform 150ms ease; display: inline-block; }
+.kill-followup[open] > summary i { transform: rotate(180deg); }
+.kill-followup[open] > summary { border-bottom: 1px dashed var(--line); }
+.kill-followup > *:not(summary) { padding-inline: 12px; }
+.kill-followup .prep-doc-say { font-size: 13.5px; line-height: 2.05; }
+
+.kill-mine {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px;
+  margin: 0 16px 12px; padding: 9px 12px; background: #fff1ec;
+  font-size: 12px; line-height: 1.8;
+}
+.kill-mine > span { color: #8d382b; font-size: 10px; font-weight: 600; }
+
+.kill-why { margin: 0 16px 14px; }
+.kill-why > button {
+  width: 100%; padding: 8px 12px; border: 1px solid var(--line); background: #fdf6e4;
+  color: #7a5c12; font-size: 11.5px; text-align: left; cursor: pointer;
+}
+.kill-why > button i { float: right; font-style: normal; font-family: var(--font-geist-mono), monospace; }
+.kill-why > p {
+  margin: 0; padding: 11px 13px; border: 1px solid var(--line); border-top: 0;
+  background: #fdf6e4; font-size: 12.5px; line-height: 1.95;
+}
+
+@media (max-width: 780px) {
+  .kill-map-head { grid-template-columns: 1fr auto; }
+  .kill-map-head > i { grid-column: 1 / -1; }
+  .kill-card > header { grid-template-columns: auto minmax(0, 1fr); }
+  .kill-card > header > button { grid-column: 2; justify-self: start; }
 }
 
 .prep-doc-pager {
@@ -12883,9 +13377,8 @@ button.prep-doc-ref.card::after { content: " →"; font-size: 0.85em; }
   background-color: var(--surface-raised);
 }
 
-.search-wrap,
 .search-panel,
-.sync-button,
+.library-search,
 .saved-queries button,
 .job-search,
 .job-sort,
@@ -12919,7 +13412,7 @@ button.prep-doc-ref.card::after { content: " →"; font-size: 0.85em; }
 .primary-action,
 .jobs-next-pick > button,
 .focus-language-now-action,
-.sync-button,
+.topbar-next,
 .clear-filter {
   transition:
     color 150ms ease,
@@ -12936,17 +13429,8 @@ button.prep-doc-ref.card::after { content: " →"; font-size: 0.85em; }
   box-shadow: 0 11px 24px rgba(24, 35, 30, .15);
 }
 
-.topbar,
-.section-nav {
+.topbar {
   border-color: rgba(200, 196, 184, .78);
-}
-
-.section-nav button {
-  font-weight: 560;
-}
-
-.section-nav button.active {
-  font-weight: 700;
 }
 
 @media (max-width: 1050px) {

@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from "react";
 import {
+  jobMatchesRatingBands,
   jobRatingBand,
   JOB_RATING_BANDS,
   JOB_STATUSES,
   toJobCard,
   type JobCard,
 } from "@/lib/jobs";
+import type { JobsInitialFilters } from "./jobs-view";
 import { JOB_CASE_TYPE } from "@/lib/vault-boundary.mjs";
 import {
   buildDailyFlow,
@@ -58,6 +60,19 @@ const pct1 = (value: number) => `${(value * 100).toFixed(1)}%`;
 const IN_FLIGHT: string[] = ["応募済", "書類通過", "面接中"];
 const PASSED_SCREENING: string[] = ["書類通過", "面接中", "内定"];
 const ACTIVE_SELECTION: string[] = [...IN_FLIGHT, "内定"];
+
+/**
+ * 冒頭の4つの数字カード。**件数の計算とリンク先のフィルタを同じ定義から作る**——
+ * 別々に書くと、カードが「10件」と言っているのに遷移先が9件、が静かに起きる。
+ * 「可応募」は status だけでは表せない（未応募 かつ rating 7以上）ので、
+ * rating band もフィルタに含める。`7plus` は jobs.ts のしきい値ショートカット。
+ */
+const GLANCE_CARDS = [
+  { key: "active", label: "进行中", sub: "ACTIVE PIPELINE", tone: "active", filters: { statuses: IN_FLIGHT } },
+  { key: "interview", label: "面试阶段", sub: "INTERVIEW", tone: "interview", filters: { statuses: ["面接中"] } },
+  { key: "waiting", label: "结果等待", sub: "WAITING", tone: "waiting", filters: { statuses: ["応募済", "書類通過"] } },
+  { key: "ready", label: "可応募", sub: "READY TO APPLY", tone: "ready", filters: { statuses: ["未応募"], ratings: ["7plus" as const] } },
+] as const;
 
 function scheduledDate(job: JobCard) {
   return explicitNextEventDate(job.note);
@@ -272,7 +287,7 @@ export default function JobsAnalytics({
   notes: Note[];
   onOpen: (note: Note) => void;
   /** statuses を渡すと求人一覧側の状態フィルタに引き継がれる（渡さなければ全件）。 */
-  onViewJobs: (statuses?: string[]) => void;
+  onViewJobs: (filters?: JobsInitialFilters) => void;
 }) {
   const [range, setRange] = useState<RangeId>("all");
   const [handScope, setHandScope] = useState<HandScopeId>("high");
@@ -319,10 +334,22 @@ export default function JobsAnalytics({
     [stats],
   );
 
-  const inFlight = jobs.filter((job) => IN_FLIGHT.includes(job.status)).length;
-  const interviewCount = jobs.filter((job) => job.status === "面接中").length;
-  const resultWaiting = jobs.filter((job) => ["応募済", "書類通過"].includes(job.status)).length;
-  const readyToApply = jobs.filter((job) => job.status === "未応募" && job.rating >= 7).length;
+  // 🔴 件数はカード定義の filters から数える。**遷移先と同じ条件を使う**のが要点で、
+  // 別々に書くと「10件」と表示して9件のページへ飛ぶ、が静かに起きる。
+  const glanceCounts = useMemo(() => {
+    const counts = {} as Record<(typeof GLANCE_CARDS)[number]["key"], number>;
+    for (const card of GLANCE_CARDS) {
+      const ratings = "ratings" in card.filters ? [...card.filters.ratings] : [];
+      counts[card.key] = jobs.filter(
+        (job) =>
+          card.filters.statuses.includes(job.status) &&
+          jobMatchesRatingBands(job.rating, ratings),
+      ).length;
+    }
+    return counts;
+  }, [jobs]);
+
+  const inFlight = glanceCounts.active;
   const focusJobs = useMemo(
     () =>
       jobs
@@ -476,38 +503,28 @@ export default function JobsAnalytics({
   return (
     <div className="analytics">
       <dl className="analytics-head-glance" aria-label="当前求职进展摘要">
-        <div data-tone="active">
-          <dt>
-            进行中
-            <small>ACTIVE PIPELINE</small>
-          </dt>
-          <dd><strong>{inFlight}</strong><small>件</small></dd>
-          <span aria-hidden="true">01</span>
-        </div>
-        <div data-tone="interview">
-          <dt>
-            面试阶段
-            <small>INTERVIEW</small>
-          </dt>
-          <dd><strong>{interviewCount}</strong><small>件</small></dd>
-          <span aria-hidden="true">02</span>
-        </div>
-        <div data-tone="waiting">
-          <dt>
-            结果等待
-            <small>WAITING</small>
-          </dt>
-          <dd><strong>{resultWaiting}</strong><small>件</small></dd>
-          <span aria-hidden="true">03</span>
-        </div>
-        <div data-tone="ready">
-          <dt>
-            可応募
-            <small>READY TO APPLY</small>
-          </dt>
-          <dd><strong>{readyToApply}</strong><small>件</small></dd>
-          <span aria-hidden="true">04</span>
-        </div>
+        {GLANCE_CARDS.map((card, index) => {
+          const count = glanceCounts[card.key];
+          return (
+            <div key={card.key} data-tone={card.tone}>
+              <dt>
+                {card.label}
+                <small>{card.sub}</small>
+              </dt>
+              <dd><strong>{count}</strong><small>件</small></dd>
+              <span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+              {/* カード全体を覆う透明ボタン。dt/dd の入れ子を壊さずにクリック領域だけ足す。
+                  件数 0 の時は押しても空の一覧が出るだけなので押させない。 */}
+              <button
+                type="button"
+                className="analytics-glance-hit"
+                disabled={count === 0}
+                onClick={() => onViewJobs(card.filters)}
+                aria-label={`${card.label} ${count} 件の内訳を見る`}
+              />
+            </div>
+          );
+        })}
       </dl>
 
       <section className="analytics-command">
@@ -517,7 +534,7 @@ export default function JobsAnalytics({
             <h2>当前推进</h2>
             <p>1 件优先处理，{watchJobs.length} 件持续观察</p>
           </div>
-          <button type="button" onClick={() => onViewJobs(IN_FLIGHT)}>
+          <button type="button" onClick={() => onViewJobs({ statuses: IN_FLIGHT })}>
             全部进行中 <b>{inFlight}</b> <i aria-hidden="true">→</i>
           </button>
         </header>

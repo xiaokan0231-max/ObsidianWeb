@@ -21,7 +21,7 @@ import InterviewSharedAsset from "./interview-shared-asset";
 import JapaneseTraining from "./japanese-training";
 import LanguageExpressionCourses from "./language-expression-courses";
 import JobsAnalytics from "./jobs-analytics";
-import JobsView from "./jobs-view";
+import JobsView, { type JobsInitialFilters } from "./jobs-view";
 import type {
   KnowledgeGraphSceneLink,
   KnowledgeGraphSceneNode,
@@ -37,7 +37,10 @@ import {
   REVIEW_DIMENSION_META,
   type ReviewDimensionKey,
 } from "@/lib/review-deep";
-import type { SharedAssetTarget } from "@/lib/interview-shared-assets";
+import {
+  isRoundSpecificAsset,
+  type SharedAssetTarget,
+} from "@/lib/interview-shared-assets";
 import {
   formatDate,
   getString,
@@ -120,6 +123,9 @@ type PrimaryNavigationItem = {
 type SecondaryNavigationItem = {
   id: View;
   label: string;
+  // 二级菜单是「章节标签」：汉字印章负责一眼辨认，拉丁小字负责分层，两者都不是装饰的可选项。
+  glyph: string;
+  caption: string;
 };
 
 type LibrarySort = "recent" | "connections" | "title";
@@ -197,20 +203,50 @@ const NAVIGATION: PrimaryNavigationItem[] = [
 
 const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigationItem[]>> = {
   interview: [
-    { id: "session", label: "当前面试" },
-    { id: "prep", label: "通用准备" },
-    { id: "review", label: "面试复盘" },
+    { id: "session", label: "当前面试", glyph: "場", caption: "LIVE" },
+    { id: "prep", label: "通用准备", glyph: "備", caption: "PLAYBOOK" },
+    { id: "review", label: "面试复盘", glyph: "復", caption: "REVIEW" },
   ],
   training: [
-    { id: "language", label: "日语训练" },
-    { id: "topics", label: "专项训练" },
+    { id: "language", label: "日语训练", glyph: "話", caption: "NIHONGO" },
+    { id: "topics", label: "专项训练", glyph: "専", caption: "FOCUS" },
   ],
   resources: [
-    { id: "library", label: "全部资料" },
-    { id: "timeline", label: "时间线" },
-    { id: "graph", label: "关系图" },
+    { id: "library", label: "全部资料", glyph: "庫", caption: "ARCHIVE" },
+    { id: "timeline", label: "时间线", glyph: "歴", caption: "TIMELINE" },
+    { id: "graph", label: "关系图", glyph: "網", caption: "GRAPH" },
   ],
 };
+
+/**
+ * 二级导航住在哪：
+ * 资料库的三项是**同一批笔记的三种看法**（列表・时序・关系），切换是浏览时的常态动作，
+ * 值得在内容区顶部常驻一条章节标签带。
+ * 面试作战・训练中心的子项是三件**不同的事**，内容互不相干，切换属于换任务——
+ * 那种跳转归左栏。而且这两个分区的页面自己已经有一层切换（当前面试的 6 章节导航、
+ * 专项训练的 5 种练法），再压一条带子就是三层标签叠在 150px 里。
+ *
+ * 移动端没有左栏，所以那两个分区的带子在 820px 以下会回来（CSS 按 data-placement 切）。
+ */
+const TOP_BAR_SECTION_IDS = new Set<PrimaryNavId>(["resources"]);
+
+/** 单键快捷键（R）在输入场景必须让路，否则在搜索框里打 r 就会触发重读。 */
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+}
+
+/** 顶栏「下一件」的相对日期。本场面试页有自己的一份，那份还带「N 天前」。 */
+function eventCountdown(date: string) {
+  const target = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return "日期未定";
+  const today = new Date(`${localDateKey()}T00:00:00`);
+  const days = Math.round((target.getTime() - today.getTime()) / 86400000);
+  if (days === 0) return "今天";
+  if (days === 1) return "明天";
+  return `${days} 天后`;
+}
 
 const MOBILE_PRIMARY_NAV_IDS = new Set<PrimaryNavId>([
   "overview",
@@ -398,8 +434,8 @@ function SharedAssetOverlay({
         </button>
         <div>
           <small>
-            {target.scope === "company"
-              ? "THIS INTERVIEW · COMPANY MOTIVATION"
+            {isRoundSpecificAsset(target)
+              ? "THIS ROUND · MOTIVATION"
               : "COMMON INTERVIEW ASSET"}
           </small>
           <strong id="shared-asset-overlay-title">{target.label}</strong>
@@ -429,17 +465,22 @@ function MemoryAtlas() {
   const [sharedAssetOverlay, setSharedAssetOverlay] = useState<SharedAssetTarget | null>(null);
   const [sharedAssetOrigin, setSharedAssetOrigin] = useState({ x: 0, y: 0 });
   // 求職分析から「進行中 N 件をすべて見る」で飛んできた時だけ、求人一覧に状態フィルタを引き継ぐ。
-  const [jobsInitialStatuses, setJobsInitialStatuses] = useState<string[] | null>(null);
+  const [jobsInitialFilters, setJobsInitialFilters] = useState<JobsInitialFilters | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  /*
+   * 资料库那一页的筛选词。以前它和顶栏那个全局搜索框共用同一个 state，
+   * 于是「页面状态住在全局 chrome 里」：在顶栏打字，底下的卡片列表跟着变，
+   * 同时还弹出一个跳转面板盖在上面。现在搜索面板自己持有局部关键词，
+   * 这个 state 只服务资料库自己的搜索框。
+   */
+  const [libraryQuery, setLibraryQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [groupFilter, setGroupFilter] = useState<GroupKey | "all">("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
 
   // 模块间切换不继承上一页的滚动位置，否则新页面会从标题或工具栏中段开始。
   useEffect(() => {
@@ -580,7 +621,9 @@ function MemoryAtlas() {
           ...("defaultSection" in asset && typeof asset.defaultSection === "string"
             ? { defaultSection: asset.defaultSection }
             : {}),
-          ...("scope" in asset && (asset.scope === "shared" || asset.scope === "company")
+          // 履歴から復元する時も scope を落とさない。落とすと「戻る」の後だけ
+          // 本轮专属の志望動機が共通素材として表示されていた。
+          ...("scope" in asset && asset.scope === "round"
             ? { scope: asset.scope }
             : {}),
         });
@@ -604,8 +647,19 @@ function MemoryAtlas() {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        // 面板挂载后自己聚焦输入框，这里不需要再持有 ref。
         setSearchOpen(true);
-        searchRef.current?.focus();
+      }
+      // R = 重读 vault。顶栏不再有按钮，所以这条必须挡住输入场景，否则打字就会触发。
+      if (
+        event.key.toLowerCase() === "r" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !isTypingTarget(event.target)
+      ) {
+        event.preventDefault();
+        void loadVault();
       }
       if (event.key === "Escape") {
         // 回答库の上に原笔记 drawer を開いている時は、一段ずつ閉じる。
@@ -633,6 +687,7 @@ function MemoryAtlas() {
   }, [
     closePrepCard,
     closeSharedAsset,
+    loadVault,
     prepOverlayCard,
     selectedPath,
     sharedAssetOverlay,
@@ -671,15 +726,24 @@ function MemoryAtlas() {
     [notes, notesByBasename],
   );
 
-  const searchResults = useMemo(
-    () => notes.filter((note) => noteMatches(note, query)).slice(0, 8),
-    [notes, query],
-  );
-
   const derived = useMemo(() => buildDerivedData(notes), [notes]);
 
+  // 顶栏「下一件」：只取已确定日程里最近的一场，没有就不占位。
+  const nextEvent = useMemo(
+    () =>
+      derived.calendarEvents
+        .filter((event) => event.phase === "upcoming")
+        .toSorted((left, right) =>
+          `${left.date} ${left.time}`.localeCompare(`${right.date} ${right.time}`),
+        )[0] ?? null,
+    [derived.calendarEvents],
+  );
+
+  const sourceLabel = error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接";
+  const sourceDetail = fetchedAt ? `${formatDate(fetchedAt)} 同步` : "本地数据源";
+
   const runSavedQuery = (savedQuery: string) => {
-    setQuery(savedQuery);
+    setLibraryQuery(savedQuery);
     setView("library");
     setSearchOpen(false);
   };
@@ -687,7 +751,7 @@ function MemoryAtlas() {
   const navigateToView = (nextView: View) => {
     if (nextView === "review") setReviewInitialKey(null);
     // ナビから直接来た時は分析画面由来のフィルタを持ち越さない。
-    if (nextView === "jobs") setJobsInitialStatuses(null);
+    if (nextView === "jobs") setJobsInitialFilters(null);
     setMobileMoreOpen(false);
     setView(nextView);
   };
@@ -696,6 +760,13 @@ function MemoryAtlas() {
     NAVIGATION.find((item) => item.views.includes(view)) ?? NAVIGATION[0];
   const secondaryNavigation =
     SECONDARY_NAVIGATION[activeNavigation.id] ?? [];
+  const secondaryPlacement = TOP_BAR_SECTION_IDS.has(activeNavigation.id)
+    ? "bar"
+    : "rail";
+  const activeSecondaryLabel =
+    secondaryNavigation.find((item) => item.id === view)?.label ?? "";
+  // 左栏只展开当前分区的子项，顶层始终只有 7 个目标。
+  const railSecondary = secondaryPlacement === "rail" ? secondaryNavigation : [];
   const mobilePrimaryNavigation = NAVIGATION.filter((item) =>
     MOBILE_PRIMARY_NAV_IDS.has(item.id),
   );
@@ -718,74 +789,100 @@ function MemoryAtlas() {
         </button>
 
         <nav className="side-nav">
-          {NAVIGATION.map((item) => (
-            <button
-              key={item.id}
-              className={item.views.includes(view) ? "active" : ""}
-              onClick={() => navigateToView(item.target)}
-              aria-current={item.views.includes(view) ? "page" : undefined}
-              // 折叠态把文字视觉隐藏，靠这个属性画出 hover 提示气泡。
-              data-label={item.label}
-            >
-              <span className="nav-glyph" aria-hidden="true">{item.glyph}</span>
-              <span>{item.label}</span>
-            </button>
-          ))}
+          {NAVIGATION.map((item) => {
+            const isActiveSection = item.views.includes(view);
+            const subItems = isActiveSection ? railSecondary : [];
+            return (
+              <Fragment key={item.id}>
+                <button
+                  className={isActiveSection ? "active" : ""}
+                  onClick={() => navigateToView(item.target)}
+                  // 有二级项时当前页是子项（左栏或顶部带子里那个），父项不该也自称 page。
+                  aria-current={
+                    isActiveSection && secondaryNavigation.length === 0 ? "page" : undefined
+                  }
+                  // 折叠态把文字视觉隐藏，靠这个属性画出 hover 提示气泡。
+                  data-label={item.label}
+                >
+                  <span className="nav-glyph" aria-hidden="true">{item.glyph}</span>
+                  <span>{item.label}</span>
+                </button>
+                {subItems.length > 0 && (
+                  <div
+                    className="side-subnav"
+                    role="group"
+                    aria-label={`${item.label}二级导航`}
+                  >
+                    {subItems.map((sub) => (
+                      <button
+                        key={sub.id}
+                        className={view === sub.id ? "active" : ""}
+                        onClick={() => navigateToView(sub.id)}
+                        aria-current={view === sub.id ? "page" : undefined}
+                        data-label={sub.label}
+                      >
+                        <span className="nav-glyph" aria-hidden="true">{sub.glyph}</span>
+                        <span>{sub.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </Fragment>
+            );
+          })}
         </nav>
-
-        <div
-          className="source-status"
-          title={`${error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接"} · ${fetchedAt ? `${formatDate(fetchedAt)} 同步` : "本地数据源"}`}
-        >
-          <span className={`status-dot ${error ? "error" : loading ? "loading" : ""}`} />
-          <div>
-            <strong>{error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接"}</strong>
-            <small>{fetchedAt ? `${formatDate(fetchedAt)} 同步` : "本地数据源"}</small>
-          </div>
-        </div>
 
         <RailToggle />
       </aside>
 
       <main className="main-stage">
+        {/*
+          这一行原来是「全局搜索框 + 刷新按钮」，两个都是工具而不是信息，去掉后就空了。
+          现在放三样每一页都成立的东西：我在哪、下一件有时限的事、数据源是不是新的。
+          两个动作降级为快捷键（⌘K 搜索 / R 重读），提示就写在右侧状态旁边。
+        */}
         <header className="topbar">
           <div className="mobile-brand">
             <span className="brand-mark">回</span>
             <strong>回声</strong>
           </div>
-          <div className="search-wrap">
-            <span className="search-icon" aria-hidden="true">⌕</span>
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setSearchOpen(true);
-              }}
-              onFocus={() => setSearchOpen(true)}
-              onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
-                if (event.key === "Enter" && searchResults[0]) {
-                  openNote(searchResults[0]);
-                }
-              }}
-              placeholder="搜索记忆、公司、日语错误…"
-              aria-label="搜索记忆库"
-            />
-            <kbd>⌘ K</kbd>
-            {searchOpen && (
-              <SearchPanel
-                query={query}
-                notes={searchResults}
-                onOpen={openNote}
-                onQuery={runSavedQuery}
-                onClose={() => setSearchOpen(false)}
-              />
-            )}
+
+          <div className="topbar-where">
+            <span aria-hidden="true">{activeNavigation.glyph}</span>
+            <strong>{activeNavigation.label}</strong>
+            {activeSecondaryLabel && <small>{activeSecondaryLabel}</small>}
           </div>
-          <button className="sync-button" onClick={() => void loadVault()} disabled={loading}>
-            <span aria-hidden="true">↻</span>
-            {loading ? "读取中" : "刷新记忆"}
+
+          {nextEvent && (
+            <button
+              className="topbar-next"
+              onClick={() => navigateToView(nextEvent.phase === "upcoming" ? "calendar" : "calendar")}
+              title={`${nextEvent.date}${nextEvent.time ? ` ${nextEvent.time}` : ""} ${nextEvent.label}`}
+            >
+              <small>下一件</small>
+              <em>{eventCountdown(nextEvent.date)}{nextEvent.time ? ` ${nextEvent.time}` : ""}</em>
+              <strong>{nextEvent.company}</strong>
+              <i aria-hidden="true">→</i>
+            </button>
+          )}
+
+          <button
+            className="topbar-source"
+            onClick={() => void loadVault()}
+            disabled={loading}
+            title={`${sourceLabel} · ${sourceDetail}（按 R 重新读取）`}
+          >
+            <span className={`status-dot ${error ? "error" : loading ? "loading" : ""}`} />
+            <span className="topbar-source-copy">
+              <strong>{sourceLabel}</strong>
+              <small>{sourceDetail}</small>
+            </span>
           </button>
+
+          <div className="topbar-keys" aria-hidden="true">
+            <span><kbd>⌘K</kbd>搜索</span>
+            <span><kbd>R</kbd>重读</span>
+          </div>
         </header>
 
         {error ? (
@@ -795,9 +892,13 @@ function MemoryAtlas() {
         ) : (
           <>
             {secondaryNavigation.length > 0 && (
-              <nav className="section-nav" aria-label={`${activeNavigation.label}二级导航`}>
-                <span>{activeNavigation.label}</span>
-                <div>
+              <nav
+                className="section-nav"
+                data-placement={secondaryPlacement}
+                aria-label={`${activeNavigation.label}二级导航`}
+              >
+                {/* 分区名现在由顶栏的位置指示器说，这条带子只负责章节标签本身。 */}
+                <div className="section-nav-tabs">
                   {secondaryNavigation.map((item) => (
                     <button
                       key={item.id}
@@ -805,7 +906,11 @@ function MemoryAtlas() {
                       onClick={() => navigateToView(item.id)}
                       aria-current={view === item.id ? "page" : undefined}
                     >
-                      {item.label}
+                      <i aria-hidden="true">{item.glyph}</i>
+                      <span>
+                        <strong>{item.label}</strong>
+                        <small>{item.caption}</small>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -861,15 +966,15 @@ function MemoryAtlas() {
                   notes={notes}
                   onOpen={openNote}
                   onVaultChanged={loadVault}
-                  initialStatuses={jobsInitialStatuses}
+                  initialFilters={jobsInitialFilters}
                 />
               )}
               {view === "analytics" && (
                 <JobsAnalytics
                   notes={notes}
                   onOpen={openNote}
-                  onViewJobs={(statuses) => {
-                    setJobsInitialStatuses(statuses ?? null);
+                  onViewJobs={(filters) => {
+                    setJobsInitialFilters(filters ?? null);
                     setView("jobs");
                   }}
                 />
@@ -899,9 +1004,9 @@ function MemoryAtlas() {
                 <LibraryView
                   notes={notes}
                   filter={groupFilter}
-                  query={query}
+                  query={libraryQuery}
                   onFilter={setGroupFilter}
-                  onQuery={setQuery}
+                  onQuery={setLibraryQuery}
                   onOpen={openNote}
                 />
               )}
@@ -949,6 +1054,15 @@ function MemoryAtlas() {
         </nav>
       )}
 
+      {searchOpen && (
+        <SearchPalette
+          notes={notes}
+          onOpen={openNote}
+          onQuery={runSavedQuery}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
+
       {sharedAssetOverlay && sharedAssetNote && (
         <SharedAssetOverlay
           note={sharedAssetNote}
@@ -987,35 +1101,75 @@ function MemoryAtlas() {
   );
 }
 
-function SearchPanel({
-  query,
+/**
+ * 全库检索是「跳到任意笔记」的导航工具，不是某一页的主操作，
+ * 所以它不再占着顶栏一条 650px 的输入框，而是 ⌘K 唤出的浮层。
+ * 关键词是这里的局部 state：资料库那页有自己的搜索框，两者互不干扰。
+ */
+function SearchPalette({
   notes,
   onOpen,
   onQuery,
   onClose,
 }: {
-  query: string;
   notes: Note[];
   onOpen: (note: Note) => void;
   onQuery: (query: string) => void;
   onClose: () => void;
 }) {
+  const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const results = useMemo(
+    () => notes.filter((note) => noteMatches(note, query)).slice(0, 8),
+    [notes, query],
+  );
+
   return (
+    <div
+      className="search-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="搜索记忆库"
+      onMouseDown={(event) => {
+        // 只认背景本身的点击，面板内部按下再拖到背景松手不算关闭。
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
     <div className="search-panel">
+      <div className="search-palette-input">
+        <span className="search-icon" aria-hidden="true">⌕</span>
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+            if (event.key === "Enter" && results[0]) onOpen(results[0]);
+          }}
+          placeholder="搜索记忆、公司、日语错误…"
+          aria-label="搜索关键词"
+        />
+        <kbd>ESC</kbd>
+      </div>
       <div className="search-panel-head">
         <span>{query ? `“${query}” 的结果` : "快捷查询"}</span>
         <button onClick={onClose} aria-label="关闭搜索">×</button>
       </div>
       {!query && (
         <div className="saved-queries">
-          <button onClick={() => onQuery("status:選考中")}>进行中的选考</button>
+          {/* status 是 7 个枚举值，「進行中」跨其中三个，所以用 | 而不是不存在的「選考中」。 */}
+          <button onClick={() => onQuery("status:応募済|書類通過|面接中")}>进行中的选考</button>
           <button onClick={() => onQuery("重要度:高")}>高优先日语错误</button>
           <button onClick={() => onQuery("type:ai-report")}>AI 分析</button>
           <button onClick={() => onQuery("待ち")}>等待结果</button>
         </div>
       )}
       <div className="search-results">
-        {notes.map((note) => (
+        {results.map((note) => (
           <button key={note.path} onClick={() => onOpen(note)}>
             <span
               className="result-group"
@@ -1030,11 +1184,12 @@ function SearchPanel({
             <span className="result-arrow">↗</span>
           </button>
         ))}
-        {query && notes.length === 0 && (
+        {query && results.length === 0 && (
           <div className="empty-search">没有匹配的记忆，试试更短的关键词。</div>
         )}
       </div>
       <div className="search-help">支持 <code>type:</code>、<code>status:</code>、<code>folder:</code> 组合查询</div>
+    </div>
     </div>
   );
 }
@@ -2324,6 +2479,20 @@ function LibraryView({
     <section className="library-view">
       <div className="library-workspace">
         <aside className="library-facets" aria-label="记忆筛选">
+          {/* 检索这一页的关键词属于这一页，和下面的分区・场景筛选是一组，别放回顶栏。 */}
+          <div className="library-search">
+            <span className="search-icon" aria-hidden="true">⌕</span>
+            <input
+              value={query}
+              onChange={(event) => { onQuery(event.target.value); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
+              placeholder="搜索标题与正文…"
+              aria-label="搜索资料库"
+            />
+            {query && (
+              <button onClick={() => onQuery("")} aria-label="清空搜索">×</button>
+            )}
+          </div>
+
           <div className="library-facet-block">
             <div className="library-facet-title"><span>内容分区</span><small>按来源目录</small></div>
             <div className="library-group-list">
@@ -2363,7 +2532,7 @@ function LibraryView({
 
           <div className="library-query-help">
             <span>精确搜索</span>
-            <p>顶部搜索框支持 <code>type:</code>、<code>status:</code> 和 <code>folder:</code>。</p>
+            <p>上面的搜索框支持 <code>type:</code>、<code>status:</code> 和 <code>folder:</code>。跳转到任意笔记按 <code>⌘K</code>。</p>
           </div>
         </aside>
 

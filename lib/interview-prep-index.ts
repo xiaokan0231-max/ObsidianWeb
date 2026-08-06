@@ -24,7 +24,7 @@ function prepDirectory(doc: InterviewPrepDoc) {
  * 同じ会社に複数求人があっても混ぜないため、面接シリーズの正本は company 表記ではなく case。
  * 古いノートに case が無い場合だけ同じ会社ディレクトリへ退避する。
  */
-export function interviewPrepSeriesKey(doc: InterviewPrepDoc) {
+function interviewPrepSeriesKey(doc: InterviewPrepDoc) {
   if (doc.caseLink) return `case:${doc.caseLink}`;
   const directory = prepDirectory(doc);
   if (directory) return `directory:${directory}`;
@@ -32,7 +32,7 @@ export function interviewPrepSeriesKey(doc: InterviewPrepDoc) {
 }
 
 /** 表示用 round は自由文のまま保ち、順序だけを既知の名称から補う。 */
-export function inferredInterviewRoundOrder(round: string): number | null {
+function inferredInterviewRoundOrder(round: string): number | null {
   const value = round.normalize("NFKC").toLocaleLowerCase();
   if (/最終|final|役員/.test(value)) return 90;
   if (/カジュアル|casual|面談/.test(value)) return 0;
@@ -43,7 +43,7 @@ export function inferredInterviewRoundOrder(round: string): number | null {
   return null;
 }
 
-export function interviewRoundOrder(doc: InterviewPrepDoc) {
+function interviewRoundOrder(doc: InterviewPrepDoc) {
   return doc.sessionOrder ?? inferredInterviewRoundOrder(doc.round);
 }
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  isRoundSpecificAsset,
   parseSharedAssetDocument,
   type SharedAssetTarget,
 } from "@/lib/interview-shared-assets";
@@ -88,7 +89,7 @@ export default function InterviewSharedAsset({
   const visibleIndexes = doc.sections
     .map((_, index) => index)
     .filter((index) => !needle || hits[index] > 0);
-  const roundSpecific = target.scope === "round" || target.scope === "company";
+  const roundSpecific = isRoundSpecificAsset(target);
 
   return (
     <div className="shared-asset-view">

@@ -34,7 +34,12 @@ test("server-renders the Memory Atlas shell", async () => {
   assert.match(html, /<title>回声 · 求职作战室<\/title>/i);
   assert.match(html, /<link rel="icon" href="\/favicon\.svg"/i);
   assert.match(html, /正在重建你的记忆关系/);
-  assert.match(html, /搜索记忆、公司、日语错误/);
+  // 顶栏不再有搜索框和刷新按钮，改成「我在哪 / 下一件 / 数据源」。首屏 loading=true。
+  assert.match(html, /正在读取/);
+  assert.match(html, /重读/);
+  // 全库检索只有资料库有实体入口，其他页面靠 ⌘K 召唤浮层。
+  // 所以初始外壳里既没有搜索框也没有搜索按钮——这不是漏渲染。
+  assert.doesNotMatch(html, /搜索记忆、公司、日语错误/);
   for (const navigationLabel of [
     "总览",
     "求职进展",

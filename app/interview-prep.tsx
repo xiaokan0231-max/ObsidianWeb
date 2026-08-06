@@ -22,7 +22,9 @@ function GuidanceBlock({
 }: {
   title: string;
   text: string;
-  tone?: "warm" | "safe";
+  // 取值必须和 globals.css 的 .prep-guidance-card.<tone> 修饰类一一对应。
+  // 加新语气＝同时加 CSS 规则，否则就是编译通过但没样式的死值（"safe" 当初就是这么留下的）
+  tone?: "warm";
 }) {
   if (!text) return null;
   return (

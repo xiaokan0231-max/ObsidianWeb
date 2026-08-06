@@ -48,7 +48,17 @@ export function normalizeAnswer(value: string) {
     .replace(/[\s、。,.!?！？「」『』（）()]/g, "");
 }
 
+// 值里带换行会把 frontmatter 整块撑破，所以一律用 JSON 字符串字面量包起来：
+// JSON 的转义集合完整落在 YAML 双引号字符串里，输出直接是合法 YAML。
+// 这份**还会把换行压成空格**——语言道场写进去的是 model 名・考试名这类单行标识，压掉不丢信息。
 export function yamlString(value: string) {
   return JSON.stringify(value.replace(/\r?\n/g, " "));
+}
+
+// 不压换行的版本（换行留成 \n 转义，读回来还是换行），review 线的写入 route 用这份。
+// 不并到上面：这里写的 company/round 是从整理稿 frontmatter 原样透传的，
+// 悄悄压成一行会让派生笔记和上游对不上，把坏输入伪装成好输入。
+export function yamlScalar(value: string) {
+  return JSON.stringify(value);
 }
 

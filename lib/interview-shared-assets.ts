@@ -15,8 +15,22 @@ export type SharedAssetTarget = {
   hint: string;
   section?: string;
   defaultSection?: string;
-  scope?: "shared" | "company" | "round";
+  /**
+   * 値を持つのは「その回だけの素材」だけ。共通素材は undefined のまま。
+   * 表示側で条件を書き下さず、必ず isRoundSpecificAsset() を通すこと。
+   */
+  scope?: "round";
 };
+
+/**
+ * 「本轮专属」か「共通素材」かの唯一の判定。
+ * 以前は overlay の顶栏とヘッダーが別々に条件を持っていたため、
+ * scope の呼び名を company → round に変えた時に顶栏だけ取り残され、
+ * 同じ画面に「COMMON INTERVIEW ASSET」と「THIS ROUND」が同時に出ていた。
+ */
+export function isRoundSpecificAsset(target: SharedAssetTarget) {
+  return target.scope === "round";
+}
 
 export type SharedAssetSection = {
   id: string;

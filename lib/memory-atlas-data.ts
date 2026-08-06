@@ -242,15 +242,27 @@ export function noteMatches(note: Note, rawQuery: string) {
   const query = rawQuery.trim().toLowerCase();
   if (!query) return true;
   const haystack = `${note.path}\n${note.content}\n${JSON.stringify(note.frontmatter)}`.toLowerCase();
+  // 空白分隔的多个 token 是 AND；单个 token 的值里用 | 分隔是 OR。
+  // 「進行中の選考」这种跨多个枚举值的条件，没有 OR 就一条都写不出来。
   return query.split(/\s+/).every((token) => {
     const [prefix, ...rest] = token.split(":");
     const value = rest.join(":");
     if (!value) return haystack.includes(token);
-    if (prefix === "type") return getType(note).toLowerCase().includes(value);
-    if (prefix === "status") {
-      return getString(note.frontmatter.status).toLowerCase().includes(value);
+    const alternatives = value.split("|").filter(Boolean);
+    if (!alternatives.length) return haystack.includes(token);
+    if (prefix === "type") {
+      const type = getType(note).toLowerCase();
+      return alternatives.some((item) => type.includes(item));
     }
-    if (prefix === "folder") return note.path.toLowerCase().includes(value);
+    if (prefix === "status") {
+      const status = getString(note.frontmatter.status).toLowerCase();
+      return alternatives.some((item) => status.includes(item));
+    }
+    if (prefix === "folder") {
+      const path = note.path.toLowerCase();
+      return alternatives.some((item) => path.includes(item));
+    }
+    // 未知前缀退回全文子串：此时 token 原样匹配（`重要度:高` 这类写法靠这条生效）。
     return haystack.includes(token);
   });
 }
@@ -368,7 +380,12 @@ export function buildReviewPreview(notes: Note[]): ReviewPreview {
   return { docs, reviewedCount, pendingDecisions, readyCount, scoreDoc, actionDoc };
 }
 
-export function calendarEventLabel(text: string) {
+/**
+ * 種別語が無ければ null を返す。「判定できなかった」と「面谈と判定した」を
+ * 呼び出し側で区別するために要る——両者を潰すと、日時だけの構造化フィールドが
+ * 常に「面谈」に化けて、しかもそれが正しい判定に見えてしまう。
+ */
+function detectEventLabel(text: string): string | null {
   if (/エージェント面談|猎头面谈/.test(text)) return "猎头面谈";
   if (/カジュアル面談|轻松面谈/.test(text)) return "轻松面谈";
   if (/最終面接|最终面试/.test(text)) return "最终面试";
@@ -376,7 +393,11 @@ export function calendarEventLabel(text: string) {
   if (/二次面接|二面/.test(text)) return "第二次面试";
   if (/セミナー|说明会/.test(text)) return "招聘说明会";
   if (/面接|面试/.test(text)) return "面试";
-  return "面谈";
+  return null;
+}
+
+export function calendarEventLabel(text: string) {
+  return detectEventLabel(text) ?? "面谈";
 }
 
 export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEvent[] {
@@ -385,7 +406,16 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
 
   const addEvent = (note: Note, date: string, source: string, priority: number) => {
     const company = getString(note.frontmatter.company) || getTitle(note);
-    const label = calendarEventLabel(source || getTitle(note));
+    // 種別は「勝った出所」ではなくノート全体から決める。next_event_at は書式が
+    // 純粋な `YYYY-MM-DD HH:MM` なので単体では種別を判定できず、しかも priority 4 で
+    // next_action(3) を上書きするため、規約どおり構造化した予定ほど
+    // ラベルが「面谈」へ退化していた（2026-08-04 実証：一次面接が確定している案件が
+    // 日历上「面谈」としか出ず、面接が消えたように見えた）。
+    // source から読めた時はそれを優先し、読めない時だけ next_action を種別の手掛かりにする。
+    const label =
+      detectEventLabel(source) ??
+      detectEventLabel(getString(note.frontmatter.next_action)) ??
+      calendarEventLabel(getTitle(note));
     const time = source.match(/(?:^|\D)((?:[01]?\d|2[0-3]):[0-5]\d)(?:\D|$)/)?.[1] ?? "";
     const key = `${company.toLowerCase()}|${date}`;
     const candidate: CalendarEvent & { priority: number } = {

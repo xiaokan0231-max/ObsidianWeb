@@ -9,7 +9,7 @@ import {
 // 面接準備ドキュメントの描画だけを持つ。記法の意味は lib/interview-prep-doc.ts、
 // 同じ記法の HTML 版は skill の build_interview_html.py にある（三者の見た目を揃えている）。
 
-export type PrepRefHandlers = {
+type PrepRefHandlers = {
   /** 回答库のカードへ飛ぶ（[[面接標準回答集#pNN …]] の参照） */
   onOpenCard?: (cardId: string) => void;
   /** それ以外の vault ノートを開く */

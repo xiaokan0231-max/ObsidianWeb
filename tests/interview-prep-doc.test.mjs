@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildPrepKillQuestions,
   cardIdFromRef,
   collectPrepExternalLinks,
+  extractPrepKillMap,
+  extractPrepTalentMap,
   findInterviewPrepDocs,
   groupPrepSections,
+  PREP_KILL_MAP_LABEL,
+  PREP_TALENT_LABEL,
   parseInline,
   parseInterviewPrepDoc,
   prepBlockText,
-  splitPrepDocsByDate,
+  prepInlineText,
 } from "../lib/interview-prep-doc.ts";
 
 function note(path, frontmatter, content) {
@@ -265,6 +270,153 @@ test("12節は用途別の6主模块に畳み、各節を一度だけ所属さ�
   assert.deepEqual(groups.flatMap((group) => group.sectionIndexes).sort((a, b) => a - b), [...Array(12).keys()]);
 });
 
+// §6 の小節を第7主模块として出す。vault は12節契約のままにしたいので、
+// 13個目の ## を作らず表示層だけで昇格させる——この分離が壊れると Web と HTML がずれる。
+test("殺傷質問7題は §6 の小節から仮想節として切り出せる", () => {
+  const doc = parseInterviewPrepDoc(
+    prepNote(`# テスト社
+
+## ６．想定問答
+
+### 殺傷質問7題・当日の型
+
+1. 転職理由 → §8
+2. 年収 → p19
+
+### 今回持ち込む共通題
+
+- p17
+
+## ７．逆質問
+
+- 一問目
+`),
+    [],
+  );
+  const killMap = extractPrepKillMap(doc.sections);
+  assert.equal(killMap.navLabel, PREP_KILL_MAP_LABEL);
+  assert.match(killMap.title, /^殺傷質問7題/);
+  // 見出しの次から、次の ### 手前までだけを持つ（共通題を巻き込まない）
+  const text = killMap.blocks.map(prepBlockText).join("\n");
+  assert.match(text, /転職理由/);
+  assert.doesNotMatch(text, /今回持ち込む共通題|p17/);
+  // §6 側は削らない。第7模块はあくまで写し
+  const six = doc.sections.find((section) => section.title.startsWith("６"));
+  assert.match(six.blocks.map(prepBlockText).join("\n"), /転職理由/);
+});
+
+// 索引だけでは当日7回ジャンプすることになる。答案は各所の正本から参照で引き込み、
+// コピーは作らない——コピーすると口径が二重管理になり、必ず片方だけ直される。
+test("殺傷質問は問い・答案・解読を1枚に組み、答案は正本からの参照で埋める", () => {
+  const doc = parseInterviewPrepDoc(
+    prepNote(`# テスト社
+
+## ６．想定問答
+
+### 殺傷質問7題・当日の型
+
+#### 希望年収を教えてください
+- 出題:: T4・7場中3場
+- 答案:: Q. 希望年収は？
+- 地雷:: 自分から金額を先に出す
+▷ 低アンカーが直近の失点。
+
+#### 答案が見つからない題
+- 答案:: Q. 存在しない見出し
+▷ 解読だけはある。
+
+### 会社特化の質問
+
+#### Q. 希望年収は？（既定・これだけで止める）
+
+【あなた】**御社（おんしゃ）の規定（きてい）に合わせてご相談させてください。**
+
+##### 「レンジのどのあたり」と押された時だけ
+
+【あなた】**レンジの中央以上を希望しております。**
+
+## ８．転職理由
+
+本文
+`),
+    [],
+  );
+  const questions = buildPrepKillQuestions(doc.sections);
+  assert.equal(questions.length, 2);
+
+  const [salary, missing] = questions;
+  assert.equal(salary.ask, "希望年収を教えてください");
+  assert.equal(salary.meta, "T4・7場中3場");
+  assert.equal(salary.resolved, true);
+  // 答案は台詞だけ。ロケータ行そのものは落とす（カード見出しが既に問いを出している）
+  assert.match(salary.answer.map(prepBlockText).join("\n"), /御社の規定に合わせて/);
+  assert.doesNotMatch(salary.answer.map(prepBlockText).join("\n"), /Q\. 希望年収は？/);
+  // 「〜と押された時だけ」以降は追問層へ回す
+  assert.match(salary.followUp.map(prepBlockText).join("\n"), /レンジの中央以上/);
+  assert.doesNotMatch(salary.answer.map(prepBlockText).join("\n"), /レンジの中央以上/);
+  assert.match(prepInlineText(salary.mine), /自分から金額を先に出す/);
+  assert.match(prepInlineText(salary.why[0]), /低アンカー/);
+
+  // 参照が外れた題は黙って空にせず、resolved=false で拾えるようにする
+  assert.equal(missing.resolved, false);
+  assert.equal(missing.source, "Q. 存在しない見出し");
+  assert.match(prepInlineText(missing.why[0]), /解読だけはある/);
+});
+
+test("殺傷質問7題の小節が無い準備稿では第7主模块を出さない", () => {
+  const doc = parseInterviewPrepDoc(
+    prepNote(`# テスト社\n\n## ６．想定問答\n\n### 今回持ち込む共通題\n\n- p17\n`),
+    [],
+  );
+  assert.equal(extractPrepKillMap(doc.sections), null);
+});
+
+// 人材育成も杀伤7题と同じ仕組みで第8主模块に昇格させる。責任者面接の中心題を
+// 当日ワンタップで開くための表示層ショートカットで、正本は §6 の小節のまま。
+test("人材育成の小節は §6 から第8主模块として切り出せる", () => {
+  const doc = parseInterviewPrepDoc(
+    prepNote(`# テスト社
+
+## ６．想定問答
+
+### 殺傷質問7題・当日の型
+
+1. 転職理由 → §8
+
+### 人材育成（育成方針を問われたら）
+
+#### Q. 人材育成で大切にしていることは何ですか
+
+【あなた】**適性（てきせい）を見極（みきわ）めます。**
+
+## ７．逆質問
+
+- 一問目
+`),
+    [],
+  );
+  const talent = extractPrepTalentMap(doc.sections);
+  assert.equal(talent.navLabel, PREP_TALENT_LABEL);
+  assert.match(talent.title, /^人材育成/);
+  const text = talent.blocks.map(prepBlockText).join("\n");
+  assert.match(text, /適性を見極めます/);
+  assert.doesNotMatch(text, /転職理由/);
+  // 前にある杀伤7题の切り出しは、人材育成の小節を巻き込まない
+  const killMap = extractPrepKillMap(doc.sections);
+  assert.doesNotMatch(killMap.blocks.map(prepBlockText).join("\n"), /適性を見極めます/);
+  // §6 側は削らない。第8模块はあくまで写し
+  const six = doc.sections.find((section) => section.title.startsWith("６"));
+  assert.match(six.blocks.map(prepBlockText).join("\n"), /適性を見極めます/);
+});
+
+test("人材育成の小節が無い準備稿では第8主模块を出さない", () => {
+  const doc = parseInterviewPrepDoc(
+    prepNote(`# テスト社\n\n## ６．想定問答\n\n### 今回持ち込む共通題\n\n- p17\n`),
+    [],
+  );
+  assert.equal(extractPrepTalentMap(doc.sections), null);
+});
+
 test("表のセル内の [[ノート#節\\|別名]] は途中で切れずリンクとして残る", () => {
   // Obsidian は表内の別名指定に `\|` を要求する。素の split("|") で切ると
   // カード参照が壊れて「回答库へ飛べない表」になる（実際に踏んだ）
@@ -401,13 +553,12 @@ test("frontmatter から会社・日付・面接官を取り、interview-prep �
   assert.equal(doc.round, "最終面接");
   assert.equal(doc.interviewers, "佐藤様・本部長");
   assert.equal(doc.caseLink, "テスト社_データエンジニア");
-  assert.equal(doc.sessionId, "test-data-s03");
   assert.equal(doc.sessionOrder, 3);
   assert.equal(doc.sessionStatus, "scheduled");
   assert.equal(parseInterviewPrepDoc(PHRASES, []), null);
 });
 
-test("準備ドキュメントは日付の新しい順、当日を含む未来と過去に分かれる", () => {
+test("準備ドキュメントは日付の新しい順に並ぶ", () => {
   const notes = [
     prepNote("# 古い\n\n## １．速査\n\n本文\n", { date: "2026-07-01" }),
     prepNote("# 当日\n\n## １．速査\n\n本文\n", { date: "2026-08-01" }),
@@ -415,8 +566,4 @@ test("準備ドキュメントは日付の新しい順、当日を含む未来�
   ];
   const docs = findInterviewPrepDocs(notes);
   assert.deepEqual(docs.map((doc) => doc.date), ["2026-09-09", "2026-08-01", "2026-07-01"]);
-
-  const { upcoming, past } = splitPrepDocsByDate(docs, "2026-08-01");
-  assert.deepEqual(upcoming.map((doc) => doc.date), ["2026-08-01", "2026-09-09"]);
-  assert.deepEqual(past.map((doc) => doc.date), ["2026-07-01"]);
 });
