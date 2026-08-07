@@ -10194,13 +10194,19 @@ canvas:focus-visible {
 .rv-deep-block.q-strong { border-left-color: #6ba183; }
 .rv-deep-block.q-weak { border-left-color: var(--orange); }
 .rv-deep-block.priority { box-shadow: inset 0 0 0 1px rgba(230, 109, 69, 0.34); }
-.rv-deep-block summary { display: grid; grid-template-columns: auto minmax(180px, 1fr) auto auto auto auto; align-items: center; gap: 8px; padding: 11px 13px; cursor: pointer; list-style: none; }
+/* 列は最大構成に合わせる：ID・見出し・听懂・品質・回答適合・漏答・開閉。
+   回答適合と漏答は出ない回もあるので、足りない側ではなく余る側に合わせて畳む。 */
+.rv-deep-block summary { display: grid; grid-template-columns: auto minmax(180px, 1fr) auto auto auto auto auto; align-items: center; gap: 8px; padding: 11px 13px; cursor: pointer; list-style: none; }
 .rv-deep-block summary::-webkit-details-marker { display: none; }
 .rv-deep-block summary > span { color: var(--muted); font-family: var(--font-geist-mono), monospace; font-size: 8.5px; }
 .rv-deep-block summary > strong { overflow: hidden; font-family: "Songti SC", serif; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .rv-deep-block summary > em { padding: 2px 7px; background: #e5e7e4; color: #4e5652; font-style: normal; font-size: 8.5px; }
 .rv-deep-block summary > em.c-likely_missed { background: #f8dfd7; color: #8d382b; }
 .rv-deep-block summary > em.c-partial { background: #f5e8c9; color: #725311; }
+/* 答非所问は「聞き取れなかった」より重い——聞けていたのに論点を外した回だから。
+   だから likely_missed と同じ赤を使い、部分的なズレは partial と同じ琥珀に揃える。 */
+.rv-deep-block summary > em.r-off_target { background: #f8dfd7; color: #8d382b; }
+.rv-deep-block summary > em.r-partial { background: #f5e8c9; color: #725311; }
 .rv-deep-block summary > b { padding: 2px 7px; background: #f8dfd7; color: #8d382b; font-size: 8.5px; font-weight: 500; }
 .rv-deep-block summary > i { color: var(--muted); font-style: normal; transition: transform 150ms ease; }
 .rv-deep-block[open] summary > i { transform: rotate(180deg); }

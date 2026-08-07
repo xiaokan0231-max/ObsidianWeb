@@ -23,18 +23,21 @@ import {
   prepDocsThroughRound,
   selectRelevantInterviewPrepDoc,
 } from "@/lib/interview-prep-index";
-import { formatDate, getString, getType, noteBasename, type Note } from "@/lib/notes";
-import { parseInterviewAnswerReview, REVIEW_DIMENSION_META } from "@/lib/review-deep";
+import { countdownLabel, localDateKey } from "@/lib/memory-atlas-data";
+import { formatDate, getType, type Note } from "@/lib/notes";
+import { REVIEW_DIMENSION_META } from "@/lib/review-deep";
 import {
   buildCardCoverage,
   buildInterviewTrends,
-  interviewKeyFromNoteName,
+  reviewTrendEntry,
 } from "@/lib/interview-trends.mjs";
 import {
   companyMotivationAssetTarget,
   type SharedAssetTarget,
 } from "@/lib/interview-shared-assets";
 import { Blocks, Inlines } from "./prep-doc-render";
+import { copySelectionWithoutRuby } from "./ruby-copy";
+import { isTypingTarget, PrepSearchBox, useSlashFocus } from "./prep-search";
 
 // 会社／応募案件を選び、その中の各回を履歴のまま読む画面。
 // 回答库（面试准备）は平時に引く辞書、こちらは当日に読む一枚。用途が違うので分けている。
@@ -72,32 +75,6 @@ const SHARED_ASSETS: SessionAsset[] = [
   { note: "面接傾向_横断", label: "横断傾向", hint: "五維の推移・反復タグ" },
 ];
 
-function todayKey() {
-  const now = new Date();
-  return [
-    now.getFullYear(),
-    `${now.getMonth() + 1}`.padStart(2, "0"),
-    `${now.getDate()}`.padStart(2, "0"),
-  ].join("-");
-}
-
-function daysFromToday(date: string) {
-  if (!date) return null;
-  const target = new Date(`${date}T00:00:00`);
-  const today = new Date(`${todayKey()}T00:00:00`);
-  if (Number.isNaN(target.getTime())) return null;
-  return Math.round((target.getTime() - today.getTime()) / 86400000);
-}
-
-function countdownLabel(date: string) {
-  const days = daysFromToday(date);
-  if (days === null) return "日期未定";
-  if (days === 0) return "今天";
-  if (days === 1) return "明天";
-  if (days > 1) return `${days} 天后`;
-  return `${-days} 天前`;
-}
-
 function hasInterviewDate(date: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date);
 }
@@ -107,14 +84,7 @@ function buildDigest(notes: Note[]) {
   const coverage = buildCardCoverage(library?.content ?? "");
   const entries = notes
     .filter((note) => getType(note) === "interview-answer-review")
-    .map((note) => ({
-      key: interviewKeyFromNoteName(noteBasename(note.path)),
-      company: getString(note.frontmatter.company),
-      date: getString(note.frontmatter.date),
-      round: getString(note.frontmatter.round),
-      review: parseInterviewAnswerReview(note.content),
-    }))
-    .filter((entry) => entry.review);
+    .map((note) => reviewTrendEntry(note.path, note.frontmatter, note.content));
   return entries.length > 0 ? buildInterviewTrends(entries, coverage) : null;
 }
 
@@ -368,21 +338,14 @@ function DocReader({
     return () => window.clearTimeout(timer);
   }, [keyword, active]);
 
+  // 「/」で検索欄へ・Escape で消す、の2つは PrepSearchBox 側が持つ。
+  // ここに残すのは群の左右送りだけ——以前は Escape も window で拾っていて、
+  // 画面内の別の入力欄で Escape を押しただけで検索語が消えていた。
+  useSlashFocus(searchRef);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const typing =
-        event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
-      if (event.key === "/" && !typing) {
-        event.preventDefault();
-        searchRef.current?.focus();
-        return;
-      }
-      if (event.key === "Escape" && typing) {
-        setQuery("");
-        searchRef.current?.blur();
-        return;
-      }
-      if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isTypingTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === "ArrowRight" && activeGroupIndex < groups.length - 1) {
         event.preventDefault();
         goToGroup(activeGroupIndex + 1);
@@ -425,19 +388,14 @@ function DocReader({
             </button>
           ))}
         </nav>
-        <label className="prep-doc-search">
-          <span aria-hidden="true">⌕</span>
-          <input
-            ref={searchRef}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="全章搜索（/ 聚焦）"
-            aria-label="在这份准备文档里搜索"
-          />
-          {keyword && (
-            <button type="button" onClick={() => setQuery("")} aria-label="清除搜索">✕</button>
-          )}
-        </label>
+        <PrepSearchBox
+          className="prep-doc-search"
+          value={query}
+          onChange={setQuery}
+          inputRef={searchRef}
+          placeholder="全章搜索（/ 聚焦）"
+          label="在这份准备文档里搜索"
+        />
 
         {currentGroup?.sectionIndexes.length > 1 && (
           <nav className="prep-doc-section-tabs" aria-label={`${currentGroup.label}の子項目`}>
@@ -482,7 +440,10 @@ function DocReader({
         </div>
       )}
 
-      <article className="prep-doc-body" ref={bodyRef}>
+      {/* 振り仮名は読むための飾りで、貼り付け先には要らない。ここを外すと
+          「肖侃しょう・かん」のようにコピー結果へ読みが混ざる——当日いちばん多く
+          選択される画面なので、他の2画面と同じく rt/rp を落として渡す。 */}
+      <article className="prep-doc-body" ref={bodyRef} onCopy={copySelectionWithoutRuby}>
         <h2>{current.title}</h2>
         {isKillMap ? (
           <KillMapPage
@@ -605,7 +566,7 @@ export default function InterviewSession({
   onOpenAsset: (asset: SharedAssetTarget) => void;
 }) {
   const docs = useMemo(() => findInterviewPrepDocs(notes), [notes]);
-  const today = todayKey();
+  const today = localDateKey();
   const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
   const digest = useMemo(() => buildDigest(notes), [notes]);
   // 既定で開くのは「次の確定面接 → 日程調整中の次回 → 直近の終了回」。

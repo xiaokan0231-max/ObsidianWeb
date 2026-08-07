@@ -50,7 +50,11 @@ test("cross-interview trends require the same strategy tag in two interviews", a
     readFile("app/interview-review.tsx", "utf8"),
     readFile("lib/interview-trends.mjs", "utf8"),
   ]);
-  assert.match(ui, /item\.interviewKeys\.size >= 2/);
+  // 「何場で癖とみなすか」は lib 側の判定を呼ぶこと。閾値の数字を UI に書き戻すと、
+  // 片方だけ直した時に Web の傾向ページと generated ノートが黙って割れる。
+  assert.match(ui, /isRepeatedAcrossInterviews\(item\.interviewKeys\.size\)/);
+  assert.doesNotMatch(ui, /interviewKeys\.size >= \d/);
+  assert.match(trends, /export function isRepeatedAcrossInterviews/);
   assert.match(ui, /跨面试回答趋势/);
   assert.match(ui, /STRATEGY_TREND_META.*from "@\/lib\/interview-trends\.mjs"/s);
   assert.match(trends, /复合问题漏答/);

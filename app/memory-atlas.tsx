@@ -18,6 +18,7 @@ import InterviewReview from "./interview-review";
 import InterviewPrep from "./interview-prep";
 import InterviewSession from "./interview-session";
 import InterviewSharedAsset from "./interview-shared-asset";
+import { isTypingTarget } from "./prep-search";
 import JapaneseTraining from "./japanese-training";
 import LanguageExpressionCourses from "./language-expression-courses";
 import JobsAnalytics from "./jobs-analytics";
@@ -66,6 +67,7 @@ import {
   careerStatus,
   extractLinks,
   getGroup,
+  countdownLabel,
   getLatestNoteDate,
   GROUPS,
   libraryScopeMatches,
@@ -231,22 +233,7 @@ const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigationItem
 const TOP_BAR_SECTION_IDS = new Set<PrimaryNavId>(["resources"]);
 
 /** 单键快捷键（R）在输入场景必须让路，否则在搜索框里打 r 就会触发重读。 */
-function isTypingTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
-}
 
-/** 顶栏「下一件」的相对日期。本场面试页有自己的一份，那份还带「N 天前」。 */
-function eventCountdown(date: string) {
-  const target = new Date(`${date}T00:00:00`);
-  if (Number.isNaN(target.getTime())) return "日期未定";
-  const today = new Date(`${localDateKey()}T00:00:00`);
-  const days = Math.round((target.getTime() - today.getTime()) / 86400000);
-  if (days === 0) return "今天";
-  if (days === 1) return "明天";
-  return `${days} 天后`;
-}
 
 const MOBILE_PRIMARY_NAV_IDS = new Set<PrimaryNavId>([
   "overview",
@@ -305,18 +292,32 @@ function RailToggle() {
   );
 }
 
-function PrepCardOverlay({
-  notes,
-  cardId,
+/**
+ * 本场面试の上に重ねる全画面ビューの外殻。
+ *
+ * 中身（回答库カード／共通素材）は違っても、閉じた時に元いた場所へ戻す挙動は
+ * 同じでなければならない。以前は2つの overlay が同じ useEffect を各自持っていて、
+ * 復元のコツを書いた注釈は片方にしか残っていなかった——読む側からは
+ * 「注釈の無い方は単純な処理」に見えるので、次に触る人がそちらを削る。
+ */
+function InterviewOverlay({
+  className,
+  contentClassName,
+  titleId,
+  eyebrow,
+  title,
   origin,
-  onOpen,
   onClose,
+  children,
 }: {
-  notes: Note[];
-  cardId: string;
+  className: string;
+  contentClassName: string;
+  titleId: string;
+  eyebrow: ReactNode;
+  title: ReactNode;
   origin: { x: number; y: number };
-  onOpen: (note: Note) => void;
   onClose: () => void;
+  children: ReactNode;
 }) {
   const backRef = useRef<HTMLButtonElement>(null);
 
@@ -350,32 +351,48 @@ function PrepCardOverlay({
   }, [origin.x, origin.y]);
 
   return (
-    <section
-      className="prep-card-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="prep-card-overlay-title"
-    >
+    <section className={className} role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <header className="prep-card-overlay-bar">
         <button ref={backRef} type="button" onClick={onClose}>
           <span aria-hidden="true">←</span>
           返回本场面试
         </button>
         <div>
-          <small>STANDARD ANSWER LIBRARY</small>
-          <strong id="prep-card-overlay-title">回答库 · {cardId}</strong>
+          <small>{eyebrow}</small>
+          <strong id={titleId}>{title}</strong>
         </div>
         <span><kbd>Esc</kbd> 也可返回</span>
       </header>
-      <div className="prep-card-overlay-content">
-        <InterviewPrep
-          key={cardId}
-          notes={notes}
-          onOpen={onOpen}
-          initialCardId={cardId}
-        />
-      </div>
+      <div className={contentClassName}>{children}</div>
     </section>
+  );
+}
+
+function PrepCardOverlay({
+  notes,
+  cardId,
+  origin,
+  onOpen,
+  onClose,
+}: {
+  notes: Note[];
+  cardId: string;
+  origin: { x: number; y: number };
+  onOpen: (note: Note) => void;
+  onClose: () => void;
+}) {
+  return (
+    <InterviewOverlay
+      className="prep-card-overlay"
+      contentClassName="prep-card-overlay-content"
+      titleId="prep-card-overlay-title"
+      eyebrow="STANDARD ANSWER LIBRARY"
+      title={`回答库 · ${cardId}`}
+      origin={origin}
+      onClose={onClose}
+    >
+      <InterviewPrep key={cardId} notes={notes} onOpen={onOpen} initialCardId={cardId} />
+    </InterviewOverlay>
   );
 }
 
@@ -394,64 +411,24 @@ function SharedAssetOverlay({
   onOpenWiki: (target: string, section?: string) => void;
   onClose: () => void;
 }) {
-  const backRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    const previousFocus =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const bodyOverflow = document.body.style.overflow;
-    const rootOverflow = document.documentElement.style.overflow;
-    const scrollRestoration = window.history.scrollRestoration;
-    window.history.scrollRestoration = "manual";
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
-    backRef.current?.focus();
-    return () => {
-      document.body.style.overflow = bodyOverflow;
-      document.documentElement.style.overflow = rootOverflow;
-      previousFocus?.focus({ preventScroll: true });
-      const restore = () => window.scrollTo({ left: origin.x, top: origin.y });
-      restore();
-      window.setTimeout(restore, 0);
-      window.setTimeout(() => {
-        restore();
-        window.history.scrollRestoration = scrollRestoration;
-      }, 80);
-    };
-  }, [origin.x, origin.y]);
-
   return (
-    <section
+    <InterviewOverlay
       className="prep-card-overlay shared-asset-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="shared-asset-overlay-title"
+      contentClassName="prep-card-overlay-content shared-asset-overlay-content"
+      titleId="shared-asset-overlay-title"
+      eyebrow={isRoundSpecificAsset(target) ? "THIS ROUND · MOTIVATION" : "COMMON INTERVIEW ASSET"}
+      title={target.label}
+      origin={origin}
+      onClose={onClose}
     >
-      <header className="prep-card-overlay-bar">
-        <button ref={backRef} type="button" onClick={onClose}>
-          <span aria-hidden="true">←</span>
-          返回本场面试
-        </button>
-        <div>
-          <small>
-            {isRoundSpecificAsset(target)
-              ? "THIS ROUND · MOTIVATION"
-              : "COMMON INTERVIEW ASSET"}
-          </small>
-          <strong id="shared-asset-overlay-title">{target.label}</strong>
-        </div>
-        <span><kbd>Esc</kbd> 也可返回</span>
-      </header>
-      <div className="prep-card-overlay-content shared-asset-overlay-content">
-        <InterviewSharedAsset
-          key={`${target.note}#${target.section ?? ""}#${target.defaultSection ?? ""}`}
-          note={note}
-          target={target}
-          onOpenCard={onOpenCard}
-          onOpenWiki={onOpenWiki}
-        />
-      </div>
-    </section>
+      <InterviewSharedAsset
+        key={`${target.note}#${target.section ?? ""}#${target.defaultSection ?? ""}`}
+        note={note}
+        target={target}
+        onOpenCard={onOpenCard}
+        onOpenWiki={onOpenWiki}
+      />
+    </InterviewOverlay>
   );
 }
 
@@ -860,7 +837,7 @@ function MemoryAtlas() {
               title={`${nextEvent.date}${nextEvent.time ? ` ${nextEvent.time}` : ""} ${nextEvent.label}`}
             >
               <small>下一件</small>
-              <em>{eventCountdown(nextEvent.date)}{nextEvent.time ? ` ${nextEvent.time}` : ""}</em>
+              <em>{countdownLabel(nextEvent.date)}{nextEvent.time ? ` ${nextEvent.time}` : ""}</em>
               <strong>{nextEvent.company}</strong>
               <i aria-hidden="true">→</i>
             </button>
