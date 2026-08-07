@@ -43,11 +43,16 @@ export async function POST(request: Request) {
   const practicePath = reviewSiblingPath(notePath, "practice");
 
   try {
-    const [source, reviewNote] = await Promise.all([readNote(notePath), readNote(reviewPath)]);
+    // 復盤は「まだ無い」が正常な状態（面接直後は整理稿だけが在る）。readNote で読むと
+    // Obsidian の英語 404 が本文ごと画面に出てしまうので、無い場合は自前の文言に寄せる。
+    const [source, reviewNote] = await Promise.all([
+      readNote(notePath),
+      readNoteOrNull(reviewPath),
+    ]);
     if (text(source.frontmatter.type) !== "transcript-study") {
       throw new Error("目标笔记不是 transcript-study。");
     }
-    if (text(reviewNote.frontmatter.type) !== "interview-answer-review") {
+    if (!reviewNote || text(reviewNote.frontmatter.type) !== "interview-answer-review") {
       throw new Error("回答质量复盘尚未生成。");
     }
     const review = parseInterviewAnswerReview(reviewNote.content);
