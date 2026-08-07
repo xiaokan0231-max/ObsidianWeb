@@ -12,12 +12,7 @@ import {
   stripMarkdown,
   type Note,
 } from "./notes.ts";
-import {
-  parseAnnotations,
-  parseSeirikou,
-  reviewDecisionTasks,
-  uniqueAnnotations,
-} from "./review.ts";
+import { joinReviewNotes } from "./review-join.ts";
 import { parseInterviewAnswerReview, type InterviewAnswerReview } from "./review-deep.ts";
 import { JOB_CASE_TYPE } from "./vault-boundary.mjs";
 
@@ -316,6 +311,31 @@ export function localDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+/** 今日から見て何日か。日付として読めなければ null（0日先と区別する）。 */
+export function daysFromToday(date: string) {
+  if (!date) return null;
+  const target = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return null;
+  const today = new Date(`${localDateKey()}T00:00:00`);
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+/**
+ * 「3 天后」「今天」のような相対表記。
+ *
+ * 過去を必ず「N 天前」に落とすのが要点。以前は頂栏側が負の日数を
+ * そのまま `${days} 天后` に流していて、期限を過ぎた予定が「-2 天后」と出ていた。
+ * 表示だけの分岐に見えるが、遅れているものが遅れて見えないという実害がある。
+ */
+export function countdownLabel(date: string) {
+  const days = daysFromToday(date);
+  if (days === null) return "日期未定";
+  if (days === 0) return "今天";
+  if (days === 1) return "明天";
+  if (days > 1) return `${days} 天后`;
+  return `${-days} 天前`;
+}
+
 export function todoPriority(note: Note) {
   return getString(note.frontmatter.priority).toLowerCase() || "medium";
 }
@@ -330,43 +350,18 @@ export function todoAction(note: Note) {
 }
 
 export function buildReviewPreview(notes: Note[]): ReviewPreview {
-  const studies = notes.filter((note) => getType(note) === "transcript-study");
-  const annotationNotes = notes.filter((note) => getType(note) === "study-annotation");
-  const deepReviewNotes = notes.filter((note) => getType(note) === "interview-answer-review");
-  const docs = studies
-    .map((note): ReviewPreviewDoc => {
-      const company = getString(note.frontmatter.company);
-      const date = getString(note.frontmatter.date);
-      const round = getString(note.frontmatter.round);
-      const annotationNote = annotationNotes.find(
-        (candidate) =>
-          getString(candidate.frontmatter.company) === company &&
-          getString(candidate.frontmatter.date) === date,
-      );
-      const deepReviewNote = deepReviewNotes.find(
-        (candidate) =>
-          getString(candidate.frontmatter.company) === company &&
-          getString(candidate.frontmatter.date) === date &&
-          getString(candidate.frontmatter.round) === round,
-      );
-      const parsed = parseSeirikou(note.content);
-      const annotations = annotationNote
-        ? uniqueAnnotations(parseAnnotations(annotationNote.content))
-        : [];
-      const decisions = reviewDecisionTasks(parsed.sentences, annotations);
-      return {
-        key: note.path,
-        company,
-        date,
-        round,
-        decisionTotal: decisions.length,
-        pendingDecisions: decisions.filter((item) => !item.resolvedBy).length,
-        deepReview: deepReviewNote
-          ? parseInterviewAnswerReview(deepReviewNote.content) ?? undefined
-          : undefined,
-      };
-    })
-    .sort((left, right) => right.date.localeCompare(left.date));
+  // 照合規則そのものは lib/review-join.ts が持つ。ここは要約に必要な数だけを畳む。
+  const docs = joinReviewNotes(notes).map((joined): ReviewPreviewDoc => ({
+    key: joined.key,
+    company: joined.company,
+    date: joined.date,
+    round: joined.round,
+    decisionTotal: joined.decisionTasks.length,
+    pendingDecisions: joined.decisionTasks.filter((item) => !item.resolvedBy).length,
+    deepReview: joined.deepReviewNote
+      ? parseInterviewAnswerReview(joined.deepReviewNote.content) ?? undefined
+      : undefined,
+  }));
   const reviewedCount = docs.filter((doc) => doc.deepReview).length;
   const pendingDecisions = docs.reduce((total, doc) => total + doc.pendingDecisions, 0);
   const readyCount = docs.filter((doc) => doc.pendingDecisions === 0 && !doc.deepReview).length;

@@ -32,12 +32,11 @@ import {
 import { isGeneratedNote, JOB_CASE_ORIGINS } from "../lib/vault-boundary.mjs";
 import { buildKnowledgeGraph, graphHealth } from "../lib/knowledge-graph.ts";
 import { parseQueue, queueStats } from "../lib/job-queue.mjs";
-import { parseInterviewAnswerReview } from "../lib/review-deep.ts";
 import {
   buildCardCoverage,
   buildInterviewTrends,
-  interviewKeyFromNoteName,
   renderInterviewTrends,
+  reviewTrendEntry,
 } from "../lib/interview-trends.mjs";
 import {
   buildStatsPayload,
@@ -341,14 +340,7 @@ for (const path of await listMarkdownFiles(JOB_CASE_ROOT)) {
   const content = await readFile(path, "utf8");
   const fm = parseFrontmatter(content);
   if (fm.type !== "interview-answer-review") continue;
-  const name = (path.split("/").pop() ?? "").replace(/\.md$/i, "");
-  reviewEntries.push({
-    key: interviewKeyFromNoteName(name),
-    company: String(fm.company ?? ""),
-    date: String(fm.date ?? ""),
-    round: String(fm.round ?? ""),
-    review: parseInterviewAnswerReview(content),
-  });
+  reviewEntries.push(reviewTrendEntry(path, fm, content));
 }
 const trendsBlock = renderInterviewTrends(buildInterviewTrends(reviewEntries, cardCoverage));
 
