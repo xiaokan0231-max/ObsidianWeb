@@ -69,7 +69,10 @@ function Overview({
   const recentChanges = useMemo(() => jobs
     .filter((job) => !ACTIVE_JOB_STATUSES.has(job.status) && job.status !== "未応募")
     .slice(0, 3), [jobs]);
-  const focusBrief = useMemo(() => buildFocusBrief(notes), [notes]);
+  // today を渡し、依存にも入れる。入れないと日付を跨いでも focusBrief が昨日の判定のまま
+  // 凍り、expires_at をまたいだ待办が hero に居座り続ける——H5 で直したのと同型の穴を
+  // stale 机制で作り直すところだった。
+  const focusBrief = useMemo(() => buildFocusBrief(notes, today), [notes, today]);
   const primaryFocus = focusBrief.primary;
   const waitingFocus = focusBrief.waiting[0] ?? null;
 

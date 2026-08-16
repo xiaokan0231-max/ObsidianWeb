@@ -122,20 +122,28 @@ function focusReason(action: Omit<FocusAction, "reason">, today: string) {
 
 /**
  * 「この日を過ぎたらタスク自体が意味を失う」日付。due（期限：過ぎたらもっと急ぐ）とは
- * 反対向きの概念で、面接準備のようなイベント拘束の待办だけが持つ。
+ * 反対向きの概念で、特定のイベントに縛られた待办だけが持つ。
  *
- * 正書きは frontmatter の expires_at。無い旧ノートには保守的な推断だけを掛ける：
- * category が 面接対策 かつ focus: true かつ focus_until が過去 かつ
- * due が有効で ≦ focus_until——つまり本人が宣言した集中窗口が丸ごと過去にある場合のみ。
- * category を見るのは、返信・日程調整のような「窗口を逃しても義務が残る」待办を
- * 巻き込まないため（対抗審査の指摘：pin の残骸だけで失効と断じてはいけない）。
+ * 正書きは frontmatter の expires_at。これから起票するものは skill が必ず書く。
+ *
+ * 無い旧ノート向けの推断は**イベント拘束の明示的な印がある場合だけ**に絞る：
+ *   case_id（どの案件か）＋ blocks_next_stage（その案件の次の選考を止める関門か）
+ *   ＋ 本人が宣言した集中窗口が丸ごと過去（focus_until < today かつ due ≦ focus_until）。
+ *
+ * category だけでは足りない——面接対策 には「転職回数の説明」「面接復盤」のような
+ * 使い回しの効くタスクが実在し、それらに due と一時的な集中窗口を付けただけで
+ * 失効扱いされると、窗口が切れた瞬間に生きたタスクが黙って沈む（Codex レビューの指摘）。
+ * case_id ＋ blocks_next_stage は「この案件のこの回の関門」という意味を持つので、
+ * 使い回しタスクには原理的に付かない。
+ *
  * due しか無い待办（再認証のような「過ぎても今日やれば有効」な真の期限超過）は
- * 絶対に巻き込まない。
+ * どのみち巻き込まない。
  */
 function expiresAt(note: Note): string {
   const explicit = validDate(getString(note.frontmatter.expires_at));
   if (explicit) return explicit;
-  if (getString(note.frontmatter.category) !== "面接対策") return "";
+  if (!getString(note.frontmatter.case_id)) return "";
+  if (!booleanValue(note.frontmatter.blocks_next_stage)) return "";
   if (!booleanValue(note.frontmatter.focus)) return "";
   const focusUntil = validDate(getString(note.frontmatter.focus_until));
   if (!focusUntil) return "";
