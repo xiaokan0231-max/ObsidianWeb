@@ -863,6 +863,39 @@
   gap: 10px;
 }
 
+/* 失効した待办の収尾入口。hero の中では最も静かな要素にする——催促（オレンジの主ボタン）
+   と混ざると「もう意味のないタスク」がまた叫び始める。金色は「整理」の合図。 */
+.hero-stale-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 160ms ease;
+}
+
+.hero-stale-note i {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--gold);
+  border-radius: 50%;
+  color: var(--gold);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.hero-stale-note:hover { color: rgba(255, 255, 255, 0.85); }
+.hero-stale-note span { transition: transform 160ms ease; }
+.hero-stale-note:hover span { transform: translateX(3px); }
+
 .primary-action {
   display: flex;
   align-items: center;
@@ -1054,111 +1087,135 @@
   color: var(--orange);
 }
 
-.health-score-row {
+/* ===== 面试手感（BETWEEN ROUNDS）。旧「记忆健康度」の跡地 =====
+   金は首页でまだ使われていない色＝この面板の身分色（復盤 panel の violet 渐变と同じ手法）。
+   面板内の警戒はこれまで通り --orange。 */
+.drill-panel {
+  background:
+    linear-gradient(145deg, rgba(181, 132, 47, 0.055), transparent 48%),
+    var(--surface);
+}
+
+.drill-gap-row {
   display: flex;
-  align-items: baseline;
-  gap: 15px;
-  padding-bottom: 22px;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 18px;
   border-bottom: 1px solid #e2ded5;
 }
 
-.health-score strong {
+.drill-gap {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  color: var(--muted);
+}
+
+.drill-gap strong {
   font-family: "Songti SC", serif;
   font-size: 45px;
-  font-weight: 500;
+  font-weight: 560;
+  line-height: 1;
+  letter-spacing: -0.02em;
 }
 
-.health-score span {
-  color: #979c98;
-  font-size: 13px;
-}
+/* 空窗が3日を超えたら数字だけ温度を上げる——毎日ひとつ育つのがこの面板の鼓動 */
+.drill-gap.long { color: var(--orange); }
 
-.health-score-row p {
-  margin: 0;
-  color: #747a76;
-  font-size: 11px;
-}
+.drill-gap span { font-size: 11px; }
 
-.health-bars {
-  display: grid;
-  gap: 16px;
-  margin: 24px 0;
-}
+.drill-gap-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.drill-gap-copy p { margin: 0; font-size: 12.5px; font-weight: 640; }
+.drill-gap-copy small { color: var(--muted); font-size: 10px; }
+.drill-gap-copy .drill-gap-meta { color: var(--muted); font-size: 9.5px; }
 
-.health-bar-row > div:first-child {
+.drill-habits { padding: 6px 0 2px; }
+
+.drill-habits > button {
   display: flex;
-  justify-content: space-between;
-  margin-bottom: 7px;
-  font-size: 10px;
-}
-
-.health-bar-row strong {
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 9px;
-}
-
-.health-bar {
-  height: 3px;
-  overflow: hidden;
-  background: #e4e1d8;
-}
-
-.health-bar i {
-  display: block;
-  height: 100%;
-}
-
-.health-bar i.green { background: var(--green); }
-.health-bar i.orange { background: var(--orange); }
-.health-bar i.violet { background: var(--violet); }
-
-.health-alert {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 25px minmax(0, 1fr) 20px;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  width: 100%;
   border: 0;
-  background: #f4e9df;
-  padding: 14px;
+  border-bottom: 1px solid #e9e5dc;
+  background: transparent;
+  padding: 9px 2px;
   text-align: left;
   cursor: pointer;
 }
 
-.health-alert > span {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  background: var(--orange);
-  color: #fff;
+.drill-habits > button strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 150ms ease;
+}
+
+.drill-habits > button:hover strong { color: var(--orange); }
+
+.drill-habits > button span {
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+/* 直近の場でも出た癖の印。「まだ生きている」ことだけを静かに示す */
+.drill-habit-hot {
+  flex: none;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
+  background: var(--orange);
+}
+
+.drill-habits-guard {
+  margin: 10px 0;
+  color: var(--muted);
   font-size: 11px;
-  font-weight: 700;
+  line-height: 1.7;
 }
 
-.health-alert div {
+.drill-habits-foot {
   display: flex;
-  flex-direction: column;
-}
-
-.health-alert strong {
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 9px 0 0;
+  color: var(--muted);
   font-size: 10px;
 }
 
-.health-alert small {
-  margin-top: 4px;
-  color: #8b766d;
-  font-size: 10px;
+/* 墨底の「今日素振り」。復盤 panel の黒帯と同じ振る舞い、身分だけ金の霞 */
+.drill-action {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 0;
+  background: var(--ink);
+  color: #fff;
+  margin-top: 14px;
+  padding: 11px 14px;
+  text-align: left;
+  cursor: pointer;
 }
 
-.health-alert b {
-  transition: transform 160ms ease;
+.drill-action > span { min-width: 0; display: flex; flex-direction: column; }
+.drill-action small { color: rgba(255, 255, 255, 0.55); font-size: 9.5px; }
+.drill-action strong {
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-.health-alert:hover b {
-  transform: translateX(4px);
-}
+.drill-action b { color: #e5cf9d; transition: transform 160ms ease; }
+.drill-action:hover b { transform: translateX(4px); }
 
 .pipeline-list {
   display: flex;

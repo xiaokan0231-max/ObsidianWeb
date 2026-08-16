@@ -1449,6 +1449,21 @@
   padding: 18px 22px;
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
+
+/* 失効した待办：赤い催促を金色の「収尾」に落とす。目立たせない——
+   これは急ぎではなく、vault 側で 完了 にして閉じるだけの整理。 */
+.todo-card.is-stale { opacity: 0.78; }
+.todo-stale-badge {
+  align-self: center;
+  margin-left: 8px;
+  padding: 3px 8px;
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  color: var(--gold);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
 .todo-card:hover { border-color: #b2b2ac; box-shadow: 0 10px 24px rgba(32,39,35,.07); transform: translateY(-2px); }
 .todo-card.pri-high { border-left-color: var(--orange); }
 .todo-card.pri-medium { border-left-color: var(--gold); }

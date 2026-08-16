@@ -2,6 +2,7 @@
 
 import { memo, useState } from "react";
 import { noteDecisionMeta } from "./note-decision";
+import { isStaleTodo } from "@/lib/focus-action";
 import { jobSection } from "@/lib/jobs";
 import { getString, getType, type Note } from "@/lib/notes";
 import {
@@ -13,7 +14,16 @@ import {
   TODO_STATUS,
 } from "@/lib/memory-atlas-data";
 
-function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => void }) {
+function TodoView({
+  notes,
+  today,
+  onOpen,
+}: {
+  notes: Note[];
+  /** 「今日」は殻が持つ。memo 越しなので中で求めると日付を跨いでも凍る（H5 と同型）。 */
+  today: string;
+  onOpen: (note: Note) => void;
+}) {
   const [tab, setTab] = useState<string>("all");
   const [audience, setAudience] = useState<"user" | "system">("user");
   const todos = notes
@@ -76,13 +86,16 @@ function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => vo
         {visible.map((note) => {
           const pri = todoPriority(note);
           const st = todoStatus(note);
+          // 失効＝イベントが過ぎて、やること自体が意味を失った待办。
+          // 赤い催促のまま放置すると「已逾期」が嘘になるので、収尾の合図に変える。
+          const stale = st !== "完了" && isStaleTodo(note, today, notes);
           const decision = noteDecisionMeta(note);
           const why = jobSection(note, "なぜ必要か") || jobSection(note, "課題");
           const what = jobSection(note, "やること");
           return (
             <article
-              className={`todo-card pri-${pri} ${st === "完了" ? "is-done" : ""}`}
-              data-semantic={decision.semantic}
+              className={`todo-card pri-${pri} ${st === "完了" ? "is-done" : ""} ${stale ? "is-stale" : ""}`}
+              data-semantic={stale ? "fact" : decision.semantic}
               key={note.path}
             >
               <header className="todo-head">
@@ -91,6 +104,7 @@ function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => vo
                   <h2>{todoAction(note)}</h2>
                 </div>
                 <span className={`todo-status st-${st}`}>{st}</span>
+                {stale && <span className="todo-stale-badge">事件已过 · 待收尾</span>}
               </header>
               {getString(note.frontmatter.category) && (
                 <div className="todo-cat">{getString(note.frontmatter.category)}</div>

@@ -1088,7 +1088,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                 />
               )}
               {view === "todo" && (
-                <TodoView notes={notes} onOpen={openNote} />
+                <TodoView notes={notes} today={today} onOpen={openNote} />
               )}
               {view === "graph" && (
                 <GraphView
