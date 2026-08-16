@@ -5,9 +5,11 @@ import {
   buildCalendarEvents,
   buildDerivedData,
   calendarCompanyIdentity,
+  extractLinks,
   careerStatus,
   getLatestNoteDate,
   libraryScopeMatches,
+  mergePendingWrites,
   noteMatches,
   trustLayer,
   typeLabel,
@@ -249,4 +251,72 @@ test("値の | は OR、空白区切りの token 同士は AND", () => {
   // token をまたぐと従来どおり AND のまま。
   assert.equal(noteMatches(applied, "type:job-case status:応募済|面接中"), true);
   assert.equal(noteMatches(applied, "type:todo status:応募済|面接中"), false);
+});
+
+// 🔴 単条差し替え（patchNote）に変えた後の穴。全量取得は在途中に発行されたものが
+// 後から着地し得るので、素直に採用すると書いたばかりの内容が写前の値で黙って消える。
+test("在途の全量スナップショットは、まだ追いついていない書き込みを上書きしない", () => {
+  const written = note("20_求職/A/A_Data.md", "job-case", { status: "不採用" }, "書いた後の本文");
+  const staleSnapshot = [
+    note("20_求職/A/A_Data.md", "job-case", { status: "応募済" }, "書く前の本文"),
+    note("99_系统/_索引.md", "moc", {}, "索引"),
+  ];
+  const pending = new Map([[written.path, written]]);
+
+  const { notes, settled } = mergePendingWrites(staleSnapshot, pending);
+  const merged = notes.find((item) => item.path === written.path);
+  assert.match(merged.content, /書いた後の本文/, "写前スナップショットに潰されない");
+  assert.equal(merged.frontmatter.status, "不採用");
+  assert.deepEqual(settled, [], "サーバがまだ追いついていないので台帳に残す");
+  assert.equal(notes.length, 2, "他のノートはスナップショット側をそのまま使う");
+});
+
+test("サーバが追いついたら台帳から落とす（永久に貼り付かない）", () => {
+  const written = note("20_求職/A/A_Data.md", "job-case", { status: "不採用" }, "書いた後の本文");
+  const freshSnapshot = [note("20_求職/A/A_Data.md", "job-case", { status: "不採用" }, "書いた後の本文")];
+
+  const { settled } = mergePendingWrites(freshSnapshot, new Map([[written.path, written]]));
+  assert.deepEqual(settled, [written.path]);
+});
+
+test("台帳が空なら受け取った配列をそのまま返す（余計なコピーも並べ替えもしない）", () => {
+  const snapshot = [note("a.md", "moc", {}, "a")];
+  const { notes, settled } = mergePendingWrites(snapshot, new Map());
+  assert.equal(notes, snapshot);
+  assert.deepEqual(settled, []);
+});
+
+// 🔴 リンクの数え方は「本文からは例示コードを除く・frontmatter の構造化関係は数える」。
+// 片方に寄せると首页の孤立統計と知識図譜が割れる（実測：孤点 16 → 22 に膨らんだ）。
+test("リンク抽出：frontmatter の構造化関係は数え、コードフェンス内の例示は数えない", () => {
+  const content = [
+    "---",
+    "type: language-expression-course-progress",
+    'source_note: "[[AI活用推進_語彙]]"',
+    "---",
+    "# 進捗",
+    "",
+    "本文からは [[本物のリンク]] を拾う。",
+    "",
+    "```markdown",
+    "例示なので数えない: [[コード内のリンク]]",
+    "```",
+    "",
+    "`[[行内コードのリンク]]` も数えない。",
+    "<!-- [[コメント内のリンク]] も数えない -->",
+  ].join("\n");
+
+  const links = extractLinks(content);
+  assert.deepEqual(links.sort(), ["AI活用推進_語彙", "本物のリンク"]);
+});
+
+test("リンク抽出：frontmatter からしか繋がっていないノートは孤立ではない", () => {
+  // 進捗ノート・批注ノートの実際の形。ここを孤立と数えると、図譜では連結して見えるのに
+  // 首页の健康度だけが下がる——同じ問いに二つの答えがある状態に戻る。
+  const progress = note("30_日本語学習/専門コースログ/x_進捗.md", "language-expression-course-progress");
+  const withLink = {
+    ...progress,
+    content: `---\ntype: language-expression-course-progress\nsource_note: "[[素材ノート]]"\n---\n# 進捗\n`,
+  };
+  assert.deepEqual(extractLinks(withLink.content), ["素材ノート"]);
 });

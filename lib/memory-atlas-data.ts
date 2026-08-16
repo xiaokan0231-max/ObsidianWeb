@@ -225,10 +225,22 @@ export function noteFolder(path: string) {
   return folders.length ? folders.join(" / ") : "Vault 根目录";
 }
 
+const WIKILINK = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g;
+
 export function extractLinks(content: string) {
-  // 剥离规则与知识图谱（extractWikiLinks）同一口径。以前这边不剥 frontmatter/代码块，
-  // 同一篇笔记在首页孤点统计和图谱里的「有没有关系」可能不一致。
-  return Array.from(stripNonLinkRegions(content).matchAll(/\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g))
+  // 本文からは「リンクと見なさない領域」（コードフェンス・HTML コメント・行内コード）を落とす
+  // ——例示コードの [[…]] は知識関係ではない。知識図譜の extractWikiLinks と同じ剥ぎ方。
+  //
+  // frontmatter は落とさず**別に**拾う。source_note / annotation_note / target_note のような
+  // 構造化された関係はれっきとしたリンクで、図譜側も専用ルールで辺を張っている
+  // （knowledge-graph.ts）。本文と一緒に剥ぐと、進捗ノートや批注ノートのように
+  // frontmatter からしか繋がっていないノートが首页では「孤立」、図譜では「連結」に割れる。
+  const frontmatter = content.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+  const body = stripNonLinkRegions(content);
+  return [
+    ...Array.from(frontmatter.matchAll(WIKILINK)),
+    ...Array.from(body.matchAll(WIKILINK)),
+  ]
     .map((match) => match[1].trim())
     .filter(Boolean);
 }
@@ -557,6 +569,38 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
     if (byDate) return byDate;
     return left.time.localeCompare(right.time);
   });
+}
+
+/**
+ * 全量スナップショットへ「サーバがまだ追いついていない書き込み」を被せ直す。
+ *
+ * なぜ要るか：全量取得は在途中に発行されたものが後から着地し得る。着地したスナップショットは
+ * **発行時点**の vault なので、その後の書き込みを含まない——素直に採用すると書いたばかりの
+ * 内容が写前の値で黙って消える。書き込みごとに全量再取得していた頃は最後に着地するのが
+ * ほぼ必ず写後スナップショットだったので表面化しなかった。
+ *
+ * 突き合わせは本文の一致で行う（mtime はサーバ側とクライアント組み立てで基準が違う）。
+ * 一致したものは settled として返し、呼ぶ側が台帳から落とす。
+ */
+export function mergePendingWrites(
+  incoming: Note[],
+  pending: ReadonlyMap<string, Note>,
+): { notes: Note[]; settled: string[] } {
+  if (pending.size === 0) return { notes: incoming, settled: [] };
+  const byPath = new Map(incoming.map((note) => [note.path, note]));
+  const settled: string[] = [];
+  for (const [path, written] of pending) {
+    const server = byPath.get(path);
+    if (server && server.content === written.content) {
+      settled.push(path);
+      continue;
+    }
+    byPath.set(path, written);
+  }
+  return {
+    notes: [...byPath.values()].sort((left, right) => right.stat.mtime - left.stat.mtime),
+    settled,
+  };
 }
 
 export function buildDerivedData(notes: Note[], now = new Date()): DerivedData {

@@ -53,6 +53,8 @@ import {
   buildDerivedData,
   countdownLabel,
   GROUPS,
+  localDateKey,
+  mergePendingWrites,
   type GroupKey,
 } from "@/lib/memory-atlas-data";
 
@@ -414,6 +416,10 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       ? group as GroupKey | "all"
       : "all";
   });
+  // ダッシュボードは開きっぱなしで使う。「今日」は殻が state で持ち、視圖へは props で渡す
+  // ——視圖は memo で包んであるので、中で new Date() を呼ぶだけだと日付を跨いでも
+  // props が変わらず再レンダーされず、昨日の日付が凍りつく（総覧の見出し・日历の「今天」）。
+  const [today, setToday] = useState(() => localDateKey());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
@@ -423,9 +429,61 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     window.scrollTo({ left: 0, top: 0 });
   }, [view]);
 
+  // 次の深夜0時ちょうどに一度だけ起こす（常駐タイマーを置かないため）。
+  // タブが背面にいる間に日付が変わっていることもあるので、復帰時にも合わせる。
+  useEffect(() => {
+    let timer = 0;
+    const sync = () => {
+      setToday((current: string) => {
+        const now = localDateKey();
+        return now === current ? current : now;
+      });
+      schedule();
+    };
+    const schedule = () => {
+      window.clearTimeout(timer);
+      const now = new Date();
+      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      timer = window.setTimeout(sync, Math.max(1000, midnight.getTime() - now.getTime()));
+    };
+    schedule();
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("focus", sync);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("focus", sync);
+    };
+  }, []);
+
+  /**
+   * 書き込み結果の突き合わせ台帳。key はパス、値は「このリクエストで書いた本文」。
+   *
+   * 全量取得は在途中に発行されたものが後から着地し得る（R キーの強制爬取は 0.5〜1s かかり、
+   * その間も画面は操作できる）。到着した全量スナップショットは**発行時点**の vault なので、
+   * その後の書き込みを含まない——素直に setNotes すると、書いたばかりの内容が
+   * 写前の値で黙って上書きされる（last-write-wins）。以前は書くたびに新しい全量取得を
+   * 起こしていたので最後に着地するのがほぼ必ず写後スナップショットだったが、
+   * 単条差し替えに変えた今はその保証が無い。
+   *
+   * だから「サーバがまだ追いついていない書き込み」だけをここに保持し、
+   * 着地したスナップショットへ被せ直す。内容が一致した時点で台帳から落とす。
+   */
+  const pendingWrites = useRef(new Map<string, Note>());
+
+  const applyPendingWrites = useCallback((incoming: Note[]) => {
+    const { notes: merged, settled } = mergePendingWrites(incoming, pendingWrites.current);
+    // サーバが追いついたものは台帳から外す。以後はサーバ側が正。
+    for (const path of settled) pendingWrites.current.delete(path);
+    return merged;
+  }, []);
+
   const loadVault = useCallback(async (options?: { fresh?: boolean }) => {
     setLoading(true);
     setError("");
+    // R キーは「ローカルの状態も含めて信じ直す」操作。台帳ごと捨てて、
+    // サーバの言う通りにする（ここが台帳の逃げ道＝永久に貼り付き続けない保証）。
+    if (options?.fresh) pendingWrites.current.clear();
     try {
       // fresh は R キー専用の「サーバのキャッシュも信じない」通路。通常は増分キャッシュで足りる。
       const url = options?.fresh ? "/api/vault?refresh=1" : "/api/vault";
@@ -434,14 +492,14 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       if (!response.ok || !payload.connected) {
         throw new Error(payload.error || "无法连接 Obsidian");
       }
-      setNotes(payload.notes);
+      setNotes(applyPendingWrites(payload.notes));
       setFetchedAt(payload.fetchedAt ?? Date.now());
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "无法连接 Obsidian");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyPendingWrites]);
 
   /**
    * 写路由已经把更新后的那条 note 放在响应里，这里只做单条替换。
@@ -449,6 +507,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
    * spinner 还要按住整条链路——为了换一条已经在手里的数据。
    */
   const patchNote = useCallback((note: Note) => {
+    // 在途の全量取得が写前スナップショットを持って着地しても潰されないよう、台帳にも残す。
+    pendingWrites.current.set(note.path, note);
     setNotes((current) => {
       const index = current.findIndex((item) => item.path === note.path);
       if (index < 0) return [...current, note];
@@ -959,6 +1019,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                 <Overview
                   notes={notes}
                   derived={derived}
+                  today={today}
                   onOpen={openNote}
                   onView={navigateToView}
                   onQuery={runSavedQuery}
@@ -1032,6 +1093,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                 <CalendarView
                   events={derived.calendarEvents}
                   notes={notes}
+                  today={today}
                   onOpen={openNote}
                   onPrepare={prepareInterview}
                 />

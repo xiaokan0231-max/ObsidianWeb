@@ -139,6 +139,17 @@ export async function readAllNotes(options?: { force?: boolean }) {
   return vaultCache.readAll(options);
 }
 
+/**
+ * 書いた側が「更新後のノートはこれ」とキャッシュへ置く。
+ * writeNote の invalidate だけだと、次の再取得が Obsidian の metadataCache 再解析より
+ * 先に走った時に「新しい mtime ＋ 古い frontmatter」を掴んで固定してしまう
+ * （看板の status が巻き戻り、手動再読込まで直らない）。書き手は全文も frontmatter も
+ * 手元に持っているのだから、推測させずに渡す。
+ */
+export function primeNote(note: ObsidianNote) {
+  vaultCache.prime(note);
+}
+
 // 「笔记还没建」和「Obsidian 挂了」只能靠 request() 抛出的文案区分。
 // 判定收在这里：散在各 route 时它有 9 份，改一处就等于漏改八处。
 export function isMissingNoteError(error: unknown) {

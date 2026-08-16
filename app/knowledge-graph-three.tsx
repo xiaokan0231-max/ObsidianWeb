@@ -1030,8 +1030,11 @@ export default function ThreeKnowledgeGraph({
     const pulsePoint = new THREE.Vector3();
     const pulseColor = new THREE.Color();
 
-    // 「今どの節点の飄帯が立っているか」。clearRelationRibbons が必ず空へ戻すので、
-    // どの経路（関係探索など）から拆されても、次の focusAttributes が正しく建て直す。
+    // 「今 relationRibbons に何が入っているか」。空文字＝何も入っていない。
+    // 関係探索の飄帯も同じ容器を使うので、専用の印を入れて「無選択（空文字）」と区別する
+    // ——同値だと、探索を抜けた後の focusAttributes(null) が「変化なし」と判断して
+    // 掃除を飛ばし、探索の飄帯が画面に残り続ける。
+    const EXPLORATION_RIBBONS = " exploration";
     let ribbonsKey = "";
     const clearRelationRibbons = () => {
       ribbonsKey = "";
@@ -1218,6 +1221,9 @@ export default function ThreeKnowledgeGraph({
         ribbon.renderOrder = 3;
         relationRibbons.add(ribbon);
       });
+      // 容器の中身を印にも反映する。ここを更新し忘れると、探索を抜けた後の
+      // focusAttributes(null) が「空文字のまま＝変化なし」と見て掃除を飛ばす。
+      ribbonsKey = EXPLORATION_RIBBONS;
       labelItems.forEach(({ node, label }) => {
         label.dataset.active = node.id === sourceId || node.id === targetId
           ? "selected"

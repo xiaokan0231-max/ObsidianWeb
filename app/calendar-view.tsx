@@ -12,6 +12,7 @@ import {
 function CalendarView({
   events,
   notes,
+  today,
   onOpen,
   onPrepare,
 }: {
@@ -19,12 +20,13 @@ function CalendarView({
   notes: Note[];
   onOpen: (note: Note) => void;
   onPrepare: (company: string) => void;
+  /** 「今日」は殻が持つ。memo 越しなので中で求めると日付を跨いでも昨日のままになる。 */
+  today: string;
 }) {
   const [month, setMonth] = useState(() => {
-    const today = new Date();
-    return new Date(today.getFullYear(), today.getMonth(), 1);
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
   });
-  const today = localDateKey();
   const monthLabel = new Intl.DateTimeFormat("zh-CN", {
     year: "numeric",
     month: "long",

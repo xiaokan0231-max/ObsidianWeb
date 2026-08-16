@@ -17,12 +17,20 @@ function bridgeHeaders() {
   };
 }
 
+/**
+ * ブリッジ側は task ごとに上限を持つ（最長 480 秒、scripts/codex-bridge.mjs）。
+ * ここはその外側の兜底：接続だけ受けて黙り込まれた時、undici の既定（約 300 秒）まで
+ * 待たされるのを避ける。ブリッジ自身の上限より長く取り、正常な長時間タスクは殺さない。
+ */
+const BRIDGE_TIMEOUT_MS = 540_000;
+
 async function bridgeFetch(path: string, init: RequestInit) {
   try {
     const response = await fetch(`${BRIDGE_URL}${path}`, {
       ...init,
       headers: { ...bridgeHeaders(), ...(init.headers ?? {}) },
       cache: "no-store",
+      signal: AbortSignal.timeout(BRIDGE_TIMEOUT_MS),
     });
     const result = (await response.json()) as {
       error?: string;

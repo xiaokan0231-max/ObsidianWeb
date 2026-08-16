@@ -16,7 +16,6 @@ import {
   getGroup,
   getLatestNoteDate,
   GROUPS,
-  localDateKey,
   todoAction,
   todoAudience,
   todoPriority,
@@ -33,6 +32,7 @@ const currentStageRank: Record<string, number> = { 面接中: 0, 書類通過: 1
 function Overview({
   notes,
   derived,
+  today,
   onOpen,
   onView,
   onQuery,
@@ -40,6 +40,8 @@ function Overview({
 }: {
   notes: Note[];
   derived: DerivedData;
+  /** 「今日」は殻が持つ。memo で包まれているので、中で new Date() すると日付を跨いでも凍る。 */
+  today: string;
   onOpen: (note: Note) => void;
   onView: (view: View) => void;
   onQuery: (query: string) => void;
@@ -92,7 +94,7 @@ function Overview({
   return (
     <div className="overview-view">
       <section className="memory-hero feature-shell">
-        <div className="eyebrow"><span /> TODAY&apos;S BRIEF · {formatDate(localDateKey())}</div>
+        <div className="eyebrow"><span /> TODAY&apos;S BRIEF · {formatDate(today)}</div>
         <div className="hero-layout">
           <div className="hero-primary">
             <div className="hero-primary-topline">

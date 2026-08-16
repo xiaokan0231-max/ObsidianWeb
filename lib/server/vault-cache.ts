@@ -28,7 +28,23 @@ export type VaultCacheIO = {
   crawlAllNotes(): Promise<ObsidianNote[]>;
   /** 重取变更文件时的并发度，与 crawlAllNotes 的口径保持一致。 */
   concurrency?: number;
+  /** 时钟。测试用；业务侧不传就是 Date.now。 */
+  now?: () => number;
 };
+
+/**
+ * 「次回スキャンで必ず取り直す」印。実在の mtime（正の epoch ミリ秒）と衝突しない値。
+ * 条目を消すのではなく印を付けるのは、消すと在途の増分リフレッシュに穴が空くため（下記）。
+ */
+const STALE_MTIME = -1;
+
+/**
+ * prime した権威データを磁盘側が追いつくまで守る時間。
+ * Obsidian の metadataCache は非同期に再解析されるので、書いた直後の GET は
+ * 「新しい mtime ＋ 古い frontmatter」を返し得る。それを鵜呑みにすると mtime が
+ * 一致してしまい、古い frontmatter が永久に居座る（看板の status が巻き戻る）。
+ */
+const PRIME_GUARD_MS = 5_000;
 
 async function mapConcurrent<T, R>(
   values: T[],
@@ -52,11 +68,21 @@ async function mapConcurrent<T, R>(
 
 export function createVaultCache(io: VaultCacheIO) {
   const limit = io.concurrency ?? 8;
+  const now = io.now ?? Date.now;
   // value.mtime 存扫描返回的值而不是 note.stat.mtime：两者在「扫描和 GET 之间文件又变了」
   // 时会不同，存扫描值可保证下一轮扫描必然发现差异并重取（宁可多取一次，不可漏取）。
-  const entries = new Map<string, { mtime: number; note: ObsidianNote }>();
+  // primedAt が在るのは「書いた側が権威データを置いた」条目（下の prime を参照）。
+  const entries = new Map<
+    string,
+    { mtime: number; note: ObsidianNote; primedAt?: number }
+  >();
   // 并发的 readAll 共享同一趟在途请求；写入 invalidate 时置空，让下一个调用者重新扫描。
   let inflight: Promise<ObsidianNote[]> | null = null;
+
+  /** prime 直後か（＝磁盘や metadataCache がまだ追いついていない可能性がある間か）。 */
+  function withinPrimeGuard(entry: { primedAt?: number } | undefined) {
+    return entry?.primedAt !== undefined && now() - entry.primedAt < PRIME_GUARD_MS;
+  }
 
   function sorted(notes: ObsidianNote[]) {
     return notes.sort((left, right) => right.stat.mtime - left.stat.mtime);
@@ -80,11 +106,21 @@ export function createVaultCache(io: VaultCacheIO) {
     }
     const fetched = await mapConcurrent(stale, limit, io.readNote);
     fetched.forEach((note, index) => {
-      entries.set(note.path, { mtime: stats.get(stale[index]) ?? note.stat.mtime, note });
+      const path = stale[index];
+      const current = entries.get(path);
+      // 権威データを守る：取り直した内容がまだ prime した内容と違う＝磁盘／metadataCache が
+      // 追いついていない。ここで入れると「新しい mtime ＋ 古い frontmatter」が固定される。
+      // 印（STALE_MTIME）を残したまま見送れば、次のスキャンでもう一度取り直す。
+      if (withinPrimeGuard(current) && current!.note.content !== note.content) return;
+      entries.set(path, { mtime: stats.get(path) ?? note.stat.mtime, note });
     });
     // 已删除的文件不会出现在扫描里，从缓存中清掉，否则删除的笔记会永远留在页面上。
-    for (const path of entries.keys()) {
-      if (!stats.has(path)) entries.delete(path);
+    for (const [path, entry] of entries) {
+      if (stats.has(path)) continue;
+      // 作りたてのノートは、作成がこのラウンドのスキャンより後なら まだ現れない。
+      // 守り時間内は消さない——消すと「今書いたノートが無い」画面になる。
+      if (withinPrimeGuard(entry)) continue;
+      entries.delete(path);
     }
     return sorted([...entries.values()].map((entry) => entry.note));
   }
@@ -99,15 +135,34 @@ export function createVaultCache(io: VaultCacheIO) {
     return run;
   }
 
-  /** 写入后调用。删掉本条并作废在途读取，让同一请求内紧随的 readAll 拿到新内容。 */
+  /**
+   * 写入后调用。**消さずに印だけ付ける**のが要点。
+   * 消すと、在途の増分リフレッシュ（スキャン済み・再取得待ち）が「そのパスは stale ではない」と
+   * 判断した後に穴が空き、そのラウンドの結果からノートが丸ごと落ちる——クライアントは
+   * それを全量スナップショットとして setNotes するので、画面から消えたまま手動再読込まで戻らない。
+   * 印なら、内容は1ラウンド古いことがあっても存在は消えず、次のスキャンで必ず取り直す。
+   */
   function invalidate(path: string) {
-    entries.delete(path);
+    const current = entries.get(path);
+    if (current) entries.set(path, { ...current, mtime: STALE_MTIME });
+    inflight = null;
+  }
+
+  /**
+   * 書いた側が権威データをそのまま置く（write-through）。invalidate だけだと、
+   * 次の再取得が Obsidian の metadataCache 再解析に先んじて「新しい mtime ＋ 古い frontmatter」を
+   * 掴み、mtime 一致でそれが固定される。書き手は全文も frontmatter も手元に持っているので、
+   * 推測させずに渡す。印は STALE_MTIME のままなので、磁盘の値とは次のラウンドで必ず突き合わせる。
+   */
+  function prime(note: ObsidianNote) {
+    entries.set(note.path, { mtime: STALE_MTIME, note, primedAt: now() });
     inflight = null;
   }
 
   return {
     readAll,
     invalidate,
+    prime,
     /** 仅测试用：观察缓存规模，不要在业务代码里读。 */
     size: () => entries.size,
   };

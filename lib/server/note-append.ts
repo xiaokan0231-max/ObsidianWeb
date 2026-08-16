@@ -1,5 +1,5 @@
 import type { ObsidianNote } from "./obsidian.ts";
-import { readNoteOrNull, writeNote } from "./obsidian.ts";
+import { primeNote, readNoteOrNull, writeNote } from "./obsidian.ts";
 
 /**
  * 追記型ノート（批注・フィードバック・重練キュー・専項進度）の共通骨格。
@@ -42,19 +42,19 @@ export async function upsertAppendNote<T>(options: {
   // stat/frontmatter は手元の知識から組み立てる。書いた直後の readNote は
   // Obsidian の metadata cache が追いつく前の frontmatter を返し得るので、往復を増やさない。
   const now = Date.now();
-  return {
-    value: planned.value,
-    deduplicated: false,
-    note: {
-      path: options.path,
-      stat: {
-        ctime: existing?.stat.ctime ?? now,
-        mtime: now,
-        size: planned.nextContent.length,
-      },
-      tags: existing?.tags ?? [],
-      frontmatter: existing?.frontmatter ?? planned.frontmatterForNew ?? {},
-      content: planned.nextContent,
+  const note: ObsidianNote = {
+    path: options.path,
+    stat: {
+      ctime: existing?.stat.ctime ?? now,
+      mtime: now,
+      size: planned.nextContent.length,
     },
+    tags: existing?.tags ?? [],
+    frontmatter: existing?.frontmatter ?? planned.frontmatterForNew ?? {},
+    content: planned.nextContent,
   };
+  // 組み立てた権威データをキャッシュへも置く。新規作成の場合はこれが無いと、
+  // 作成がスキャンより後だったラウンドで「まだ存在しないノート」として扱われる。
+  primeNote(note);
+  return { value: planned.value, deduplicated: false, note };
 }
