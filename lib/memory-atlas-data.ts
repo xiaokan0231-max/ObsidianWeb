@@ -395,6 +395,28 @@ export function calendarEventLabel(text: string) {
   return detectEventLabel(text) ?? "面谈";
 }
 
+/**
+ * 日历の重複判定に使う会社 identity。
+ * 表示名は出所ごとに `株式会社Sharing Innovations` / `Sharing_Innovations` のように
+ * 揺れるが、人間には同じ会社である。法人格・空白・区切りだけを落とし、語そのものは
+ * 残すことで、見た目の揺れだけを吸収する。
+ */
+export function calendarCompanyIdentity(company: string) {
+  return company
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    .replace(/株式会社|有限会社|合同会社|\(株\)|incorporated|inc\.?|co\.?,?\s*ltd\.?|ltd\.?/gu, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function calendarCompanyDisplayScore(company: string) {
+  const normalized = company.normalize("NFKC");
+  return (/(?:株式会社|有限会社|合同会社)/u.test(normalized) ? 6 : 0) +
+    (!/_/.test(normalized) ? 2 : 0) +
+    (!/[\\/]/.test(normalized) ? 1 : 0) +
+    Math.min(normalized.length, 40) / 100;
+}
+
 export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEvent[] {
   const today = localDateKey(now);
   const events = new Map<string, CalendarEvent>();
@@ -412,7 +434,8 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
       detectEventLabel(getString(note.frontmatter.next_action)) ??
       calendarEventLabel(getTitle(note));
     const time = source.match(/(?:^|\D)((?:[01]?\d|2[0-3]):[0-5]\d)(?:\D|$)/)?.[1] ?? "";
-    const key = `${company.toLowerCase()}|${date}`;
+    const identity = calendarCompanyIdentity(company) || company.toLocaleLowerCase("ja-JP");
+    const key = `${identity}|${date}`;
     const candidate: CalendarEvent & { priority: number } = {
       id: `${key}|${note.path}`,
       note,
@@ -424,7 +447,21 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
       priority,
     };
     const current = events.get(key) as (CalendarEvent & { priority?: number }) | undefined;
-    if (!current || (current.priority ?? 0) < priority) events.set(key, candidate);
+    if (!current) {
+      events.set(key, candidate);
+      return;
+    }
+    const winner = (current.priority ?? 0) < priority ? candidate : current;
+    const other = winner === candidate ? current : candidate;
+    const displayCompany = calendarCompanyDisplayScore(company) > calendarCompanyDisplayScore(current.company)
+      ? company
+      : current.company;
+    events.set(key, {
+      ...winner,
+      company: displayCompany,
+      time: winner.time || other.time,
+      label: winner.label === "面谈" ? other.label : winner.label,
+    });
   };
 
   notes.forEach((note) => {
@@ -466,8 +503,24 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
         .map((line) => ({ line, priority: 2, trusted: false })),
     ];
     sources.forEach(({ line, priority, trusted }) => {
+      // 🔴 本文からの推測は「予定」より「叙述」を拾いやすい。実測した誤検出3型：
+      //   ①`[[ワークポート面談対応]] の 2026-08-08 追記に集約した`＝**ノート名**の中の「面談」
+      //   ②`| 2026-07-24 | ワークポート面談実施 → …`＝表の**履歴行**
+      //   ③`…2026-07-24…＝面談の前に謝絶`＝「面談に至らなかった」という叙述
+      // いずれも予定ではないのに、会社名つきで日历へ出る（＝約束していない面談が現れる）。
+      // 予定は next_event_at が正本なので、ここは**取りこぼしの兜底**に徹して厳しく絞る。
+      if (!trusted) {
+        // 表の行は履歴・照合表であって予定ではない（引用ブロック `> |` の中にもある）。
+        if (/^\s*>?\s*\|/.test(line)) return;
+        // 語の判定から [[wikilink]] の中身を除く。ノート名は予定の根拠にならない。
+        if (!/(?:面接|面談|面试|面谈|カジュアル|セミナー|说明会)/.test(line.replace(/\[\[[^\]]*\]\]/g, ""))) {
+          return;
+        }
+      }
       if (!/(?:面接|面談|面试|面谈|カジュアル|セミナー|说明会)/.test(line)) return;
-      if (!trusted && /(?:通知|リマインド|案内|お礼|準備|証拠|応募|スカウト|不採用|結果)/.test(line)) return;
+      // 「拒」は中文表記の拒否（书类拒 等）。拒否の叙述行に他社の日付が混ざり、
+      // 別会社の予定として出ていた実例がある（FPTコンサル に FPTソフトウェア の日付）。
+      if (!trusted && /(?:通知|リマインド|案内|お礼|準備|証拠|応募|スカウト|不採用|結果|拒)/.test(line)) return;
       const date = line.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
       if (date) addEvent(note, date, line, priority);
     });
