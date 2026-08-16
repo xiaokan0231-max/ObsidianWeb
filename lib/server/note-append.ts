@@ -1,5 +1,5 @@
 import type { ObsidianNote } from "./obsidian.ts";
-import { primeNote, readNoteOrNull, writeNote } from "./obsidian.ts";
+import { readNoteOrNull, writeNote } from "./obsidian.ts";
 
 /**
  * 追記型ノート（批注・フィードバック・重練キュー・専項進度）の共通骨格。
@@ -53,8 +53,5 @@ export async function upsertAppendNote<T>(options: {
     frontmatter: existing?.frontmatter ?? planned.frontmatterForNew ?? {},
     content: planned.nextContent,
   };
-  // 組み立てた権威データをキャッシュへも置く。新規作成の場合はこれが無いと、
-  // 作成がスキャンより後だったラウンドで「まだ存在しないノート」として扱われる。
-  primeNote(note);
   return { value: planned.value, deduplicated: false, note };
 }

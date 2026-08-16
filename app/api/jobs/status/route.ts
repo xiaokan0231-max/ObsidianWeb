@@ -8,7 +8,7 @@ import {
   statusRequiresChannel,
 } from "@/lib/jobs";
 import { errorResponse, readJson } from "@/lib/server/api";
-import { primeNote, readNote, writeNote } from "@/lib/server/obsidian";
+import { readNote, writeNote } from "@/lib/server/obsidian";
 import { createSerialQueue } from "@/lib/server/serial-queue";
 
 type Body = {
@@ -89,9 +89,6 @@ export async function POST(request: Request) {
         stat: { ...note.stat, mtime: Date.now(), size: content.length },
         frontmatter: { ...note.frontmatter, status: value, status_updated: date },
       };
-      // キャッシュにも権威データを置く。Obsidian の metadataCache 再解析は非同期なので、
-      // これが無いと次の再取得が古い status の frontmatter を掴んで固定し得る。
-      primeNote(updated);
       return Response.json({
         ok: true,
         path,

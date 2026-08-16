@@ -150,107 +150,7 @@ test("在途リフレッシュ中に別のノートを書いても、そのノ�
   );
 });
 
-// 🔴 実際の Local REST API の形：content と stat は磁盘（PUT 完了後なので新しい）、
-// frontmatter と tags は**非同期に再解析される metadataCache**（しばらく古いまま）。
-// つまり滞留中は「新しい mtime ＋ 新しい content ＋ 古い frontmatter」。
-// content で追いつき判定をすると必ず一致してしまい、古い frontmatter が
-// 磁盘と同じ mtime で落ちて**永久に固定**される（看板の status が巻き戻り、
-// R キーを押しても直らない）。この形でしか捕まらないので、こう組む。
-test("prime した権威データは、metadataCache が追いつくまで古い frontmatter に上書きされない", async () => {
-  const { state, cache } = fakeVault({ "a.md": 100 });
-  await cache.readAll();
-
-  const authoritative = {
-    ...note("a.md", 500),
-    content: "書き換え後の本文",
-    frontmatter: { type: "job-case", status: "不採用" },
-  };
-  cache.prime(authoritative);
-  state.stats.set("a.md", 500);
-  // 磁盘は追いついている（content も mtime も新しい）が metadataCache だけ古い
-  state.contentOverride.set("a.md", {
-    content: "書き換え後の本文",
-    frontmatter: { type: "job-case", status: "応募済" },
-  });
-
-  const first = await cache.readAll();
-  assert.equal(first[0].frontmatter.status, "不採用", "古い frontmatter で権威データを潰さない");
-
-  // 何度読んでも固定されない（＝mtime 一致で取り直しを諦めていない）
-  const second = await cache.readAll();
-  assert.equal(second[0].frontmatter.status, "不採用");
-
-  // metadataCache が追いついたら素直に受け入れる
-  state.contentOverride.set("a.md", {
-    content: "書き換え後の本文",
-    frontmatter: { type: "job-case", status: "不採用" },
-  });
-  const third = await cache.readAll();
-  assert.equal(third[0].frontmatter.status, "不採用");
-  state.readCalls.length = 0;
-  await cache.readAll();
-  assert.equal(state.readCalls.length, 0, "追いついた後は普通にキャッシュが効く");
-
-  // 守り時間を過ぎれば、Obsidian 側の手編集は無条件に通る（固定ではなく逃げ道）
-  state.clock += 10_000;
-  state.stats.set("a.md", 900);
-  state.contentOverride.set("a.md", {
-    content: "Obsidian で手編集",
-    frontmatter: { type: "job-case", status: "保留" },
-  });
-  const fourth = await cache.readAll();
-  assert.equal(fourth[0].frontmatter.status, "保留");
-  assert.equal(fourth[0].content, "Obsidian で手編集");
-});
-
-// R キー（force）は crawl 分岐へ落ちる。ここが守りを見ていないと、書いた直後に
-// R を押した時——カードが変わらないので押したくなる——同じ古い frontmatter が、
-// 今度は取り直しの機会も無いまま固定される。
-test("force（R キー）の全量爬取でも、prime した権威データは守り時間内なら残る", async () => {
-  const { state, cache } = fakeVault({ "a.md": 100 });
-  await cache.readAll();
-
-  cache.prime({
-    ...note("a.md", 500),
-    content: "書き換え後の本文",
-    frontmatter: { type: "job-case", status: "不採用" },
-  });
-  state.stats.set("a.md", 500);
-  state.contentOverride.set("a.md", {
-    content: "書き換え後の本文",
-    frontmatter: { type: "job-case", status: "応募済" },
-  });
-
-  const forced = await cache.readAll({ force: true });
-  assert.equal(forced[0].frontmatter.status, "不採用", "R キーでも古い frontmatter を固定しない");
-
-  // その後の増分読みでも固定されていない
-  const next = await cache.readAll();
-  assert.equal(next[0].frontmatter.status, "不採用");
-});
-
-test("prime 直後の新規ノートは、まだスキャンに現れなくても消えない", async () => {
-  const { state, cache } = fakeVault({ "a.md": 100 });
-  await cache.readAll();
-
-  // 批注ノートの初回作成：スキャンはまだこのファイルを知らない
-  cache.prime(note("new.md", 300));
-  const notes = await cache.readAll();
-  assert.ok(notes.some((item) => item.path === "new.md"), "作りたてのノートが消えてはいけない");
-
-  // 守り時間を過ぎ、スキャンにも現れないなら（＝本当に消された）落とす
-  state.clock += 10_000;
-  const later = await cache.readAll();
-  assert.equal(later.some((item) => item.path === "new.md"), false);
-});
-
-// 🔴 prime できるのは「更新後の note を組み立てられる書き手」だけで、実際には
-// writeNote の呼び出し 15 箇所のうち 2 箇所しかない。残り（課程の再生成・
-// generated-artifact の supersede など）は invalidate だけなので、権威データが無い。
-// 印を付けて取り直させても、その取り直しが metadataCache の再解析より早ければ
-// 「新しい mtime ＋ 古い frontmatter」を mtime 一致で固定してしまう——
-// supersede は既存ノートの frontmatter だけを書き換えるので Obsidian は旧 cache を即返す＝必ず踏む。
-test("prime していない書き込みでも、守り時間内は mtime で固定しない", async () => {
+test("書いた直後は mtime で固定しない（取り直しが古い値を掴んでも居座らせない）", async () => {
   const { state, cache } = fakeVault({ "curriculum.md": 100 });
   await cache.readAll();
 
@@ -276,4 +176,41 @@ test("prime していない書き込みでも、守り時間内は mtime で固�
   const settled = await cache.readAll();
   assert.deepEqual(state.readCalls, [], "守り時間を過ぎたらキャッシュが効く");
   assert.equal(settled[0].frontmatter.lifecycle, "superseded");
+});
+
+// R キー（force）は crawl 分岐へ落ちる。ここが守りを見ていないと、書いた直後に
+// R を押した時——カードが変わらないので押したくなる——固定を早回しすることになる。
+test("force（R キー）の全量爬取でも、書いた直後のパスは固定しない", async () => {
+  const { state, cache } = fakeVault({ "a.md": 100 });
+  await cache.readAll();
+
+  cache.invalidate("a.md");
+  state.stats.set("a.md", 500);
+
+  await cache.readAll({ force: true });
+  state.readCalls.length = 0;
+  await cache.readAll();
+  assert.deepEqual(state.readCalls, ["a.md"], "crawl 後も守り時間内は突き合わせ続ける");
+
+  state.clock += 10_000;
+  await cache.readAll();
+  state.readCalls.length = 0;
+  await cache.readAll();
+  assert.deepEqual(state.readCalls, [], "守り時間を過ぎたら固定される");
+});
+
+test("書き込み直後のノートは、まだスキャンに現れなくても消えない", async () => {
+  const { state, cache } = fakeVault({ "a.md": 100, "b.md": 200 });
+  await cache.readAll();
+
+  // b を書いたが、このラウンドのスキャンは b の変更前を見ている（＝現れない）
+  cache.invalidate("b.md");
+  state.stats.delete("b.md");
+  const notes = await cache.readAll();
+  assert.ok(notes.some((item) => item.path === "b.md"), "書いた直後のノートが消えてはいけない");
+
+  // 守り時間を過ぎてもスキャンに現れないなら（＝本当に消された）落とす
+  state.clock += 10_000;
+  const later = await cache.readAll();
+  assert.equal(later.some((item) => item.path === "b.md"), false);
 });
