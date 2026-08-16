@@ -1006,7 +1006,13 @@ export default function ThreeKnowledgeGraph({
       }
     }
 
+    // 曲線はリンクごとに決定的（節点座標は構築後に動かない）なのでキャッシュする。
+    // 素のままだと脈衝が毎フレーム・毎リンクで Vector3 3個＋曲線＋seeded の文字列2本を
+    // 作り直し、80 リンクで秒間数万個の一時オブジェクトが GC を叩き続ける。
+    const relationCurveCache = new Map<KnowledgeGraphSceneLink, THREE.QuadraticBezierCurve3>();
     const relationCurve = (link: KnowledgeGraphSceneLink) => {
+      const cached = relationCurveCache.get(link);
+      if (cached) return cached;
       const source = positionById.get(link.source)!;
       const target = positionById.get(link.target)!;
       const midpoint = source.clone().lerp(target, 0.5);
@@ -1015,10 +1021,23 @@ export default function ThreeKnowledgeGraph({
       const bend = 0.16 + seeded(`${link.source}:${link.target}:bend`) * 0.3;
       midpoint.addScaledVector(normal, bend);
       midpoint.z += (seeded(`${link.source}:${link.target}:z`) - 0.5) * 0.42;
-      return new THREE.QuadraticBezierCurve3(source, midpoint, target);
+      const curve = new THREE.QuadraticBezierCurve3(source, midpoint, target);
+      relationCurveCache.set(link, curve);
+      return curve;
     };
+    // 帧内の書き込み先は使い回す。getPoint(t, target) / toArray(array, offset) は
+    // three が最初から用意している無分配経路。
+    const pulsePoint = new THREE.Vector3();
+    const pulseColor = new THREE.Color();
 
+    // 「今 relationRibbons に何が入っているか」。空文字＝何も入っていない。
+    // 関係探索の飄帯も同じ容器を使うので、専用の印を入れて「無選択（空文字）」と区別する
+    // ——同値だと、探索を抜けた後の focusAttributes(null) が「変化なし」と判断して
+    // 掃除を飛ばし、探索の飄帯が画面に残り続ける。
+    const EXPLORATION_RIBBONS = " exploration";
+    let ribbonsKey = "";
     const clearRelationRibbons = () => {
+      ribbonsKey = "";
       [...relationRibbons.children].forEach((child) => {
         relationRibbons.remove(child);
         if (!(child instanceof THREE.Mesh)) return;
@@ -1109,8 +1128,14 @@ export default function ThreeKnowledgeGraph({
         focusArtifact.setPosition(focusPosition);
         focusArtifact.setAccent(artifactAccent);
       }
-      clearRelationRibbons();
-      if (selectedRef.current) {
+      // 飄帯は selectedRef.current だけで決まる（hover では変わらない）。锁定中は
+      // onPointerMove が hover のたびにここへ来るので、鍵が同じなら拆して建て直さない
+      // ——TubeGeometry(28,·,7)×32 で一回あたり約 300KB の白建になる。
+      // showRelationExploration の activeRelationKey と同じ守り方。
+      if (ribbonsKey !== (selectedRef.current ?? "")) {
+        clearRelationRibbons();
+        ribbonsKey = selectedRef.current ?? "";
+        if (selectedRef.current) {
         validLinks
           .filter((link) => (
             link.source === selectedRef.current || link.target === selectedRef.current
@@ -1143,6 +1168,7 @@ export default function ThreeKnowledgeGraph({
             ribbon.renderOrder = 2;
             relationRibbons.add(ribbon);
           });
+        }
       }
       labelItems.forEach(({ node, label }) => {
         label.dataset.active =
@@ -1195,6 +1221,9 @@ export default function ThreeKnowledgeGraph({
         ribbon.renderOrder = 3;
         relationRibbons.add(ribbon);
       });
+      // 容器の中身を印にも反映する。ここを更新し忘れると、探索を抜けた後の
+      // focusAttributes(null) が「空文字のまま＝変化なし」と見て掃除を飛ばす。
+      ribbonsKey = EXPLORATION_RIBBONS;
       labelItems.forEach(({ node, label }) => {
         label.dataset.active = node.id === sourceId || node.id === targetId
           ? "selected"
@@ -1872,12 +1901,12 @@ export default function ThreeKnowledgeGraph({
       if (!pauseRef.current && pulseLinks.length > 0) {
         pulseLinks.forEach((link, index) => {
           const progress = (seconds * 0.23 + index / Math.max(1, pulseLinks.length)) % 1;
-          const position = relationCurve(link).getPoint(progress);
-          const color = new THREE.Color(
+          relationCurve(link).getPoint(progress, pulsePoint);
+          pulseColor.set(
             nodeById.get(progress < 0.5 ? link.source : link.target)?.color ?? "#ffffff",
           );
-          pulsePositions.set(position.toArray(), index * 3);
-          pulseColors.set(color.toArray(), index * 3);
+          pulsePoint.toArray(pulsePositions, index * 3);
+          pulseColor.toArray(pulseColors, index * 3);
         });
         (pulseGeometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
         (pulseGeometry.getAttribute("color") as THREE.BufferAttribute).needsUpdate = true;

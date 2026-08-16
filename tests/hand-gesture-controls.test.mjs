@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { readAppCss } from "./css-source.mjs";
 import {
   gestureScoreThreshold,
   handPoseFromLandmarks,
@@ -20,7 +21,7 @@ import { relationExploration } from "../lib/graph-relation-exploration.mjs";
 const [graph, controls, css] = await Promise.all([
   readFile("app/knowledge-graph-three.tsx", "utf8"),
   readFile("app/graph-hand-controls.tsx", "utf8"),
-  readFile("app/globals.css", "utf8"),
+  readAppCss(),
 ]);
 
 test("手势几何：自拍镜像、抓取滞回和低通平滑", () => {

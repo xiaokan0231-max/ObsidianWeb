@@ -1,0 +1,434 @@
+/* 単場面接の準備ドキュメント（globals.css から分割） */
+
+/* ============================================================
+   単場面接の準備ドキュメント（type: interview-prep）
+   面接直前に読むものなので、注音（ruby）と台詞の区別を最優先に組む。
+   共通資産は埋め込みで入ってくるため、見た目は当日用 HTML と揃えている。
+   ============================================================ */
+
+.prep-upcoming {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 22px 24px; border: 1px solid var(--line); background: var(--surface);
+}
+.prep-upcoming > header {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 20px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--line);
+}
+.prep-upcoming > header span {
+  color: var(--muted); font-size: 9px; letter-spacing: 0.18em;
+}
+.prep-upcoming > header h2 { margin: 4px 0 0; font-size: 19px; }
+.prep-upcoming > header p { max-width: 46ch; color: var(--muted); font-size: 11px; line-height: 1.7; text-align: right; }
+.prep-upcoming-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;
+}
+.prep-upcoming-grid button {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px;
+  padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--green);
+  background: #fff; color: var(--ink); text-align: left; cursor: pointer;
+  font-family: inherit; transition: background .15s, border-color .15s;
+}
+.prep-upcoming-grid button:hover { background: var(--paper); border-color: var(--green); }
+.prep-upcoming-date { grid-column: 1; color: var(--green); font-size: 10px; letter-spacing: 0.08em; }
+.prep-upcoming-grid strong { grid-column: 1; font-size: 15px; }
+.prep-upcoming-grid em { grid-column: 1; color: var(--muted); font-size: 11px; font-style: normal; }
+.prep-upcoming-grid small { grid-column: 1; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.prep-upcoming-grid button > i { grid-row: 1 / span 4; grid-column: 2; align-self: center; color: var(--muted); font-style: normal; }
+
+.prep-doc-hero {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 18px;
+  padding: 20px 24px; border: 1px solid var(--line); background: var(--surface);
+}
+.prep-doc-back, .prep-doc-pager button, .prep-doc-nav button {
+  border: 1px solid var(--line); background: #fff; color: var(--ink);
+  font-family: inherit; cursor: pointer;
+}
+.prep-doc-back { padding: 7px 13px; font-size: 11px; }
+.prep-doc-back:hover { background: var(--paper); }
+.prep-doc-hero .eyebrow { color: var(--muted); font-size: 10px; letter-spacing: 0.12em; }
+.prep-doc-hero h1 { margin: 4px 0 0; font-size: 24px; }
+.prep-doc-meta { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+.prep-doc-broken {
+  padding: 11px 15px; border-left: 3px solid var(--orange);
+  background: #fdf1ec; color: #8a3c1d; font-size: 11px; line-height: 1.7;
+}
+
+/* 🔴 .topbar が sticky top:0 / z-index:25 / 高さ76px。ここを 0 にすると章ナビが
+   顶栏の裏に隠れて、スクロール後に章を切り替えられなくなる（実際に踏んだ）。 */
+.prep-doc-bar {
+  position: sticky; top: 76px; z-index: 6;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px;
+  padding: 9px 0; background: var(--paper); border-bottom: 1px solid var(--line);
+}
+.prep-doc-nav {
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px;
+}
+.prep-doc-nav button {
+  position: relative; display: inline-flex; align-items: center; gap: 6px;
+  flex: 0 0 auto; white-space: nowrap;
+  padding: 6px 13px; border-radius: 999px; font-size: 11px;
+}
+.prep-doc-nav button > b {
+  display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--paper-deep); color: var(--muted); font: 700 9px/1 var(--font-geist-mono), monospace;
+}
+/* 横に溢れる章タブの端を硬く切らずにフェードさせる（続きがあることが分かる） */
+.prep-doc-nav {
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+}
+.prep-doc-nav button.active { border-color: var(--green); background: var(--green); color: #f7f4ea; }
+.prep-doc-nav button.active > b { background: rgba(255,255,255,.18); color: #fff; }
+/* 検索ヒットのある章に印を出す。どの章を見ればよいかが一目で分かる */
+.prep-doc-nav button > i {
+  position: absolute; top: 3px; right: 5px; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--orange);
+}
+.prep-doc-search {
+  display: flex; align-items: center; gap: 7px; padding: 6px 12px;
+  border: 1px solid var(--line); border-radius: 999px; background: #fff;
+}
+.prep-doc-search > span { color: var(--muted); font-size: 13px; }
+.prep-doc-search input {
+  width: 150px; border: 0; outline: 0; background: transparent; color: var(--ink);
+  font-family: inherit; font-size: 11px;
+}
+.prep-doc-search button {
+  border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 11px; padding: 0;
+}
+.prep-doc-section-tabs {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 7px;
+  margin-top: -3px; padding: 7px 10px 0; border-top: 1px solid var(--line); background: var(--paper);
+}
+.prep-doc-section-tabs > span {
+  margin-right: 5px; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .1em;
+}
+.prep-doc-section-tabs button {
+  position: relative; padding: 5px 11px; border: 0; border-bottom: 2px solid transparent;
+  background: transparent; color: var(--muted); font-family: inherit; font-size: 10.5px; cursor: pointer;
+}
+.prep-doc-section-tabs button:hover { color: var(--green); }
+.prep-doc-section-tabs button.active { border-bottom-color: var(--orange); color: var(--ink); font-weight: 700; }
+.prep-doc-section-tabs button > i {
+  position: absolute; top: 1px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--orange);
+}
+.prep-doc-hits {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
+  padding: 9px 12px; background: #fdf6e4; border-left: 3px solid var(--gold); font-size: 11px;
+}
+.prep-doc-hits > span { color: #7a5c12; }
+.prep-doc-hits > span.none { color: var(--muted); }
+.prep-doc-hits button {
+  padding: 4px 11px; border: 1px solid #e3d3a3; border-radius: 999px; background: #fff;
+  color: var(--ink); font-family: inherit; font-size: 11px; cursor: pointer;
+}
+.prep-doc-hits button.active { border-color: var(--gold); background: var(--gold); color: #fff; }
+.prep-doc-hits button b { font-variant-numeric: tabular-nums; opacity: .65; }
+.prep-doc-hit { background: #ffe9a8; color: inherit; padding: 0 1px; border-radius: 2px; }
+/* 目次と本文の器。狭い画面では目次が本文の上、広い画面では左の余白に常駐させる */
+.prep-doc-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+
+/* 長い節の頭に置く「この節の構成」目次。以前は灰色チップの横並びで目次に見えず、
+   節全体の骨組みが掴めなかった——採番付きにし、本文の見出し番号と対応させる */
+.prep-doc-subnav {
+  padding: 12px 16px 13px; overflow: hidden;
+  background: var(--paper); border: 1px solid var(--line);
+}
+.prep-doc-subnav .subnav-label {
+  display: block; margin-bottom: 7px;
+  color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .14em;
+}
+.prep-doc-subnav .subnav-items {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 1px 20px;
+  position: relative;
+}
+/* 現在地の滑走インジケータ。縦一列（広い画面の側栏）でだけ意味を持つ */
+.prep-doc-subnav .subnav-indicator { display: none; }
+.prep-doc-subnav a {
+  display: flex; align-items: baseline; gap: 8px; min-width: 0;
+  padding: 3px 6px; border-radius: 3px;
+  color: var(--ink); font-size: 11.5px; text-decoration: none;
+  transition: color .16s ease, background-color .16s ease;
+}
+.prep-doc-subnav a > b {
+  flex: 0 0 auto; color: var(--green);
+  font: 700 10px/1.6 var(--font-geist-mono), monospace;
+  transition: color .16s ease;
+}
+.prep-doc-subnav a > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prep-doc-subnav a:hover { background: #fff; color: var(--green); }
+.prep-doc-subnav a:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+/* スクロール現在地。番号を橙に変え、読んでいる小節が目次側で分かる */
+.prep-doc-subnav a.active { background: #fff; color: var(--green); font-weight: 700; }
+.prep-doc-subnav a.active > b { color: var(--orange); }
+
+/* 広い画面：目次を左の余白に常駐させ、カード感を捨てて「巻物の欄外索引」にする。
+   軌道＋滑走する現在地バーは、灰色の枠とスクロールバーより現在地がよく見える */
+@media (min-width: 1480px) {
+  .prep-doc-main:has(.prep-doc-subnav) { grid-template-columns: 212px minmax(0, 1fr); gap: 20px; }
+  /* top はほぼ topbar(76)＋二段の章ナビの実測≒最大値。ずれても余白が増えるだけで隠れない */
+  .prep-doc-subnav {
+    position: sticky; top: 182px;
+    max-height: calc(100vh - 206px); overflow-y: auto; overflow-x: hidden;
+    scrollbar-width: none;
+    padding: 2px 0; background: none; border: 0;
+  }
+  .prep-doc-subnav::-webkit-scrollbar { display: none; }
+  .prep-doc-subnav .subnav-label { margin-bottom: 10px; padding-left: 15px; }
+  .prep-doc-subnav .subnav-items { grid-template-columns: 1fr; gap: 0; }
+  /* 全項をつなぐ細い軌道。その上を .subnav-indicator が滑る */
+  .prep-doc-subnav .subnav-items::before {
+    content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px;
+    border-radius: 2px; background: var(--line);
+  }
+  .prep-doc-subnav .subnav-indicator {
+    display: block; position: absolute; left: 0; top: 0; width: 2px; height: 0;
+    border-radius: 2px; background: var(--green); opacity: 0;
+    transition: top .28s cubic-bezier(.4, 0, .2, 1), height .28s cubic-bezier(.4, 0, .2, 1),
+      opacity .2s ease;
+  }
+  .prep-doc-subnav a { padding: 5px 8px 5px 15px; border-radius: 0 4px 4px 0; }
+  .prep-doc-subnav a:hover { background: rgba(47, 93, 63, 0.07); }
+  .prep-doc-subnav a.active { background: none; }
+}
+/* 本文側の見出し番号。目次と同じ番号なので、長文の途中でも現在地が分かる */
+.prep-doc-body h3 .prep-h-no {
+  display: inline-grid; place-items: center; min-width: 21px; height: 21px;
+  margin-right: 9px; padding: 0 5px;
+  background: var(--green); color: #f7f4ea;
+  font: 700 10.5px/1 var(--font-geist-mono), monospace; font-style: normal;
+  vertical-align: 3px;
+}
+/* 畳みカードの番号は控えめに：資産は「参照」であり、本輪の見出しと同格に光らせない */
+.prep-doc-embed-toggle .prep-h-no {
+  flex: 0 0 auto; display: inline-grid; place-items: center; min-width: 21px; height: 21px;
+  padding: 0 5px; background: var(--paper-deep); color: var(--muted);
+  font: 700 10.5px/1 var(--font-geist-mono), monospace; font-style: normal;
+}
+
+.prep-doc-body {
+  padding: 26px 30px; border: 1px solid var(--line); background: #fff;
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", var(--font-geist-sans), sans-serif;
+}
+.prep-doc-body h2 {
+  margin: 0 0 18px; padding-bottom: 9px; border-bottom: 2px solid var(--green); font-size: 20px;
+}
+.prep-doc-body h3 { margin: 24px 0 9px; color: var(--green); font-size: 15px; }
+.prep-doc-body h4 { margin: 18px 0 7px; color: var(--violet); font-size: 13px; }
+.prep-doc-body h3, .prep-doc-body h4 { scroll-margin-top: 180px; }
+.prep-doc-body p { margin: 8px 0; font-size: 13px; line-height: 1.85; }
+/* ルビは行間を食うので、台詞ブロックだけ行送りを広げる */
+.prep-doc-body ruby { ruby-position: over; }
+.prep-doc-body rt { color: var(--green); font-size: 9px; font-weight: 400; }
+
+.prep-doc-say {
+  padding: 11px 14px; border-left: 3px solid var(--green); background: #eef4f0;
+  font-size: 14px; line-height: 2.1;
+}
+.prep-doc-say.interviewer { border-left-color: var(--violet); background: #f1eef7; }
+.prep-doc-say > span {
+  display: inline-block; margin-right: 9px; padding: 1px 8px;
+  background: var(--green); color: #f7f4ea; font-size: 9px; vertical-align: 2px;
+}
+.prep-doc-say.interviewer > span { background: var(--violet); }
+
+.prep-doc-note { padding: 9px 13px; font-size: 12px; line-height: 1.8; }
+.prep-doc-note.zh { background: #fdf6e4; border-left: 3px solid var(--gold); }
+.prep-doc-note.follow { background: #eef2f7; border-left: 3px solid #4a6d99; }
+/* > 引用の大半は「当日そのまま口に出す内容」（開幕・救場・逆質問・締め）。
+   以前の灰底＋灰文字は読み上げ本文を背景騒音に見せていた——離線 HTML の金框に合わせ、
+   本文と同じ字色で読めるようにする。⚠️🔴 で始まる行だけが本当の注意書き＝警戒色 */
+.prep-doc-note.tip { background: #fffcf3; border-left: 3px solid var(--gold); }
+.prep-doc-note.tip.warn { background: #fdf1ec; border-left-color: var(--orange); }
+/* 連続する引用（救場3句・逆質問1〜3）はひとつの塊に見せる。ぶつ切りの「方塊」を並べない */
+.prep-doc-body .prep-doc-note.tip:not(.warn) + .prep-doc-note.tip:not(.warn) {
+  margin-top: -8px; padding-top: 4px;
+}
+.prep-doc-ref {
+  padding: 0 3px; border-bottom: 1px dotted var(--line); color: var(--muted); font-size: 0.92em;
+}
+
+.prep-doc-list { margin: 8px 0; padding-left: 1.4em; }
+.prep-doc-body ol.prep-doc-list { list-style: decimal; }
+.prep-doc-body ul.prep-doc-list { list-style: disc; }
+.prep-doc-list li { margin: 5px 0; font-size: 13px; line-height: 1.85; }
+.prep-doc-tablewrap { overflow-x: auto; margin: 12px 0; }
+.prep-doc-tablewrap table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.prep-doc-tablewrap th, .prep-doc-tablewrap td {
+  padding: 7px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; line-height: 1.7;
+}
+.prep-doc-tablewrap th { background: var(--paper); }
+.prep-doc-code {
+  overflow-x: auto; margin: 12px 0; padding: 14px 16px;
+  border: 1px solid var(--line); background: var(--paper);
+  font-family: var(--font-geist-mono), monospace; font-size: 11px; line-height: 1.8;
+}
+
+/* 埋め込み共通資産の畳み：展開のまま地の文に混ぜると、輪を切り替えても同じ長文が
+   続いて見える。破線＝「ここは正本の参照」の印。開くと実線になり本文と地続きで読める */
+.prep-doc-embed {
+  margin: 14px 0; border: 1px dashed var(--line); background: var(--paper);
+  scroll-margin-top: 180px;
+}
+.prep-doc-embed.open { border-style: solid; background: #fff; }
+.prep-doc-embed-head { display: flex; align-items: center; gap: 8px; }
+.prep-doc-embed-toggle {
+  flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 10px 13px; border: 0; background: transparent; color: var(--ink);
+  font-family: inherit; font-size: 11.5px; text-align: left; cursor: pointer;
+}
+.prep-doc-embed-toggle > i { color: var(--muted); font-style: normal; font-size: 10px; }
+.prep-doc-embed-toggle > b { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
+.prep-doc-embed-toggle .section {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted); font-size: 10.5px;
+}
+.prep-doc-embed-toggle .scope {
+  flex: 0 0 auto; padding: 2px 8px; border-radius: 999px;
+  background: var(--paper-deep); color: var(--muted); font-size: 9px; letter-spacing: .06em;
+}
+.prep-doc-embed-toggle .hit {
+  flex: 0 0 auto; padding: 1px 7px; border-radius: 999px;
+  background: #ffe9a8; color: #7a5c12; font-size: 9.5px; font-style: normal;
+}
+.prep-doc-embed-toggle:hover > b { color: var(--green); }
+.prep-doc-embed-open {
+  flex: 0 0 auto; margin-right: 10px; padding: 4px 10px;
+  border: 1px solid var(--line); background: #fff; color: var(--muted);
+  font-family: inherit; font-size: 10px; cursor: pointer;
+}
+.prep-doc-embed-open:hover { color: var(--green); border-color: var(--green); }
+.prep-doc-embed-body { padding: 2px 16px 14px; border-top: 1px dashed var(--line); }
+
+/* 殺傷質問7題：当日これ1画面で回すページ。問い → 読み上げる答案 → なぜ、の順に固定する */
+.kill-map { display: flex; flex-direction: column; gap: 14px; }
+.kill-map-head {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px;
+  padding: 12px 16px; background: var(--paper); border: 1px solid var(--line);
+}
+.kill-map-head > div { display: flex; align-items: baseline; gap: 8px; }
+.kill-map-head strong { color: var(--green); font-family: var(--font-geist-mono), monospace; font-size: 17px; }
+.kill-map-head span { color: var(--muted); font-size: 10.5px; }
+.kill-map-head > i { display: block; height: 4px; background: var(--line); }
+.kill-map-head > i em { display: block; height: 100%; background: var(--green); transition: width 200ms ease; }
+.kill-map-head button { padding: 5px 10px; border: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+
+.kill-card { border: 1px solid var(--line); border-left: 3px solid var(--green); background: #fff; }
+.kill-card.done { border-left-color: #b9c8bf; opacity: .62; }
+.kill-card > header {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 12px;
+  padding: 14px 16px; border-bottom: 1px solid var(--line); background: #fbfaf6;
+}
+.kill-card > header > b {
+  width: 24px; height: 24px; display: grid; place-items: center;
+  background: var(--green); color: #f7f4ea;
+  font-family: var(--font-geist-mono), monospace; font-size: 11px; font-weight: 500;
+}
+.kill-card.done > header > b { background: #b9c8bf; }
+.kill-card > header h3 { margin: 0; color: var(--ink); font-size: 15px; line-height: 1.5; }
+.kill-card > header small { display: block; margin-top: 3px; color: var(--muted); font-size: 10.5px; }
+.kill-card > header > button {
+  padding: 6px 12px; border: 1px solid var(--line); background: transparent;
+  color: var(--muted); font-size: 10.5px; white-space: nowrap; cursor: pointer;
+}
+.kill-card > header > button.on { border-color: var(--green); background: var(--green); color: #f7f4ea; }
+
+/* 答案は「読み上げる文」なので、ここだけ本文より大きくルビの行送りも広く取る */
+.kill-answer { padding: 4px 16px 14px; }
+.kill-answer .prep-doc-say { font-size: 15px; line-height: 2.25; }
+.kill-answer h4 { margin: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 500; }
+.kill-answer > :first-child { margin-top: 12px; }
+.kill-missing { margin: 0; padding: 14px 16px; background: #fff1ec; color: #8d382b; font-size: 12px; line-height: 1.8; }
+
+.kill-followup { margin: 0 16px 12px; border: 1px dashed var(--line); }
+.kill-followup > summary {
+  padding: 9px 12px; color: var(--muted); font-size: 11.5px; cursor: pointer; list-style: none;
+}
+.kill-followup > summary::-webkit-details-marker { display: none; }
+.kill-followup > summary i { font-style: normal; transition: transform 150ms ease; display: inline-block; }
+.kill-followup[open] > summary i { transform: rotate(180deg); }
+.kill-followup[open] > summary { border-bottom: 1px dashed var(--line); }
+.kill-followup > *:not(summary) { padding-inline: 12px; }
+.kill-followup .prep-doc-say { font-size: 13.5px; line-height: 2.05; }
+
+.kill-mine {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px;
+  margin: 0 16px 12px; padding: 9px 12px; background: #fff1ec;
+  font-size: 12px; line-height: 1.8;
+}
+.kill-mine > span { color: #8d382b; font-size: 10px; font-weight: 600; }
+
+.kill-why { margin: 0 16px 14px; }
+.kill-why > button {
+  width: 100%; padding: 8px 12px; border: 1px solid var(--line); background: #fdf6e4;
+  color: #7a5c12; font-size: 11.5px; text-align: left; cursor: pointer;
+}
+.kill-why > button i { float: right; font-style: normal; font-family: var(--font-geist-mono), monospace; }
+.kill-why > p {
+  margin: 0; padding: 11px 13px; border: 1px solid var(--line); border-top: 0;
+  background: #fdf6e4; font-size: 12.5px; line-height: 1.95;
+}
+
+@media (max-width: 780px) {
+  .kill-map-head { grid-template-columns: 1fr auto; }
+  .kill-map-head > i { grid-column: 1 / -1; }
+  .kill-card > header { grid-template-columns: auto minmax(0, 1fr); }
+  .kill-card > header > button { grid-column: 2; justify-self: start; }
+}
+
+.prep-doc-pager {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding-top: 14px; border-top: 1px solid var(--line);
+}
+.prep-doc-pager button { flex: 1; padding: 12px; color: var(--green); font-size: 12px; }
+.prep-doc-pager button:disabled { opacity: .35; cursor: default; }
+.prep-doc-pager span { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 780px) {
+  .prep-upcoming > header { flex-direction: column; align-items: flex-start; }
+  .prep-upcoming > header p { text-align: left; }
+  .prep-doc-hero { grid-template-columns: minmax(0, 1fr); }
+  .prep-doc-body { padding: 20px 16px; }
+}
+
+/* 過去の復盤から出す「次に気をつけること」。数字は lib/interview-trends.mjs が唯一の計算元。 */
+.prep-weakness {
+  border: 1px solid var(--line); border-left: 3px solid var(--orange); background: var(--surface);
+}
+.prep-weakness > summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  padding: 11px 16px; cursor: pointer; list-style: none;
+}
+.prep-weakness > summary::-webkit-details-marker { display: none; }
+.prep-weakness > summary::before {
+  content: "▸"; color: var(--muted); font-size: 10px;
+}
+.prep-weakness[open] > summary::before { content: "▾"; }
+.prep-weakness > summary > span { font-size: 12.5px; font-weight: 500; }
+.prep-weakness > summary > em { color: var(--muted); font-size: 11px; font-style: normal; }
+.prep-weakness > summary > em b { color: var(--orange); }
+.prep-weakness-peek { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.prep-weakness-peek li {
+  display: flex; align-items: center; gap: 5px;
+  padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px;
+  background: #fff; color: var(--muted); font-size: 10.5px;
+}
+.prep-weakness-peek li.hot { border-color: var(--orange); color: #8a3c1d; }
+.prep-weakness-peek li i {
+  padding: 0 4px; background: var(--orange); color: #fff; font-size: 9px; font-style: normal; border-radius: 2px;
+}
+.prep-weakness-body { padding: 0 16px 14px 34px; }
+.prep-weakness-body > p { margin: 0 0 10px; color: var(--muted); font-size: 11px; }
+.prep-weakness-body ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.prep-weakness-body li {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 7px 12px; border: 1px solid var(--line); background: #fff;
+}
+.prep-weakness-body li.hot { border-color: var(--orange); background: #fdf1ec; }
+.prep-weakness-body li strong { font-size: 12px; }
+.prep-weakness-body li span { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.prep-weakness-body li i {
+  padding: 1px 6px; background: var(--orange); color: #fff; font-size: 9px; font-style: normal;
+}
+@media (max-width: 780px) {
+  .prep-weakness { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+}

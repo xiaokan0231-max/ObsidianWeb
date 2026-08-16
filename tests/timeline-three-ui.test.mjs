@@ -1,26 +1,30 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { readAppCss } from "./css-source.mjs";
 
-const [ui, atlas, graph, stage, chrome, sceneLib, css] = await Promise.all([
+const [ui, atlas, timelineView, graphView, graph, stage, chrome, sceneLib, css] = await Promise.all([
   readFile("app/timeline-three.tsx", "utf8"),
   readFile("app/memory-atlas.tsx", "utf8"),
+  readFile("app/timeline-view.tsx", "utf8"),
+  readFile("app/graph-view.tsx", "utf8"),
   readFile("app/knowledge-graph-three.tsx", "utf8"),
   readFile("app/three-stage.ts", "utf8"),
   readFile("app/three-stage-chrome.tsx", "utf8"),
   readFile("lib/timeline-scene.ts", "utf8"),
-  readFile("app/globals.css", "utf8"),
+  readAppCss(),
 ]);
 
-test("时之航道接入 memory-atlas：lazy 加载、纯数据映射、双渲染切换与降级", () => {
-  assert.ok(atlas.includes('lazy(() => import("./timeline-three"))'), "航道必须走 lazy 边界");
-  assert.ok(atlas.includes("buildTimelineScene("), "场景数据在 atlas 侧映射");
-  assert.ok(atlas.includes('from "@/lib/timeline-scene"'));
-  assert.ok(atlas.includes("3D 航道"));
-  assert.ok(atlas.includes("简洁模式"));
-  assert.ok(atlas.includes('useState<"corridor" | "list">("corridor")'), "默认 3D，与关系图一致");
-  assert.ok(atlas.includes("<TimelineListView"), "2D 列表作为简洁模式保留");
-  assert.ok(atlas.includes("onFallback={fallBackToList}"), "WebGL 失败退回列表");
+test("时之航道接入时间线视图：lazy 加载、纯数据映射、双渲染切换与降级", () => {
+  // 视图从 memory-atlas 拆出到 timeline-view.tsx，契约不变、落点变了。
+  assert.ok(timelineView.includes('lazy(() => import("./timeline-three"))'), "航道必须走 lazy 边界");
+  assert.ok(timelineView.includes("buildTimelineScene("), "场景数据在视图侧映射为纯数据");
+  assert.ok(timelineView.includes('from "@/lib/timeline-scene"'));
+  assert.ok(timelineView.includes("3D 航道"));
+  assert.ok(timelineView.includes("简洁模式"));
+  assert.ok(timelineView.includes('useState<"corridor" | "list">("corridor")'), "默认 3D，与关系图一致");
+  assert.ok(timelineView.includes("<TimelineListView"), "2D 列表作为简洁模式保留");
+  assert.ok(timelineView.includes("onFallback={fallBackToList}"), "WebGL 失败退回列表");
   assert.ok(atlas.includes('events={derived.calendarEvents}'), "日程事件要传进时间线");
   // 导航顺序保持：时间线在关系图之前。
   assert.ok(
@@ -29,12 +33,15 @@ test("时之航道接入 memory-atlas：lazy 加载、纯数据映射、双渲�
   );
 });
 
-test("chunk 边界：three 及其共享层绝不能被 memory-atlas 急加载", () => {
-  assert.equal(atlas.includes('from "three"'), false, "atlas 不许直接 import three");
-  assert.equal(atlas.includes("./three-stage"), false, "atlas 不许引用 three 工具层");
-  assert.equal(atlas.includes("three-stage-chrome"), false, "atlas 不许引用舞台 chrome");
+test("chunk 边界：three 及其共享层绝不能被视图外壳急加载", () => {
+  // 拆分后规则覆盖外壳和两个 3D 视图文件：谁都不许急加载 three。
+  for (const consumer of [atlas, timelineView, graphView]) {
+    assert.equal(consumer.includes('from "three"'), false, "不许直接 import three");
+    assert.equal(consumer.includes('from "./three-stage"'), false, "不许引用 three 工具层");
+    assert.equal(consumer.includes("three-stage-chrome"), false, "不许引用舞台 chrome");
+  }
   // 场景类型只能以 import type 穿过 lazy 边界。
-  assert.match(atlas, /import type \{[^}]*KnowledgeGraphSceneNode/);
+  assert.match(graphView, /import type \{[^}]*KnowledgeGraphSceneNode/);
   assert.equal(sceneLib.includes('from "three"'), false, "timeline-scene 必须保持纯数据");
   assert.equal(sceneLib.includes('from "./notes"'), false, "timeline-scene 不依赖 Note 类型");
 });

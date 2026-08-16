@@ -302,6 +302,10 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     const colors = new Float32Array(notes.length * 3);
     const sizes = new Float32Array(notes.length);
     const phases = new Float32Array(notes.length);
+    // 検索命中球の回転基値。決定的な値なのに、以前は帧内で命中ごとに
+    // seeded(テンプレート文字列)×3 を回していた——命中数に上限が無いので、
+    // 「面接」のような常用語では毎フレーム数百〜千回の文字列分配になる。
+    const searchSpins = new Float32Array(notes.length * 3);
     const nodeFocus = new Float32Array(notes.length);
     const nodeSearch = new Float32Array(notes.length);
     const positionById = new Map<string, THREE.Vector3>();
@@ -326,6 +330,9 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       colors.set(color.toArray(), index * 3);
       sizes[index] = 0.85 + seeded(`${note.id}:size`) * 0.25;
       phases[index] = seeded(`${note.id}:phase`) * Math.PI * 2;
+      searchSpins[index * 3] = seeded(`${note.id}:search-x`) * Math.PI;
+      searchSpins[index * 3 + 1] = seeded(`${note.id}:search-y`) * Math.PI;
+      searchSpins[index * 3 + 2] = seeded(`${note.id}:search-z`) * Math.PI;
       positionById.set(note.id, position);
       indexById.set(note.id, index);
     });
@@ -415,9 +422,9 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         nodeSearch[index] = matched ? 1 : 0;
         searchMatrix.position.copy(positionById.get(note.id)!);
         searchMatrix.rotation.set(
-          seeded(`${note.id}:search-x`) * Math.PI,
-          seeded(`${note.id}:search-y`) * Math.PI,
-          seeded(`${note.id}:search-z`) * Math.PI,
+          searchSpins[index * 3],
+          searchSpins[index * 3 + 1],
+          searchSpins[index * 3 + 2],
         );
         searchMatrix.scale.setScalar(
           active && matched ? searchSphereScale : 0.0001,
@@ -1171,9 +1178,9 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
             : 1 + Math.sin(seconds * 1.5 + phases[index]) * 0.055;
           searchMatrix.position.copy(positionById.get(note.id)!);
           searchMatrix.rotation.set(
-            seeded(`${note.id}:search-x`) * Math.PI + seconds * 0.04,
-            seeded(`${note.id}:search-y`) * Math.PI + seconds * 0.065,
-            seeded(`${note.id}:search-z`) * Math.PI,
+            searchSpins[index * 3] + seconds * 0.04,
+            searchSpins[index * 3 + 1] + seconds * 0.065,
+            searchSpins[index * 3 + 2],
           );
           searchMatrix.scale.setScalar(searchSphereScale * pulse);
           searchMatrix.updateMatrix();

@@ -29,10 +29,36 @@ import {
   type TwoHandMetrics,
 } from "@/lib/hand-gesture.mjs";
 
-const MEDIAPIPE_WASM_ROOT =
+// wasm とモデルは自托管が正（scripts/fetch-mediapipe.mjs が public/mediapipe/ に用意する）。
+// オフラインや CSP を締めた環境でも手勢が動き、モデルのバージョンも固定される。
+// 取得脚本が走っていない環境のためだけに CDN フォールバックを残す——
+// CDN のモデル URL はバージョン無しの latest で、Google 側の差し替えで挙動が変わり得る。
+const LOCAL_WASM_ROOT = "/mediapipe/wasm";
+const LOCAL_MODEL_URL = "/mediapipe/gesture_recognizer.task";
+const CDN_WASM_ROOT =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
-const GESTURE_MODEL_URL =
+const CDN_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-tasks/gesture_recognizer/gesture_recognizer.task";
+
+/** 自托管の実体が揃っている時だけ local を選ぶ。wasm とモデルは対で切り替える。 */
+async function resolveMediapipeAssets() {
+  try {
+    const [wasmOk, modelOk] = await Promise.all([
+      fetch(`${LOCAL_WASM_ROOT}/vision_wasm_internal.wasm`, { method: "HEAD" })
+        .then((response) => response.ok)
+        .catch(() => false),
+      fetch(LOCAL_MODEL_URL, { method: "HEAD" })
+        .then((response) => response.ok)
+        .catch(() => false),
+    ]);
+    if (wasmOk && modelOk) {
+      return { wasmRoot: LOCAL_WASM_ROOT, modelUrl: LOCAL_MODEL_URL };
+    }
+  } catch {
+    // HEAD が投げたら CDN へ
+  }
+  return { wasmRoot: CDN_WASM_ROOT, modelUrl: CDN_MODEL_URL };
+}
 const INFERENCE_INTERVAL_MS = 1000 / 15;
 const RADIAL_MENU_HOLD_MS = 560;
 const PALM_MENU_HOLD_MS = 550;
@@ -461,7 +487,8 @@ export function GraphHandControls({
         setPhase("loading");
         setDetail("首次进入会下载约 20MB 的模型与运行时，之后由浏览器缓存。");
         const { FilesetResolver, GestureRecognizer } = await import("@mediapipe/tasks-vision");
-        const fileset = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_ROOT);
+        const assets = await resolveMediapipeAssets();
+        const fileset = await FilesetResolver.forVisionTasks(assets.wasmRoot);
         const commonOptions = {
           runningMode: "VIDEO" as const,
           numHands: 2,
@@ -480,12 +507,12 @@ export function GraphHandControls({
           recognizer = await GestureRecognizer.createFromOptions(fileset, {
             ...commonOptions,
             canvas: document.createElement("canvas"),
-            baseOptions: { modelAssetPath: GESTURE_MODEL_URL, delegate: "GPU" },
+            baseOptions: { modelAssetPath: assets.modelUrl, delegate: "GPU" },
           });
         } catch {
           recognizer = await GestureRecognizer.createFromOptions(fileset, {
             ...commonOptions,
-            baseOptions: { modelAssetPath: GESTURE_MODEL_URL, delegate: "CPU" },
+            baseOptions: { modelAssetPath: assets.modelUrl, delegate: "CPU" },
           });
         }
         if (stopped) {

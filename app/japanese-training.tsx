@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   LanguageBatch,
   LanguageBatchAction,
@@ -79,7 +79,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
-export default function JapaneseTraining({
+function JapaneseTraining({
   onVaultChanged,
 }: {
   onVaultChanged: () => Promise<void>;
@@ -831,3 +831,6 @@ function LanguageInputStage({
     </main>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay）变化时不重渲染整个视圖。props 都是稳定引用。
+export default memo(JapaneseTraining);

@@ -1,4 +1,5 @@
 import { isOperationalPath } from "@/lib/vault-boundary.mjs";
+import { createVaultCache } from "./vault-cache.ts";
 
 export type ObsidianNote = {
   path: string;
@@ -96,10 +97,46 @@ export async function readNote(path: string) {
   );
 }
 
-export async function readAllNotes() {
-  const paths = await listMarkdownFiles();
-  const notes = await mapConcurrent(paths, 8, readNote);
-  return notes.sort((left, right) => right.stat.mtime - left.stat.mtime);
+/**
+ * 全库 mtime 一次拿齐（POST /search/ + JsonLogic，实测 320 文件 12ms）。
+ * 这是缓存层的变更信号；插件不支持该端点时返回 null，缓存层自己退回全量爬取。
+ */
+async function statAllNotes(): Promise<Map<string, number> | null> {
+  try {
+    const response = await request("/search/", {
+      method: "POST",
+      headers: headers("application/json", "application/vnd.olrapi.jsonlogic+json"),
+      body: JSON.stringify({ var: "stat.mtime" }),
+    });
+    const rows = (await response.json()) as { filename?: string; result?: unknown }[];
+    const stats = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.filename?.toLowerCase().endsWith(".md")) continue;
+      if (!isOperationalPath(row.filename)) continue;
+      if (typeof row.result !== "number") continue;
+      stats.set(row.filename, row.result);
+    }
+    return stats.size > 0 ? stats : null;
+  } catch {
+    return null;
+  }
+}
+
+const vaultCache = createVaultCache({
+  statAllNotes,
+  readNote,
+  crawlAllNotes: async () => {
+    const paths = await listMarkdownFiles();
+    return mapConcurrent(paths, 8, readNote);
+  },
+});
+
+/**
+ * 读全库。默认走缓存（1 次 mtime 扫描 + 只重取变过的文件）；
+ * force 用于「我不信缓存」的场景（页面上的 R 键），行为等于改动前的全量爬取。
+ */
+export async function readAllNotes(options?: { force?: boolean }) {
+  return vaultCache.readAll(options);
 }
 
 // 「笔记还没建」和「Obsidian 挂了」只能靠 request() 抛出的文案区分。
@@ -131,6 +168,8 @@ export async function writeNote(path: string, content: string) {
     headers: headers("application/json", "text/markdown; charset=utf-8"),
     body: content,
   });
+  // 写穿失效：同一请求内紧随的 readAllNotes（语言路由的收尾都这么干）要能看到新内容。
+  vaultCache.invalidate(path);
 }
 
 export async function appendNote(path: string, content: string) {
@@ -143,6 +182,7 @@ export async function appendNote(path: string, content: string) {
     headers: headers("application/json", "text/markdown; charset=utf-8"),
     body: content,
   });
+  vaultCache.invalidate(path);
 }
 
 export async function patchHeading(
@@ -161,6 +201,7 @@ export async function patchHeading(
     },
     body: content,
   });
+  vaultCache.invalidate(path);
 }
 
 export async function uniquePath(path: string) {

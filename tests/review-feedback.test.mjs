@@ -36,7 +36,9 @@ test("feedback is written separately, shown per AI block, and reused on regenera
   ]);
   assert.match(route, /interview-answer-feedback/);
   assert.match(route, /kind === "disagree" \|\| kind === "context"/);
-  assert.match(route, /deduplicated: true/);
+  // 去重は共通骨格の duplicate 分岐＋応答の deduplicated。文言でなく機構を固定する。
+  assert.match(route, /duplicate: \{ id: duplicate\.id \}/);
+  assert.match(route, /deduplicated: outcome\.deduplicated/);
   assert.match(deepRoute, /humanFeedback/);
   assert.match(ui, /你对这项 AI 评价/);
   assert.match(ui, />不同意</);

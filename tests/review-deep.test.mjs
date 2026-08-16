@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { readAppCss } from "./css-source.mjs";
 import {
   allDeductions,
   carryOverSections,
@@ -313,7 +314,9 @@ test("deep review stays locked behind completed human decisions and an allowlist
   assert.doesNotMatch(bridge, /reviewDimension = \{[^}]*score: number/s);
   assert.match(client, /review_interview_answers/);
   assert.match(annotate, /inAnnotationQueue/);
-  assert.match(annotate, /deduplicated: true/);
+  // 去重は共通骨格（upsertAppendNote）の duplicate 分岐＋応答の deduplicated で表現される。
+  assert.match(annotate, /duplicate: \{ id: duplicate\.id \}/);
+  assert.match(annotate, /deduplicated: outcome\.deduplicated/);
   // 批注ノートが未作成でも初回の裁定が 404 で落ちないこと（面接ごとに一度必ず踏んでいた）。
   assert.match(annotate, /annotationSkeleton/);
   assert.match(annotate, /type: study-annotation/);
@@ -323,7 +326,7 @@ test("deep review stays locked behind completed human decisions and an allowlist
 test("five-dimension scores stay visible before the full report is expanded", async () => {
   const [client, css] = await Promise.all([
     readFile("app/interview-review.tsx", "utf8"),
-    readFile("app/globals.css", "utf8"),
+    readAppCss(),
   ]);
   const stageStart = client.indexOf("rv-deep-stage");
   const collapsedReportStart = client.indexOf("doc.deepReview && deepOpen", stageStart);
@@ -341,7 +344,7 @@ test("five-dimension scores stay visible before the full report is expanded", as
 test("the report shows where each point went, and says so when it cannot", async () => {
   const [client, css] = await Promise.all([
     readFile("app/interview-review.tsx", "utf8"),
-    readFile("app/globals.css", "utf8"),
+    readAppCss(),
   ]);
   // 概览の各维は扣分明细へのボタン、報告側は算式＋逐条依据。
   assert.match(client, /setDeepFocusDimension\(key\)/);

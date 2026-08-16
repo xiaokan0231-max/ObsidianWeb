@@ -49,3 +49,6 @@ next-env.d.ts
 # 応募書類の書き出し先（生成物・個人情報を含むため追跡しない）
 /output
 .DS_Store
+
+# MediaPipe の wasm とモデル（計 34MB）。scripts/fetch-mediapipe.mjs が dev/build 前に用意する
+/public/mediapipe/

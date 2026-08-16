@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   computeStats,
   latestListeningMarks,
@@ -169,7 +169,7 @@ function buildDocs(notes: Note[]): ReviewDoc[] {
   // 一覧とプレビューで順序が割れても誰も気づかない。
 }
 
-type WriteResponse = { ok?: boolean; error?: string };
+type WriteResponse = { ok?: boolean; error?: string; note?: Note };
 
 /**
  * 書き込み系 API への POST を一本化する。四つの呼び出し口が
@@ -196,13 +196,16 @@ async function postReviewWrite<T extends WriteResponse = WriteResponse>(
   return payload;
 }
 
-export default function InterviewReview({
+function InterviewReview({
   notes,
   onVaultChanged,
+  onNoteWritten,
   initialSelectedKey = null,
 }: {
   notes: Note[];
   onVaultChanged: () => void | Promise<void>;
+  /** 追記系の書込は応答の note を1件差し替えるだけでよい。復盤の再生成だけ全量再取得に残す。 */
+  onNoteWritten?: (note: Note) => void;
   initialSelectedKey?: string | null;
 }) {
   const docs = useMemo(() => buildDocs(notes), [notes]);
@@ -339,7 +342,7 @@ export default function InterviewReview({
       setMessage(null);
       dismissWriteAlert(alertKey);
       try {
-        await postReviewWrite(
+        const payload = await postReviewWrite(
           "/api/review/annotate",
           {
             notePath: target.annotationPath,
@@ -351,7 +354,8 @@ export default function InterviewReview({
           "写入失败",
         );
         setAnnotationDraft(null);
-        await onVaultChanged();
+        if (payload.note && onNoteWritten) onNoteWritten(payload.note);
+        else await onVaultChanged();
       } catch (error) {
         noteWriteFailure(
           alertKey,
@@ -364,7 +368,7 @@ export default function InterviewReview({
         setBusy(null);
       }
     },
-    [dismissWriteAlert, noteWriteFailure, onVaultChanged],
+    [dismissWriteAlert, noteWriteFailure, onNoteWritten, onVaultChanged],
   );
 
   const generateDeepReview = useCallback(
@@ -403,7 +407,8 @@ export default function InterviewReview({
           { notePath: target.note.path, blockId },
           "加入失败",
         );
-        await onVaultChanged();
+        if (payload.note && onNoteWritten) onNoteWritten(payload.note);
+        else await onVaultChanged();
         setMessage(payload.deduplicated ? `${blockId} 已在重练队列中。` : `${blockId} 已加入重练队列。`);
       } catch (error) {
         noteWriteFailure(
@@ -416,7 +421,7 @@ export default function InterviewReview({
         setPracticeBusy(null);
       }
     },
-    [dismissWriteAlert, noteWriteFailure, onVaultChanged],
+    [dismissWriteAlert, noteWriteFailure, onNoteWritten, onVaultChanged],
   );
 
   const submitReviewFeedback = useCallback(
@@ -436,7 +441,8 @@ export default function InterviewReview({
           { notePath: target.note.path, blockId, kind, text: feedbackText },
           "反馈写入失败",
         );
-        await onVaultChanged();
+        if (payload.note && onNoteWritten) onNoteWritten(payload.note);
+        else await onVaultChanged();
         setMessage(payload.deduplicated ? `${blockId} 已记录过相同反馈。` : `${blockId} 的人工反馈已保存。`);
         return true;
       } catch (error) {
@@ -451,7 +457,7 @@ export default function InterviewReview({
         setFeedbackBusy(null);
       }
     },
-    [dismissWriteAlert, noteWriteFailure, onVaultChanged],
+    [dismissWriteAlert, noteWriteFailure, onNoteWritten, onVaultChanged],
   );
 
   if (!doc) {
@@ -1927,3 +1933,6 @@ function SentenceCard({
     </article>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay）变化时不重渲染整个视圖。props 都是稳定引用。
+export default memo(InterviewReview);

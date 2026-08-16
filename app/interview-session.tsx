@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildPrepKillQuestions,
   extractPrepKillMap,
@@ -9,6 +9,7 @@ import {
   groupPrepSections,
   prepBlockText,
   prepInlineText,
+  prepSectionNumber,
   shortLabel,
   type InterviewPrepDoc,
   type PrepBlock,
@@ -27,7 +28,6 @@ import {
 import {
   calendarCompanyIdentity,
   countdownLabel,
-  localDateKey,
 } from "@/lib/memory-atlas-data";
 import { formatDate, getType, type Note } from "@/lib/notes";
 import { REVIEW_DIMENSION_META } from "@/lib/review-deep";
@@ -96,10 +96,6 @@ const SESSION_MODES: {
   { id: "sprint", duration: "5分钟", label: "冲刺", description: "按临场顺序快速热身" },
   { id: "deep", duration: "完整", label: "深度准备", description: "公司、问答与全部材料" },
 ];
-
-function prepSectionNumber(title: string) {
-  return Number(title.normalize("NFKC").match(/^(\d+)[.、．]/)?.[1] ?? 0);
-}
 
 function prepSectionByNumber(doc: InterviewPrepDoc, number: number) {
   return doc.sections.find((section) => prepSectionNumber(section.title) === number) ?? null;
@@ -174,8 +170,8 @@ const SECTION_TAB_LABELS: Record<number, string> = {
 
 function sectionTabLabel(title: string) {
   const normalized = title.normalize("NFKC");
-  const number = Number(normalized.match(/^(\d+)[.、]/)?.[1] ?? 0);
-  return SECTION_TAB_LABELS[number] ?? shortLabel(normalized.replace(/^\d+[.、]\s*/, ""), 10);
+  const number = prepSectionNumber(title);
+  return SECTION_TAB_LABELS[number] ?? shortLabel(normalized.replace(/^\d+[.、．]\s*/, ""), 10);
 }
 
 function subsectionTabLabel(title: string) {
@@ -980,8 +976,9 @@ function SessionAssets({
   );
 }
 
-export default function InterviewSession({
+function InterviewSession({
   notes,
+  today,
   onOpen,
   onOpenWiki,
   onOpenCard,
@@ -998,9 +995,11 @@ export default function InterviewSession({
   initialCompany?: string;
   initialPath?: string;
   onSelectionChange?: (company: string, prepPath: string) => void;
+  /** 「今日」は殻が持つ。memo 越しなので中で求めると、日付を跨いでも昨日のまま凍る
+   *  ——当日かどうかで既定モード（确认/冲刺/深度）が変わる画面なので、ここが一番効く。 */
+  today: string;
 }) {
   const docs = useMemo(() => findInterviewPrepDocs(notes), [notes]);
-  const today = localDateKey();
   const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
   const digest = useMemo(() => buildDigest(notes), [notes]);
   // 既定で開くのは「次の確定面接 → 日程調整中の次回 → 直近の終了回」。
@@ -1297,3 +1296,6 @@ export default function InterviewSession({
     </div>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay）变化时不重渲染整个视圖。props 都是稳定引用。
+export default memo(InterviewSession);

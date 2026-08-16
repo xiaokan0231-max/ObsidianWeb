@@ -17,6 +17,19 @@ function bridgeHeaders() {
   };
 }
 
+/**
+ * ここにクライアント側のタイムアウトは置かない。
+ *
+ * 上限はブリッジが task ごとに持っている（runProcess の timeoutMs、最長 480 秒）。
+ * そのブリッジは受けた依頼を**直列キュー**（深さ4）で回すので、こちら側から見た
+ * 待ち時間は「自分の実行時間」ではなく「前の依頼が終わるまで＋自分」になる。
+ * 発行時刻から数える AbortSignal.timeout を被せると、正常に順番待ちしていただけの
+ * 依頼が実行途中で切られる——一度そう書いて、レビューで指摘された。
+ *
+ * 「接続だけ受けて黙り込む」場合の保護は、呼ぶ側の構造で担保する：
+ * 集中訓練の完了はこの呼び出しをキューの外に出してあるので、待たされても
+ * 自動保存・退出時の保存はブロックされない（app/api/language/v2/batch/complete）。
+ */
 async function bridgeFetch(path: string, init: RequestInit) {
   try {
     const response = await fetch(`${BRIDGE_URL}${path}`, {

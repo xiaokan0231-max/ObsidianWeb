@@ -7,7 +7,8 @@ import {
 } from "@/lib/review-practice";
 import { isReviewNotePath, reviewSiblingPath } from "@/lib/review-paths";
 import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
-import { appendNote, readNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
+import { upsertAppendNote } from "@/lib/server/note-append";
+import { readNote, readNoteOrNull } from "@/lib/server/obsidian";
 import { createSerialQueue } from "@/lib/server/serial-queue";
 
 type Body = { notePath?: string; blockId?: string };
@@ -60,39 +61,54 @@ export async function POST(request: Request) {
     if (!block) throw new Error("深度复盘中找不到这个问题。");
     if (!block.improvedAnswerJa) throw new Error("这个问题还没有可练习的改善回答。");
 
-    const result = await inPracticeQueue(async () => {
-      // 存在判定と本文読みは同じ 1 往復で足りる。noteExists を挟むと同じ GET を 2 回打つ。
-      const existing = await readNoteOrNull(practicePath);
-      if (existing) {
-        const duplicate = parseInterviewPractice(existing.content).find(
-          (entry) => entry.blockId === blockId && entry.status === "queued",
-        );
-        if (duplicate) return { deduplicated: true };
-      }
+    const outcome = await inPracticeQueue(() =>
+      upsertAppendNote({
+        path: practicePath,
+        plan: (existing) => {
+          if (existing) {
+            const duplicate = parseInterviewPractice(existing.content).find(
+              (entry) => entry.blockId === blockId && entry.status === "queued",
+            );
+            if (duplicate) return { duplicate: {} };
+          }
 
-      const entry = renderInterviewPracticeEntry({
-        blockId,
-        status: "queued",
-        queuedAt: queuedAtInTokyo(),
-        questionTitle: block.questionTitle,
-        improvedAnswerJa: block.improvedAnswerJa,
-        evidenceSentenceIds: block.evidenceSentenceIds,
-      });
-      if (existing) {
-        await appendNote(practicePath, entry);
-      } else {
-        const company = text(source.frontmatter.company);
-        const date = text(source.frontmatter.date);
-        const round = text(source.frontmatter.round);
-        await writeNote(
-          practicePath,
-          `---\ntype: interview-answer-practice\ncompany: ${yamlScalar(company)}\ndate: ${yamlScalar(date)}\nround: ${yamlScalar(round)}\nsource_note: ${yamlScalar(`[[${basename(notePath)}]]`)}\nreview_note: ${yamlScalar(`[[${basename(reviewPath)}]]`)}\nlayer: user-action\n---\n# ${date} ${company} 回答練習\n\n> 本人が「重练」に選んだ質問のキュー。改善回答は AI 草稿であり、本人の事実や確定台本ではない。\n\n## 重练キュー\n${entry}`,
-        );
-      }
-      return { deduplicated: false };
+          const entry = renderInterviewPracticeEntry({
+            blockId,
+            status: "queued",
+            queuedAt: queuedAtInTokyo(),
+            questionTitle: block.questionTitle,
+            improvedAnswerJa: block.improvedAnswerJa,
+            evidenceSentenceIds: block.evidenceSentenceIds,
+          });
+          if (existing) {
+            return { nextContent: `${existing.content}${entry}`, value: {} };
+          }
+          const company = text(source.frontmatter.company);
+          const date = text(source.frontmatter.date);
+          const round = text(source.frontmatter.round);
+          return {
+            nextContent: `---\ntype: interview-answer-practice\ncompany: ${yamlScalar(company)}\ndate: ${yamlScalar(date)}\nround: ${yamlScalar(round)}\nsource_note: ${yamlScalar(`[[${basename(notePath)}]]`)}\nreview_note: ${yamlScalar(`[[${basename(reviewPath)}]]`)}\nlayer: user-action\n---\n# ${date} ${company} 回答練習\n\n> 本人が「重练」に選んだ質問のキュー。改善回答は AI 草稿であり、本人の事実や確定台本ではない。\n\n## 重练キュー\n${entry}`,
+            value: {},
+            frontmatterForNew: {
+              type: "interview-answer-practice",
+              company,
+              date,
+              round,
+              source_note: `[[${basename(notePath)}]]`,
+              review_note: `[[${basename(reviewPath)}]]`,
+              layer: "user-action",
+            },
+          };
+        },
+      }),
+    );
+
+    return Response.json({
+      ok: true,
+      path: practicePath,
+      deduplicated: outcome.deduplicated,
+      note: outcome.note,
     });
-
-    return Response.json({ ok: true, path: practicePath, ...result });
   } catch (error) {
     return obsidianErrorResponse(error, "重练队列写入失败");
   }

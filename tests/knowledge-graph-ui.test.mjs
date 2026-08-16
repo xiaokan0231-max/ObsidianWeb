@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const graph = await readFile("app/knowledge-graph-three.tsx", "utf8");
-const atlas = await readFile("app/memory-atlas.tsx", "utf8");
+const graphView = await readFile("app/graph-view.tsx", "utf8");
 
 test("星图 3D 观感机制：错层分区、侧角常驻机位、一次性开场运镜", () => {
   // 分区中心必须在 z 轴错层——五区同深就会退化回平面散点图。
@@ -33,14 +33,15 @@ test("星图 3D 观感机制：错层分区、侧角常驻机位、一次性开�
 });
 
 test("语义图与普通双链共享数据，并可筛选公司和技能实体", () => {
-  assert.ok(atlas.includes('useState<GraphViewMode>("semantic")'));
-  assert.ok(atlas.includes("buildKnowledgeGraph(notes)"));
-  assert.ok(atlas.includes("selectKnowledgeGraphView(graph,"));
-  assert.ok(atlas.includes("语义关系"));
-  assert.ok(atlas.includes("普通双链"));
-  assert.ok(atlas.includes('["all", "note", "company", "skill"]'));
+  // 视图从 memory-atlas 拆出到 graph-view.tsx，契约不变、落点变了。
+  assert.ok(graphView.includes('useState<GraphViewMode>("semantic")'));
+  assert.ok(graphView.includes("buildKnowledgeGraph(notes)"));
+  assert.ok(graphView.includes("selectKnowledgeGraphView(graph,"));
+  assert.ok(graphView.includes("语义关系"));
+  assert.ok(graphView.includes("普通双链"));
+  assert.ok(graphView.includes('["all", "note", "company", "skill"]'));
   assert.ok(
-    atlas.includes("<CanvasKnowledgeGraph nodes={scene.nodes} links={scene.links}"),
+    graphView.includes("<CanvasKnowledgeGraph nodes={scene.nodes} links={scene.links}"),
     "Canvas 降级模式也必须消费同一份 scene links",
   );
   assert.ok(graph.includes("relationLabel"));

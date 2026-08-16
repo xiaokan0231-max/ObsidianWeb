@@ -240,5 +240,5 @@ test("进度 API 只接受业务 ID，路径和时间均由服务端决定", asy
   assert.match(source, /event\.eventId === eventId/u);
   // 直列キューは共有ファクトリ由来・モジュール級に1本、かつ書き込み経路が実際にそれを通ること。
   assert.match(source, /const inProgressQueue = createSerialQueue\(\)/u);
-  assert.match(source, /await inProgressQueue\(async/u);
+  assert.match(source, /await inProgressQueue\(\(\) =>\s*\n?\s*upsertAppendNote\(/u);
 });

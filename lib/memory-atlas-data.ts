@@ -4,12 +4,14 @@
 
 import { graphGroup, type GraphGroup } from "./knowledge-graph.ts";
 import {
+  companyIdentity,
   getString,
   getTitle,
   getType,
   noteBasename,
   stripFrontmatter,
   stripMarkdown,
+  stripNonLinkRegions,
   type Note,
 } from "./notes.ts";
 import { joinReviewNotes } from "./review-join.ts";
@@ -223,20 +225,59 @@ export function noteFolder(path: string) {
   return folders.length ? folders.join(" / ") : "Vault 根目录";
 }
 
+const WIKILINK = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g;
+
 export function extractLinks(content: string) {
-  return Array.from(content.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g))
+  // 本文からは「リンクと見なさない領域」（コードフェンス・HTML コメント・行内コード）を落とす
+  // ——例示コードの [[…]] は知識関係ではない。知識図譜の extractWikiLinks と同じ剥ぎ方。
+  //
+  // frontmatter は落とさず**別に**拾う。source_note / annotation_note / target_note のような
+  // 構造化された関係はれっきとしたリンクで、図譜側も専用ルールで辺を張っている
+  // （knowledge-graph.ts）。本文と一緒に剥ぐと、進捗ノートや批注ノートのように
+  // frontmatter からしか繋がっていないノートが首页では「孤立」、図譜では「連結」に割れる。
+  const frontmatter = content.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+  const body = stripNonLinkRegions(content);
+  return [
+    ...Array.from(frontmatter.matchAll(WIKILINK)),
+    ...Array.from(body.matchAll(WIKILINK)),
+  ]
     .map((match) => match[1].trim())
     .filter(Boolean);
+}
+
+// 同一批 notes 会被反复问「这篇有哪些链接」（派生统计、资料库排序、反链、卡片角标）。
+// 内容不变时答案不变，所以按 note 对象缓存。notes 数组整体替换、单条 patch 都会
+// 产生新对象，WeakMap 自然失效，不需要手动清理。
+const noteLinksCache = new WeakMap<Note, string[]>();
+
+export function noteLinks(note: Note): string[] {
+  const cached = noteLinksCache.get(note);
+  if (cached) return cached;
+  const links = extractLinks(note.content);
+  noteLinksCache.set(note, links);
+  return links;
 }
 
 export function countMatches(content: string, expression: RegExp) {
   return Array.from(content.matchAll(expression)).length;
 }
 
+// 搜索的干草堆按 note 缓存。以前每敲一个字都对全库 300 篇重建小写 haystack
+// （含 JSON.stringify frontmatter，约 5.5MB 字符串分配/键击）。
+const haystackCache = new WeakMap<Note, string>();
+
+function noteHaystack(note: Note) {
+  const cached = haystackCache.get(note);
+  if (cached) return cached;
+  const haystack = `${note.path}\n${note.content}\n${JSON.stringify(note.frontmatter)}`.toLowerCase();
+  haystackCache.set(note, haystack);
+  return haystack;
+}
+
 export function noteMatches(note: Note, rawQuery: string) {
   const query = rawQuery.trim().toLowerCase();
   if (!query) return true;
-  const haystack = `${note.path}\n${note.content}\n${JSON.stringify(note.frontmatter)}`.toLowerCase();
+  const haystack = noteHaystack(note);
   // 空白分隔的多个 token 是 AND；单个 token 的值里用 | 分隔是 OR。
   // 「進行中の選考」这种跨多个枚举值的条件，没有 OR 就一条都写不出来。
   return query.split(/\s+/).every((token) => {
@@ -402,11 +443,8 @@ export function calendarEventLabel(text: string) {
  * 残すことで、見た目の揺れだけを吸収する。
  */
 export function calendarCompanyIdentity(company: string) {
-  return company
-    .normalize("NFKC")
-    .toLocaleLowerCase("en-US")
-    .replace(/株式会社|有限会社|合同会社|\(株\)|incorporated|inc\.?|co\.?,?\s*ltd\.?|ltd\.?/gu, "")
-    .replace(/[^\p{L}\p{N}]+/gu, "");
+  // 実体は notes.ts の companyIdentity（review-join と共用）。名前だけ日历の文脈で残す。
+  return companyIdentity(company);
 }
 
 function calendarCompanyDisplayScore(company: string) {
@@ -533,12 +571,66 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
   });
 }
 
+/**
+ * 全量スナップショットへ「サーバがまだ追いついていない書き込み」を被せ直す。
+ *
+ * なぜ要るか：全量取得は在途中に発行されたものが後から着地し得る。着地したスナップショットは
+ * **発行時点**の vault なので、その後の書き込みを含まない——素直に採用すると書いたばかりの
+ * 内容が写前の値で黙って消える。書き込みごとに全量再取得していた頃は最後に着地するのが
+ * ほぼ必ず写後スナップショットだったので表面化しなかった。
+ *
+ * 突き合わせは本文の一致で行う（mtime はサーバ側とクライアント組み立てで基準が違う）。
+ * 一致したものは settled として返し、呼ぶ側が台帳から落とす。
+ */
+export type PendingWrite = { note: Note; at: number };
+
+/**
+ * 台帳に残せる上限。守りたいのは「この書き込みより前に発行された全量取得が後から着地する」
+ * ことだけで、それは最長でも強制爬取の1秒程度。桁で余裕を取った値にしてある。
+ *
+ * 期限が要る理由：突き合わせは本文の一致で行うので、Obsidian 側で手編集された等で
+ * サーバと食い違ったままになると、期限が無ければ自分の版を**永久に**貼り続ける
+ * （その間サーバ側の実際の内容は画面に出てこない）。
+ */
+export const PENDING_WRITE_TTL_MS = 30_000;
+
+export function mergePendingWrites(
+  incoming: Note[],
+  pending: ReadonlyMap<string, PendingWrite>,
+  now = Date.now(),
+): { notes: Note[]; settled: string[] } {
+  if (pending.size === 0) return { notes: incoming, settled: [] };
+  const byPath = new Map(incoming.map((note) => [note.path, note]));
+  const settled: string[] = [];
+  for (const [path, written] of pending) {
+    // 期限切れはサーバ側を正とする。食い違いの理由（手編集・削除・改名）を
+    // クライアントからは区別できないので、時間で降りる。
+    if (now - written.at > PENDING_WRITE_TTL_MS) {
+      settled.push(path);
+      continue;
+    }
+    const server = byPath.get(path);
+    if (server && server.content === written.note.content) {
+      settled.push(path);
+      continue;
+    }
+    // server が居ない＝この書き込みより前に発行されたスナップショット（新規作成が典型）。
+    // 期限内はこちらを残す。期限を過ぎれば上の分岐で降りるので、幽霊にはならない。
+    byPath.set(path, written.note);
+  }
+  return {
+    notes: [...byPath.values()].sort((left, right) => right.stat.mtime - left.stat.mtime),
+    settled,
+  };
+}
+
 export function buildDerivedData(notes: Note[], now = new Date()): DerivedData {
-  const links = notes.flatMap((note) => extractLinks(note.content));
+  // 每篇只解析一次链接（以前 flatMap 扫一遍、orphan filter 再扫一遍）。
+  const links = notes.flatMap((note) => noteLinks(note));
   const linkedNames = new Set(links);
   const orphanCount = notes.filter(
     (note) =>
-      extractLinks(note.content).length === 0 &&
+      noteLinks(note).length === 0 &&
       !linkedNames.has(noteBasename(note.path)) &&
       getType(note) !== "moc",
   ).length;
