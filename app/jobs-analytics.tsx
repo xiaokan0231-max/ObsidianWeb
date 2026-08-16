@@ -502,31 +502,6 @@ export default function JobsAnalytics({
 
   return (
     <div className="analytics">
-      <dl className="analytics-head-glance" aria-label="当前求职进展摘要">
-        {GLANCE_CARDS.map((card, index) => {
-          const count = glanceCounts[card.key];
-          return (
-            <div key={card.key} data-tone={card.tone}>
-              <dt>
-                {card.label}
-                <small>{card.sub}</small>
-              </dt>
-              <dd><strong>{count}</strong><small>件</small></dd>
-              <span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
-              {/* カード全体を覆う透明ボタン。dt/dd の入れ子を壊さずにクリック領域だけ足す。
-                  件数 0 の時は押しても空の一覧が出るだけなので押させない。 */}
-              <button
-                type="button"
-                className="analytics-glance-hit"
-                disabled={count === 0}
-                onClick={() => onViewJobs(card.filters)}
-                aria-label={`${card.label} ${count} 件の内訳を見る`}
-              />
-            </div>
-          );
-        })}
-      </dl>
-
       <section className="analytics-command">
         <header>
           <div>
@@ -557,6 +532,31 @@ export default function JobsAnalytics({
           <p className="chart-empty">当前没有处于选考中的案件。</p>
         )}
       </section>
+
+      <dl className="analytics-head-glance module-stat-strip" aria-label="当前求职进展摘要">
+        {GLANCE_CARDS.map((card, index) => {
+          const count = glanceCounts[card.key];
+          return (
+            <div key={card.key} data-tone={card.tone} data-zero={count === 0}>
+              <dt>
+                {card.label}
+                <small>{card.sub}</small>
+              </dt>
+              <dd><strong>{count}</strong><small>件</small></dd>
+              <span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+              {/* カード全体を覆う透明ボタン。dt/dd の入れ子（定義リストの意味）を壊さずに
+                  押せるようにする。0 件は背景情報なので操作対象にしない。 */}
+              <button
+                type="button"
+                className="analytics-glance-hit"
+                disabled={count === 0}
+                onClick={() => onViewJobs(card.filters)}
+                aria-label={`${card.label} ${count} 件の内訳を見る`}
+              />
+            </div>
+          );
+        })}
+      </dl>
 
       <details className="analytics-hand">
         <summary>

@@ -967,8 +967,8 @@ canvas:focus-visible {
 .memory-hero {
   position: relative;
   overflow: hidden;
-  min-height: 320px;
-  padding: 24px 34px 0;
+  min-height: 0;
+  padding: 20px 26px 0;
   background:
     radial-gradient(circle at 77% 36%, rgba(229, 109, 69, 0.22), transparent 23%),
     linear-gradient(115deg, #17241e 0%, #21382e 68%, #263d33 100%);
@@ -1023,9 +1023,9 @@ canvas:focus-visible {
 
 .hero-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.75fr);
-  gap: 14px;
-  padding: 20px 0 18px;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.85fr);
+  gap: 12px;
+  padding: 14px 0;
 }
 
 .hero-primary,
@@ -1038,8 +1038,8 @@ canvas:focus-visible {
 }
 
 .hero-primary {
-  min-height: 226px;
-  padding: 25px 28px 23px;
+  min-height: 184px;
+  padding: 20px 22px 18px;
 }
 
 .hero-primary-topline,
@@ -1073,12 +1073,12 @@ canvas:focus-visible {
   display: -webkit-box;
   overflow: hidden;
   max-width: 880px;
-  margin: 16px 0 12px;
+  margin: 10px 0;
   font-family: "Songti SC", "Noto Serif CJK SC", serif;
-  font-size: clamp(30px, 3.1vw, 45px);
+  font-size: clamp(24px, 2.15vw, 32px);
   font-weight: 520;
-  line-height: 1.15;
-  letter-spacing: -0.04em;
+  line-height: 1.22;
+  letter-spacing: -0.025em;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -1106,8 +1106,8 @@ canvas:focus-visible {
   display: -webkit-box;
   overflow: hidden;
   max-width: 830px;
-  min-height: 35px;
-  margin: 13px 0 17px;
+  min-height: 0;
+  margin: 10px 0 13px;
   color: rgba(247, 246, 238, 0.65);
   font-size: 11px;
   line-height: 1.65;
@@ -1161,9 +1161,9 @@ canvas:focus-visible {
 
 .hero-watch {
   display: flex;
-  min-height: 226px;
+  min-height: 184px;
   flex-direction: column;
-  padding: 20px 20px 16px;
+  padding: 17px 18px 14px;
 }
 
 .hero-watch-head {
@@ -1236,12 +1236,12 @@ canvas:focus-visible {
   position: relative;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  margin: 0 -34px;
+  margin: 0 -26px;
   border-top: 1px solid rgba(255, 255, 255, 0.13);
 }
 
 .stat {
-  min-height: 62px;
+  min-height: 54px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5257,6 +5257,7 @@ canvas:focus-visible {
 }
 
 .note-drawer--full .drawer-header {
+  position: relative;
   flex: 0 0 auto;
   gap: 14px;
   padding-inline: clamp(20px, 4vw, 52px);
@@ -5298,10 +5299,103 @@ canvas:focus-visible {
   margin: 0 auto;
 }
 
-/* 全屏では読書用に一段大きく */
-.note-drawer--full .drawer-scroll > .drawer-reading > h1 {
+/* 目次レールと本文を横に並べる。中央寄せなので、目次が無い時は本文だけが中央に残る。 */
+.drawer-reading-shell {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: clamp(24px, 3vw, 48px);
+}
+
+.drawer-reading-shell > .drawer-reading {
+  flex: 0 1 880px;
+  min-width: 0;
+}
+
+/* ===== 本文目次（スクロールスパイ付き） ===== */
+
+.doc-toc {
+  position: sticky;
+  top: 0;
+  flex: 0 0 214px;
+  max-height: calc(100dvh - 170px);
+  overflow-y: auto;
+  padding-top: 4px;
+  /* 長い目次でスクロールバーが出ても、本文側の視線を邪魔しない細さで */
+  scrollbar-width: thin;
+}
+
+.doc-toc-label {
+  display: block;
+  margin-bottom: 12px;
+  color: #9aa09b;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.doc-toc ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-left: 1px solid var(--line);
+}
+
+.doc-toc-item > button {
+  display: block;
+  width: 100%;
+  margin-left: -1px;
+  padding: 5px 0 5px 13px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10.5px;
+  line-height: 1.55;
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease;
+}
+
+.doc-toc-item > button:hover { color: var(--ink); }
+
+.doc-toc-item--h3 > button {
+  padding-left: 24px;
+  font-size: 9.5px;
+  color: #9aa09b;
+}
+
+.doc-toc-item.is-active > button {
+  border-left-color: var(--orange);
+  color: var(--ink);
+  font-weight: 620;
+}
+
+/* 読書進捗。ヘッダの下端をそのままバーにする */
+.drawer-progress {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 100%;
+  height: 2px;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: linear-gradient(90deg, var(--orange), var(--gold));
+  transition: transform 90ms linear;
+}
+
+/* 全屏では読書用に一段大きく。
+   素の .drawer-scroll > h1 は直接子セレクタなので、
+   .drawer-reading を挟むこの構造では当たらない。書体もここで指定する。 */
+.note-drawer--full .drawer-scroll .drawer-reading > h1 {
+  margin: 16px 0 14px;
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
   font-size: clamp(32px, 3.2vw, 44px);
+  font-weight: 520;
   line-height: 1.35;
+  letter-spacing: -0.02em;
 }
 
 .note-drawer--full .markdown-document p,
@@ -5312,7 +5406,26 @@ canvas:focus-visible {
 
 .note-drawer--full .markdown-document h2 {
   margin-top: 46px;
+  padding-bottom: 12px;
+  border-bottom: 0;
   font-size: 26px;
+  /* 下線の頭だけアクセント色にする。::before の飛び出しと違い、狭い幅でも切れない */
+  background: linear-gradient(90deg, var(--orange) 0 54px, #dcd8cf 54px) left bottom / 100% 1px no-repeat;
+}
+
+/* メタ情報はピルにして、題名との境目をはっきりさせる */
+.note-drawer--full .drawer-meta {
+  gap: 6px 8px;
+  padding-bottom: 22px;
+}
+
+.note-drawer--full .drawer-meta > span {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: #7d837f;
+  font-size: 8.5px;
 }
 
 .note-drawer--full .markdown-document h3 { font-size: 19px; }
@@ -5438,6 +5551,12 @@ canvas:focus-visible {
   border: 1px solid #dcd8ce;
 }
 
+/* 罫線はセルの隙間から下地を透かせて描いている。項目数が奇数だと
+   最後の1つの隣が「セルの無い下地」＝灰色の空箱として残るので、横に伸ばして埋める。 */
+.frontmatter-grid > div:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
 .frontmatter-grid > div {
   min-width: 0;
   display: flex;
@@ -5510,9 +5629,43 @@ canvas:focus-visible {
   padding: 13px 16px;
   background: #ede9df;
   border-left: 3px solid var(--gold);
-  color: #626a65;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  color: #565f5a;
   font-size: 11px;
   line-height: 1.8;
+}
+
+/* 引用の頭に付いた記号（🔴 ⚠️ 🔑 📊 🎯 💡）で色を変える。
+   vault 側は記号で強弱を書き分けているので、全部同じ灰箱にするとその情報が消える。 */
+.markdown-document blockquote[data-callout] {
+  border-left-width: 4px;
+  color: #3d4842;
+}
+
+.markdown-document blockquote[data-callout="danger"] {
+  background: #f7e8e2;
+  border-left-color: #b83f27;
+}
+
+.markdown-document blockquote[data-callout="warn"] {
+  background: #f6efdc;
+  border-left-color: var(--gold);
+}
+
+.markdown-document blockquote[data-callout="key"] {
+  background: #fbeadf;
+  border-left-color: var(--orange);
+}
+
+.markdown-document blockquote[data-callout="data"] {
+  background: #eae7f2;
+  border-left-color: var(--violet);
+}
+
+.markdown-document blockquote[data-callout="aim"],
+.markdown-document blockquote[data-callout="idea"] {
+  background: #e5eee9;
+  border-left-color: var(--green);
 }
 
 /* 連続した > 行は1つの引用の中で改行して並べる */
@@ -5568,11 +5721,53 @@ canvas:focus-visible {
   border-color: var(--orange);
 }
 
+/* 外部リンク。vault 内リンク（.wiki-link）と色で区別する */
+.md-link {
+  border-bottom: 1px solid rgba(47, 107, 89, 0.35);
+  color: #2f6b59;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.md-link > i {
+  margin-left: 2px;
+  font-size: 0.8em;
+  font-style: normal;
+  opacity: 0.65;
+}
+
+.md-link:hover {
+  border-color: var(--green);
+  background: rgba(47, 107, 89, 0.07);
+}
+
+/* 表は1つの枠にまとめる。行ごとに独立した箱だと、ヘッダと本体の区別が付かない */
+.md-table {
+  overflow: hidden;
+  margin: 18px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
 .md-table-row {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(100px, 1fr);
   border-bottom: 1px solid #dedad0;
+  transition: background 120ms ease;
+}
+
+.md-table > .md-table-row:last-child { border-bottom: 0; }
+
+.md-table-head {
+  background: #ece7dc;
+  color: var(--ink);
+  font-weight: 640;
+}
+
+.md-table > .md-table-row:not(.md-table-head):hover {
+  background: rgba(230, 109, 69, 0.055);
 }
 
 .md-table-row span {
@@ -5581,6 +5776,11 @@ canvas:focus-visible {
   font-size: 9px;
   line-height: 1.6;
 }
+
+.md-table-row span:last-child { border-right: 0; }
+
+/* 1列目は行の見出しとして働くことが多いので、少し強く出す */
+.md-table > .md-table-row:not(.md-table-head) > span:first-child { color: #2b352f; }
 
 .backlinks {
   margin-top: 48px;
@@ -6786,7 +6986,7 @@ canvas:focus-visible {
   .topbar-next strong { max-width: 130px; }
   .memory-hero { min-height: 0; }
   .hero-primary { padding: 23px 20px 21px; }
-  .hero-primary h1 { font-size: 34px; }
+  .hero-primary h1 { font-size: 28px; }
   .hero-primary-topline { align-items: flex-start; flex-direction: column; gap: 5px; }
   .hero-primary-topline > small { max-width: 100%; }
   .hero-primary-actions { align-items: stretch; flex-direction: column; }
@@ -14231,4 +14431,357 @@ button.prep-doc-ref.card::after { content: " →"; font-size: 0.85em; }
   .review-view .rv-agg > span {
     flex-basis: 100%;
   }
+}
+
+/* ===== 记忆库阅读页：目次レールが入る幅を切る ===== */
+@media (max-width: 1180px) {
+  /* 目次を出すと本文が読める幅を割るので、この幅から下は本文だけにする */
+  .doc-toc { display: none; }
+  .drawer-reading-shell { display: block; }
+  .drawer-reading-shell > .drawer-reading { width: min(880px, 100%); margin: 0 auto; }
+}
+
+@media (max-width: 780px) {
+  .note-drawer--full .markdown-document h2 {
+    background-size: 100% 1px;
+    background-image: linear-gradient(90deg, var(--orange) 0 40px, #dcd8cf 40px);
+  }
+}
+
+/* ===== 首屏注意力层级：一个主行动，其余都退成上下文 ===== */
+
+[data-zero="true"] {
+  opacity: .46;
+  filter: saturate(.35);
+}
+
+.jobs-view > .jobs-next-pick {
+  margin-top: 0;
+}
+
+.jobs-view > .jobs-stat {
+  margin-top: 10px;
+}
+
+.jobs-featured-only {
+  padding: 24px 18px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, .32);
+  font-size: 11px;
+  text-align: center;
+}
+
+.analytics > .analytics-command {
+  margin-top: 0;
+}
+
+.analytics-command + .analytics-head-glance {
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.analytics-command + .analytics-head-glance > div {
+  min-height: 76px;
+  border-radius: var(--radius-control);
+  box-shadow: none;
+}
+
+.analytics-command + .analytics-head-glance dt small,
+.analytics-command + .analytics-head-glance div > span {
+  display: none;
+}
+
+.analytics-command + .analytics-head-glance dd {
+  grid-column: 2;
+  align-self: center;
+  margin: 0;
+}
+
+@media (min-width: 821px) {
+  .overview-view .hero-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .overview-view .hero-primary {
+    min-height: 194px;
+    padding: 22px 24px 20px;
+    background: rgba(248, 246, 237, .09);
+    box-shadow: inset 3px 0 0 rgba(230, 109, 69, .88);
+  }
+
+  .overview-view .hero-watch {
+    display: grid;
+    min-height: 62px;
+    grid-template-columns: minmax(145px, .34fr) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 14px;
+    background: rgba(248, 246, 237, .035);
+  }
+
+  .overview-view .hero-watch-head {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+
+  .overview-view .hero-watch-head small {
+    display: block;
+    margin-top: 4px;
+  }
+
+  .overview-view .hero-watch > button {
+    display: grid;
+    min-height: 38px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    border-left: 1px solid rgba(255, 255, 255, .12);
+    border-right: 1px solid rgba(255, 255, 255, .12);
+  }
+
+  .overview-view .hero-watch > button strong {
+    display: block;
+    margin: 0;
+    overflow: hidden;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 620;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .overview-view .hero-watch > button > span {
+    white-space: nowrap;
+  }
+
+  .overview-view .hero-watch-empty {
+    min-width: 0;
+    padding: 0 16px;
+    border-left: 1px solid rgba(255, 255, 255, .12);
+    border-right: 1px solid rgba(255, 255, 255, .12);
+  }
+
+  .overview-view .hero-watch-empty strong {
+    margin: 0;
+    font-family: inherit;
+    font-size: 12px;
+  }
+
+  .overview-view .hero-watch footer {
+    min-height: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .overview-view .hero-stats {
+    min-height: 48px;
+  }
+
+  .overview-view .stat {
+    min-height: 48px;
+  }
+
+  .overview-view .stat strong {
+    font-size: 19px;
+  }
+
+  .overview-view .stat span {
+    font-size: 10px;
+  }
+}
+
+/* ===== 跨页面语义：颜色只表达状态，不再只做装饰 ===== */
+
+[data-semantic="fact"] {
+  --semantic-tone: var(--green);
+  --semantic-wash: rgba(47, 107, 89, .045);
+}
+
+[data-semantic="analysis"] {
+  --semantic-tone: var(--gold);
+  --semantic-wash: rgba(181, 132, 47, .085);
+}
+
+[data-semantic="action"] {
+  --semantic-tone: var(--orange);
+  --semantic-wash: rgba(230, 109, 69, .075);
+}
+
+[data-semantic="waiting"] {
+  --semantic-tone: #78817d;
+  --semantic-wash: rgba(120, 129, 125, .075);
+}
+
+[data-semantic="risk"] {
+  --semantic-tone: #b64f42;
+  --semantic-wash: rgba(182, 79, 66, .095);
+}
+
+.note-card[data-semantic] {
+  min-height: 302px;
+  border-left: 3px solid var(--semantic-tone);
+  background: linear-gradient(105deg, var(--semantic-wash), transparent 38%), var(--surface);
+}
+
+.note-card[data-semantic="fact"] {
+  background: var(--surface);
+}
+
+.note-card[data-semantic="analysis"] {
+  background: linear-gradient(115deg, rgba(181, 132, 47, .08), transparent 48%), #fffdf8;
+}
+
+.note-card[data-semantic]::before {
+  inset: 0 auto 0 0;
+  width: 3px;
+  height: auto;
+  background: var(--semantic-tone);
+  opacity: 1;
+}
+
+.note-semantic {
+  width: fit-content;
+  padding: 4px 7px;
+  color: var(--semantic-tone);
+  border: 1px solid color-mix(in srgb, var(--semantic-tone) 28%, transparent);
+  border-radius: 999px;
+  background: var(--semantic-wash);
+  font-size: 7px;
+  font-weight: 720;
+  letter-spacing: .04em;
+}
+
+.note-card-what,
+.note-card-decision > span {
+  color: var(--semantic-tone);
+  font: 700 7px/1.2 var(--font-geist-mono), monospace;
+  letter-spacing: .13em;
+}
+
+.note-card-what {
+  margin-top: 17px;
+}
+
+.note-card[data-semantic] h2 {
+  margin: 6px 0 13px;
+}
+
+.note-card-decision {
+  padding: 12px 13px;
+  border: 1px solid color-mix(in srgb, var(--semantic-tone) 17%, var(--line));
+  background: rgba(255, 255, 255, .5);
+}
+
+.note-card-decision > p {
+  margin-top: 6px;
+  color: #626b66;
+  font-size: 9px;
+  line-height: 1.65;
+  -webkit-line-clamp: 2;
+}
+
+.note-card-decision dl {
+  display: grid;
+  grid-template-columns: minmax(100px, .72fr) minmax(0, 1.28fr);
+  gap: 12px;
+  margin: 11px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.note-card-decision dt {
+  color: #979c98;
+  font-size: 7px;
+}
+
+.note-card-decision dd {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 3px 0 0;
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 620;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.note-card[data-semantic] .note-card-source {
+  padding-top: 12px;
+}
+
+.note-card[data-semantic] .note-card-foot {
+  align-items: center;
+}
+
+.todo-card[data-semantic] {
+  border-left-color: var(--semantic-tone);
+  background: linear-gradient(90deg, var(--semantic-wash), transparent 34%), var(--surface);
+}
+
+.calendar-event[data-semantic] {
+  border-left-color: var(--semantic-tone);
+  background: var(--semantic-wash);
+}
+
+.calendar-event[data-semantic="fact"] {
+  opacity: .58;
+  filter: saturate(.45);
+}
+
+.agenda-list > button[data-semantic] {
+  position: relative;
+  padding-left: 11px;
+  border-left: 3px solid var(--semantic-tone);
+  background: linear-gradient(90deg, var(--semantic-wash), transparent 38%);
+}
+
+.agenda-copy em {
+  display: block;
+  margin-top: 5px;
+  color: var(--semantic-tone);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 620;
+}
+
+.calendar-history {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .34);
+}
+
+.calendar-history > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.calendar-history > summary::-webkit-details-marker {
+  display: none;
+}
+
+.calendar-history > summary strong {
+  min-width: 22px;
+  min-height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--paper-deep);
+  font-size: 8px;
+}
+
+.calendar-history .agenda-group {
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
 }

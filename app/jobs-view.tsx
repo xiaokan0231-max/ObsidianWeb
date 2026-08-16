@@ -123,6 +123,96 @@ export type JobsInitialFilters = {
   ratings?: JobRatingBand[];
 };
 
+type JobsUrlState = {
+  query: string;
+  sort: JobSort;
+  filters: Filters;
+  viewMode: ViewMode;
+  weekOffset: number;
+  detailPath: string | null;
+};
+
+function csvParam(params: URLSearchParams, key: string) {
+  return (params.get(key) ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlState {
+  const params = typeof window === "undefined"
+    ? new URLSearchParams()
+    : new URLSearchParams(window.location.search);
+  const seeded = initialFilters?.statuses?.length || initialFilters?.ratings?.length;
+  const statusParam = params.get("status");
+  const baseFilters = seeded
+    ? {
+        ...EMPTY_FILTERS,
+        statuses: initialFilters?.statuses ?? [],
+        ratings: initialFilters?.ratings ?? [],
+      }
+    : DEFAULT_OPPORTUNITY_FILTERS;
+  const hasUrlFilters = [
+    "status",
+    "rating",
+    "salary",
+    "stack",
+    "region",
+    "source",
+    "verification",
+    "intake",
+    "remote",
+  ].some((key) => params.has(key));
+  const ratings = csvParam(params, "rating").filter((value): value is JobRatingBand =>
+    JOB_RATING_BANDS.some((band) => band.id === value),
+  );
+  const verifications = csvParam(params, "verification").filter((value): value is JobVerification =>
+    VERIFICATIONS.includes(value as JobVerification),
+  );
+  const intakes = csvParam(params, "intake").filter((value): value is JobIntake =>
+    JOB_INTAKES.some((bucket) => bucket.id === value),
+  );
+  const salary = Number(params.get("salary") ?? 0);
+  const sortParam = params.get("sort");
+  const modeParam = params.get("mode");
+  const week = Number(params.get("week") ?? 0);
+
+  return {
+    query: params.get("q") ?? "",
+    sort: JOB_SORTS.some((option) => option.id === sortParam) ? sortParam as JobSort : "rating",
+    filters: hasUrlFilters
+      ? {
+          ...EMPTY_FILTERS,
+          statuses: statusParam === "all" ? [] : csvParam(params, "status"),
+          ratings,
+          minSalary: SALARY_STEPS.includes(salary) ? salary : 0,
+          stacks: csvParam(params, "stack"),
+          regions: csvParam(params, "region"),
+          sources: csvParam(params, "source"),
+          verifications,
+          intakes,
+          remoteOnly: params.get("remote") === "1",
+        }
+      : baseFilters,
+    viewMode: VIEW_MODES.some((mode) => mode.id === modeParam) ? modeParam as ViewMode : "card",
+    weekOffset: Number.isInteger(week) && Math.abs(week) <= 52 ? week : 0,
+    detailPath: params.get("job") || null,
+  };
+}
+
+function isDefaultOpportunityFilters(filters: Filters) {
+  return filters.statuses.length === 1 &&
+    filters.statuses[0] === "未応募" &&
+    filters.ratings.length === 0 &&
+    filters.minSalary === 0 &&
+    filters.stacks.length === 0 &&
+    filters.regions.length === 0 &&
+    filters.sources.length === 0 &&
+    filters.verifications.length === 0 &&
+    filters.intakes.length === 0 &&
+    !filters.remoteOnly;
+}
+
 function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
 }
@@ -358,23 +448,15 @@ export default function JobsView({
    */
   initialFilters?: JobsInitialFilters | null;
 }) {
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<JobSort>("rating");
-  const [filters, setFilters] = useState<Filters>(() => {
-    const seeded = initialFilters?.statuses?.length || initialFilters?.ratings?.length;
-    return seeded
-      ? {
-          ...EMPTY_FILTERS,
-          statuses: initialFilters?.statuses ?? [],
-          ratings: initialFilters?.ratings ?? [],
-        }
-      : DEFAULT_OPPORTUNITY_FILTERS;
-  });
-  const [viewMode, setViewMode] = useState<ViewMode>("card");
-  const [weekOffset, setWeekOffset] = useState(0);
+  const [initialUrlState] = useState(() => readJobsUrlState(initialFilters));
+  const [query, setQuery] = useState(initialUrlState.query);
+  const [sort, setSort] = useState<JobSort>(initialUrlState.sort);
+  const [filters, setFilters] = useState<Filters>(initialUrlState.filters);
+  const [viewMode, setViewMode] = useState<ViewMode>(initialUrlState.viewMode);
+  const [weekOffset, setWeekOffset] = useState(initialUrlState.weekOffset);
   // 这个面板常挂着不关，「今天」要在跨天后重新取，否则周复盘会一直停在打开那天的那一周。
   const [today, setToday] = useState(() => isoDate(new Date()));
-  const [detailPath, setDetailPath] = useState<string | null>(null);
+  const [detailPath, setDetailPath] = useState<string | null>(initialUrlState.detailPath);
   const [comparePaths, setComparePaths] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
   const [savingPaths, setSavingPaths] = useState<string[]>([]);
@@ -687,6 +769,46 @@ export default function JobsView({
     };
   }, []);
 
+  useEffect(() => {
+    const syncFromUrl = () => {
+      const next = readJobsUrlState();
+      setQuery(next.query);
+      setSort(next.sort);
+      setFilters(next.filters);
+      setViewMode(next.viewMode);
+      setWeekOffset(next.weekOffset);
+      setDetailPath(next.detailPath);
+    };
+    window.addEventListener("popstate", syncFromUrl);
+    return () => window.removeEventListener("popstate", syncFromUrl);
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (query.trim()) params.set("q", query.trim());
+    if (!isDefaultOpportunityFilters(filters)) {
+      params.set("status", filters.statuses.length ? filters.statuses.join(",") : "all");
+      if (filters.ratings.length) params.set("rating", filters.ratings.join(","));
+      if (filters.minSalary > 0) params.set("salary", String(filters.minSalary));
+      if (filters.stacks.length) params.set("stack", filters.stacks.join(","));
+      if (filters.regions.length) params.set("region", filters.regions.join(","));
+      if (filters.sources.length) params.set("source", filters.sources.join(","));
+      if (filters.verifications.length) params.set("verification", filters.verifications.join(","));
+      if (filters.intakes.length) params.set("intake", filters.intakes.join(","));
+      if (filters.remoteOnly) params.set("remote", "1");
+    }
+    if (sort !== "rating") params.set("sort", sort);
+    if (viewMode !== "card") params.set("mode", viewMode);
+    if (viewMode === "weekly" && weekOffset !== 0) params.set("week", String(weekOffset));
+    if (detailPath) params.set("job", detailPath);
+    const queryString = params.toString();
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoAppView: "jobs" },
+      "",
+      `${window.location.pathname}${queryString ? `?${queryString}` : ""}`,
+    );
+  }, [detailPath, filters, query, sort, viewMode, weekOffset]);
+
   const notAppliedJobs = jobs.filter((job) => job.status === "未応募");
   const readyJobs = notAppliedJobs
     .filter((job) => job.rating >= 7)
@@ -695,6 +817,16 @@ export default function JobsView({
     readyJobs[0] ??
     [...notAppliedJobs].sort((left, right) => compareJobs(left, right, "rating"))[0] ??
     null;
+  const highlightedNextPick =
+    viewMode === "card" &&
+    sort === "rating" &&
+    query.trim() === "" &&
+    isDefaultOpportunityFilters(filters)
+      ? nextPick
+      : null;
+  const resultVisible = highlightedNextPick
+    ? visible.filter((job) => job.path !== highlightedNextPick.path)
+    : visible;
   const recentNotApplied = notAppliedJobs.filter((job) =>
     ["today", "d3", "d7"].includes(jobIntake(job.date, today)),
   ).length;
@@ -704,44 +836,44 @@ export default function JobsView({
 
   return (
     <section className="jobs-view">
-      <div className="jobs-stat page-stat-strip module-stat-strip" aria-label="当前岗位机会摘要">
-        <div><strong>{notAppliedJobs.length}</strong><span>未应募</span></div>
-        <div><strong>{readyJobs.length}</strong><span>7 分以上待判断</span></div>
-        <div><strong>{recentNotApplied}</strong><span>7 日内新增</span></div>
-        <div><strong>{verifiedNotApplied}</strong><span>原文已核对</span></div>
-      </div>
-
-      {nextPick && (
+      {highlightedNextPick && (
         <section className="jobs-next-pick" aria-label="下一项応募判断">
-          <span className={`jobs-next-score rate-${rateTone(nextPick.rating)}`}>
-            <strong>{nextPick.rating}</strong>
+          <span className={`jobs-next-score rate-${rateTone(highlightedNextPick.rating)}`}>
+            <strong>{highlightedNextPick.rating}</strong>
             <small>/ 10</small>
           </span>
           <div className="jobs-next-copy">
             <span>NEXT DECISION</span>
-            <h2>{nextPick.company}</h2>
-            <p>{nextPick.position}</p>
+            <h2>{highlightedNextPick.company}</h2>
+            <p>{highlightedNextPick.position}</p>
             <small>
               {readyJobs.length > 0
-                ? clip(nextPick.reason || "达到当前可投线，打开详情确认硬性条件与风险。", 110)
+                ? clip(highlightedNextPick.reason || "达到当前可投线，打开详情确认硬性条件与风险。", 110)
                 : "当前没有达到 7 分线的未应募岗位；先复核最高分候选，不自动建议投递。"}
             </small>
           </div>
           <dl className="jobs-next-facts">
             <div>
               <dt>年収</dt>
-              <dd>{salaryLabel(nextPick)}</dd>
+              <dd>{salaryLabel(highlightedNextPick)}</dd>
             </div>
             <div>
               <dt>原文</dt>
-              <dd>{VERIFICATION_LABEL[nextPick.verification]}</dd>
+              <dd>{VERIFICATION_LABEL[highlightedNextPick.verification]}</dd>
             </div>
           </dl>
-          <button type="button" onClick={() => setDetailPath(nextPick.path)}>
+          <button type="button" onClick={() => setDetailPath(highlightedNextPick.path)}>
             判断是否応募 <span aria-hidden="true">→</span>
           </button>
         </section>
       )}
+
+      <div className="jobs-stat page-stat-strip module-stat-strip" aria-label="当前岗位机会摘要">
+        <div data-zero={notAppliedJobs.length === 0}><strong>{notAppliedJobs.length}</strong><span>未应募</span></div>
+        <div data-zero={readyJobs.length === 0}><strong>{readyJobs.length}</strong><span>7 分以上待判断</span></div>
+        <div data-zero={recentNotApplied === 0}><strong>{recentNotApplied}</strong><span>7 日内新增</span></div>
+        <div data-zero={verifiedNotApplied === 0}><strong>{verifiedNotApplied}</strong><span>原文已核对</span></div>
+      </div>
 
       <div className="jobs-body">
         <details className="jobs-filter-panel">
@@ -922,7 +1054,7 @@ export default function JobsView({
           {isJobList && (
             <div className="jobs-result-bar">
               <span>
-                <strong>{visible.length}</strong> / {jobs.length} 条
+                {highlightedNextPick ? "其余 " : ""}<strong>{resultVisible.length}</strong> / {jobs.length} 条
                 {query && <> · 关键词「{query.trim()}」</>}
               </span>
               <span className="jobs-filter-count">已选 {activeFilterCount} 个筛选</span>
@@ -943,9 +1075,13 @@ export default function JobsView({
             </div>
           )}
 
-          {jobs.length > 0 && viewMode === "card" && visible.length > 0 && (
+          {jobs.length > 0 && highlightedNextPick && resultVisible.length === 0 && (
+            <div className="jobs-featured-only">当前筛选下只有上方这一项需要判断。</div>
+          )}
+
+          {jobs.length > 0 && viewMode === "card" && resultVisible.length > 0 && (
             <div className="jobs-grid">
-              {visible.map((job) => (
+              {resultVisible.map((job) => (
                 <JobCardView
                   key={job.path}
                   job={job}
@@ -962,8 +1098,8 @@ export default function JobsView({
             </div>
           )}
 
-          {jobs.length > 0 && viewMode === "list" && visible.length > 0 && (
-            <JobListView jobs={visible} query={query} today={today} onDetail={setDetailPath} />
+          {jobs.length > 0 && viewMode === "list" && resultVisible.length > 0 && (
+            <JobListView jobs={resultVisible} query={query} today={today} onDetail={setDetailPath} />
           )}
 
           {jobs.length > 0 && viewMode === "kanban" && visible.length > 0 && (

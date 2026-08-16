@@ -1,5 +1,5 @@
 import MemoryAtlas from "./memory-atlas";
 
 export default function Home() {
-  return <MemoryAtlas />;
+  return <MemoryAtlas initialView="overview" />;
 }

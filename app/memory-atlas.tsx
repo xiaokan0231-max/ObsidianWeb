@@ -23,6 +23,11 @@ import JapaneseTraining from "./japanese-training";
 import LanguageExpressionCourses from "./language-expression-courses";
 import JobsAnalytics from "./jobs-analytics";
 import JobsView, { type JobsInitialFilters } from "./jobs-view";
+import {
+  appViewFromPathname,
+  appViewHref,
+  type AppView,
+} from "./app-route";
 import type {
   KnowledgeGraphSceneLink,
   KnowledgeGraphSceneNode,
@@ -42,6 +47,7 @@ import {
   isRoundSpecificAsset,
   type SharedAssetTarget,
 } from "@/lib/interview-shared-assets";
+import { findInterviewPrepDocs } from "@/lib/interview-prep-doc";
 import {
   formatDate,
   getString,
@@ -64,6 +70,7 @@ import {
   ACTIVE_JOB_STATUSES,
   buildDerivedData,
   buildReviewPreview,
+  calendarCompanyIdentity,
   careerStatus,
   extractLinks,
   getGroup,
@@ -103,7 +110,7 @@ type VaultResponse = {
   notes: Note[];
 };
 
-type View = "overview" | "session" | "prep" | "review" | "language" | "topics" | "jobs" | "analytics" | "todo" | "graph" | "calendar" | "timeline" | "library";
+type View = AppView;
 type PrimaryNavId =
   | "overview"
   | "progress"
@@ -432,9 +439,9 @@ function SharedAssetOverlay({
   );
 }
 
-function MemoryAtlas() {
+function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const [notes, setNotes] = useState<Note[]>([]);
-  const [view, setView] = useState<View>("overview");
+  const [view, setView] = useState<View>(initialView);
   const [reviewInitialKey, setReviewInitialKey] = useState<string | null>(null);
   // 本场面试を残したまま、その上に全幅で開く回答库カード
   const [prepOverlayCard, setPrepOverlayCard] = useState<string | null>(null);
@@ -451,10 +458,18 @@ function MemoryAtlas() {
    * 同时还弹出一个跳转面板盖在上面。现在搜索面板自己持有局部关键词，
    * 这个 state 只服务资料库自己的搜索框。
    */
-  const [libraryQuery, setLibraryQuery] = useState("");
+  const [libraryQuery, setLibraryQuery] = useState(() =>
+    typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("q") ?? "",
+  );
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
-  const [groupFilter, setGroupFilter] = useState<GroupKey | "all">("all");
+  const [groupFilter, setGroupFilter] = useState<GroupKey | "all">(() => {
+    if (typeof window === "undefined") return "all";
+    const group = new URLSearchParams(window.location.search).get("group");
+    return group === "all" || (group !== null && group in GROUPS)
+      ? group as GroupKey | "all"
+      : "all";
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
@@ -608,8 +623,35 @@ function MemoryAtlas() {
         setSharedAssetOverlay(null);
       }
     };
-    const onPopState = (event: PopStateEvent) => syncOverlays(event.state);
+    const syncRoute = () => {
+      const routedView = appViewFromPathname(window.location.pathname);
+      if (!routedView) return;
+      setView(routedView);
+      if (routedView === "library") {
+        const params = new URLSearchParams(window.location.search);
+        setLibraryQuery(params.get("q") ?? "");
+        const group = params.get("group");
+        setGroupFilter(
+          group === "all" || (group !== null && group in GROUPS)
+            ? group as GroupKey | "all"
+            : "all",
+        );
+      }
+      if (routedView === "graph") {
+        const group = new URLSearchParams(window.location.search).get("group");
+        setGroupFilter(
+          group === "all" || (group !== null && group in GROUPS)
+            ? group as GroupKey | "all"
+            : "all",
+        );
+      }
+    };
+    const onPopState = (event: PopStateEvent) => {
+      syncOverlays(event.state);
+      syncRoute();
+    };
     syncOverlays(window.history.state);
+    syncRoute();
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -719,19 +761,55 @@ function MemoryAtlas() {
   const sourceLabel = error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接";
   const sourceDetail = fetchedAt ? `${formatDate(fetchedAt)} 同步` : "本地数据源";
 
+  const navigateToView = useCallback((
+    nextView: View,
+    search?: URLSearchParams | string,
+    preserveJobsInitialFilters = false,
+  ) => {
+    if (nextView === "review") setReviewInitialKey(null);
+    // ナビから直接来た時は分析画面由来のフィルタを持ち越さない。
+    if (nextView === "jobs" && !preserveJobsInitialFilters) setJobsInitialFilters(null);
+    setMobileMoreOpen(false);
+    window.history.pushState({ __echoAppView: nextView }, "", appViewHref(nextView, search));
+    setView(nextView);
+  }, []);
+
   const runSavedQuery = (savedQuery: string) => {
+    const params = new URLSearchParams();
+    params.set("q", savedQuery);
     setLibraryQuery(savedQuery);
-    setView("library");
+    navigateToView("library", params);
     setSearchOpen(false);
   };
 
-  const navigateToView = (nextView: View) => {
-    if (nextView === "review") setReviewInitialKey(null);
-    // ナビから直接来た時は分析画面由来のフィルタを持ち越さない。
-    if (nextView === "jobs") setJobsInitialFilters(null);
-    setMobileMoreOpen(false);
-    setView(nextView);
-  };
+  const syncInterviewSelection = useCallback((company: string, prepPath: string) => {
+    const params = new URLSearchParams();
+    if (company) params.set("company", company);
+    if (prepPath) params.set("prep", prepPath);
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoAppView: "session" },
+      "",
+      appViewHref("session", params),
+    );
+  }, []);
+
+  useEffect(() => {
+    if (view !== "library" && view !== "graph") return;
+    const params = new URLSearchParams(window.location.search);
+    if (view === "library") {
+      if (libraryQuery.trim()) params.set("q", libraryQuery.trim());
+      else params.delete("q");
+    } else {
+      params.delete("q");
+    }
+    if (groupFilter === "all") params.delete("group");
+    else params.set("group", groupFilter);
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoAppView: view },
+      "",
+      appViewHref(view, params),
+    );
+  }, [groupFilter, libraryQuery, view]);
 
   const activeNavigation =
     NAVIGATION.find((item) => item.views.includes(view)) ?? NAVIGATION[0];
@@ -757,7 +835,7 @@ function MemoryAtlas() {
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="主导航">
-        <button className="brand" onClick={() => setView("overview")} aria-label="返回总览">
+        <button className="brand" onClick={() => navigateToView("overview")} aria-label="返回总览">
           <span className="brand-mark">回</span>
           <span className="brand-copy">
             <strong>回声</strong>
@@ -830,7 +908,8 @@ function MemoryAtlas() {
             {activeSecondaryLabel && <small>{activeSecondaryLabel}</small>}
           </div>
 
-          {nextEvent && (
+          {/* 当前面试页已经有“本场”倒计时；再放全局下一场会让两家公司同时争夺上下文。 */}
+          {nextEvent && view !== "session" && (
             <button
               className="topbar-next"
               onClick={() => navigateToView(nextEvent.phase === "upcoming" ? "calendar" : "calendar")}
@@ -899,11 +978,11 @@ function MemoryAtlas() {
                   notes={notes}
                   derived={derived}
                   onOpen={openNote}
-                  onView={setView}
+                  onView={navigateToView}
                   onQuery={runSavedQuery}
                   onOpenReview={(key) => {
                     setReviewInitialKey(key ?? null);
-                    setView("review");
+                    navigateToView("review");
                   }}
                 />
               )}
@@ -921,6 +1000,9 @@ function MemoryAtlas() {
                   onOpenWiki={openWikiLink}
                   onOpenCard={openPrepCard}
                   onOpenAsset={openSharedAsset}
+                  initialCompany={typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("company") ?? ""}
+                  initialPath={typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("prep") ?? ""}
+                  onSelectionChange={syncInterviewSelection}
                 />
               )}
               {view === "prep" && (
@@ -952,7 +1034,10 @@ function MemoryAtlas() {
                   onOpen={openNote}
                   onViewJobs={(filters) => {
                     setJobsInitialFilters(filters ?? null);
-                    setView("jobs");
+                    const params = new URLSearchParams();
+                    if (filters?.statuses?.length) params.set("status", filters.statuses.join(","));
+                    if (filters?.ratings?.length) params.set("rating", filters.ratings.join(","));
+                    navigateToView("jobs", params, true);
                   }}
                 />
               )}
@@ -968,7 +1053,16 @@ function MemoryAtlas() {
                 />
               )}
               {view === "calendar" && (
-                <CalendarView events={derived.calendarEvents} onOpen={openNote} />
+                <CalendarView
+                  events={derived.calendarEvents}
+                  notes={notes}
+                  onOpen={openNote}
+                  onPrepare={(company) => {
+                    const params = new URLSearchParams();
+                    params.set("company", company);
+                    navigateToView("session", params);
+                  }}
+                />
               )}
               {view === "timeline" && (
                 <TimelineView
@@ -1570,7 +1664,7 @@ function Overview({
 }
 
 function Stat({ value, label }: { value: number; label: string }) {
-  return <div className="stat"><strong>{value.toString().padStart(2, "0")}</strong><span>{label}</span></div>;
+  return <div className="stat" data-zero={value === 0}><strong>{value.toString().padStart(2, "0")}</strong><span>{label}</span></div>;
 }
 
 function PanelHeading({
@@ -1987,7 +2081,17 @@ function CanvasKnowledgeGraph({
   );
 }
 
-function CalendarView({ events, onOpen }: { events: CalendarEvent[]; onOpen: (note: Note) => void }) {
+function CalendarView({
+  events,
+  notes,
+  onOpen,
+  onPrepare,
+}: {
+  events: CalendarEvent[];
+  notes: Note[];
+  onOpen: (note: Note) => void;
+  onPrepare: (company: string) => void;
+}) {
   const [month, setMonth] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -2011,12 +2115,23 @@ function CalendarView({ events, onOpen }: { events: CalendarEvent[]; onOpen: (no
     events.forEach((event) => map.set(event.date, [...(map.get(event.date) ?? []), event]));
     return map;
   }, [events]);
+  const horizon = (() => {
+    const [year, monthNumber, day] = today.split("-").map(Number);
+    return localDateKey(new Date(year, monthNumber - 1, day + 6));
+  })();
   const upcomingAll = events.filter((event) => event.phase === "upcoming");
-  const upcoming = upcomingAll.slice(0, 6);
+  const upcomingWeek = upcomingAll.filter((event) => event.date <= horizon);
+  const upcomingLater = upcomingAll.filter((event) => event.date > horizon).slice(0, 5);
   const recent = events
     .filter((event) => event.phase === "past")
     .sort((left, right) => right.date.localeCompare(left.date) || right.time.localeCompare(left.time))
     .slice(0, 6);
+  const prepCompanies = useMemo(
+    () => new Set(findInterviewPrepDocs(notes).map((doc) => calendarCompanyIdentity(doc.company))),
+    [notes],
+  );
+  const canPrepare = (event: CalendarEvent) =>
+    event.phase === "upcoming" && prepCompanies.has(calendarCompanyIdentity(event.company));
 
   const moveMonth = (offset: number) => {
     setMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
@@ -2064,6 +2179,7 @@ function CalendarView({ events, onOpen }: { events: CalendarEvent[]; onOpen: (no
                       {dayEvents.slice(0, 3).map((event) => (
                         <button
                           className={`calendar-event ${event.phase}`}
+                          data-semantic={event.phase === "upcoming" ? "action" : "fact"}
                           key={event.id}
                           onClick={() => onOpen(event.note)}
                           title={`${event.company} · ${event.label}`}
@@ -2082,8 +2198,38 @@ function CalendarView({ events, onOpen }: { events: CalendarEvent[]; onOpen: (no
         </div>
 
         <aside className="calendar-agenda">
-          <AgendaGroup title="接下来的安排" empty="目前没有已记录的未来面谈。" events={upcoming} onOpen={onOpen} />
-          <AgendaGroup title="最近的面试记录" empty="还没有可识别的历史面试记录。" events={recent} onOpen={onOpen} />
+          <AgendaGroup
+            title="未来 7 天"
+            empty="未来七天没有已确认的安排。"
+            events={upcomingWeek}
+            onOpen={onOpen}
+            onPrepare={onPrepare}
+            canPrepare={canPrepare}
+          />
+          {upcomingLater.length > 0 && (
+            <AgendaGroup
+              title="稍后安排"
+              empty=""
+              events={upcomingLater}
+              onOpen={onOpen}
+              onPrepare={onPrepare}
+              canPrepare={canPrepare}
+            />
+          )}
+          <details className="calendar-history">
+            <summary>
+              <span>最近的面试记录</span>
+              <strong>{recent.length}</strong>
+            </summary>
+            <AgendaGroup
+              title="历史事实"
+              empty="还没有可识别的历史面试记录。"
+              events={recent}
+              onOpen={onOpen}
+              onPrepare={onPrepare}
+              canPrepare={canPrepare}
+            />
+          </details>
         </aside>
       </div>
     </section>
@@ -2095,18 +2241,28 @@ function AgendaGroup({
   empty,
   events,
   onOpen,
+  onPrepare,
+  canPrepare,
 }: {
   title: string;
   empty: string;
   events: CalendarEvent[];
   onOpen: (note: Note) => void;
+  onPrepare: (company: string) => void;
+  canPrepare: (event: CalendarEvent) => boolean;
 }) {
   return (
     <section className="agenda-group">
       <div className="agenda-heading"><h2>{title}</h2><span>{events.length}</span></div>
       <div className="agenda-list">
-        {events.map((event) => (
-          <button key={event.id} onClick={() => onOpen(event.note)}>
+        {events.map((event) => {
+          const prepare = canPrepare(event);
+          return (
+          <button
+            key={event.id}
+            data-semantic={event.phase === "upcoming" ? "action" : "fact"}
+            onClick={() => prepare ? onPrepare(event.company) : onOpen(event.note)}
+          >
             <time dateTime={event.date}>
               <strong>{event.date.slice(8)}</strong>
               <span>{formatDate(event.date)}</span>
@@ -2114,10 +2270,11 @@ function AgendaGroup({
             <span className="agenda-copy">
               <small>{event.time ? `${event.time} · ${event.label}` : event.label}</small>
               <strong>{event.company}</strong>
+              <em>{prepare ? "下一步 · 打开面试准备" : event.phase === "upcoming" ? "下一步 · 查看安排原文" : "事实记录 · 查看原文"}</em>
             </span>
             <span className={`agenda-dot ${event.phase}`} />
           </button>
-        ))}
+        );})}
         {events.length === 0 && <p className="agenda-empty">{empty}</p>}
       </div>
     </section>
@@ -2253,6 +2410,60 @@ function TimelineListView({ items, onOpen }: { items: { note: Note; date: string
   );
 }
 
+type DecisionSemantic = "fact" | "analysis" | "action" | "waiting" | "risk";
+
+const DECISION_SEMANTICS: Record<DecisionSemantic, { label: string; next: string }> = {
+  fact: { label: "事实", next: "打开事实原文" },
+  analysis: { label: "分析", next: "核对结论与来源" },
+  action: { label: "本人行动", next: "继续执行" },
+  waiting: { label: "外部等待", next: "查看跟进条件" },
+  risk: { label: "风险", next: "立即确认" },
+};
+
+function decisionClip(value: string, limit: number) {
+  const text = stripMarkdown(value).replace(/\s+/gu, " ").trim();
+  return text.length > limit ? `${text.slice(0, limit)}…` : text;
+}
+
+function noteDecisionMeta(note: Note) {
+  const type = getType(note);
+  const status = getString(note.frontmatter.status);
+  const nextAction =
+    getString(note.frontmatter.next_action) ||
+    getString(note.frontmatter.action);
+  const scheduled = getString(note.frontmatter.next_event_at);
+  const scheduledDate = scheduled.match(/\b20\d{2}-\d{2}-\d{2}\b/u)?.[0] ?? "";
+  const overdue = scheduledDate !== "" && scheduledDate < localDateKey() && status !== "完了";
+  const waiting = /(?:待ち|待機|等待|返信|回复|結果待)/u.test(`${nextAction} ${status}`);
+  const activeJob = getType(note) === "job-case" && careerStatus(status).tone === "active";
+  let semantic: DecisionSemantic = "fact";
+  if (overdue) semantic = "risk";
+  else if (waiting) semantic = "waiting";
+  else if (type === "todo" && todoAudience(note) === "user" && status !== "完了") semantic = "action";
+  else if (activeJob || (type === "interview-prep" && scheduledDate >= localDateKey())) semantic = "action";
+  else if (trustLayer(note).className === "trust-analysis") semantic = "analysis";
+
+  const structuredWhy = [
+    getString(note.frontmatter.reason),
+    getString(note.frontmatter.summary),
+    getString(note.frontmatter.caution),
+    getString(note.frontmatter.result),
+  ].find(Boolean);
+  const importance = decisionClip(
+    structuredWhy || notePreview(note) ||
+      (semantic === "analysis"
+        ? "这是基于现有材料形成的分析，需要结合来源再判断。"
+        : "这是可以回查的事实与证据。"),
+    118,
+  );
+  const when = scheduled ||
+    getString(note.frontmatter.status_updated) ||
+    getString(note.frontmatter.date) ||
+    formatDate(note.stat.mtime);
+  const next = decisionClip(nextAction || DECISION_SEMANTICS[semantic].next, 76);
+  return { semantic, importance, when, next, label: DECISION_SEMANTICS[semantic].label };
+}
+
 
 function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => void }) {
   const [tab, setTab] = useState<string>("all");
@@ -2317,10 +2528,15 @@ function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => vo
         {visible.map((note) => {
           const pri = todoPriority(note);
           const st = todoStatus(note);
+          const decision = noteDecisionMeta(note);
           const why = jobSection(note, "なぜ必要か") || jobSection(note, "課題");
           const what = jobSection(note, "やること");
           return (
-            <article className={`todo-card pri-${pri} ${st === "完了" ? "is-done" : ""}`} key={note.path}>
+            <article
+              className={`todo-card pri-${pri} ${st === "完了" ? "is-done" : ""}`}
+              data-semantic={decision.semantic}
+              key={note.path}
+            >
               <header className="todo-head">
                 <div className="todo-titles">
                   <span className={`todo-pri pri-${pri}`}>{TODO_PRIORITY[pri]?.label ?? pri}</span>
@@ -2536,22 +2752,35 @@ function LibraryView({
             {visibleNotes.map((note) => {
               const group = getGroup(note.path);
               const trust = trustLayer(note);
+              const decision = noteDecisionMeta(note);
               const links = extractLinks(note.content).length;
               return (
                 <button
                   className="note-card"
                   key={note.path}
+                  data-semantic={decision.semantic}
                   onClick={() => onOpen(note)}
-                  style={{ "--note-accent": GROUPS[group].color } as CSSProperties}
+                  style={{
+                    "--note-accent": GROUPS[group].color,
+                  } as CSSProperties}
                 >
                   <div className="note-card-top">
                     <span className="note-group"><i />{GROUPS[group].label}</span>
-                    <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
+                    <span className={`note-semantic semantic-${decision.semantic}`}>{decision.label}</span>
                   </div>
+                  <span className="note-card-what">发生了什么</span>
                   <h2>{getTitle(note)}</h2>
-                  <p>{notePreview(note).slice(0, 190)}</p>
+                  <div className="note-card-decision">
+                    <span>为什么重要</span>
+                    <p>{decision.importance}</p>
+                    <dl>
+                      <div><dt>何时处理</dt><dd>{decision.when}</dd></div>
+                      <div><dt>下一步</dt><dd>{decision.next}</dd></div>
+                    </dl>
+                  </div>
                   <div className="note-card-source">{noteFolder(note.path)}</div>
                   <div className="note-card-foot">
+                    <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
                     <span>{typeLabel(getType(note))}</span>
                     <span>{links ? `${links} 条关联` : "暂无关联"}</span>
                     <time dateTime={new Date(note.stat.mtime).toISOString()}>{formatDate(note.stat.mtime)}</time>
@@ -2584,6 +2813,45 @@ function LibraryView({
   );
 }
 
+/** 見出しに付ける id。行番号ベースなので、目次側と本文側で必ず一致する。 */
+function headingAnchor(lineIndex: number) {
+  return `doc-h-${lineIndex}`;
+}
+
+/** 目次用の見出しだけを拾う。**強調** や [[リンク]] の記号は目次では邪魔なので落とす。 */
+function headingPlainText(text: string) {
+  return text
+    .replace(/!?\[\[([^\]]+)\]\]/g, (_, body: string) => {
+      const [targetWithHeading, alias] = String(body).split("|");
+      return alias || targetWithHeading.split("#")[0];
+    })
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
+}
+
+/**
+ * MarkdownDocument と同じ順序で本文を舐めて見出しを集める。
+ * 走査規則（コードフェンス内は無視・冒頭 H1 はノート題名なので捨てる）を
+ * 本文レンダラと揃えていないと、目次のリンク先がずれる。
+ */
+function scanHeadings(content: string) {
+  const found: { id: string; level: number; text: string }[] = [];
+  let inCode = false;
+  let seenTitle = false;
+  stripFrontmatter(content).split("\n").forEach((line, index) => {
+    if (line.startsWith("```")) { inCode = !inCode; return; }
+    if (inCode || line.startsWith(">")) return;
+    const heading = line.match(/^(#{1,4})\s+(.+)/);
+    if (!heading) return;
+    const level = heading[1].length;
+    if (level === 1 && !seenTitle) { seenTitle = true; return; }
+    if (level > 3) return;
+    found.push({ id: headingAnchor(index), level: level === 1 ? 2 : level, text: headingPlainText(heading[2]) });
+  });
+  return found;
+}
+
 function NoteDrawer({
   note,
   section,
@@ -2605,6 +2873,9 @@ function NoteDrawer({
   const basename = noteBasename(note.path);
   const backlinks = allNotes.filter((candidate) => extractLinks(candidate.content).includes(basename));
   const frontmatterEntries = Object.entries(note.frontmatter);
+  const headings = useMemo(() => scanHeadings(note.content), [note.content]);
+  const [activeHeading, setActiveHeading] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
 
   // 全屏で読むので背面はスクロールさせない。閉じたときに元の位置へ戻す。
   useEffect(() => {
@@ -2632,6 +2903,39 @@ function NoteDrawer({
     return () => window.clearTimeout(timer);
   }, [note.path, section]);
 
+  // 読書位置：進捗バーと目次のハイライトは同じ1回の計測から作る。
+  // 別々に scroll を購読すると、長文でフレームを2回食う。
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const travel = scroller.scrollHeight - scroller.clientHeight;
+      setProgress(travel > 0 ? Math.min(1, Math.max(0, scroller.scrollTop / travel)) : 0);
+      const marks = [...scroller.querySelectorAll<HTMLElement>("[data-md-heading][id]")];
+      // 見出しが画面上端の少し下を通過した時点で「その節を読んでいる」とみなす。
+      const threshold = scroller.getBoundingClientRect().top + 140;
+      let current = marks[0]?.id ?? null;
+      for (const mark of marks) {
+        if (mark.getBoundingClientRect().top > threshold) break;
+        current = mark.id;
+      }
+      setActiveHeading(current);
+    };
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(measure); };
+    measure();
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [note.path]);
+
+  const jumpToHeading = (id: string) => {
+    scrollRef.current?.querySelector<HTMLElement>(`#${CSS.escape(id)}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+
   return (
     <div className="drawer-backdrop drawer-backdrop--full">
       <aside className="note-drawer note-drawer--full" aria-label="记忆详情" aria-modal="true" role="dialog">
@@ -2639,8 +2943,22 @@ function NoteDrawer({
           <div><span style={{ color: GROUPS[group].color }}>{GROUPS[group].label}</span><small>{note.path}</small></div>
           <span className="drawer-esc-hint"><kbd>Esc</kbd> 返回</span>
           <button onClick={onClose} aria-label="关闭详情">×</button>
+          <i className="drawer-progress" style={{ transform: `scaleX(${progress})` }} aria-hidden />
         </header>
         <div className="drawer-scroll" ref={scrollRef}>
+          <div className="drawer-reading-shell">
+          {headings.length > 2 && (
+            <nav className="doc-toc" aria-label="本文目录">
+              <span className="doc-toc-label">目录</span>
+              <ol>
+                {headings.map((heading) => (
+                  <li key={heading.id} className={`doc-toc-item doc-toc-item--h${heading.level}${activeHeading === heading.id ? " is-active" : ""}`}>
+                    <button onClick={() => jumpToHeading(heading.id)}>{heading.text}</button>
+                  </li>
+                ))}
+              </ol>
+            </nav>
+          )}
           <div className="drawer-reading">
             <div className="drawer-title-row">
               <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
@@ -2674,6 +2992,7 @@ function NoteDrawer({
               </section>
             )}
           </div>
+          </div>
         </div>
       </aside>
     </div>
@@ -2682,8 +3001,27 @@ function NoteDrawer({
 
 function renderInline(text: string, onWikiLink: (target: string, section?: string) => void): ReactNode[] {
   // 埋め込み記法 ![[…]] も同じリンクとして扱う。`!` を先に食わないと裸で残る。
-  const pieces = text.split(/(!?\[\[[^\]]+\]\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+  // [題](url) と <url> は取材メモの出典で多用するので、素の URL を晒さずリンクにする。
+  const pieces = text
+    .split(/(!?\[\[[^\]]+\]\]|\[[^\]]+\]\([^)\s]+\)|<https?:\/\/[^>\s]+>|\*\*[^*]+\*\*|`[^`]+`)/g)
+    .filter(Boolean);
   return pieces.map((piece, index) => {
+    const mdLink = piece.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
+    if (mdLink) {
+      return (
+        <a className="md-link" key={index} href={mdLink[2]} target="_blank" rel="noreferrer">
+          {mdLink[1]}<i>↗</i>
+        </a>
+      );
+    }
+    if (/^<https?:\/\/[^>\s]+>$/.test(piece)) {
+      const url = piece.slice(1, -1);
+      return (
+        <a className="md-link" key={index} href={url} target="_blank" rel="noreferrer">
+          {url}<i>↗</i>
+        </a>
+      );
+    }
     if (piece.startsWith("[[") || piece.startsWith("![[")) {
       const body = piece.replace(/^!?\[\[/, "").replace(/\]\]$/, "");
       const [targetWithHeading, alias] = body.split("|");
@@ -2698,6 +3036,29 @@ function renderInline(text: string, onWikiLink: (target: string, section?: strin
     if (piece.startsWith("`") && piece.endsWith("`")) return <code key={index}>{piece.slice(1, -1)}</code>;
     return piece;
   });
+}
+
+/**
+ * 引用の先頭に付いた記号で色を決める。vault 側は 🔴＝禁止・⚠️＝注意・⭐＝最重要…と
+ * 記号で強弱を書き分けているのに、全部同じ灰色の箱で出すとその区別が消える。
+ */
+const CALLOUT_TONES: [string, string][] = [
+  ["🔴", "danger"], ["❌", "danger"], ["⛔", "danger"],
+  ["⚠️", "warn"], ["⚠", "warn"],
+  ["🔑", "key"], ["⭐", "key"],
+  ["📊", "data"], ["🔍", "data"],
+  ["🎯", "aim"], ["✅", "aim"],
+  ["💡", "idea"],
+];
+
+function calloutTone(firstLine: string) {
+  const head = firstLine.trimStart();
+  // ** で始まる強調や > の入れ子を剥いでから記号を見る
+  const bare = head.replace(/^(\*\*|>|\s)+/, "");
+  for (const [mark, tone] of CALLOUT_TONES) {
+    if (bare.startsWith(mark)) return tone;
+  }
+  return null;
 }
 
 function MarkdownDocument({
@@ -2715,22 +3076,45 @@ function MarkdownDocument({
   // 数行の注意書きが分断されて読めなくなる。
   let quoteLines: string[] = [];
   let quoteStart = 0;
+  // 表も同じ理由でまとめる。行ごとに独立した箱だと、
+  // ヘッダ行と本体行の区別も、枠線の一体感も出せない。
+  let tableLines: string[] = [];
+  let tableStart = 0;
   let seenTitle = false;
   const flushQuote = () => {
     if (!quoteLines.length) return;
     const buffered = quoteLines;
     quoteLines = [];
+    const tone = calloutTone(buffered[0] ?? "");
     blocks.push(
-      <blockquote key={`quote-${quoteStart}`}>
+      <blockquote key={`quote-${quoteStart}`} data-callout={tone ?? undefined}>
         {buffered.map((quoted, offset) => (
           <span key={offset}>{renderInline(quoted, onWikiLink)}</span>
         ))}
       </blockquote>,
     );
   };
+  const flushTable = () => {
+    if (!tableLines.length) return;
+    const buffered = tableLines;
+    tableLines = [];
+    blocks.push(
+      <div className="md-table" key={`table-${tableStart}`}>
+        {buffered.map((row, rowIndex) => (
+          <div className={`md-table-row${rowIndex === 0 ? " md-table-head" : ""}`} key={rowIndex}>
+            {/* 前後のパイプだけ落として分割する。filter(Boolean) だと空セルが消えて列がずれる */}
+            {row.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((cell, cellIndex) => (
+              <span key={cellIndex}>{renderInline(cell.trim(), onWikiLink)}</span>
+            ))}
+          </div>
+        ))}
+      </div>,
+    );
+  };
   lines.forEach((line, index) => {
     if (line.startsWith("```")) {
       flushQuote();
+      flushTable();
       if (inCode) {
         blocks.push(<pre key={`code-${index}`}><code>{codeLines.join("\n")}</code></pre>);
         codeLines = [];
@@ -2740,11 +3124,20 @@ function MarkdownDocument({
     }
     if (inCode) { codeLines.push(line); return; }
     if (line.startsWith(">")) {
+      flushTable();
       if (!quoteLines.length) quoteStart = index;
       quoteLines.push(line.replace(/^>\s?/, ""));
       return;
     }
+    if (line.startsWith("|")) {
+      flushQuote();
+      if (!tableLines.length) tableStart = index;
+      // |---|---| の区切り行は表示しない
+      if (!/^\|?\s*:?-+/.test(line)) tableLines.push(line);
+      return;
+    }
     flushQuote();
+    flushTable();
     if (!line.trim()) return;
     if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
       blocks.push(<hr key={index} />);
@@ -2753,7 +3146,7 @@ function MarkdownDocument({
     const heading = line.match(/^(#{1,4})\s+(.+)/);
     if (heading) {
       const level = heading[1].length;
-      const data = { "data-md-heading": normalizeHeading(heading[2]) };
+      const data = { "data-md-heading": normalizeHeading(heading[2]), id: headingAnchor(index) };
       // 冒頭の H1 は Obsidian 慣例でノート題名＝drawer が既に大きく出しているので捨てる。
       // 2つ目以降の H1 は本文の見出しなので h2 として出す。
       if (level === 1) {
@@ -2770,14 +3163,10 @@ function MarkdownDocument({
       blocks.push(<div className="md-list-item" key={index}><i /> <span>{renderInline(listItem[1], onWikiLink)}</span></div>);
       return;
     }
-    if (line.startsWith("|")) {
-      if (/^\|?\s*:?-+/.test(line)) return;
-      blocks.push(<div className="md-table-row" key={index}>{line.split("|").filter(Boolean).map((cell, cellIndex) => <span key={cellIndex}>{renderInline(cell.trim(), onWikiLink)}</span>)}</div>);
-      return;
-    }
     blocks.push(<p key={index}>{renderInline(line, onWikiLink)}</p>);
   });
   flushQuote();
+  flushTable();
   return <article className="markdown-document">{blocks}</article>;
 }
 
