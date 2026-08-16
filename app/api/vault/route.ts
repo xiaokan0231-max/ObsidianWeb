@@ -1,8 +1,10 @@
 import { readAllNotes } from "@/lib/server/obsidian";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const notes = await readAllNotes();
+    // refresh=1 是页面 R 键的「我不信缓存」通道：跳过 mtime 增量，按旧行为全量爬取。
+    const force = new URL(request.url).searchParams.get("refresh") === "1";
+    const notes = await readAllNotes({ force });
 
     return Response.json(
       {
