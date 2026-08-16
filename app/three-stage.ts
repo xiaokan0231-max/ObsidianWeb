@@ -525,10 +525,13 @@ export function projectLabelItems(
 
 export function disposeStage(scene: THREE.Scene) {
   scene.traverse((object) => {
+    // Line で判定する（LineSegments は Line の子クラスなので両方拾える）。
+    // 以前は LineSegments で判定していて、普通の Line（手勢の射線）が
+    // どの分岐にも入らず geometry/material を漏らしていた。
     if (
       object instanceof THREE.Mesh ||
       object instanceof THREE.Points ||
-      object instanceof THREE.LineSegments
+      object instanceof THREE.Line
     ) {
       object.geometry?.dispose();
       const materials = Array.isArray(object.material) ? object.material : [object.material];
@@ -536,6 +539,13 @@ export function disposeStage(scene: THREE.Scene) {
     }
     if (object instanceof THREE.Sprite) {
       object.material.dispose();
+    }
+    // InstancedMesh の instanceMatrix / instanceColor の GL buffer は
+    // object.dispose() の dispose イベント経由でしか解放されない
+    // （geometry/material の dispose では落ちない）。分区筛选はシーンを
+    // 作り直すので、これが無いと旧 buffer が GC まで宙吊りになる。
+    if (object instanceof THREE.InstancedMesh) {
+      object.dispose();
     }
   });
 }

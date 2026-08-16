@@ -23,6 +23,10 @@ if ! node "$(dirname -- "$0")/vault-check.mjs" >/dev/null 2>&1 ||
   echo "⚠️  vault のデータに不整合がある。詳細: npm run vault:verify" >&2
 fi
 
+# 手勢用の wasm・モデルを public/mediapipe/ に用意（揃っていれば何もしない、
+# 失敗しても起動は止めない——クライアントが CDN へフォールバックする）
+node "$(dirname -- "$0")/fetch-mediapipe.mjs" || true
+
 OBSIDIAN_API_KEY="$(jq -r '.apiKey // empty' "$OBSIDIAN_CONFIG_PATH")"
 export OBSIDIAN_API_KEY
 export OBSIDIAN_API_URL="${OBSIDIAN_API_URL:-http://127.0.0.1:27123}"

@@ -17,6 +17,8 @@ const eslintConfig = defineConfig([
     // 构建产物。带 ** 前缀是因为 worktree 之类的嵌套 checkout 里也有自己的 dist/.next，
     // 它们是压缩后的 rolldown 输出，lint 出来的上千条都是噪音。
     "**/dist/**",
+    // MediaPipe 的 wasm 加载器（scripts/fetch-mediapipe.mjs 复制来的第三方产物）。
+    "public/mediapipe/**",
     // 设计交付稿的原型运行时，只作参考，不参与构建。
     "**/design_handoff_*/**",
     // Claude Code 的 worktree：每个都是一份完整仓库，各自的 checkout 自己 lint，
