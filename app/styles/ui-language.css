@@ -1,0 +1,680 @@
+/* 全局 UI 言語・首屏注意力・跨頁語義（globals.css から分割） */
+
+/* ============================================================
+   全局 UI 语言
+   页面可以有不同任务密度，但同级标题、统计、卡片和操作必须长得像同一套产品。
+   ============================================================ */
+
+.page-head {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(500px, .9fr);
+  align-items: end;
+  gap: 48px;
+  margin: 0;
+  padding: 4px 0 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.page-head-simple {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.page-head .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--green);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+
+.page-head .eyebrow i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  display: block;
+  background: var(--orange);
+  border-radius: 50%;
+}
+
+.page-head h1 {
+  margin: 8px 0 7px;
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: var(--page-title-size);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -.045em;
+}
+
+.page-head p {
+  max-width: 680px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--page-copy-size);
+  line-height: 1.65;
+}
+
+.page-stat-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-soft);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .58);
+}
+
+.page-stat-strip > div,
+.page-stat-strip > span {
+  min-width: 0;
+  border-right: 1px solid var(--line);
+}
+
+.page-stat-strip > div:last-child,
+.page-stat-strip > span:last-child {
+  border-right: 0;
+}
+
+.calendar-summary.page-stat-strip {
+  gap: 0;
+}
+
+.calendar-summary.page-stat-strip span {
+  min-width: 0;
+  padding: 14px 15px;
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  background: transparent;
+}
+
+.feature-shell {
+  overflow: hidden;
+  border-radius: var(--radius-feature);
+  box-shadow: var(--shadow-soft);
+}
+
+.feature-shell-light {
+  box-shadow: 0 10px 28px rgba(28, 37, 32, .055);
+}
+
+/* 一级、二级导航已经承担“我在哪里”的说明；模块首屏只保留可操作状态。 */
+.module-stat-strip {
+  width: 100%;
+  border-radius: var(--radius-control);
+}
+
+.module-stat-strip.analytics-head-glance > div,
+.module-stat-strip.jobs-stat > div,
+.module-stat-strip.focus-language-glance > div {
+  padding: 10px 14px;
+}
+
+.module-stat-strip.analytics-head-glance dd,
+.module-stat-strip.focus-language-glance dd,
+.module-stat-strip.jobs-stat strong {
+  font-size: 22px;
+}
+
+.module-control-row {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: flex-start;
+  margin-bottom: 10px;
+}
+
+/* 复盘摘要是业务数据，不再借深色“大标题卡”承载。 */
+.review-view .rv-agg {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+.review-view .rv-agg > span {
+  flex: 0 0 auto;
+  margin: 0 5px 0 0;
+  color: var(--muted);
+}
+
+.review-view .rv-agg > div {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+}
+
+.review-view .rv-agg em {
+  max-width: 150px;
+}
+
+.review-view .rv-agg b {
+  color: var(--orange);
+}
+
+.panel,
+.calendar-board,
+.agenda-group,
+.library-facets,
+.note-card,
+.job-card,
+.jobs-filter-panel,
+.todo-card,
+.prep-command,
+.rv-answer-trends,
+.rv-card,
+.focus-language-two-column > div,
+.focus-profile-summary,
+.focus-stage-grid article,
+.focus-issue-map details,
+.focus-language-table,
+.expression-course-header,
+.expression-practice {
+  border-radius: var(--radius-card);
+}
+
+.calendar-board,
+.agenda-group,
+.library-facets,
+.jobs-filter-panel,
+.prep-command,
+.rv-answer-trends,
+.focus-profile-summary,
+.focus-language-table,
+.expression-course-header,
+.expression-practice {
+  overflow: hidden;
+}
+
+.panel,
+.calendar-board,
+.agenda-group,
+.library-facets,
+.note-card,
+.job-card,
+.todo-card,
+.prep-command,
+.rv-answer-trends,
+.rv-card,
+.focus-language-two-column > div,
+.focus-profile-summary,
+.focus-stage-grid article,
+.focus-issue-map details,
+.focus-language-table,
+.expression-course-header,
+.expression-practice {
+  background-color: var(--surface-raised);
+}
+
+.search-panel,
+.library-search,
+.saved-queries button,
+.job-search,
+.job-sort,
+.jobs-view-switch,
+.library-result-actions label,
+.clear-filter,
+.calendar-actions,
+.prep-source,
+.session-company-switch select,
+.focus-library-filters button,
+.expression-practice-actions > button,
+.expression-practice-actions .expression-question-navigation > button,
+.expression-practice-actions .expression-complete-group > button {
+  border-radius: var(--radius-control);
+}
+
+.search-panel,
+.jobs-view-switch,
+.calendar-actions {
+  overflow: hidden;
+}
+
+.primary-action,
+.jobs-next-pick > button,
+.focus-language-now-action {
+  min-height: 42px;
+  border-radius: var(--radius-control);
+  box-shadow: 0 8px 18px rgba(24, 35, 30, .11);
+}
+
+.primary-action,
+.jobs-next-pick > button,
+.focus-language-now-action,
+.topbar-next,
+.clear-filter {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    transform 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.primary-action:hover,
+.jobs-next-pick > button:hover,
+.focus-language-now-action:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 11px 24px rgba(24, 35, 30, .15);
+}
+
+.topbar {
+  border-color: rgba(200, 196, 184, .78);
+}
+
+@media (max-width: 1050px) {
+  .page-head {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 22px;
+  }
+
+  .page-stat-strip {
+    width: min(680px, 100%);
+  }
+}
+
+@media (max-width: 700px) {
+  :root {
+    --page-title-size: 38px;
+    --page-copy-size: 11px;
+    --radius-feature: 13px;
+  }
+
+  .page-head {
+    gap: 18px;
+    padding-bottom: 21px;
+  }
+
+  .page-stat-strip {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .page-stat-strip > div:nth-child(2),
+  .page-stat-strip > span:nth-child(2) {
+    border-right: 0;
+  }
+
+  .page-stat-strip > div:nth-child(-n+2),
+  .page-stat-strip > span:nth-child(-n+2) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .module-control-row {
+    min-height: 0;
+    justify-content: flex-start;
+  }
+
+  .module-control-row .group-filters {
+    justify-content: flex-start;
+  }
+
+  .review-view .rv-agg {
+    align-items: flex-start;
+  }
+
+  .review-view .rv-agg > span {
+    flex-basis: 100%;
+  }
+}
+
+/* ===== 记忆库阅读页：目次レールが入る幅を切る ===== */
+@media (max-width: 1180px) {
+  /* 目次を出すと本文が読める幅を割るので、この幅から下は本文だけにする */
+  .doc-toc { display: none; }
+  .drawer-reading-shell { display: block; }
+  .drawer-reading-shell > .drawer-reading { width: min(880px, 100%); margin: 0 auto; }
+}
+
+@media (max-width: 780px) {
+  .note-drawer--full .markdown-document h2 {
+    background-size: 100% 1px;
+    background-image: linear-gradient(90deg, var(--orange) 0 40px, #dcd8cf 40px);
+  }
+}
+
+/* ===== 首屏注意力层级：一个主行动，其余都退成上下文 ===== */
+
+[data-zero="true"] {
+  opacity: .46;
+  filter: saturate(.35);
+}
+
+.jobs-view > .jobs-next-pick {
+  margin-top: 0;
+}
+
+.jobs-view > .jobs-stat {
+  margin-top: 10px;
+}
+
+.jobs-featured-only {
+  padding: 24px 18px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, .32);
+  font-size: 11px;
+  text-align: center;
+}
+
+.analytics > .analytics-command {
+  margin-top: 0;
+}
+
+.analytics-command + .analytics-head-glance {
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.analytics-command + .analytics-head-glance > div {
+  min-height: 76px;
+  border-radius: var(--radius-control);
+  box-shadow: none;
+}
+
+.analytics-command + .analytics-head-glance dt small,
+.analytics-command + .analytics-head-glance div > span {
+  display: none;
+}
+
+.analytics-command + .analytics-head-glance dd {
+  grid-column: 2;
+  align-self: center;
+  margin: 0;
+}
+
+@media (min-width: 821px) {
+  .overview-view .hero-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .overview-view .hero-primary {
+    min-height: 194px;
+    padding: 22px 24px 20px;
+    background: rgba(248, 246, 237, .09);
+    box-shadow: inset 3px 0 0 rgba(230, 109, 69, .88);
+  }
+
+  .overview-view .hero-watch {
+    display: grid;
+    min-height: 62px;
+    grid-template-columns: minmax(145px, .34fr) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 14px;
+    background: rgba(248, 246, 237, .035);
+  }
+
+  .overview-view .hero-watch-head {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+
+  .overview-view .hero-watch-head small {
+    display: block;
+    margin-top: 4px;
+  }
+
+  .overview-view .hero-watch > button {
+    display: grid;
+    min-height: 38px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    border-left: 1px solid rgba(255, 255, 255, .12);
+    border-right: 1px solid rgba(255, 255, 255, .12);
+  }
+
+  .overview-view .hero-watch > button strong {
+    display: block;
+    margin: 0;
+    overflow: hidden;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 620;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .overview-view .hero-watch > button > span {
+    white-space: nowrap;
+  }
+
+  .overview-view .hero-watch-empty {
+    min-width: 0;
+    padding: 0 16px;
+    border-left: 1px solid rgba(255, 255, 255, .12);
+    border-right: 1px solid rgba(255, 255, 255, .12);
+  }
+
+  .overview-view .hero-watch-empty strong {
+    margin: 0;
+    font-family: inherit;
+    font-size: 12px;
+  }
+
+  .overview-view .hero-watch footer {
+    min-height: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .overview-view .hero-stats {
+    min-height: 48px;
+  }
+
+  .overview-view .stat {
+    min-height: 48px;
+  }
+
+  .overview-view .stat strong {
+    font-size: 19px;
+  }
+
+  .overview-view .stat span {
+    font-size: 10px;
+  }
+}
+
+/* ===== 跨页面语义：颜色只表达状态，不再只做装饰 ===== */
+
+[data-semantic="fact"] {
+  --semantic-tone: var(--green);
+  --semantic-wash: rgba(47, 107, 89, .045);
+}
+
+[data-semantic="analysis"] {
+  --semantic-tone: var(--gold);
+  --semantic-wash: rgba(181, 132, 47, .085);
+}
+
+[data-semantic="action"] {
+  --semantic-tone: var(--orange);
+  --semantic-wash: rgba(230, 109, 69, .075);
+}
+
+[data-semantic="waiting"] {
+  --semantic-tone: #78817d;
+  --semantic-wash: rgba(120, 129, 125, .075);
+}
+
+[data-semantic="risk"] {
+  --semantic-tone: #b64f42;
+  --semantic-wash: rgba(182, 79, 66, .095);
+}
+
+.note-card[data-semantic] {
+  min-height: 302px;
+  border-left: 3px solid var(--semantic-tone);
+  background: linear-gradient(105deg, var(--semantic-wash), transparent 38%), var(--surface);
+}
+
+.note-card[data-semantic="fact"] {
+  background: var(--surface);
+}
+
+.note-card[data-semantic="analysis"] {
+  background: linear-gradient(115deg, rgba(181, 132, 47, .08), transparent 48%), #fffdf8;
+}
+
+.note-card[data-semantic]::before {
+  inset: 0 auto 0 0;
+  width: 3px;
+  height: auto;
+  background: var(--semantic-tone);
+  opacity: 1;
+}
+
+.note-semantic {
+  width: fit-content;
+  padding: 4px 7px;
+  color: var(--semantic-tone);
+  border: 1px solid color-mix(in srgb, var(--semantic-tone) 28%, transparent);
+  border-radius: 999px;
+  background: var(--semantic-wash);
+  font-size: 7px;
+  font-weight: 720;
+  letter-spacing: .04em;
+}
+
+.note-card-what,
+.note-card-decision > span {
+  color: var(--semantic-tone);
+  font: 700 7px/1.2 var(--font-geist-mono), monospace;
+  letter-spacing: .13em;
+}
+
+.note-card-what {
+  margin-top: 17px;
+}
+
+.note-card[data-semantic] h2 {
+  margin: 6px 0 13px;
+}
+
+.note-card-decision {
+  padding: 12px 13px;
+  border: 1px solid color-mix(in srgb, var(--semantic-tone) 17%, var(--line));
+  background: rgba(255, 255, 255, .5);
+}
+
+.note-card-decision > p {
+  margin-top: 6px;
+  color: #626b66;
+  font-size: 9px;
+  line-height: 1.65;
+  -webkit-line-clamp: 2;
+}
+
+.note-card-decision dl {
+  display: grid;
+  grid-template-columns: minmax(100px, .72fr) minmax(0, 1.28fr);
+  gap: 12px;
+  margin: 11px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.note-card-decision dt {
+  color: #979c98;
+  font-size: 7px;
+}
+
+.note-card-decision dd {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 3px 0 0;
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 620;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.note-card[data-semantic] .note-card-source {
+  padding-top: 12px;
+}
+
+.note-card[data-semantic] .note-card-foot {
+  align-items: center;
+}
+
+.todo-card[data-semantic] {
+  border-left-color: var(--semantic-tone);
+  background: linear-gradient(90deg, var(--semantic-wash), transparent 34%), var(--surface);
+}
+
+.calendar-event[data-semantic] {
+  border-left-color: var(--semantic-tone);
+  background: var(--semantic-wash);
+}
+
+.calendar-event[data-semantic="fact"] {
+  opacity: .58;
+  filter: saturate(.45);
+}
+
+.agenda-list > button[data-semantic] {
+  position: relative;
+  padding-left: 11px;
+  border-left: 3px solid var(--semantic-tone);
+  background: linear-gradient(90deg, var(--semantic-wash), transparent 38%);
+}
+
+.agenda-copy em {
+  display: block;
+  margin-top: 5px;
+  color: var(--semantic-tone);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 620;
+}
+
+.calendar-history {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .34);
+}
+
+.calendar-history > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.calendar-history > summary::-webkit-details-marker {
+  display: none;
+}
+
+.calendar-history > summary strong {
+  min-width: 22px;
+  min-height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--paper-deep);
+  font-size: 8px;
+}
+
+.calendar-history .agenda-group {
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+}

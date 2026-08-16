@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { readAppCss } from "./css-source.mjs";
 
 const [ui, atlas, timelineView, graphView, graph, stage, chrome, sceneLib, css] = await Promise.all([
   readFile("app/timeline-three.tsx", "utf8"),
@@ -11,7 +12,7 @@ const [ui, atlas, timelineView, graphView, graph, stage, chrome, sceneLib, css] 
   readFile("app/three-stage.ts", "utf8"),
   readFile("app/three-stage-chrome.tsx", "utf8"),
   readFile("lib/timeline-scene.ts", "utf8"),
-  readFile("app/globals.css", "utf8"),
+  readAppCss(),
 ]);
 
 test("时之航道接入时间线视图：lazy 加载、纯数据映射、双渲染切换与降级", () => {

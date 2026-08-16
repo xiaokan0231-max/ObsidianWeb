@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { readAppCss } from "./css-source.mjs";
 import {
   allDeductions,
   carryOverSections,
@@ -325,7 +326,7 @@ test("deep review stays locked behind completed human decisions and an allowlist
 test("five-dimension scores stay visible before the full report is expanded", async () => {
   const [client, css] = await Promise.all([
     readFile("app/interview-review.tsx", "utf8"),
-    readFile("app/globals.css", "utf8"),
+    readAppCss(),
   ]);
   const stageStart = client.indexOf("rv-deep-stage");
   const collapsedReportStart = client.indexOf("doc.deepReview && deepOpen", stageStart);
@@ -343,7 +344,7 @@ test("five-dimension scores stay visible before the full report is expanded", as
 test("the report shows where each point went, and says so when it cannot", async () => {
   const [client, css] = await Promise.all([
     readFile("app/interview-review.tsx", "utf8"),
-    readFile("app/globals.css", "utf8"),
+    readAppCss(),
   ]);
   // 概览の各维は扣分明细へのボタン、報告側は算式＋逐条依据。
   assert.match(client, /setDeepFocusDimension\(key\)/);

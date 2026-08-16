@@ -1,0 +1,2145 @@
+/* 3D 舞台 chrome（星図・航道が共用）と手勢 UI（globals.css から分割） */
+
+/* 以下 .space-graph-* 舞台 chrome 同时服务两个 3D 视图：记忆星图（关系图）
+   与时之航道（时间线）。改动任何一条规则前，两个视图都要过一遍。 */
+.space-graph-stage,
+.space-graph-loading-shell,
+.space-graph-empty {
+  position: relative;
+  min-width: 0;
+  min-height: 640px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 22% 22%, rgba(55, 102, 80, .24), transparent 28%),
+    radial-gradient(circle at 78% 72%, rgba(181, 132, 47, .14), transparent 26%),
+    #101b17;
+}
+
+.space-graph-stage:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  background: #07110d;
+}
+
+.space-graph-stage::backdrop {
+  background: #07110d;
+}
+
+.space-graph-stage::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background:
+    linear-gradient(90deg, rgba(5, 12, 9, .22), transparent 24%, transparent 76%, rgba(5, 12, 9, .22)),
+    linear-gradient(0deg, rgba(5, 12, 9, .32), transparent 22%, transparent 84%, rgba(5, 12, 9, .2));
+  content: "";
+  pointer-events: none;
+}
+
+.space-graph-webgl,
+.space-graph-webgl canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.space-graph-webgl canvas {
+  cursor: grab;
+  outline: none;
+  touch-action: none;
+}
+
+.space-graph-webgl canvas:active {
+  cursor: grabbing;
+}
+
+.space-graph-webgl canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(230, 109, 69, .88);
+}
+
+.space-graph-label-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.space-graph-label-layer > span {
+  --label-accent: #fff;
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: 180px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(238, 243, 239, .58);
+  font-size: 8px;
+  line-height: 1;
+  opacity: 0;
+  text-shadow: 0 2px 7px #07110d, 0 0 12px #07110d;
+  white-space: nowrap;
+  transition: color 180ms ease, opacity 180ms ease;
+  will-change: transform;
+}
+
+.space-graph-label-layer > span[data-visible="true"] {
+  opacity: .72;
+}
+
+.space-graph-label-layer > span[data-active="neighbor"] {
+  color: rgba(255, 255, 255, .86);
+  opacity: .92;
+}
+
+.space-graph-label-layer > span[data-active="selected"] {
+  color: #fff;
+  font-size: 9px;
+  font-weight: 760;
+  opacity: 1;
+}
+
+.space-graph-label-layer i {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  background: var(--label-accent);
+  border-radius: 50%;
+  box-shadow: 0 0 9px var(--label-accent);
+}
+
+.space-graph-label-layer b {
+  overflow: hidden;
+  font-weight: 560;
+  text-overflow: ellipsis;
+}
+
+.space-graph-label-layer > .space-graph-group-label {
+  isolation: isolate;
+  min-width: 0;
+  max-width: none;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  color: rgba(244, 248, 245, .76);
+  text-align: center;
+  text-shadow: 0 2px 9px #07110d, 0 0 16px #07110d;
+}
+
+/* 星域铭牌不做 UI 卡片：一束渐隐光轨和无边界辉光把文字嵌回星云里。 */
+.space-graph-label-layer > .space-graph-group-label::before {
+  content: "";
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  z-index: -1;
+  width: 54px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--label-accent) 30% 70%, transparent);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--label-accent) 54%, transparent);
+  opacity: .52;
+  transform: translateX(-50%);
+  transition: width 220ms ease, opacity 220ms ease;
+}
+
+.space-graph-label-layer > .space-graph-group-label::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: -2;
+  width: 92px;
+  height: 48px;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--label-accent) 14%, transparent), transparent 68%);
+  filter: blur(5px);
+  opacity: .58;
+  transform: translate(-50%, -48%);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-visible="true"] {
+  opacity: .58;
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-active="hovered"] {
+  color: #fff;
+  opacity: .96;
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-active="hovered"]::before,
+.space-graph-label-layer > .space-graph-group-label[data-active="selected"]::before {
+  width: 72px;
+  opacity: .88;
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-active="hovered"]::after,
+.space-graph-label-layer > .space-graph-group-label[data-active="selected"]::after {
+  opacity: 1;
+  transform: translate(-50%, -48%) scale(1.14);
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-active="selected"] {
+  color: #fff;
+  font-size: 8px;
+  opacity: 1;
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-active="dim"] {
+  opacity: .2;
+}
+
+.space-graph-group-label strong {
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: .22em;
+}
+
+.space-graph-group-label small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: color-mix(in srgb, var(--label-accent) 72%, white 28%);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  letter-spacing: .12em;
+}
+
+.space-graph-group-label small::before {
+  content: "";
+  width: 3px;
+  height: 3px;
+  background: var(--label-accent);
+  border-radius: 50%;
+  box-shadow: 0 0 7px var(--label-accent);
+}
+
+.space-graph-loading,
+.space-graph-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 13px;
+  color: rgba(239, 244, 240, .56);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  letter-spacing: .1em;
+}
+
+.space-graph-stage > .space-graph-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: #101b17;
+  transition: opacity 260ms ease;
+}
+
+.space-graph-loading i {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-top-color: #e66d45;
+  border-radius: 50%;
+  animation: graph-orbit 1.05s linear infinite;
+}
+
+@keyframes graph-orbit {
+  to { transform: rotate(360deg); }
+}
+
+.space-graph-brand {
+  position: absolute;
+  top: 22px;
+  left: 22px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  pointer-events: none;
+}
+
+.space-graph-brand span {
+  color: rgba(207, 226, 215, .44);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  letter-spacing: .18em;
+}
+
+.space-graph-brand strong {
+  color: rgba(246, 245, 237, .76);
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: .02em;
+}
+
+.space-graph-search {
+  position: absolute;
+  top: 78px;
+  left: 22px;
+  z-index: 9;
+  width: min(350px, calc(100% - 44px));
+  color: rgba(241, 248, 244, .9);
+  font-family: var(--font-geist-mono), monospace;
+}
+
+.space-graph-search-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  border: 1px solid rgba(206, 239, 224, .18);
+  border-radius: 13px;
+  padding: 0 10px 0 12px;
+  background: rgba(6, 17, 13, .74);
+  box-shadow:
+    0 15px 34px rgba(0, 0, 0, .24),
+    inset 0 1px 0 rgba(255, 255, 255, .055);
+  backdrop-filter: blur(18px) saturate(1.2);
+  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+}
+
+.space-graph-search[data-active="true"] .space-graph-search-field,
+.space-graph-search-field:focus-within {
+  border-color: rgba(164, 240, 207, .5);
+  background: rgba(5, 18, 13, .92);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, .35),
+    0 0 28px rgba(103, 225, 177, .08),
+    inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+
+.space-graph-search-field > span {
+  color: rgba(195, 241, 220, .68);
+  font-size: 17px;
+}
+
+.space-graph-search-field input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  color: #f4fbf7;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: .02em;
+}
+
+.space-graph-search-field input::placeholder {
+  color: rgba(218, 235, 226, .38);
+}
+
+.space-graph-search-field input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.space-graph-search-field button,
+.space-graph-search-field kbd {
+  display: grid;
+  min-width: 21px;
+  height: 21px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .045);
+  color: rgba(232, 244, 237, .58);
+  font: inherit;
+  font-size: 10px;
+}
+
+.space-graph-search-field button {
+  cursor: pointer;
+}
+
+.space-graph-search-results {
+  overflow: hidden;
+  margin-top: 7px;
+  border: 1px solid rgba(188, 234, 212, .2);
+  border-radius: 17px;
+  background:
+    radial-gradient(circle at 12% 0, rgba(117, 227, 183, .09), transparent 31%),
+    rgba(5, 16, 12, .94);
+  box-shadow: 0 24px 58px rgba(0, 0, 0, .48);
+  backdrop-filter: blur(28px) saturate(1.35);
+  animation: graph-signal-in 180ms ease-out both;
+}
+
+.space-graph-search-results > header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, .07);
+}
+
+.space-graph-search-results > header span {
+  color: rgba(175, 224, 202, .42);
+  font-size: 7px;
+  letter-spacing: .15em;
+}
+
+.space-graph-search-results > header strong {
+  color: rgba(242, 249, 245, .82);
+  font-size: 9px;
+  font-weight: 620;
+}
+
+.space-graph-search-results > div {
+  max-height: 294px;
+  overflow-y: auto;
+  padding: 5px;
+}
+
+.space-graph-search-results > div > button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 11px;
+  padding: 9px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.space-graph-search-results > div > button:hover,
+.space-graph-search-results > div > button[data-active="true"] {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--search-accent, #77d8b2), transparent 85%), transparent),
+    rgba(255, 255, 255, .045);
+}
+
+.space-graph-search-results > div > button > i {
+  width: 13px;
+  height: 13px;
+  border: 1px solid color-mix(in srgb, var(--search-accent), #fff 28%);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--search-accent), transparent 42%);
+  box-shadow:
+    0 0 11px var(--search-accent),
+    inset 0 0 5px rgba(255, 255, 255, .55);
+}
+
+.space-graph-search-results > div > button > span {
+  min-width: 0;
+}
+
+.space-graph-search-results > div > button strong,
+.space-graph-search-results > div > button small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-graph-search-results > div > button strong {
+  color: rgba(245, 250, 247, .88);
+  font-size: 9px;
+  font-weight: 620;
+}
+
+.space-graph-search-results > div > button small {
+  margin-top: 3px;
+  color: rgba(213, 231, 221, .4);
+  font-size: 7px;
+}
+
+.space-graph-search-results > div > button > b {
+  color: rgba(205, 229, 216, .28);
+  font-size: 7px;
+  font-weight: 500;
+}
+
+.space-graph-search-results > p {
+  margin: 0;
+  padding: 18px 14px;
+  color: rgba(215, 233, 223, .5);
+  font-size: 8px;
+  line-height: 1.7;
+}
+
+.space-graph-search-results > footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 9px 14px 11px;
+  border-top: 1px solid rgba(255, 255, 255, .06);
+  color: rgba(212, 231, 221, .36);
+  font-size: 7px;
+}
+
+.space-graph-search-results kbd {
+  color: rgba(237, 246, 241, .62);
+  font: inherit;
+}
+
+.space-graph-label-layer > span[data-search="dim"] {
+  opacity: .09;
+}
+
+.space-graph-label-layer > span[data-search="match"] {
+  color: #fff;
+  opacity: 1;
+}
+
+.space-graph-node-card {
+  --node-accent: #e66d45;
+  position: absolute;
+  top: 82px;
+  left: 22px;
+  z-index: 5;
+  width: min(260px, calc(100% - 44px));
+  display: flex;
+  flex-direction: column;
+  padding: 15px 16px 14px;
+  border: 1px solid color-mix(in srgb, var(--node-accent), transparent 58%);
+  background: rgba(244, 244, 236, .93);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .28);
+  backdrop-filter: blur(16px);
+}
+
+.space-graph-node-card::before {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: -1px;
+  width: 3px;
+  background: var(--node-accent);
+  content: "";
+}
+
+.space-graph-node-card > span {
+  color: var(--node-accent);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .12em;
+}
+
+.space-graph-node-card > strong {
+  margin: 7px 0 5px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.48;
+  overflow-wrap: anywhere;
+}
+
+.space-graph-node-card > small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.space-graph-node-card > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  border: 0;
+  border-top: 1px solid rgba(28, 42, 35, .13);
+  padding: 10px 0 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.space-graph-node-peek {
+  pointer-events: none;
+  animation: graph-signal-in 180ms ease-out both;
+}
+
+.space-graph-dossier {
+  --node-accent: #e66d45;
+  position: absolute;
+  top: 64px;
+  right: 18px;
+  bottom: 46px;
+  z-index: 7;
+  width: min(360px, calc(100% - 36px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--node-accent), transparent 48%);
+  padding: 17px 18px 14px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--node-accent), transparent 89%), transparent 42%),
+    rgba(9, 21, 16, .9);
+  box-shadow:
+    0 28px 70px rgba(0, 0, 0, .44),
+    inset 0 0 45px color-mix(in srgb, var(--node-accent), transparent 92%);
+  color: #f2f5ef;
+  backdrop-filter: blur(22px) saturate(1.2);
+  animation: graph-dossier-in 420ms cubic-bezier(.18, .82, .22, 1) both;
+}
+
+.space-graph-dossier::before {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 4px, rgba(255, 255, 255, .018) 5px),
+    linear-gradient(90deg, transparent 0 94%, color-mix(in srgb, var(--node-accent), transparent 84%) 94% 94.4%, transparent 94.4%);
+  content: "";
+  pointer-events: none;
+}
+
+.space-graph-dossier::after {
+  position: absolute;
+  top: -1px;
+  right: 34px;
+  width: 74px;
+  height: 2px;
+  background: var(--node-accent);
+  box-shadow: 0 0 18px var(--node-accent);
+  content: "";
+}
+
+.space-graph-dossier-scan {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 0;
+  height: 76px;
+  background: linear-gradient(transparent, color-mix(in srgb, var(--node-accent), transparent 91%), transparent);
+  opacity: .72;
+  pointer-events: none;
+  animation: graph-dossier-scan 4.8s linear infinite;
+}
+
+.space-graph-dossier > *:not(.space-graph-dossier-scan) {
+  position: relative;
+  z-index: 1;
+}
+
+.space-graph-dossier > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, .09);
+}
+
+.space-graph-dossier > header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.space-graph-dossier > header span {
+  color: var(--node-accent);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  font-weight: 780;
+  letter-spacing: .16em;
+  text-shadow: 0 0 14px color-mix(in srgb, var(--node-accent), transparent 25%);
+}
+
+.space-graph-dossier > header small {
+  border-left: 1px solid rgba(255, 255, 255, .14);
+  padding-left: 8px;
+  color: rgba(255, 255, 255, .42);
+  font-size: 7px;
+}
+
+.space-graph-dossier > header button {
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(255, 255, 255, .035);
+  color: rgba(255, 255, 255, .62);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.space-graph-dossier > header button:hover {
+  border-color: var(--node-accent);
+  color: #fff;
+}
+
+.space-graph-dossier-orbit {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex: 0 0 auto;
+  margin: 17px 0 3px;
+  border: 1px solid color-mix(in srgb, var(--node-accent), transparent 58%);
+  border-radius: 50%;
+  box-shadow:
+    0 0 30px color-mix(in srgb, var(--node-accent), transparent 76%),
+    inset 0 0 22px color-mix(in srgb, var(--node-accent), transparent 85%);
+}
+
+.space-graph-dossier-orbit::before,
+.space-graph-dossier-orbit::after,
+.space-graph-dossier-orbit i {
+  position: absolute;
+  inset: 8px;
+  border: 1px dashed color-mix(in srgb, var(--node-accent), transparent 54%);
+  border-radius: 50%;
+  content: "";
+  animation: graph-dossier-orbit 8s linear infinite;
+}
+
+.space-graph-dossier-orbit::after {
+  inset: 20px;
+  border-style: solid;
+  opacity: .58;
+  animation-direction: reverse;
+  animation-duration: 4s;
+}
+
+.space-graph-dossier-orbit i:nth-child(1) {
+  inset: 5px 22px;
+  border-style: solid;
+  transform: rotate(58deg);
+  animation-duration: 5.5s;
+}
+
+.space-graph-dossier-orbit i:nth-child(2) {
+  inset: 22px 5px;
+  border-style: solid;
+  transform: rotate(-32deg);
+  animation-direction: reverse;
+  animation-duration: 7s;
+}
+
+.space-graph-dossier-orbit b {
+  position: absolute;
+  inset: 29px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 7px #fff, 0 0 20px var(--node-accent), 0 0 36px var(--node-accent);
+  animation: graph-core-pulse 1.7s ease-in-out infinite alternate;
+}
+
+.space-graph-dossier-title {
+  margin-top: 9px;
+}
+
+.space-graph-dossier-title > span {
+  color: rgba(255, 255, 255, .38);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  letter-spacing: .11em;
+}
+
+.space-graph-dossier-title h2 {
+  margin: 6px 0 0;
+  color: #f4f5ee;
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: clamp(20px, 2.2vw, 28px);
+  font-weight: 520;
+  line-height: 1.16;
+  letter-spacing: -.025em;
+  overflow-wrap: anywhere;
+}
+
+.space-graph-dossier dl {
+  display: grid;
+  grid-template-columns: .7fr .7fr 1.35fr;
+  margin: 15px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, .1);
+  border-bottom: 1px solid rgba(255, 255, 255, .1);
+}
+
+.space-graph-dossier dl > div {
+  min-width: 0;
+  padding: 10px 8px 9px 0;
+  border-right: 1px solid rgba(255, 255, 255, .08);
+}
+
+.space-graph-dossier dl > div:not(:first-child) {
+  padding-left: 9px;
+}
+
+.space-graph-dossier dl > div:last-child {
+  border-right: 0;
+}
+
+.space-graph-dossier dt {
+  color: rgba(255, 255, 255, .34);
+  font-size: 7px;
+}
+
+.space-graph-dossier dd {
+  overflow: hidden;
+  margin: 5px 0 0;
+  color: #fff;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-graph-dossier > p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 13px 0 0;
+  color: rgba(239, 244, 240, .7);
+  font-size: 9px;
+  line-height: 1.75;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.space-graph-dossier-neighbors {
+  margin-top: 13px;
+}
+
+.space-graph-dossier-neighbors > span {
+  display: block;
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, .3);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  letter-spacing: .1em;
+}
+
+.space-graph-dossier-neighbors > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.space-graph-dossier-neighbors button {
+  --neighbor-accent: #fff;
+  display: grid;
+  gap: 2px;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--neighbor-accent), transparent 76%);
+  padding: 5px 7px;
+  background: color-mix(in srgb, var(--neighbor-accent), transparent 94%);
+  color: rgba(255, 255, 255, .63);
+  font-family: inherit;
+  font-size: 7px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.space-graph-dossier-neighbors button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-graph-dossier-neighbors button small {
+  color: color-mix(in srgb, var(--neighbor-accent), transparent 34%);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 6px;
+  letter-spacing: .04em;
+}
+
+.space-graph-dossier-neighbors button:hover {
+  border-color: var(--neighbor-accent);
+  color: #fff;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--neighbor-accent), transparent 74%);
+}
+
+.space-graph-entity-hint {
+  border-top: 1px solid rgba(255, 255, 255, .08);
+  padding: 13px 18px;
+  color: rgba(255, 255, 255, .38);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  letter-spacing: .08em;
+  text-align: center;
+}
+
+.space-graph-dossier > code {
+  display: block;
+  overflow: hidden;
+  margin-top: auto;
+  padding-top: 12px;
+  color: rgba(255, 255, 255, .28);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-graph-enter-memory {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 9px;
+  border: 1px solid color-mix(in srgb, var(--node-accent), transparent 24%);
+  padding: 8px 11px 8px 13px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--node-accent), transparent 78%), transparent),
+    rgba(255, 255, 255, .04);
+  color: #fff;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.space-graph-enter-memory:hover {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--node-accent), transparent 58%), transparent),
+    rgba(255, 255, 255, .07);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--node-accent), transparent 70%);
+  transform: translateY(-1px);
+}
+
+.space-graph-enter-memory span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+}
+
+.space-graph-enter-memory small {
+  color: var(--node-accent);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 6px;
+  letter-spacing: .16em;
+}
+
+.space-graph-enter-memory b {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--node-accent), transparent 42%);
+  border-radius: 50%;
+  font-size: 15px;
+  font-weight: 400;
+  box-shadow: inset 0 0 14px color-mix(in srgb, var(--node-accent), transparent 82%);
+}
+
+.space-graph-dossier > footer {
+  margin-top: 8px;
+  color: rgba(255, 255, 255, .28);
+  font-size: 7px;
+  text-align: center;
+}
+
+.space-graph-dossier > footer kbd {
+  border: 1px solid rgba(255, 255, 255, .14);
+  padding: 1px 4px;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 6px;
+}
+
+.space-graph-portal {
+  --node-accent: #e66d45;
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 28px;
+  padding: 24px;
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--node-accent), transparent 79%), transparent 30%),
+    radial-gradient(circle, transparent 0 15%, rgba(2, 9, 6, .7) 52%, rgba(2, 9, 6, .96) 100%);
+  color: #fff;
+  text-align: center;
+  backdrop-filter: blur(8px);
+  animation: graph-portal-in 680ms cubic-bezier(.2, .78, .2, 1) both;
+}
+
+.space-graph-portal::before {
+  position: absolute;
+  inset: -30%;
+  background: repeating-conic-gradient(
+    from 0deg,
+    transparent 0 8deg,
+    color-mix(in srgb, var(--node-accent), transparent 94%) 8deg 9deg
+  );
+  content: "";
+  animation: graph-portal-rays 9s linear infinite;
+}
+
+.space-graph-portal-rings {
+  position: relative;
+  z-index: 1;
+  width: min(32vw, 290px);
+  aspect-ratio: 1;
+}
+
+.space-graph-portal-rings i,
+.space-graph-portal-rings::before,
+.space-graph-portal-rings::after {
+  position: absolute;
+  border: 1px solid var(--node-accent);
+  border-radius: 50%;
+  content: "";
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--node-accent), transparent 42%),
+    inset 0 0 18px color-mix(in srgb, var(--node-accent), transparent 72%);
+}
+
+.space-graph-portal-rings::before {
+  inset: 0;
+  border-style: dashed;
+  animation: graph-dossier-orbit 4.8s linear infinite;
+}
+
+.space-graph-portal-rings::after {
+  inset: 13%;
+  opacity: .78;
+  animation: graph-dossier-orbit 3.2s linear infinite reverse;
+}
+
+.space-graph-portal-rings i:nth-child(1) {
+  inset: 26%;
+  border-width: 2px;
+  animation: graph-core-pulse .7s ease-in-out infinite alternate;
+}
+
+.space-graph-portal-rings i:nth-child(2) {
+  inset: 6% 35%;
+  transform: rotate(54deg);
+  animation: graph-dossier-orbit 2.6s linear infinite;
+}
+
+.space-graph-portal-rings i:nth-child(3) {
+  inset: 35% 6%;
+  transform: rotate(-32deg);
+  animation: graph-dossier-orbit 2.2s linear infinite reverse;
+}
+
+.space-graph-portal-rings b {
+  position: absolute;
+  inset: 44%;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow:
+    0 0 18px #fff,
+    0 0 54px var(--node-accent),
+    0 0 100px var(--node-accent);
+}
+
+.space-graph-portal > div:last-child {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  max-width: 560px;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.space-graph-portal span {
+  color: var(--node-accent);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: .2em;
+  text-shadow: 0 0 16px var(--node-accent);
+}
+
+.space-graph-portal strong {
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: clamp(24px, 4vw, 46px);
+  font-weight: 520;
+  line-height: 1.12;
+}
+
+.space-graph-portal small {
+  color: rgba(255, 255, 255, .5);
+  font-size: 8px;
+  letter-spacing: .12em;
+}
+
+@keyframes graph-signal-in {
+  from { opacity: 0; transform: translateY(7px); }
+}
+
+@keyframes graph-dossier-in {
+  from { opacity: 0; transform: translateX(34px) scale(.97); }
+}
+
+@keyframes graph-dossier-scan {
+  from { top: -90px; }
+  to { top: calc(100% + 20px); }
+}
+
+@keyframes graph-dossier-orbit {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes graph-core-pulse {
+  to { opacity: .62; transform: scale(.72); }
+}
+
+@keyframes graph-portal-in {
+  0% { opacity: 0; transform: scale(1.2); }
+  45% { opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+@keyframes graph-portal-rays {
+  to { transform: rotate(360deg); }
+}
+
+/* 第二层交互采用柔和的光学玻璃，而不是传统 HUD 方框。 */
+.space-graph-webgl,
+.space-graph-label-layer {
+  transition: filter 420ms ease, transform 520ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.space-graph-stage[data-dossier-mode="focus"] .space-graph-webgl,
+.space-graph-stage[data-dossier-mode="focus"] .space-graph-label-layer {
+  filter: blur(3px) brightness(.48) saturate(.78);
+  transform: scale(1.035);
+}
+
+.space-graph-dossier {
+  --dossier-zoom: 1;
+  width: min(390px, calc(100% - 36px));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--node-accent), rgba(255, 255, 255, .32) 44%);
+  border-radius: 26px;
+  padding: 14px 14px 12px;
+  background:
+    radial-gradient(circle at 8% 3%, rgba(255, 255, 255, .22), transparent 18%),
+    radial-gradient(circle at 96% 88%, color-mix(in srgb, var(--node-accent), transparent 78%), transparent 31%),
+    linear-gradient(145deg, rgba(210, 245, 231, .12), rgba(6, 22, 16, .78) 37%, rgba(4, 15, 11, .9));
+  box-shadow:
+    0 34px 90px rgba(0, 0, 0, .56),
+    0 0 64px color-mix(in srgb, var(--node-accent), transparent 83%),
+    inset 0 1px 0 rgba(255, 255, 255, .24),
+    inset 0 -1px 0 rgba(255, 255, 255, .06),
+    inset 18px 0 55px rgba(255, 255, 255, .025);
+  backdrop-filter: blur(34px) saturate(1.6) brightness(.9);
+}
+
+.space-graph-dossier::before {
+  background:
+    radial-gradient(circle at 24% -10%, rgba(255, 255, 255, .24), transparent 27%),
+    linear-gradient(116deg, transparent 12%, rgba(255, 255, 255, .055) 25%, transparent 39%),
+    repeating-linear-gradient(0deg, transparent 0 5px, rgba(255, 255, 255, .012) 6px);
+}
+
+.space-graph-dossier::after {
+  top: -1px;
+  right: 58px;
+  width: 112px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #fff, var(--node-accent), transparent);
+  box-shadow:
+    0 0 17px color-mix(in srgb, var(--node-accent), transparent 20%),
+    0 0 44px color-mix(in srgb, var(--node-accent), transparent 58%);
+}
+
+.space-graph-dossier[data-mode="focus"] {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  width: min(900px, calc(100% - 84px));
+  height: min(calc(100% - 36px), 790px);
+  border-radius: 32px;
+  padding: 18px 20px 16px;
+  transform: translate(-50%, -50%);
+  animation: graph-dossier-focus-in 460ms cubic-bezier(.18, .86, .18, 1) both;
+}
+
+@keyframes graph-dossier-focus-in {
+  from { opacity: 0; transform: translate(-50%, -46%) scale(.94); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+.space-graph-dossier > header {
+  min-height: 34px;
+  align-items: center;
+  padding: 0 2px 12px;
+}
+
+.space-graph-dossier > header > div:first-child {
+  min-width: 0;
+}
+
+.space-graph-dossier-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.space-graph-dossier .space-graph-dossier-actions button {
+  width: auto;
+  min-width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-color: rgba(255, 255, 255, .12);
+  border-radius: 999px;
+  padding: 0 8px;
+  background: rgba(255, 255, 255, .045);
+  color: rgba(255, 255, 255, .66);
+  font-family: inherit;
+  font-size: 7px;
+}
+
+.space-graph-dossier .space-graph-dossier-actions button:hover {
+  border-color: color-mix(in srgb, var(--node-accent), #fff 28%);
+  background: color-mix(in srgb, var(--node-accent), transparent 88%);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--node-accent), transparent 74%);
+}
+
+.space-graph-dossier-actions output {
+  min-width: 35px;
+  color: rgba(255, 255, 255, .46);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  text-align: center;
+}
+
+.space-graph-dossier-actions kbd {
+  color: var(--node-accent);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 6px;
+}
+
+.space-graph-dossier-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  margin: 0 -5px 0 0;
+  padding: 0 7px 10px 2px;
+  scrollbar-color: color-mix(in srgb, var(--node-accent), transparent 42%) transparent;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+}
+
+.space-graph-dossier-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.space-graph-dossier-body::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--node-accent), transparent 46%);
+  border-radius: 999px;
+}
+
+.space-graph-dossier-orbit {
+  width: 86px;
+  height: 86px;
+  margin: 18px 0 5px;
+  border: 0;
+  background:
+    radial-gradient(circle at 34% 27%, rgba(255, 255, 255, .9), transparent 6%),
+    radial-gradient(circle at 40% 36%, rgba(255, 255, 255, .26), transparent 20%),
+    radial-gradient(circle at 52% 55%, color-mix(in srgb, var(--node-accent), transparent 48%), transparent 56%),
+    rgba(255, 255, 255, .025);
+  box-shadow:
+    0 0 42px color-mix(in srgb, var(--node-accent), transparent 68%),
+    inset -12px -14px 30px rgba(0, 0, 0, .38),
+    inset 8px 8px 22px rgba(255, 255, 255, .12),
+    inset 0 0 0 1px rgba(255, 255, 255, .18);
+  backdrop-filter: blur(8px);
+}
+
+.space-graph-dossier-orbit::before {
+  inset: -5px 11px;
+  border: 1px solid color-mix(in srgb, var(--node-accent), rgba(255, 255, 255, .7) 38%);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--node-accent), transparent 55%);
+  transform: rotate(58deg);
+}
+
+.space-graph-dossier-orbit::after {
+  inset: 12px -2px;
+  border: 1px solid rgba(255, 255, 255, .26);
+  box-shadow: inset 0 0 16px color-mix(in srgb, var(--node-accent), transparent 74%);
+  transform: rotate(-31deg);
+}
+
+.space-graph-dossier-orbit b {
+  inset: 35px;
+  box-shadow:
+    0 0 8px #fff,
+    0 0 28px var(--node-accent),
+    0 0 64px color-mix(in srgb, var(--node-accent), transparent 22%);
+}
+
+.space-graph-dossier[data-mode="focus"] .space-graph-dossier-orbit {
+  width: 108px;
+  height: 108px;
+  float: left;
+  margin: 22px 27px 15px 6px;
+}
+
+.space-graph-dossier-orbit {
+  display: none;
+}
+
+.space-graph-dossier[data-mode="focus"] .space-graph-dossier-title {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  margin-top: 5px;
+  padding-top: 13px;
+}
+
+.space-graph-dossier-title h2 {
+  font-size: calc(25px * var(--dossier-zoom));
+}
+
+.space-graph-dossier[data-mode="focus"] .space-graph-dossier-title h2 {
+  font-size: calc(36px * var(--dossier-zoom));
+}
+
+.space-graph-dossier dl {
+  clear: both;
+  border-color: rgba(255, 255, 255, .12);
+}
+
+.space-graph-dossier dd {
+  font-size: calc(10px * var(--dossier-zoom));
+}
+
+.space-graph-dossier-copy {
+  margin-top: 16px;
+}
+
+.space-graph-dossier-copy > span {
+  display: block;
+  margin-bottom: 8px;
+  color: color-mix(in srgb, var(--node-accent), #fff 18%);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  font-weight: 720;
+  letter-spacing: .12em;
+}
+
+.space-graph-dossier-copy > p {
+  margin: 0;
+  color: rgba(243, 247, 243, .78);
+  font-size: calc(10px * var(--dossier-zoom));
+  line-height: 1.9;
+  white-space: pre-line;
+}
+
+.space-graph-dossier[data-mode="focus"] .space-graph-dossier-copy > p {
+  max-width: 76ch;
+  font-size: calc(11px * var(--dossier-zoom));
+  line-height: 2;
+}
+
+.space-graph-dossier-neighbors button {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: calc(7px * var(--dossier-zoom));
+}
+
+.space-graph-dossier-body > code {
+  display: block;
+  margin-top: 15px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, .16);
+  color: rgba(255, 255, 255, .38);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: calc(7px * var(--dossier-zoom));
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.space-graph-enter-memory {
+  flex: 0 0 auto;
+  min-height: 58px;
+  border-radius: 17px;
+  padding-inline: 15px 12px;
+  background:
+    radial-gradient(circle at 88% 50%, color-mix(in srgb, var(--node-accent), transparent 70%), transparent 22%),
+    linear-gradient(100deg, color-mix(in srgb, var(--node-accent), transparent 76%), rgba(255, 255, 255, .035));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .13),
+    inset 0 -1px 0 rgba(0, 0, 0, .3);
+}
+
+.space-graph-enter-memory span {
+  font-size: calc(10px * var(--dossier-zoom));
+}
+
+.space-graph-enter-memory b {
+  border: 0;
+  background:
+    radial-gradient(circle at 34% 28%, #fff, transparent 10%),
+    radial-gradient(circle, color-mix(in srgb, var(--node-accent), #fff 24%), color-mix(in srgb, var(--node-accent), transparent 48%));
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--node-accent), transparent 36%),
+    inset 4px 4px 10px rgba(255, 255, 255, .3),
+    inset -5px -6px 12px rgba(0, 0, 0, .28);
+}
+
+.space-graph-dossier > footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  padding-inline: 3px;
+}
+
+.space-graph-dossier > footer button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, .36);
+  font-family: inherit;
+  font-size: 7px;
+  cursor: pointer;
+}
+
+.space-graph-dossier > footer button:hover {
+  color: #fff;
+}
+
+.space-graph-shortcuts {
+  position: absolute;
+  bottom: 44px;
+  left: 20px;
+  z-index: 9;
+  width: min(370px, calc(100% - 40px));
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 22px;
+  padding: 14px;
+  background:
+    radial-gradient(circle at 5% 0, rgba(255, 255, 255, .16), transparent 28%),
+    rgba(6, 19, 13, .84);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .48), inset 0 1px rgba(255, 255, 255, .14);
+  color: #fff;
+  backdrop-filter: blur(28px) saturate(1.5);
+  animation: graph-signal-in 220ms ease-out both;
+}
+
+.space-graph-shortcuts header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1px 2px 11px;
+  border-bottom: 1px solid rgba(255, 255, 255, .1);
+}
+
+.space-graph-shortcuts header div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.space-graph-shortcuts header span {
+  color: #83d8b4;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 6px;
+  letter-spacing: .16em;
+}
+
+.space-graph-shortcuts header strong {
+  font-size: 11px;
+  font-weight: 580;
+}
+
+.space-graph-shortcuts header button {
+  width: 25px;
+  height: 25px;
+  border: 1px solid rgba(255, 255, 255, .13);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .04);
+  color: rgba(255, 255, 255, .65);
+  cursor: pointer;
+}
+
+.space-graph-shortcuts > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 13px;
+  padding-top: 11px;
+}
+
+.space-graph-shortcuts > div > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(255, 255, 255, .53);
+  font-size: 7px;
+}
+
+.space-graph-shortcuts kbd {
+  min-width: 22px;
+  min-height: 20px;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .06);
+  color: rgba(255, 255, 255, .86);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  box-shadow: inset 0 -2px rgba(0, 0, 0, .24);
+}
+
+.space-graph-shortcuts b {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-graph-controls {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 5;
+  display: flex;
+  gap: 5px;
+}
+
+.space-graph-controls button {
+  height: 29px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  padding: 0 10px;
+  background: rgba(15, 29, 23, .66);
+  color: rgba(242, 244, 238, .62);
+  font-family: inherit;
+  font-size: 8px;
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+}
+
+.space-graph-controls button:hover {
+  border-color: rgba(255, 255, 255, .36);
+  color: #fff;
+}
+
+.space-graph-controls kbd {
+  margin-left: 5px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  padding: 1px 4px;
+  background: rgba(255, 255, 255, .07);
+  color: rgba(255, 255, 255, .56);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+}
+
+/* 摄像头只在星图全屏时挂载。这块预览既是隐私反馈（灯亮时用户看得见），
+   也是校准器：骨架与真人没有重合时，用户能立刻知道手还没被识别。 */
+.graph-hand-cursor {
+  position: absolute;
+  top: var(--hand-y);
+  left: var(--hand-x);
+  z-index: 7;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(123, 242, 196, .58);
+  border-radius: 50%;
+  box-shadow: 0 0 22px rgba(89, 225, 173, .2), inset 0 0 18px rgba(89, 225, 173, .09);
+  color: var(--target-color, #8ef3c9);
+  transform: translate(-50%, -50%);
+  transition: top 58ms linear, left 58ms linear, width 150ms ease, height 150ms ease,
+    border-color 150ms ease, box-shadow 150ms ease;
+  pointer-events: none;
+}
+
+.graph-hand-cursor[data-target="node"] {
+  border-color: color-mix(in srgb, var(--target-color), transparent 28%);
+  box-shadow: 0 0 28px color-mix(in srgb, var(--target-color), transparent 70%),
+    inset 0 0 20px color-mix(in srgb, var(--target-color), transparent 88%);
+}
+
+.graph-hand-cursor[data-role="secondary"] {
+  border-color: rgba(118, 217, 255, .58);
+  box-shadow: 0 0 22px rgba(74, 185, 236, .2), inset 0 0 18px rgba(74, 185, 236, .09);
+}
+
+.graph-hand-cursor::before,
+.graph-hand-cursor::after {
+  position: absolute;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  content: "";
+  opacity: .74;
+}
+
+.graph-hand-cursor::before { top: 50%; left: -8px; width: 58px; height: 1px; }
+.graph-hand-cursor::after { top: -8px; left: 50%; width: 1px; height: 58px; }
+
+.graph-hand-cursor > i:first-child {
+  position: absolute;
+  inset: 8px;
+  border: 1px dashed currentColor;
+  border-radius: 50%;
+  opacity: .7;
+  animation: graph-hand-cursor-spin 3.6s linear infinite;
+}
+
+.graph-hand-cursor > i:nth-child(2) {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #fff, 0 0 18px currentColor;
+  transform: translate(-50%, -50%);
+}
+
+.graph-hand-cursor > b {
+  position: absolute;
+  top: calc(100% + 11px);
+  left: 50%;
+  width: max-content;
+  border: 1px solid color-mix(in srgb, currentColor, transparent 68%);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(5, 17, 12, .78);
+  color: currentColor;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  font-weight: 580;
+  letter-spacing: .06em;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .26);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.graph-hand-cursor[data-grabbed="true"] {
+  width: 58px;
+  height: 58px;
+  border-color: rgba(255, 162, 103, .9);
+  box-shadow: 0 0 30px rgba(230, 109, 69, .32), inset 0 0 24px rgba(230, 109, 69, .14);
+  color: #ffa26d;
+}
+
+.graph-hand-cursor[data-grabbed="true"] > i:first-child {
+  animation-duration: .86s;
+}
+
+.graph-hand-cursor[data-pinching="true"] > i:first-child {
+  inset: -7px;
+  border: 0;
+  background: conic-gradient(currentColor var(--pinch-progress), rgba(255, 255, 255, .08) 0);
+  opacity: .95;
+  animation: none;
+  -webkit-mask: radial-gradient(circle, transparent 61%, #000 63%);
+  mask: radial-gradient(circle, transparent 61%, #000 63%);
+}
+
+.graph-hand-cursor[data-interaction="single-pinch"] {
+  width: 50px;
+  height: 50px;
+}
+
+.graph-hand-cursor[data-gesture="Pointing_Up"] {
+  width: 34px;
+  height: 34px;
+}
+
+@keyframes graph-hand-cursor-spin { to { transform: rotate(360deg); } }
+
+.graph-hand-dual-link {
+  position: absolute;
+  top: var(--dual-y1);
+  left: var(--dual-x1);
+  z-index: 6;
+  width: var(--dual-distance);
+  height: 2px;
+  background: linear-gradient(90deg, #83f2c5, rgba(255, 255, 255, .86), #76d9ff);
+  box-shadow: 0 0 14px rgba(116, 231, 218, .7);
+  transform: rotate(var(--dual-angle));
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+.graph-hand-dual-link::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(255, 255, 255, .78);
+  border-radius: 50%;
+  background: rgba(8, 29, 21, .82);
+  box-shadow: 0 0 18px rgba(128, 239, 207, .58);
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.graph-hand-dual-link > span {
+  position: absolute;
+  top: 13px;
+  left: 50%;
+  border: 1px solid rgba(135, 236, 212, .24);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: rgba(5, 18, 13, .8);
+  color: rgba(229, 255, 247, .74);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 6px;
+  transform: translateX(-50%) rotate(calc(-1 * var(--dual-angle)));
+  white-space: nowrap;
+}
+
+.graph-hand-radial {
+  position: absolute;
+  top: var(--menu-y);
+  left: var(--menu-x);
+  z-index: 9;
+  width: 244px;
+  height: 244px;
+  border: 1px solid rgba(130, 240, 197, .17);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(8, 27, 19, .86) 0 25%, rgba(8, 27, 19, .32) 26% 54%, transparent 55%),
+    conic-gradient(from -126deg, rgba(116, 238, 191, .035), transparent 18%, rgba(116, 238, 191, .035) 20% 38%, transparent 40% 58%, rgba(116, 238, 191, .035) 60% 78%, transparent 80%);
+  box-shadow: 0 0 52px rgba(49, 197, 145, .1), inset 0 0 38px rgba(49, 197, 145, .045);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: graph-hand-radial-enter 180ms ease-out both;
+}
+
+.graph-hand-radial::before,
+.graph-hand-radial::after {
+  position: absolute;
+  inset: 18px;
+  border: 1px dashed rgba(137, 242, 202, .13);
+  border-radius: 50%;
+  content: "";
+}
+
+.graph-hand-radial::after {
+  inset: 71px;
+  border-style: solid;
+  border-color: rgba(137, 242, 202, .2);
+  box-shadow: 0 0 20px rgba(88, 225, 173, .1);
+}
+
+.graph-hand-radial > div {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: rgba(226, 250, 239, .55);
+  font-family: var(--font-geist-mono), monospace;
+  transform: translate(-50%, -50%);
+}
+
+.graph-hand-radial > div span { font-size: 6px; letter-spacing: .09em; }
+.graph-hand-radial > div b { margin-top: 3px; color: #a5f6d5; font-size: 7px; font-weight: 560; }
+
+.graph-hand-radial > span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: 58px;
+  min-height: 46px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1px solid rgba(142, 243, 202, .2);
+  border-radius: 12px;
+  background: rgba(7, 24, 16, .88);
+  color: rgba(223, 250, 238, .55);
+  box-shadow: 0 9px 22px rgba(0, 0, 0, .25);
+  font-family: var(--font-geist-mono), monospace;
+  transform: translate(-50%, -50%) rotate(var(--menu-angle)) translateX(94px)
+    rotate(calc(0deg - var(--menu-angle)));
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease,
+    box-shadow 120ms ease, scale 120ms ease;
+}
+
+.graph-hand-radial > span b { font-size: 14px; font-weight: 500; line-height: 1; }
+.graph-hand-radial > span small { font-size: 6px; white-space: nowrap; }
+
+.graph-hand-radial > span[data-active="true"] {
+  border-color: rgba(255, 181, 126, .78);
+  background: rgba(72, 37, 19, .9);
+  color: #ffd4b0;
+  box-shadow: 0 0 28px rgba(255, 135, 79, .32), inset 0 0 18px rgba(255, 135, 79, .1);
+  scale: 1.12;
+}
+
+.graph-hand-radial > span[data-disabled="true"] {
+  opacity: .42;
+  filter: saturate(.35);
+}
+
+.graph-hand-radial > span[data-disabled="true"][data-active="true"] {
+  border-color: rgba(255, 255, 255, .24);
+  background: rgba(20, 25, 22, .88);
+  color: rgba(238, 242, 239, .62);
+  box-shadow: none;
+}
+
+@keyframes graph-hand-radial-enter {
+  from { opacity: 0; scale: .78; }
+  to { opacity: 1; scale: 1; }
+}
+
+.graph-hand-relation {
+  position: absolute;
+  top: 82px;
+  left: 50%;
+  z-index: 8;
+  min-width: 270px;
+  max-width: min(520px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid rgba(118, 217, 255, .28);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: rgba(5, 19, 16, .84);
+  box-shadow: 0 14px 42px rgba(0, 0, 0, .32), 0 0 28px rgba(71, 187, 222, .1);
+  color: rgba(233, 251, 246, .82);
+  font-family: var(--font-geist-mono), monospace;
+  text-align: center;
+  transform: translateX(-50%);
+  backdrop-filter: blur(16px);
+  pointer-events: none;
+}
+
+.graph-hand-relation > span {
+  color: rgba(118, 217, 255, .58);
+  font-size: 6px;
+  letter-spacing: .15em;
+}
+
+.graph-hand-relation > strong {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-hand-relation > strong i {
+  margin: 0 8px;
+  color: #76d9ff;
+  font-style: normal;
+}
+
+.graph-hand-relation > small { color: rgba(233, 251, 246, .48); font-size: 7px; }
+.graph-hand-relation[data-connected="false"] { border-color: rgba(255, 169, 116, .3); }
+.graph-hand-relation[data-connected="false"] > span { color: rgba(255, 169, 116, .7); }
+
+.graph-hand-console {
+  position: absolute;
+  bottom: 42px;
+  left: 20px;
+  z-index: 8;
+  width: 224px;
+  overflow: hidden;
+  border: 1px solid rgba(137, 224, 190, .2);
+  border-radius: 12px;
+  background: rgba(6, 18, 13, .82);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .34), inset 0 0 34px rgba(72, 197, 166, .045);
+  color: rgba(239, 249, 244, .8);
+  font-family: var(--font-geist-mono), monospace;
+  backdrop-filter: blur(16px);
+}
+
+.graph-hand-console[data-phase="grabbed"],
+.graph-hand-console[data-phase="dual"] {
+  border-color: rgba(255, 150, 90, .55);
+  box-shadow: 0 18px 56px rgba(0, 0, 0, .38), 0 0 24px rgba(230, 109, 69, .16);
+}
+
+.graph-hand-onboarding {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 10;
+  width: min(360px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 1px solid rgba(132, 240, 201, .28);
+  border-radius: 18px;
+  padding: 22px 24px 18px;
+  background: rgba(5, 19, 13, .92);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .48), inset 0 0 45px rgba(69, 201, 153, .06);
+  color: rgba(238, 253, 246, .86);
+  font-family: var(--font-geist-mono), monospace;
+  text-align: center;
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(20px);
+}
+
+.graph-hand-onboarding > span { color: rgba(128, 239, 198, .58); font-size: 7px; letter-spacing: .14em; }
+.graph-hand-onboarding > strong { margin-top: 12px; font-size: 16px; font-weight: 620; }
+.graph-hand-onboarding > p { margin: 8px 0 14px; color: rgba(238, 253, 246, .5); font-size: 9px; line-height: 1.7; }
+.graph-hand-onboarding > div { display: flex; gap: 7px; }
+.graph-hand-onboarding > div i { width: 22px; height: 2px; background: rgba(255, 255, 255, .12); }
+.graph-hand-onboarding > div i[data-done="true"] { background: #83f2c5; box-shadow: 0 0 8px rgba(131, 242, 197, .48); }
+.graph-hand-onboarding > button {
+  margin-top: 16px;
+  border: 0;
+  background: transparent;
+  color: rgba(238, 253, 246, .42);
+  font-family: inherit;
+  font-size: 7px;
+  cursor: pointer;
+}
+
+.graph-hand-preview {
+  position: relative;
+  height: 132px;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  background: #07110d;
+}
+
+.graph-hand-preview::after {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 255, 255, .06);
+  background: linear-gradient(180deg, transparent 62%, rgba(3, 12, 8, .42));
+  content: "";
+  pointer-events: none;
+}
+
+.graph-hand-preview video,
+.graph-hand-preview canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.graph-hand-preview video { opacity: .42; filter: saturate(.7) contrast(1.08); }
+.graph-hand-preview canvas { z-index: 1; }
+
+.graph-hand-preview > i {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  z-index: 2;
+  width: 7px;
+  height: 7px;
+  background: #72f0be;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #72f0be;
+}
+
+.graph-hand-status {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 12px 9px;
+}
+
+.graph-hand-status > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(159, 234, 204, .52);
+  font-size: 7px;
+  letter-spacing: .13em;
+}
+
+.graph-hand-status > span i {
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+  border-radius: 50%;
+  box-shadow: 0 0 7px currentColor;
+}
+
+.graph-hand-status strong { font-size: 9px; font-weight: 620; line-height: 1.45; }
+.graph-hand-status small { color: rgba(239, 249, 244, .44); font-size: 7px; line-height: 1.55; }
+
+.graph-hand-guide {
+  border-top: 1px solid rgba(255, 255, 255, .07);
+}
+
+.graph-hand-guide summary {
+  padding: 8px 12px;
+  color: rgba(236, 247, 241, .48);
+  font-size: 7px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.graph-hand-guide summary::after {
+  float: right;
+  color: rgba(131, 242, 197, .5);
+  content: "+";
+}
+
+.graph-hand-guide[open] summary::after { content: "−"; }
+
+.graph-hand-guide > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 0 9px 9px;
+}
+
+.graph-hand-guide span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 7px;
+  padding: 5px 6px;
+  background: rgba(255, 255, 255, .025);
+  color: rgba(236, 247, 241, .42);
+}
+
+.graph-hand-guide span[data-active="true"] {
+  border-color: rgba(115, 242, 195, .34);
+  background: rgba(82, 213, 163, .08);
+  color: rgba(236, 255, 247, .88);
+}
+
+.graph-hand-guide span > b { flex: 0 0 auto; font-size: 12px; font-weight: 500; }
+.graph-hand-guide span > small { overflow: hidden; font-size: 6px; text-overflow: ellipsis; white-space: nowrap; }
+
+.graph-hand-actions {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, .07);
+  padding: 0 9px 0 12px;
+}
+
+.graph-hand-actions button {
+  border: 0;
+  padding: 5px 0;
+  background: transparent;
+  color: rgba(235, 246, 240, .5);
+  font-family: inherit;
+  font-size: 7px;
+  cursor: pointer;
+}
+
+.graph-hand-actions button:hover { color: #fff; }
+
+.graph-hand-actions b {
+  border: 1px solid rgba(255, 157, 98, .44);
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: #ffb384;
+  font-size: 6px;
+  letter-spacing: .12em;
+  animation: graph-hand-grab 900ms ease-in-out infinite alternate;
+}
+
+@keyframes graph-hand-grab {
+  to { border-color: rgba(255, 190, 145, .78); box-shadow: 0 0 13px rgba(230, 109, 69, .32); }
+}
+
+.space-graph-caption {
+  position: absolute;
+  right: 20px;
+  bottom: 15px;
+  left: 20px;
+  z-index: 4;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  color: rgba(255, 255, 255, .32);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  letter-spacing: .08em;
+  pointer-events: none;
+}
+
+.space-graph-index {
+  position: absolute;
+  bottom: 38px;
+  left: 20px;
+  z-index: 6;
+  color: rgba(246, 246, 239, .6);
+  font-size: 8px;
+}
+
+.space-graph-index summary {
+  width: fit-content;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, .11);
+  background: rgba(15, 29, 23, .68);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+}
+
+.space-graph-index[open] {
+  width: min(310px, calc(100% - 40px));
+  padding: 9px;
+  background: rgba(15, 29, 23, .94);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, .32);
+}
+
+.space-graph-index[open] summary {
+  margin-bottom: 7px;
+  border: 0;
+  padding: 2px;
+  background: transparent;
+}
+
+.space-graph-index > div {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.space-graph-index > div button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, .07);
+  padding: 8px 4px;
+  background: transparent;
+  color: rgba(246, 246, 239, .72);
+  text-align: left;
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.space-graph-index > div button:hover {
+  color: #fff;
+}
+
+.space-graph-index > div i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.space-graph-index > div small {
+  color: rgba(255, 255, 255, .35);
+  text-align: right;
+}

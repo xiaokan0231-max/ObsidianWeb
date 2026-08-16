@@ -1,0 +1,1629 @@
+/* 側栏・頂栏・視圖切替の殻と 2D 関係図（globals.css から分割） */
+
+/* ===== 侧栏折叠（图标条） ===== */
+
+.rail-toggle {
+  margin-top: 12px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: #6d746f;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.rail-toggle:hover {
+  border-color: #b9b5aa;
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--ink);
+}
+
+.rail-toggle i {
+  font-style: normal;
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 200ms ease;
+}
+
+:root[data-rail="collapsed"] .app-shell {
+  grid-template-columns: 66px minmax(0, 1fr);
+}
+
+:root[data-rail="collapsed"] .sidebar {
+  padding: 30px 13px 24px;
+}
+
+:root[data-rail="collapsed"] .brand {
+  justify-content: center;
+}
+
+:root[data-rail="collapsed"] .brand-copy,
+:root[data-rail="collapsed"] .rail-toggle span {
+  display: none;
+}
+
+:root[data-rail="collapsed"] .side-nav {
+  margin-top: 36px;
+}
+
+:root[data-rail="collapsed"] .side-nav button {
+  justify-content: center;
+  padding: 0;
+}
+
+:root[data-rail="collapsed"] .side-nav button:hover {
+  transform: none;
+}
+
+/* 66px 的图标条里放不下缩进和竖线，子项靠「更小 + 紧跟在墨块下面」表达从属。 */
+:root[data-rail="collapsed"] .side-subnav {
+  margin: 3px 0 7px;
+  padding-left: 0;
+  border-left: 0;
+}
+
+:root[data-rail="collapsed"] .side-subnav button {
+  height: 32px;
+}
+
+:root[data-rail="collapsed"] .side-subnav button.active::before {
+  display: none;
+}
+
+/* 折叠时文字只做视觉隐藏，可访问名与搜索仍然拿得到。 */
+:root[data-rail="collapsed"] .side-nav button > span:last-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* 悬停 / 键盘聚焦时在右侧弹出中文标签。 */
+:root[data-rail="collapsed"] .side-nav button::after {
+  content: attr(data-label);
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  padding: 6px 11px;
+  border-radius: 3px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: 0 10px 24px rgba(24, 35, 30, 0.24);
+  transition: opacity 120ms ease;
+}
+
+:root[data-rail="collapsed"] .side-nav button:hover::after,
+:root[data-rail="collapsed"] .side-nav button:focus-visible::after {
+  opacity: 1;
+}
+
+:root[data-rail="collapsed"] .rail-toggle i {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell,
+  .sidebar,
+  .rail-toggle i {
+    transition: none;
+  }
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #42a778;
+  box-shadow: 0 0 0 4px rgba(66, 167, 120, 0.12);
+}
+
+.status-dot.loading {
+  background: var(--gold);
+  animation: pulse 1s infinite alternate;
+}
+
+.status-dot.error {
+  background: #cb5845;
+  box-shadow: 0 0 0 4px rgba(203, 88, 69, 0.12);
+}
+
+.main-stage {
+  min-width: 0;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 38px;
+  background: rgba(243, 240, 232, 0.9);
+  border-bottom: 1px solid rgba(216, 213, 202, 0.84);
+  backdrop-filter: blur(18px);
+}
+
+/*
+ * 二级导航按「书页标签」来做：只有选中的那一页和下面的正文连成一张纸，
+ * 靠 bottom: -1px 把 bar 的底线切开一段。所以 active 的底色必须等于正文的 --paper，
+ * bottom: -1px 和 border-bottom: 0 是一套的，只删其一就会看见纸浮起来。
+ */
+.section-nav {
+  position: sticky;
+  top: 76px;
+  z-index: 24;
+  min-height: 74px;
+  display: flex;
+  align-items: flex-end;
+  gap: 22px;
+  padding: 0 38px;
+  background:
+    linear-gradient(180deg, rgba(237, 233, 223, 0.96), rgba(243, 240, 232, 0.97));
+  border-bottom: 1px solid rgba(200, 196, 184, 0.78);
+  backdrop-filter: blur(16px);
+}
+
+/* 面试作战・训练中心的子项在桌面端住左栏，这条带子只留给资料库。 */
+.section-nav[data-placement="rail"] {
+  display: none;
+}
+
+.section-nav-tabs {
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.section-nav-tabs button {
+  position: relative;
+  bottom: -1px;
+  min-width: 0;
+  /* 和选中态同高。高度不一样时因为底对齐，未选中的文字会整体下沉几像素。 */
+  height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 17px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 11px 11px 0 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color 170ms ease,
+    background-color 170ms ease,
+    border-color 170ms ease;
+}
+
+.section-nav-tabs button i {
+  flex: 0 0 auto;
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50% 50% 50% 10%;
+  color: inherit;
+  font-family: "Songti SC", serif;
+  font-size: 14px;
+  font-style: normal;
+  line-height: 1;
+  opacity: .55;
+  transition: background-color 170ms ease, color 170ms ease, opacity 170ms ease;
+}
+
+.section-nav-tabs button span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.section-nav-tabs button strong {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+
+.section-nav-tabs button small {
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  white-space: nowrap;
+  transition: color 170ms ease;
+}
+
+.section-nav-tabs button:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.section-nav-tabs button:hover i {
+  opacity: .8;
+}
+
+.section-nav-tabs button.active {
+  border-color: rgba(200, 196, 184, 0.78);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 -6px 18px rgba(28, 37, 32, 0.05);
+}
+
+/* 顶边的朱线＝这一页就是当前打开的章节。 */
+.section-nav-tabs button.active::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  left: -1px;
+  height: 3px;
+  border-radius: 11px 11px 0 0;
+  background: var(--orange);
+}
+
+.section-nav-tabs button.active strong {
+  font-weight: 700;
+}
+
+.section-nav-tabs button.active small {
+  color: var(--orange);
+}
+
+.section-nav-tabs button.active i {
+  border-color: var(--orange);
+  background: var(--orange);
+  color: #fff;
+  opacity: 1;
+}
+
+.mobile-brand {
+  display: none;
+}
+
+.search-icon {
+  color: #6e746f;
+  font-size: 21px;
+  line-height: 1;
+}
+
+.search-palette-input kbd {
+  padding: 4px 7px;
+  border: 1px solid #dad7ce;
+  background: #f4f1e9;
+  color: #858a86;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  border-radius: 3px;
+}
+
+/* ⌘K 浮层。全库检索是导航工具，不该在每页占一条输入框。 */
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  /* 默认的 stretch 会把面板拉到整屏高，结果列表下面留一大块空白。 */
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(40px, 12vh, 120px) 20px 40px;
+  background: rgba(24, 35, 30, 0.26);
+  backdrop-filter: blur(3px);
+}
+
+.search-palette-input {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 54px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.search-palette-input input {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.search-palette-input input::placeholder {
+  color: #8c918d;
+}
+
+/* 资料库自己的检索框，和下面的分区・场景筛选是一组。 */
+.library-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  transition: border-color 160ms ease;
+}
+
+.library-search:focus-within {
+  border-color: #a8aaa4;
+}
+
+.library-search .search-icon {
+  font-size: 18px;
+}
+
+.library-search input {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.library-search input::placeholder {
+  color: #8c918d;
+}
+
+.library-search > button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: #8b908c;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.library-search > button:hover {
+  color: var(--orange);
+}
+
+/* ===== 顶栏三段：我在哪 / 下一件 / 数据源 ===== */
+
+.topbar-where {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.topbar-where > span {
+  color: var(--orange);
+  font-family: "Songti SC", serif;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.topbar-where strong {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.topbar-where small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.topbar-where small::before {
+  content: "·";
+  margin-right: 9px;
+}
+
+/* 「下一件」是这一行里唯一有时限的信息，所以给它整行仅有的边框和朱色。 */
+.topbar-next {
+  min-width: 0;
+  height: 42px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--orange);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.topbar-next:hover {
+  border-color: var(--orange);
+  background: var(--surface);
+}
+
+.topbar-next small {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .13em;
+}
+
+.topbar-next em {
+  flex: 0 0 auto;
+  color: var(--orange);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.topbar-next strong {
+  overflow: hidden;
+  max-width: 260px;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-next i {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.topbar-source {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 没有「下一件」时，状态自己顶到右边。 */
+.topbar-next + .topbar-source {
+  margin-left: 0;
+}
+
+.topbar-source:first-of-type {
+  margin-left: auto;
+}
+
+.topbar-source:disabled {
+  cursor: wait;
+}
+
+.topbar-source-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar-source-copy strong {
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.topbar-source-copy small {
+  margin-top: 3px;
+  color: #868c88;
+  font-size: 9px;
+}
+
+.topbar-source:hover .topbar-source-copy strong {
+  color: var(--orange);
+}
+
+/* 按钮撤掉后，快捷键就是唯一入口——所以把它们写在明面上。 */
+.topbar-keys {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+}
+
+.topbar-keys span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #939893;
+  font-size: 9px;
+}
+
+.topbar-keys kbd {
+  padding: 3px 6px;
+  border: 1px solid #dad7ce;
+  border-radius: 3px;
+  background: #f4f1e9;
+  color: #7f847f;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+}
+
+.search-panel {
+  width: min(640px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* 横向留白由各段自己带（head/saved/results/help 都是 8px），这里留着会把输入框的下边线截断。 */
+  padding: 0 0 8px;
+  background: #fbfaf6;
+  border: 1px solid #cbc8be;
+  box-shadow: var(--shadow);
+}
+
+.search-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 8px 10px;
+  color: #787e7a;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.search-panel-head button {
+  border: 0;
+  background: transparent;
+  color: #777;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.saved-queries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 2px 8px 12px;
+}
+
+.saved-queries button {
+  border: 1px solid #d4d0c5;
+  background: #f4f1e8;
+  padding: 7px 9px;
+  color: #545c57;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.saved-queries button:hover {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+.search-results {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.search-results > button {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-top: 1px solid #ebe7de;
+  background: transparent;
+  padding: 9px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-results > button:hover {
+  background: #f0ede4;
+}
+
+.result-group {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 50%;
+}
+
+.result-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.result-copy strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-copy small {
+  overflow: hidden;
+  margin-top: 4px;
+  color: #848985;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-arrow {
+  color: #8b908c;
+}
+
+.empty-search {
+  padding: 28px 14px;
+  color: #858b87;
+  font-size: 11px;
+  text-align: center;
+}
+
+.search-help {
+  padding: 9px 8px 3px;
+  color: #929692;
+  font-size: 9px;
+}
+
+.search-help code {
+  color: var(--green);
+}
+
+.view-container {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 34px 38px 70px;
+}
+
+.memory-hero {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  padding: 20px 26px 0;
+  background:
+    radial-gradient(circle at 77% 36%, rgba(229, 109, 69, 0.22), transparent 23%),
+    linear-gradient(115deg, #17241e 0%, #21382e 68%, #263d33 100%);
+  color: #f6f3e9;
+}
+
+.memory-hero::before,
+.memory-hero::after {
+  content: "";
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.memory-hero::before {
+  width: 420px;
+  height: 420px;
+  top: -225px;
+  right: -50px;
+}
+
+.memory-hero::after {
+  width: 260px;
+  height: 260px;
+  bottom: -180px;
+  left: 37%;
+}
+
+.eyebrow,
+.panel-kicker {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.18em;
+}
+
+.memory-hero > .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.memory-hero > .eyebrow span,
+.section-intro .eyebrow i {
+  width: 6px;
+  height: 6px;
+  background: var(--orange);
+  border-radius: 50%;
+}
+
+.hero-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.85fr);
+  gap: 12px;
+  padding: 14px 0;
+}
+
+.hero-primary,
+.hero-watch {
+  position: relative;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(248, 246, 237, 0.075);
+  backdrop-filter: blur(8px);
+}
+
+.hero-primary {
+  min-height: 184px;
+  padding: 20px 22px 18px;
+}
+
+.hero-primary-topline,
+.hero-primary-reason,
+.hero-watch-head,
+.hero-watch footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hero-primary-topline > span,
+.hero-watch-head > span {
+  color: #f1b39d;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  font-weight: 680;
+  letter-spacing: 0.13em;
+}
+
+.hero-primary-topline > small {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero-primary h1 {
+  display: -webkit-box;
+  overflow: hidden;
+  max-width: 880px;
+  margin: 10px 0;
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: clamp(24px, 2.15vw, 32px);
+  font-weight: 520;
+  line-height: 1.22;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.hero-primary-reason {
+  justify-content: flex-start;
+}
+
+.hero-primary-reason span,
+.hero-primary-reason i {
+  padding: 4px 8px;
+  color: rgba(255, 255, 255, 0.76);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.hero-primary-reason i {
+  color: #ffd8ca;
+  background: rgba(230, 109, 69, 0.16);
+}
+
+.hero-primary p {
+  display: -webkit-box;
+  overflow: hidden;
+  max-width: 830px;
+  min-height: 0;
+  margin: 10px 0 13px;
+  color: rgba(247, 246, 238, 0.65);
+  font-size: 11px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.hero-primary-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.primary-action {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  border: 0;
+  background: var(--orange);
+  color: #fff;
+  padding: 12px 16px;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: gap 180ms ease, background 180ms ease;
+}
+
+.primary-action:hover {
+  gap: 36px;
+  background: #ee7c55;
+}
+
+.primary-action:disabled {
+  opacity: 0.45;
+}
+
+.hero-secondary-action {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  padding: 11px 15px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.hero-secondary-action:hover {
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #fff;
+}
+
+.hero-watch {
+  display: flex;
+  min-height: 184px;
+  flex-direction: column;
+  padding: 17px 18px 14px;
+}
+
+.hero-watch-head {
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.hero-watch-head small,
+.hero-watch footer {
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 9px;
+}
+
+.hero-watch > button {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  border: 0;
+  padding: 17px 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hero-watch > button small {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 9px;
+}
+
+.hero-watch > button strong,
+.hero-watch-empty strong {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 7px 0;
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 18px;
+  font-weight: 520;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.hero-watch > button > span,
+.hero-watch-empty span {
+  color: #f1b39d;
+  font-size: 9px;
+}
+
+.hero-watch-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.hero-watch footer {
+  min-height: 24px;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  padding-top: 11px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.hero-stats {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 0 -26px;
+  border-top: 1px solid rgba(255, 255, 255, 0.13);
+}
+
+.stat {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.13);
+}
+
+.stat:last-child {
+  border-right: 0;
+}
+
+.stat strong {
+  color: #fff;
+  font-family: "Songti SC", serif;
+  font-size: 24px;
+  font-weight: 500;
+}
+
+.stat span {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.panel {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 28px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 25px;
+}
+
+.panel-kicker {
+  display: block;
+  margin-bottom: 9px;
+  color: #959a96;
+}
+
+.panel-heading h2 {
+  margin: 0;
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 23px;
+  font-weight: 560;
+}
+
+.panel-heading > button {
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+  color: #777d79;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.panel-heading > button:hover {
+  color: var(--orange);
+}
+
+.health-score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 15px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid #e2ded5;
+}
+
+.health-score strong {
+  font-family: "Songti SC", serif;
+  font-size: 45px;
+  font-weight: 500;
+}
+
+.health-score span {
+  color: #979c98;
+  font-size: 13px;
+}
+
+.health-score-row p {
+  margin: 0;
+  color: #747a76;
+  font-size: 11px;
+}
+
+.health-bars {
+  display: grid;
+  gap: 16px;
+  margin: 24px 0;
+}
+
+.health-bar-row > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 7px;
+  font-size: 10px;
+}
+
+.health-bar-row strong {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+}
+
+.health-bar {
+  height: 3px;
+  overflow: hidden;
+  background: #e4e1d8;
+}
+
+.health-bar i {
+  display: block;
+  height: 100%;
+}
+
+.health-bar i.green { background: var(--green); }
+.health-bar i.orange { background: var(--orange); }
+.health-bar i.violet { background: var(--violet); }
+
+.health-alert {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: #f4e9df;
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.health-alert > span {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  background: var(--orange);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.health-alert div {
+  display: flex;
+  flex-direction: column;
+}
+
+.health-alert strong {
+  font-size: 10px;
+}
+
+.health-alert small {
+  margin-top: 4px;
+  color: #8b766d;
+  font-size: 10px;
+}
+
+.health-alert b {
+  transition: transform 160ms ease;
+}
+
+.health-alert:hover b {
+  transform: translateX(4px);
+}
+
+.pipeline-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.pipeline-list > button {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 12px;
+  min-height: 61px;
+  border: 0;
+  border-top: 1px solid #e4e0d7;
+  background: transparent;
+  padding: 9px 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pipeline-list > button:last-child {
+  border-bottom: 1px solid #e4e0d7;
+}
+
+.pipeline-list > button:hover .pipeline-company strong {
+  color: var(--orange);
+}
+
+.pipeline-status {
+  width: 58px;
+  overflow: hidden;
+  padding: 4px 6px;
+  background: #e7e5df;
+  color: #737a76;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-active {
+  background: #d8eadf;
+  color: #29624f;
+}
+
+.status-rejected {
+  background: #ece9e2;
+  color: #8a8c88;
+}
+
+.status-idle {
+  background: #eee8d9;
+  color: #786e55;
+}
+
+.pipeline-company {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pipeline-company strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  transition: color 160ms ease;
+  white-space: nowrap;
+}
+
+.pipeline-company-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pipeline-company time {
+  flex: 0 0 auto;
+  color: #929792;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+}
+
+.pipeline-company small {
+  overflow: hidden;
+  margin-top: 5px;
+  color: #858b87;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pipeline-arrow {
+  color: #969a97;
+}
+
+.learning-visual {
+  display: grid;
+  grid-template-columns: 135px minmax(0, 1fr);
+  align-items: center;
+  gap: 28px;
+  margin-top: 12px;
+}
+
+.learning-ring {
+  --progress: 0%;
+  width: 128px;
+  height: 128px;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(var(--violet) var(--progress), #e5e1d9 0);
+  border-radius: 50%;
+}
+
+.learning-ring::before {
+  content: "";
+  grid-area: 1 / 1;
+  width: 102px;
+  height: 102px;
+  background: var(--surface);
+  border-radius: 50%;
+}
+
+.learning-ring div {
+  position: relative;
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.learning-ring strong {
+  font-family: "Songti SC", serif;
+  font-size: 34px;
+  font-weight: 500;
+}
+
+.learning-ring span {
+  color: #858a86;
+  font-size: 9px;
+}
+
+.learning-copy p {
+  margin: 0 0 11px;
+  color: #777e79;
+  font-size: 10px;
+}
+
+.learning-copy p strong {
+  color: var(--ink);
+  font-family: "Songti SC", serif;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.learning-copy button,
+.graph-preview-copy button {
+  border: 0;
+  background: transparent;
+  padding: 6px 0;
+  color: var(--violet);
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.learning-copy button:hover,
+.graph-preview-copy button:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.learning-flow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 23px;
+  padding-top: 17px;
+  border-top: 1px solid #e3dfd6;
+}
+
+.learning-flow span {
+  padding: 5px 7px;
+  background: #f0ede5;
+  color: #686f6a;
+  font-size: 8px;
+}
+
+.learning-flow b {
+  color: #aaa9a4;
+  font-size: 10px;
+}
+
+.graph-preview-panel {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  min-height: 390px;
+  background: #1a2821;
+  border-color: #1a2821;
+  color: #fff;
+}
+
+.graph-preview-copy {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.graph-preview-copy .panel-kicker {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.graph-preview-copy h2 {
+  margin: 4px 0 18px;
+  font-family: "Songti SC", serif;
+  font-size: 29px;
+  font-weight: 520;
+  line-height: 1.35;
+}
+
+.graph-preview-copy p {
+  margin: 0 0 16px;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 10px;
+  line-height: 1.8;
+}
+
+.graph-preview-copy button {
+  width: fit-content;
+  color: #f4aa8d;
+}
+
+.mini-graph {
+  position: relative;
+  min-height: 330px;
+}
+
+.mini-graph::before {
+  content: "";
+  position: absolute;
+  inset: 8%;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.11) 1px, transparent 1px);
+  background-size: 18px 18px;
+  mask-image: radial-gradient(circle, #000 35%, transparent 78%);
+}
+
+.mini-graph b {
+  position: absolute;
+  z-index: 2;
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.mini-edge {
+  position: absolute;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  transform-origin: 0 0;
+}
+
+.mini-graph > strong {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 3;
+  width: 55px;
+  height: 55px;
+  display: grid;
+  place-items: center;
+  background: #f0ede2;
+  color: var(--ink);
+  font-family: "Songti SC", serif;
+  font-size: 20px;
+  font-weight: 500;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.section-intro {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 25px;
+  margin: 16px 0 28px;
+}
+
+.section-intro .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #8e938f;
+}
+
+.section-intro h1 {
+  margin: 8px 0 7px;
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: clamp(34px, 4vw, 52px);
+  font-weight: 520;
+  letter-spacing: -0.03em;
+}
+
+.section-intro p {
+  max-width: 610px;
+  margin: 0;
+  color: #777e79;
+  font-size: 11px;
+  line-height: 1.75;
+}
+
+.group-filters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.group-filters button {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d1cec4;
+  background: transparent;
+  padding: 0 10px;
+  color: #777d79;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.group-filters button i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+/* 当前视图下的节点数。0 のときは押しても空なので、押す前に分かるようにする。 */
+.group-filters button b {
+  min-width: 15px;
+  padding: 1px 4px;
+  background: #ebe8df;
+  border-radius: 3px;
+  color: #7b817d;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.group-filters button.empty { opacity: 0.5; }
+.group-filters button.empty b { background: transparent; color: #a8ada9; }
+.group-filters button.active b { background: rgba(255, 255, 255, 0.28); color: inherit; }
+
+/* 分区が空のときの説明。3D 星図の上に重ねる。 */
+.graph-empty-note {
+  position: absolute;
+  z-index: 6;
+  top: 50%;
+  left: 50%;
+  width: min(430px, calc(100% - 40px));
+  transform: translate(-50%, -50%);
+  padding: 22px 24px;
+  background: rgba(251, 250, 246, 0.97);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  box-shadow: 0 18px 48px rgba(18, 29, 24, 0.16);
+  text-align: center;
+}
+
+.graph-empty-note strong {
+  display: block;
+  margin-bottom: 9px;
+  font-family: "Songti SC", serif;
+  font-size: 15px;
+}
+
+.graph-empty-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.85;
+}
+
+.graph-empty-note button {
+  margin-top: 14px;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--orange);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: #b34d2d;
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.graph-empty-note button:hover { background: rgba(230, 109, 69, 0.1); }
+
+.group-filters button:hover,
+.group-filters button.active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+.graph-view .module-control-row {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.graph-control-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.graph-renderer-toggle {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #d1cec4;
+  background: rgba(255, 255, 255, 0.36);
+}
+
+.graph-renderer-toggle button {
+  height: 26px;
+  border: 0;
+  padding: 0 11px;
+  background: transparent;
+  color: #777d79;
+  font-family: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.graph-renderer-toggle button:hover,
+.graph-renderer-toggle button.active {
+  background: var(--ink);
+  color: #fff;
+}
+
+.graph-layout {
+  position: relative; /* .graph-empty-note の位置基準 */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  min-height: 640px;
+  background: #18231e;
+}
+
+.graph-layout[data-renderer="space"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* 顶部筛选器已经承担 3D 星图的图例，侧栏只会挤掉最需要的横向视野。 */
+.graph-layout[data-renderer="space"] > .graph-legend {
+  display: none;
+}

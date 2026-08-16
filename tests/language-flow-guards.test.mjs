@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { readAppCss } from "./css-source.mjs";
 
 test("fixed language training completes without Codex and only marks trained", async () => {
   const [route, engine] = await Promise.all([
@@ -33,7 +34,7 @@ test("language categories can expand through a fixed allowlisted task", async ()
 test("language v2 uses a keyboard-first three-phase batch and keeps old routes out of the main UI", async () => {
   const [ui, css, engine] = await Promise.all([
     readFile("app/japanese-training.tsx", "utf8"),
-    readFile("app/globals.css", "utf8"),
+    readAppCss(),
     readFile("lib/server/language-v2.ts", "utf8"),
   ]);
   assert.ok(ui.includes('"1": "known", "2": "uncertain", "3": "unknown", "4": "reject"'));

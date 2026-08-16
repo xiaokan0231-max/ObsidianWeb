@@ -1,0 +1,260 @@
+/* デザイントークン・:root・全局リセット（globals.css から分割） */
+
+:root {
+  --paper: #f3f0e8;
+  --paper-deep: #e9e5da;
+  --surface: #fbfaf6;
+  --ink: #18231e;
+  --muted: #6f7772;
+  --line: #d8d5ca;
+  --orange: #e66d45;
+  --green: #2f6b59;
+  --violet: #7466a9;
+  --gold: #b5842f;
+  --shadow: 0 18px 55px rgba(28, 37, 32, 0.12);
+  --surface-raised: rgba(251, 250, 246, 0.88);
+  --surface-soft: rgba(255, 255, 255, 0.46);
+  --line-strong: #c8c4b8;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-feature: 16px;
+  --shadow-soft: 0 12px 34px rgba(28, 37, 32, 0.07);
+  --page-title-size: clamp(38px, 3.4vw, 50px);
+  --page-copy-size: 13px;
+
+  /*
+   * チャート専用トークン。UI の --orange/--green とは別に持つ理由：
+   * 既存の --green (#2f6b59) は chroma 0.069 で塗りつぶすと灰色に見え、
+   * バーの塗りとしては検証に落ちる（validate_palette.js の chroma floor）。
+   * UI 側の色は変えずに、チャートだけ検証済みの値を使う。
+   *
+   * 名義カテゴリ（経路・技術スタック）は --chart-bar 一色。
+   * 長さが既に大きさを表しているので、濃淡で二重符号化しない。
+   */
+  --chart-bar: #c06542;
+  /* 順序カテゴリ用の 6 段（ファネル・評点・状態）。--ordinal 検証済み：
+     単一色相・L 単調・隣接 ΔL>=0.06・薄い端も surface に対して 2:1 以上 */
+  --chart-step-0: #dfa184;
+  --chart-step-1: #cf7f5a;
+  --chart-step-2: #bd633f;
+  --chart-step-3: #a64a29;
+  --chart-step-4: #88371c;
+  --chart-step-5: #622813;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--paper);
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+canvas:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 3px;
+}
+
+.app-shell {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 218px minmax(0, 1fr);
+  transition: grid-template-columns 200ms ease;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 30px 22px 24px;
+  background: #ede9df;
+  border-right: 1px solid var(--line);
+  z-index: 30;
+  transition: padding 200ms ease;
+}
+
+.brand,
+.mobile-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+}
+
+.brand {
+  cursor: pointer;
+}
+
+.brand-mark {
+  width: 39px;
+  height: 39px;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: #f7f4ea;
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 20px;
+  border-radius: 50% 50% 50% 12%;
+}
+
+.brand-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.05;
+}
+
+.brand-copy strong {
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 21px;
+  letter-spacing: 0.08em;
+}
+
+.brand-copy small {
+  margin-top: 6px;
+  font-family: var(--font-geist-mono), monospace;
+  color: #7c827e;
+  font-size: 8px;
+  letter-spacing: 0.16em;
+}
+
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  /* 展开二级项后矮屏会顶出去：先让这段留白跟着屏高收，880px 以上仍是原来的 70px。 */
+  margin-top: clamp(26px, 8vh, 70px);
+  /* 兜底——真装不下时让导航自己滚，别把「收起」和连接状态挤出视口。 */
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+/*
+ * 折叠态不能滚：overflow-y:auto 会把 overflow-x 一并变成 auto（规范如此），
+ * 那条从 66px 图标条向右弹出的 hover 标签就会被裁掉，折叠态又只剩图标，等于没名字。
+ * 折叠态本来就比展开态矮 70px 左右，让它按老样子溢出即可。
+ */
+:root[data-rail="collapsed"] .side-nav {
+  overflow: visible;
+}
+
+.side-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.side-nav button {
+  position: relative;
+  height: 45px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 0;
+  background: transparent;
+  color: #6d746f;
+  padding: 0 13px;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 4px;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.side-nav button:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.52);
+  transform: translateX(2px);
+}
+
+.side-nav button.active {
+  color: #fff;
+  background: var(--ink);
+}
+
+.nav-glyph {
+  width: 20px;
+  font-size: 20px;
+  line-height: 1;
+  text-align: center;
+}
+
+.side-nav button span:last-child {
+  font-size: 13px;
+  font-weight: 620;
+  letter-spacing: 0.05em;
+}
+
+/* 当前分区的子项，只在该分区被选中时出现，所以顶层永远只有 7 个目标。 */
+.side-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 8px 21px;
+  padding-left: 11px;
+  border-left: 1px solid var(--line);
+}
+
+.side-subnav button {
+  height: 34px;
+  gap: 9px;
+  padding: 0 9px;
+  color: #7c837e;
+}
+
+.side-subnav .nav-glyph {
+  width: 17px;
+  font-family: "Songti SC", serif;
+  font-size: 15px;
+}
+
+.side-subnav button span:last-child {
+  font-size: 12px;
+  font-weight: 560;
+}
+
+/* 父项已经是整块墨底，子项再来一块就成了两个黑砖；这里只用纸色和朱记做标记。 */
+.side-subnav button.active {
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--ink);
+}
+
+.side-subnav button.active span:last-child {
+  font-weight: 680;
+}
+
+.side-subnav button.active::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 2px;
+  height: 17px;
+  transform: translateY(-50%);
+  background: var(--orange);
+}
