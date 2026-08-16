@@ -1355,7 +1355,11 @@
   font-size: 10px;
 }
 
-.graph-preview-panel {
+/* .panel と併記するのは特異性のため。ui-language.css の「カード外観をそろえる」
+   一括規則（.panel, .calendar-board, … { background-color: var(--surface-raised) }）が
+   ずっと後ろに居るので、単一クラスのままだと背景だけ奪われて
+   白文字＋明るい背景＝読めない、になる（実際にそうなっていた）。 */
+.panel.graph-preview-panel {
   position: relative;
   overflow: hidden;
   display: grid;
