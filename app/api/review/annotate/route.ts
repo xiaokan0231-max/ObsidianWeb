@@ -67,7 +67,9 @@ export async function POST(request: Request) {
   const sentenceId = body.sentenceId ?? "";
   const kind = body.kind ?? "";
   const target = body.target ?? "";
-  const text = (body.text ?? "").replace(/\s*\n\s*/g, "；").trim();
+  // trim が先。順序を逆にすると、改行だけの入力が「；」に化けてから非空判定に通り、
+  // 追記のみ・削除経路の無い事実層に中身が全角セミコロン1個だけの条目が残る。
+  const text = (body.text ?? "").trim().replace(/\s*\n\s*/g, "；");
 
   // ここだけ入口が整理稿ではなく批注ノート自身。「整理稿に揃える」と自分の書き込み先を弾く。
   if (!isReviewNotePath(notePath, "annotation")) {

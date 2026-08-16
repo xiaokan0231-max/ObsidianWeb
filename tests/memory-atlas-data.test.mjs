@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildCalendarEvents,
   buildDerivedData,
+  calendarCompanyIdentity,
   careerStatus,
   getLatestNoteDate,
   libraryScopeMatches,
@@ -98,6 +99,29 @@ test("日历：本文は面接行だけ拾い、お礼・通知・準備の行�
   assert.equal(events[0].label, "第一次面试");
 });
 
+test("日历：本文の叙述を予定として拾わない（約束していない面談を出さない）", () => {
+  // 2026-08-08 実測の誤検出3型。いずれも「予定」ではなく叙述・引用・履歴なのに、
+  // 会社名つきで日历に出ていた＝相手と約束していない面談が画面に現れる。
+  const events = buildCalendarEvents([
+    note("20_求職/Acme/Acme_Data.md", "job-case", { company: "Acme" }, [
+      "経緯は [[ワークポート面談対応]] の 2026-08-10 追記に集約した。",
+      "| 2026-08-11 | ワークポート面談実施 → 「企業提出可」の整理 |",
+      "| 2026-08-12 | GEEKLY | 面談の前に謝絶、企業紹介ゼロ |",
+    ].join("\n")),
+  ], NOW);
+  assert.deepEqual(events, [], "ノート名・表の履歴行・「面談の前に」は予定ではない");
+});
+
+test("日历：本文の兜底は生かす（素の面接行は拾う）", () => {
+  // 上の絞り込みで、取りこぼし兜底そのものを殺していないことを確認する。
+  const events = buildCalendarEvents([
+    note("20_求職/Acme/Acme_Data.md", "job-case", { company: "Acme" },
+      "- 2026-08-12 一次面接（Teams）"),
+  ], NOW);
+  assert.deepEqual(dates(events), ["2026-08-12"]);
+  assert.equal(events[0].label, "第一次面试");
+});
+
 test("日历：同じ会社・同じ日は信頼度が高い出所だけを残す", () => {
   const events = buildCalendarEvents([
     note("20_求職/Acme/2026-07-20_一次面接.md", "review", {
@@ -109,6 +133,27 @@ test("日历：同じ会社・同じ日は信頼度が高い出所だけを残�
   assert.equal(events.length, 1, "同じ面接が証拠と案件で二重表示されてはいけない");
   assert.match(events[0].note.path, /2026-07-20_一次面接\.md$/u);
   assert.equal(events[0].phase, "past");
+});
+
+test("日历：法人格・空白・下線だけが違う会社名は同じ予定として束ねる", () => {
+  assert.equal(
+    calendarCompanyIdentity("株式会社Sharing Innovations"),
+    calendarCompanyIdentity("Sharing_Innovations"),
+  );
+  const events = buildCalendarEvents([
+    note("20_求職/Sharing/2026-08-13_最終面接.md", "review", {
+      company: "Sharing_Innovations",
+      date: "2026-08-13",
+    }),
+    note("20_求職/Sharing/Sharing_Data.md", "job-case", {
+      company: "株式会社Sharing Innovations",
+      next_event_at: "2026-08-13 13:30",
+      next_action: "最終面接（対面）",
+    }),
+  ], NOW);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].company, "株式会社Sharing Innovations");
+  assert.equal(events[0].time, "13:30");
 });
 
 test("首页の派生数字：孤立・案件順・証拠の完全度", () => {

@@ -490,6 +490,63 @@ test("節指定の埋め込みはその節だけを取り込む（内外二層�
   assert.equal(doc.embeds[0].resolved, true);
 });
 
+test("埋め込み由来のブロックは出どころを持ち、本輪の手書き本文は持たない", () => {
+  const intro = note(
+    "20_求職/_素材/自己紹介_音読台本.md",
+    { type: "material" },
+    `---
+type: material
+---
+# 自己紹介_音読台本
+
+【あなた】肖侃（しょうかん）と申します。
+
+![[当日フレーズ集#A. オンライン]]
+`,
+  );
+  const doc = parseInterviewPrepDoc(
+    prepNote(`# テスト社 面談準備
+
+## ５．自己紹介
+
+### 今回版
+
+【あなた】今回だけの一文。
+
+### 共通正本
+
+![[自己紹介_音読台本]]
+
+### 今回の締めの一文
+
+【あなた】締めの一文。
+`),
+    [intro, PHRASES],
+  );
+  const [section] = doc.sections;
+  const embedded = section.blocks.filter((block) => block.embed);
+  assert.ok(embedded.length > 0, "展開されたブロックに出どころが付く");
+  // 入れ子（音読台本の中の当日フレーズ集）は最外の資産に帰属する。
+  // 資産の一部だけ別の畳みになると、正本が分断されて見える
+  assert.ok(
+    embedded.every(
+      (block) => block.embed.target === "自己紹介_音読台本" && block.embed.section === "",
+    ),
+  );
+  const embeddedText = embedded.map(prepBlockText).join("\n");
+  assert.match(embeddedText, /肖侃/);
+  assert.match(embeddedText, /お世話/, "入れ子の埋め込みも本文として残る");
+  // 本輪の手書き部分（埋め込みの前後どちらも）に印が付かない＝畳まれない
+  const own = section.blocks.filter((block) => !block.embed).map(prepBlockText).join("\n");
+  assert.match(own, /今回だけの一文/);
+  assert.match(own, /締めの一文/, "埋め込みの後で出どころが復位する");
+  // 範囲を運ぶ行印（NUL）はどのテキストにも漏れない
+  const everything = doc.sections
+    .map((item) => item.title + item.blocks.map(prepBlockText).join("\n"))
+    .join("\n");
+  assert.ok(!everything.includes("\\u0000"), "行印が本文に漏れない");
+});
+
 test("解決できない埋め込みは黙って消えず、警告ブロックとして残る", () => {
   const missingNote = parseInterviewPrepDoc(
     prepNote(`# テスト社

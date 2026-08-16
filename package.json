@@ -20,6 +20,7 @@
     "vault:verify": "node scripts/vault-check.mjs && node scripts/vault-stats.mjs --check"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "1.0.1",
     "drizzle-orm": "0.45.2",
     "next": "16.2.6",
     "react": "19.2.6",

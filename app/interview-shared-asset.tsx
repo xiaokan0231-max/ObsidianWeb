@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   isRoundSpecificAsset,
   parseSharedAssetDocument,
@@ -10,6 +10,8 @@ import { parseInline, prepBlockText } from "@/lib/interview-prep-doc";
 import type { Note } from "@/lib/notes";
 import { Blocks, Inlines } from "./prep-doc-render";
 import { copySelectionWithoutRuby } from "./ruby-copy";
+import { PrepSearchBox, useSlashFocus } from "./prep-search";
+import { useCopyFlash } from "./copy-flash";
 
 export default function InterviewSharedAsset({
   note,
@@ -32,7 +34,9 @@ export default function InterviewSharedAsset({
   );
   const [active, setActive] = useState(initialActive);
   const [query, setQuery] = useState("");
-  const [copied, setCopied] = useState(false);
+  // この画面のコピー対象は「いま開いている節」1つだけなので、id は固定でよい。
+  const { copiedId, flash, clear } = useCopyFlash();
+  const copied = copiedId === "section";
   const searchRef = useRef<HTMLInputElement>(null);
   const articleRef = useRef<HTMLElement>(null);
 
@@ -50,18 +54,7 @@ export default function InterviewSharedAsset({
   );
   const current = doc?.sections[active] ?? null;
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const typing =
-        event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
-      if (event.key === "/" && !typing) {
-        event.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useSlashFocus(searchRef);
 
   if (!doc || !current) {
     return (
@@ -75,15 +68,14 @@ export default function InterviewSharedAsset({
 
   const goTo = (index: number) => {
     setActive(index);
-    setCopied(false);
+    clear();
     window.setTimeout(() => articleRef.current?.scrollIntoView({ block: "start" }), 0);
   };
 
   const copyCurrent = async () => {
     const text = current.blocks.map(prepBlockText).filter(Boolean).join("\n");
     await navigator.clipboard.writeText(text);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    flash("section");
   };
 
   const visibleIndexes = doc.sections
@@ -115,25 +107,13 @@ export default function InterviewSharedAsset({
       </header>
 
       <div className="shared-asset-tools">
-        <label>
-          <span aria-hidden="true">⌕</span>
-          <input
-            ref={searchRef}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== "Escape") return;
-              event.stopPropagation();
-              setQuery("");
-              event.currentTarget.blur();
-            }}
-            placeholder={roundSpecific ? "搜索这份回答（/ 聚焦）" : "搜索这份资产（/ 聚焦）"}
-            aria-label={roundSpecific ? "搜索本轮志望動機" : "搜索共通资产"}
-          />
-          {query && (
-            <button type="button" onClick={() => setQuery("")} aria-label="清除搜索">×</button>
-          )}
-        </label>
+        <PrepSearchBox
+          value={query}
+          onChange={setQuery}
+          inputRef={searchRef}
+          placeholder={roundSpecific ? "搜索这份回答（/ 聚焦）" : "搜索这份资产（/ 聚焦）"}
+          label={roundSpecific ? "搜索本轮志望動機" : "搜索共通资产"}
+        />
         <p>
           {doc.restrictedToSection
             ? "仅展示面试可直接朗读的指定区段"

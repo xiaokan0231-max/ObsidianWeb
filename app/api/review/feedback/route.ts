@@ -35,7 +35,9 @@ export async function POST(request: Request) {
   const notePath = body.notePath ?? "";
   const blockId = body.blockId ?? "";
   const kind = body.kind ?? "agree";
-  const feedbackText = (body.text ?? "").replace(/\s*\n\s*/g, "；").trim();
+  // trim が先。逆にすると改行だけの入力が「；」になって非空判定を素通りし、
+  // 「理由を書け」の門檻が空文字だけしか止められなくなる（批注 route と同じ穴）。
+  const feedbackText = (body.text ?? "").trim().replace(/\s*\n\s*/g, "；");
   const storedText = feedbackText || "同意该项 AI 评价";
   if (!isReviewNotePath(notePath, "seirikou")) {
     return badRequest("notePath 不是面试整理稿");
@@ -57,8 +59,13 @@ export async function POST(request: Request) {
   const feedbackPath = reviewSiblingPath(notePath, "answerFeedback");
 
   try {
-    const [source, reviewNote] = await Promise.all([readNote(notePath), readNote(reviewPath)]);
-    const review = parseInterviewAnswerReview(reviewNote.content);
+    // 復盤は「まだ無い」が正常な状態（面接直後は整理稿だけが在る）。readNote で読むと
+    // Obsidian の英語 404 が本文ごと画面に出てしまうので、無い場合は自前の文言に寄せる。
+    const [source, reviewNote] = await Promise.all([
+      readNote(notePath),
+      readNoteOrNull(reviewPath),
+    ]);
+    const review = reviewNote ? parseInterviewAnswerReview(reviewNote.content) : null;
     if (text(source.frontmatter.type) !== "transcript-study" || !review) {
       throw new Error("回答质量复盘尚未生成。");
     }

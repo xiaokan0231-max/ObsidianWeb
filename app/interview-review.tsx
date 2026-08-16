@@ -4,20 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import {
   computeStats,
   latestListeningMarks,
-  parseAnnotations,
-  parseSeirikou,
   patternSlug,
   plainSei,
-  reviewDecisionTasks,
   segmentSei,
-  uniqueAnnotations,
   type ParsedSeirikou,
   type ReviewAnnotation,
   type ReviewDecisionTask,
   type ReviewSentence,
   type ReviewStats,
 } from "@/lib/review";
-import { getString, getType, type Note } from "@/lib/notes";
+import { findDayNote, findRoundNote, joinReviewNotes } from "@/lib/review-join";
+import { reviewSiblingPath } from "@/lib/review-paths";
+import { getString, type Note } from "@/lib/notes";
 import {
   allDeductions,
   DEDUCTION_SEVERITY_META,
@@ -36,9 +34,9 @@ import {
   type ReviewFeedbackEntry,
   type ReviewFeedbackKind,
 } from "@/lib/review-feedback";
-// タグのラベルは vault の 面接傾向_横断 を生成する側と同じものを使う。
-// 二重に持つと Web の表示と generated ノートの表記がずれる
-import { STRATEGY_TREND_META } from "@/lib/interview-trends.mjs";
+// タグのラベルも「何場で癖とみなすか」の判定も、vault の 面接傾向_横断 を生成する側と
+// 同じものを使う。二重に持つと Web の表示と generated ノートが黙って割れる
+import { STRATEGY_TREND_META, isRepeatedAcrossInterviews } from "@/lib/interview-trends.mjs";
 
 // 面接復盤：整理稿（派生層）を読む・批注（事実層）へ追記する、の2操作だけを持つ。
 // 整理稿の中身をここで書き換える経路は意図的に存在しない（唯一writer表を参照）。
@@ -119,50 +117,14 @@ function toggleSet(current: Set<string>, key: string) {
 }
 
 function buildDocs(notes: Note[]): ReviewDoc[] {
-  const studies = notes.filter((note) => getType(note) === "transcript-study");
-  const annotationNotes = notes.filter((note) => getType(note) === "study-annotation");
-  const reviewNotes = notes.filter((note) => getType(note) === "review");
-  const deepReviewNotes = notes.filter((note) => getType(note) === "interview-answer-review");
-  const practiceNotes = notes.filter((note) => getType(note) === "interview-answer-practice");
-  const feedbackNotes = notes.filter((note) => getType(note) === "interview-answer-feedback");
-
-  return studies
-    .map((note) => {
-      const company = getString(note.frontmatter.company);
-      const date = getString(note.frontmatter.date);
-      const round = getString(note.frontmatter.round);
-      const annotationNote = annotationNotes.find(
-        (candidate) =>
-          getString(candidate.frontmatter.company) === company &&
-          getString(candidate.frontmatter.date) === date,
-      );
-      const resultNote = reviewNotes.find(
-        (candidate) =>
-          getString(candidate.frontmatter.company) === company &&
-          getString(candidate.frontmatter.date) === date,
-      );
-      const deepReviewNote = deepReviewNotes.find(
-        (candidate) =>
-          getString(candidate.frontmatter.company) === company &&
-          getString(candidate.frontmatter.date) === date &&
-          getString(candidate.frontmatter.round) === round,
-      );
-      const practiceNote = practiceNotes.find(
-        (candidate) =>
-          getString(candidate.frontmatter.company) === company &&
-          getString(candidate.frontmatter.date) === date &&
-          getString(candidate.frontmatter.round) === round,
-      );
-      const feedbackNote = feedbackNotes.find(
-        (candidate) =>
-          getString(candidate.frontmatter.company) === company &&
-          getString(candidate.frontmatter.date) === date &&
-          getString(candidate.frontmatter.round) === round,
-      );
-      const parsed = parseSeirikou(note.content);
-      const annotations = annotationNote
-        ? uniqueAnnotations(parseAnnotations(annotationNote.content))
-        : [];
+  // 整理稿を軸に同じ回のノートを束ねる規則は lib/review-join.ts が持つ。
+  // ここは詳細画面だけが要る派生値（統計・練習キュー・フィードバック）を足すだけ。
+  return joinReviewNotes(notes)
+    .map((joined) => {
+      const { note, company, date, round, annotationNote, parsed, annotations } = joined;
+      const resultNote = findDayNote(notes, "review", joined);
+      const practiceNote = findRoundNote(notes, "interview-answer-practice", joined);
+      const feedbackNote = findRoundNote(notes, "interview-answer-feedback", joined);
       const bySentence = new Map<string, ReviewAnnotation[]>();
       for (const annotation of annotations) {
         const list = bySentence.get(annotation.sentenceId) ?? [];
@@ -186,14 +148,14 @@ function buildDocs(notes: Note[]): ReviewDoc[] {
         result: getString(resultNote?.frontmatter.result) || undefined,
         parsed,
         stats: computeStats(parsed.sentences),
-        annotationPath: annotationNote?.path ?? note.path.replace(/_整理稿\.md$/, "_批注.md"),
+        annotationPath: annotationNote?.path ?? reviewSiblingPath(note.path, "annotation"),
         annotationExists: Boolean(annotationNote),
         annotations,
         bySentence,
         listeningMarks: latestListeningMarks(annotations),
-        decisionTasks: reviewDecisionTasks(parsed.sentences, annotations),
-        deepReview: deepReviewNote
-          ? parseInterviewAnswerReview(deepReviewNote.content) ?? undefined
+        decisionTasks: joined.decisionTasks,
+        deepReview: joined.deepReviewNote
+          ? parseInterviewAnswerReview(joined.deepReviewNote.content) ?? undefined
           : undefined,
         practiceBlockIds: new Set(
           practiceNote
@@ -202,8 +164,36 @@ function buildDocs(notes: Note[]): ReviewDoc[] {
         ),
         feedbackByBlock,
       };
-    })
-    .sort((left, right) => right.date.localeCompare(left.date));
+    });
+  // 並び順（日付の新しい順）は joinReviewNotes が決める。ここで並べ直すと、
+  // 一覧とプレビューで順序が割れても誰も気づかない。
+}
+
+type WriteResponse = { ok?: boolean; error?: string };
+
+/**
+ * 書き込み系 API への POST を一本化する。四つの呼び出し口が
+ *「fetch → json → !ok なら投げる」をそれぞれ書いていて、`response.status` を
+ * 混ぜ忘れた版が一つでも紛れると、その経路だけ失敗理由が画面から消える。
+ *
+ * ここが持つのは投げるところまで。busy の解除・警告の表示・再取得は
+ * 呼び出し口ごとに順序も対象も違うので、あえて引き取らない。
+ */
+async function postReviewWrite<T extends WriteResponse = WriteResponse>(
+  url: string,
+  body: unknown,
+  failureLabel: string,
+): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json()) as T;
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error ?? `${failureLabel}（${response.status}）`);
+  }
+  return payload;
 }
 
 export default function InterviewReview({
@@ -349,21 +339,17 @@ export default function InterviewReview({
       setMessage(null);
       dismissWriteAlert(alertKey);
       try {
-        const response = await fetch("/api/review/annotate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        await postReviewWrite(
+          "/api/review/annotate",
+          {
             notePath: target.annotationPath,
             sentenceId,
             kind,
             text,
             target: decisionTarget,
-          }),
-        });
-        const payload = (await response.json()) as { ok?: boolean; error?: string };
-        if (!response.ok || !payload.ok) {
-          throw new Error(payload.error ?? `写入失败（${response.status}）`);
-        }
+          },
+          "写入失败",
+        );
         setAnnotationDraft(null);
         await onVaultChanged();
       } catch (error) {
@@ -388,15 +374,7 @@ export default function InterviewReview({
       setMessage(null);
       dismissWriteAlert(alertKey);
       try {
-        const response = await fetch("/api/review/deep", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ notePath: target.note.path }),
-        });
-        const payload = (await response.json()) as { ok?: boolean; error?: string };
-        if (!response.ok || !payload.ok) {
-          throw new Error(payload.error ?? `生成失败（${response.status}）`);
-        }
+        await postReviewWrite("/api/review/deep", { notePath: target.note.path }, "生成失败");
         await onVaultChanged();
         setDeepOpen(true);
       } catch (error) {
@@ -420,19 +398,11 @@ export default function InterviewReview({
       setMessage(null);
       dismissWriteAlert(alertKey);
       try {
-        const response = await fetch("/api/review/practice", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ notePath: target.note.path, blockId }),
-        });
-        const payload = (await response.json()) as {
-          ok?: boolean;
-          error?: string;
-          deduplicated?: boolean;
-        };
-        if (!response.ok || !payload.ok) {
-          throw new Error(payload.error ?? `加入失败（${response.status}）`);
-        }
+        const payload = await postReviewWrite<WriteResponse & { deduplicated?: boolean }>(
+          "/api/review/practice",
+          { notePath: target.note.path, blockId },
+          "加入失败",
+        );
         await onVaultChanged();
         setMessage(payload.deduplicated ? `${blockId} 已在重练队列中。` : `${blockId} 已加入重练队列。`);
       } catch (error) {
@@ -461,19 +431,11 @@ export default function InterviewReview({
       setMessage(null);
       dismissWriteAlert(alertKey);
       try {
-        const response = await fetch("/api/review/feedback", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ notePath: target.note.path, blockId, kind, text: feedbackText }),
-        });
-        const payload = (await response.json()) as {
-          ok?: boolean;
-          error?: string;
-          deduplicated?: boolean;
-        };
-        if (!response.ok || !payload.ok) {
-          throw new Error(payload.error ?? `反馈写入失败（${response.status}）`);
-        }
+        const payload = await postReviewWrite<WriteResponse & { deduplicated?: boolean }>(
+          "/api/review/feedback",
+          { notePath: target.note.path, blockId, kind, text: feedbackText },
+          "反馈写入失败",
+        );
         await onVaultChanged();
         setMessage(payload.deduplicated ? `${blockId} 已记录过相同反馈。` : `${blockId} 的人工反馈已保存。`);
         return true;
@@ -968,6 +930,15 @@ const COMPREHENSION_LABELS = {
   likely_missed: "可能没听懂",
 } as const;
 
+// 「听懂了」と「訊かれたことに答えた」は別の失敗。聞き取れていても論点がずれることはあるし、
+// その取り違えは扣分明細でも別の維度（问题理解 vs 直接性）に効く。
+// direct はラベルを出さない——正常な状態に印を付けても、本当に見てほしい2つが埋もれるだけ。
+const RELEVANCE_LABELS = {
+  direct: "",
+  partial: "略有偏题",
+  off_target: "答非所问",
+} as const;
+
 const DECISION_LABELS = {
   transcript: "转录错误",
   learner: "本人确实说错",
@@ -1323,6 +1294,9 @@ function DeepReviewPanel({
                 <strong>{block.questionTitle}</strong>
                 <em className={`c-${block.comprehension}`}>{COMPREHENSION_LABELS[block.comprehension]}</em>
                 <em>{QUALITY_LABELS[block.quality]}</em>
+                {block.relevance !== "direct" && (
+                  <em className={`r-${block.relevance}`}>{RELEVANCE_LABELS[block.relevance]}</em>
+                )}
                 {block.missedPoints.length > 0 && <b>漏答 {block.missedPoints.length}</b>}
                 <i aria-hidden="true">⌄</i>
               </summary>
@@ -1525,7 +1499,7 @@ function ReviewIndex({
       }
     }
     const repeated = [...byTag.entries()]
-      .filter(([, item]) => item.interviewKeys.size >= 2)
+      .filter(([, item]) => isRepeatedAcrossInterviews(item.interviewKeys.size))
       .sort((left, right) =>
         right[1].interviewKeys.size - left[1].interviewKeys.size ||
         right[1].occurrences - left[1].occurrences,

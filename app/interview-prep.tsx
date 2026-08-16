@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -14,6 +15,8 @@ import { parseInline } from "@/lib/interview-prep-doc";
 import type { Note } from "@/lib/notes";
 import { Inlines } from "./prep-doc-render";
 import { copySelectionWithoutRuby } from "./ruby-copy";
+import { isTypingTarget, PrepSearchBox, useSlashFocus } from "./prep-search";
+import { useCopyFlash } from "./copy-flash";
 
 function GuidanceBlock({
   title,
@@ -50,7 +53,8 @@ export default function InterviewPrep({
   const [category, setCategory] = useState("全部");
   // 飛び込みで来たカードを最初の選択にする。以降は本人の選択が優先される
   const [selectedId, setSelectedId] = useState<string | null>(initialCardId ?? null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const { copiedId, flash } = useCopyFlash();
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const categories = useMemo(
     () => library ? ["全部", ...new Set(library.items.map((item) => item.category))] : ["全部"],
@@ -76,10 +80,12 @@ export default function InterviewPrep({
     filteredItems[0] ??
     null;
 
+  useSlashFocus(searchRef);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (isTypingTarget(event.target)) return;
       const index = Number(event.key) - 1;
       if (!Number.isInteger(index)) return;
       if (index < 0 || index >= Math.min(filteredItems.length, 9)) return;
@@ -92,8 +98,7 @@ export default function InterviewPrep({
 
   const copyAnswer = async (item: InterviewPrepItem) => {
     await navigator.clipboard.writeText(interviewPrepPlainText(item.standardAnswer));
-    setCopiedId(item.id);
-    window.setTimeout(() => setCopiedId((current) => current === item.id ? null : current), 1600);
+    flash(item.id);
   };
 
   if (!library) {
@@ -111,15 +116,13 @@ export default function InterviewPrep({
   return (
     <div className="prep-view">
       <section className="prep-command">
-        <label>
-          <span aria-hidden="true">⌕</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索问题、能力或关键词…"
-            aria-label="搜索标准回答"
-          />
-        </label>
+        <PrepSearchBox
+          value={query}
+          onChange={setQuery}
+          inputRef={searchRef}
+          placeholder="搜索问题、能力或关键词（/ 聚焦）"
+          label="搜索标准回答"
+        />
         <div className="prep-categories" role="tablist" aria-label="答案分类">
           {categories.map((item) => (
             <button
