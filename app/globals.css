@@ -2005,6 +2005,105 @@ canvas:focus-visible {
   text-overflow: ellipsis;
 }
 
+.space-graph-label-layer > .space-graph-group-label {
+  isolation: isolate;
+  min-width: 0;
+  max-width: none;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  color: rgba(244, 248, 245, .76);
+  text-align: center;
+  text-shadow: 0 2px 9px #07110d, 0 0 16px #07110d;
+}
+
+/* 星域铭牌不做 UI 卡片：一束渐隐光轨和无边界辉光把文字嵌回星云里。 */
+.space-graph-label-layer > .space-graph-group-label::before {
+  content: "";
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  z-index: -1;
+  width: 54px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--label-accent) 30% 70%, transparent);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--label-accent) 54%, transparent);
+  opacity: .52;
+  transform: translateX(-50%);
+  transition: width 220ms ease, opacity 220ms ease;
+}
+
+.space-graph-label-layer > .space-graph-group-label::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: -2;
+  width: 92px;
+  height: 48px;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--label-accent) 14%, transparent), transparent 68%);
+  filter: blur(5px);
+  opacity: .58;
+  transform: translate(-50%, -48%);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-visible="true"] {
+  opacity: .58;
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-active="hovered"] {
+  color: #fff;
+  opacity: .96;
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-active="hovered"]::before,
+.space-graph-label-layer > .space-graph-group-label[data-active="selected"]::before {
+  width: 72px;
+  opacity: .88;
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-active="hovered"]::after,
+.space-graph-label-layer > .space-graph-group-label[data-active="selected"]::after {
+  opacity: 1;
+  transform: translate(-50%, -48%) scale(1.14);
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-active="selected"] {
+  color: #fff;
+  font-size: 8px;
+  opacity: 1;
+}
+
+.space-graph-label-layer > .space-graph-group-label[data-active="dim"] {
+  opacity: .2;
+}
+
+.space-graph-group-label strong {
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: .22em;
+}
+
+.space-graph-group-label small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: color-mix(in srgb, var(--label-accent) 72%, white 28%);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  letter-spacing: .12em;
+}
+
+.space-graph-group-label small::before {
+  content: "";
+  width: 3px;
+  height: 3px;
+  background: var(--label-accent);
+  border-radius: 50%;
+  box-shadow: 0 0 7px var(--label-accent);
+}
+
 .space-graph-loading,
 .space-graph-empty {
   display: grid;
@@ -3328,6 +3427,524 @@ canvas:focus-visible {
   color: rgba(255, 255, 255, .56);
   font-family: var(--font-geist-mono), monospace;
   font-size: 7px;
+}
+
+/* 摄像头只在星图全屏时挂载。这块预览既是隐私反馈（灯亮时用户看得见），
+   也是校准器：骨架与真人没有重合时，用户能立刻知道手还没被识别。 */
+.graph-hand-cursor {
+  position: absolute;
+  top: var(--hand-y);
+  left: var(--hand-x);
+  z-index: 7;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(123, 242, 196, .58);
+  border-radius: 50%;
+  box-shadow: 0 0 22px rgba(89, 225, 173, .2), inset 0 0 18px rgba(89, 225, 173, .09);
+  color: var(--target-color, #8ef3c9);
+  transform: translate(-50%, -50%);
+  transition: top 58ms linear, left 58ms linear, width 150ms ease, height 150ms ease,
+    border-color 150ms ease, box-shadow 150ms ease;
+  pointer-events: none;
+}
+
+.graph-hand-cursor[data-target="node"] {
+  border-color: color-mix(in srgb, var(--target-color), transparent 28%);
+  box-shadow: 0 0 28px color-mix(in srgb, var(--target-color), transparent 70%),
+    inset 0 0 20px color-mix(in srgb, var(--target-color), transparent 88%);
+}
+
+.graph-hand-cursor[data-role="secondary"] {
+  border-color: rgba(118, 217, 255, .58);
+  box-shadow: 0 0 22px rgba(74, 185, 236, .2), inset 0 0 18px rgba(74, 185, 236, .09);
+}
+
+.graph-hand-cursor::before,
+.graph-hand-cursor::after {
+  position: absolute;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  content: "";
+  opacity: .74;
+}
+
+.graph-hand-cursor::before { top: 50%; left: -8px; width: 58px; height: 1px; }
+.graph-hand-cursor::after { top: -8px; left: 50%; width: 1px; height: 58px; }
+
+.graph-hand-cursor > i:first-child {
+  position: absolute;
+  inset: 8px;
+  border: 1px dashed currentColor;
+  border-radius: 50%;
+  opacity: .7;
+  animation: graph-hand-cursor-spin 3.6s linear infinite;
+}
+
+.graph-hand-cursor > i:nth-child(2) {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #fff, 0 0 18px currentColor;
+  transform: translate(-50%, -50%);
+}
+
+.graph-hand-cursor > b {
+  position: absolute;
+  top: calc(100% + 11px);
+  left: 50%;
+  width: max-content;
+  border: 1px solid color-mix(in srgb, currentColor, transparent 68%);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(5, 17, 12, .78);
+  color: currentColor;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 7px;
+  font-weight: 580;
+  letter-spacing: .06em;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .26);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.graph-hand-cursor[data-grabbed="true"] {
+  width: 58px;
+  height: 58px;
+  border-color: rgba(255, 162, 103, .9);
+  box-shadow: 0 0 30px rgba(230, 109, 69, .32), inset 0 0 24px rgba(230, 109, 69, .14);
+  color: #ffa26d;
+}
+
+.graph-hand-cursor[data-grabbed="true"] > i:first-child {
+  animation-duration: .86s;
+}
+
+.graph-hand-cursor[data-pinching="true"] > i:first-child {
+  inset: -7px;
+  border: 0;
+  background: conic-gradient(currentColor var(--pinch-progress), rgba(255, 255, 255, .08) 0);
+  opacity: .95;
+  animation: none;
+  -webkit-mask: radial-gradient(circle, transparent 61%, #000 63%);
+  mask: radial-gradient(circle, transparent 61%, #000 63%);
+}
+
+.graph-hand-cursor[data-interaction="single-pinch"] {
+  width: 50px;
+  height: 50px;
+}
+
+.graph-hand-cursor[data-gesture="Pointing_Up"] {
+  width: 34px;
+  height: 34px;
+}
+
+@keyframes graph-hand-cursor-spin { to { transform: rotate(360deg); } }
+
+.graph-hand-dual-link {
+  position: absolute;
+  top: var(--dual-y1);
+  left: var(--dual-x1);
+  z-index: 6;
+  width: var(--dual-distance);
+  height: 2px;
+  background: linear-gradient(90deg, #83f2c5, rgba(255, 255, 255, .86), #76d9ff);
+  box-shadow: 0 0 14px rgba(116, 231, 218, .7);
+  transform: rotate(var(--dual-angle));
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+.graph-hand-dual-link::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(255, 255, 255, .78);
+  border-radius: 50%;
+  background: rgba(8, 29, 21, .82);
+  box-shadow: 0 0 18px rgba(128, 239, 207, .58);
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.graph-hand-dual-link > span {
+  position: absolute;
+  top: 13px;
+  left: 50%;
+  border: 1px solid rgba(135, 236, 212, .24);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: rgba(5, 18, 13, .8);
+  color: rgba(229, 255, 247, .74);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 6px;
+  transform: translateX(-50%) rotate(calc(-1 * var(--dual-angle)));
+  white-space: nowrap;
+}
+
+.graph-hand-radial {
+  position: absolute;
+  top: var(--menu-y);
+  left: var(--menu-x);
+  z-index: 9;
+  width: 244px;
+  height: 244px;
+  border: 1px solid rgba(130, 240, 197, .17);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(8, 27, 19, .86) 0 25%, rgba(8, 27, 19, .32) 26% 54%, transparent 55%),
+    conic-gradient(from -126deg, rgba(116, 238, 191, .035), transparent 18%, rgba(116, 238, 191, .035) 20% 38%, transparent 40% 58%, rgba(116, 238, 191, .035) 60% 78%, transparent 80%);
+  box-shadow: 0 0 52px rgba(49, 197, 145, .1), inset 0 0 38px rgba(49, 197, 145, .045);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: graph-hand-radial-enter 180ms ease-out both;
+}
+
+.graph-hand-radial::before,
+.graph-hand-radial::after {
+  position: absolute;
+  inset: 18px;
+  border: 1px dashed rgba(137, 242, 202, .13);
+  border-radius: 50%;
+  content: "";
+}
+
+.graph-hand-radial::after {
+  inset: 71px;
+  border-style: solid;
+  border-color: rgba(137, 242, 202, .2);
+  box-shadow: 0 0 20px rgba(88, 225, 173, .1);
+}
+
+.graph-hand-radial > div {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: rgba(226, 250, 239, .55);
+  font-family: var(--font-geist-mono), monospace;
+  transform: translate(-50%, -50%);
+}
+
+.graph-hand-radial > div span { font-size: 6px; letter-spacing: .09em; }
+.graph-hand-radial > div b { margin-top: 3px; color: #a5f6d5; font-size: 7px; font-weight: 560; }
+
+.graph-hand-radial > span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: 58px;
+  min-height: 46px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1px solid rgba(142, 243, 202, .2);
+  border-radius: 12px;
+  background: rgba(7, 24, 16, .88);
+  color: rgba(223, 250, 238, .55);
+  box-shadow: 0 9px 22px rgba(0, 0, 0, .25);
+  font-family: var(--font-geist-mono), monospace;
+  transform: translate(-50%, -50%) rotate(var(--menu-angle)) translateX(94px)
+    rotate(calc(0deg - var(--menu-angle)));
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease,
+    box-shadow 120ms ease, scale 120ms ease;
+}
+
+.graph-hand-radial > span b { font-size: 14px; font-weight: 500; line-height: 1; }
+.graph-hand-radial > span small { font-size: 6px; white-space: nowrap; }
+
+.graph-hand-radial > span[data-active="true"] {
+  border-color: rgba(255, 181, 126, .78);
+  background: rgba(72, 37, 19, .9);
+  color: #ffd4b0;
+  box-shadow: 0 0 28px rgba(255, 135, 79, .32), inset 0 0 18px rgba(255, 135, 79, .1);
+  scale: 1.12;
+}
+
+.graph-hand-radial > span[data-disabled="true"] {
+  opacity: .42;
+  filter: saturate(.35);
+}
+
+.graph-hand-radial > span[data-disabled="true"][data-active="true"] {
+  border-color: rgba(255, 255, 255, .24);
+  background: rgba(20, 25, 22, .88);
+  color: rgba(238, 242, 239, .62);
+  box-shadow: none;
+}
+
+@keyframes graph-hand-radial-enter {
+  from { opacity: 0; scale: .78; }
+  to { opacity: 1; scale: 1; }
+}
+
+.graph-hand-relation {
+  position: absolute;
+  top: 82px;
+  left: 50%;
+  z-index: 8;
+  min-width: 270px;
+  max-width: min(520px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid rgba(118, 217, 255, .28);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: rgba(5, 19, 16, .84);
+  box-shadow: 0 14px 42px rgba(0, 0, 0, .32), 0 0 28px rgba(71, 187, 222, .1);
+  color: rgba(233, 251, 246, .82);
+  font-family: var(--font-geist-mono), monospace;
+  text-align: center;
+  transform: translateX(-50%);
+  backdrop-filter: blur(16px);
+  pointer-events: none;
+}
+
+.graph-hand-relation > span {
+  color: rgba(118, 217, 255, .58);
+  font-size: 6px;
+  letter-spacing: .15em;
+}
+
+.graph-hand-relation > strong {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-hand-relation > strong i {
+  margin: 0 8px;
+  color: #76d9ff;
+  font-style: normal;
+}
+
+.graph-hand-relation > small { color: rgba(233, 251, 246, .48); font-size: 7px; }
+.graph-hand-relation[data-connected="false"] { border-color: rgba(255, 169, 116, .3); }
+.graph-hand-relation[data-connected="false"] > span { color: rgba(255, 169, 116, .7); }
+
+.graph-hand-console {
+  position: absolute;
+  bottom: 42px;
+  left: 20px;
+  z-index: 8;
+  width: 224px;
+  overflow: hidden;
+  border: 1px solid rgba(137, 224, 190, .2);
+  border-radius: 12px;
+  background: rgba(6, 18, 13, .82);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .34), inset 0 0 34px rgba(72, 197, 166, .045);
+  color: rgba(239, 249, 244, .8);
+  font-family: var(--font-geist-mono), monospace;
+  backdrop-filter: blur(16px);
+}
+
+.graph-hand-console[data-phase="grabbed"],
+.graph-hand-console[data-phase="dual"] {
+  border-color: rgba(255, 150, 90, .55);
+  box-shadow: 0 18px 56px rgba(0, 0, 0, .38), 0 0 24px rgba(230, 109, 69, .16);
+}
+
+.graph-hand-onboarding {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 10;
+  width: min(360px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 1px solid rgba(132, 240, 201, .28);
+  border-radius: 18px;
+  padding: 22px 24px 18px;
+  background: rgba(5, 19, 13, .92);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .48), inset 0 0 45px rgba(69, 201, 153, .06);
+  color: rgba(238, 253, 246, .86);
+  font-family: var(--font-geist-mono), monospace;
+  text-align: center;
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(20px);
+}
+
+.graph-hand-onboarding > span { color: rgba(128, 239, 198, .58); font-size: 7px; letter-spacing: .14em; }
+.graph-hand-onboarding > strong { margin-top: 12px; font-size: 16px; font-weight: 620; }
+.graph-hand-onboarding > p { margin: 8px 0 14px; color: rgba(238, 253, 246, .5); font-size: 9px; line-height: 1.7; }
+.graph-hand-onboarding > div { display: flex; gap: 7px; }
+.graph-hand-onboarding > div i { width: 22px; height: 2px; background: rgba(255, 255, 255, .12); }
+.graph-hand-onboarding > div i[data-done="true"] { background: #83f2c5; box-shadow: 0 0 8px rgba(131, 242, 197, .48); }
+.graph-hand-onboarding > button {
+  margin-top: 16px;
+  border: 0;
+  background: transparent;
+  color: rgba(238, 253, 246, .42);
+  font-family: inherit;
+  font-size: 7px;
+  cursor: pointer;
+}
+
+.graph-hand-preview {
+  position: relative;
+  height: 132px;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  background: #07110d;
+}
+
+.graph-hand-preview::after {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 255, 255, .06);
+  background: linear-gradient(180deg, transparent 62%, rgba(3, 12, 8, .42));
+  content: "";
+  pointer-events: none;
+}
+
+.graph-hand-preview video,
+.graph-hand-preview canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.graph-hand-preview video { opacity: .42; filter: saturate(.7) contrast(1.08); }
+.graph-hand-preview canvas { z-index: 1; }
+
+.graph-hand-preview > i {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  z-index: 2;
+  width: 7px;
+  height: 7px;
+  background: #72f0be;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #72f0be;
+}
+
+.graph-hand-status {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 12px 9px;
+}
+
+.graph-hand-status > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(159, 234, 204, .52);
+  font-size: 7px;
+  letter-spacing: .13em;
+}
+
+.graph-hand-status > span i {
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+  border-radius: 50%;
+  box-shadow: 0 0 7px currentColor;
+}
+
+.graph-hand-status strong { font-size: 9px; font-weight: 620; line-height: 1.45; }
+.graph-hand-status small { color: rgba(239, 249, 244, .44); font-size: 7px; line-height: 1.55; }
+
+.graph-hand-guide {
+  border-top: 1px solid rgba(255, 255, 255, .07);
+}
+
+.graph-hand-guide summary {
+  padding: 8px 12px;
+  color: rgba(236, 247, 241, .48);
+  font-size: 7px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.graph-hand-guide summary::after {
+  float: right;
+  color: rgba(131, 242, 197, .5);
+  content: "+";
+}
+
+.graph-hand-guide[open] summary::after { content: "−"; }
+
+.graph-hand-guide > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 0 9px 9px;
+}
+
+.graph-hand-guide span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 7px;
+  padding: 5px 6px;
+  background: rgba(255, 255, 255, .025);
+  color: rgba(236, 247, 241, .42);
+}
+
+.graph-hand-guide span[data-active="true"] {
+  border-color: rgba(115, 242, 195, .34);
+  background: rgba(82, 213, 163, .08);
+  color: rgba(236, 255, 247, .88);
+}
+
+.graph-hand-guide span > b { flex: 0 0 auto; font-size: 12px; font-weight: 500; }
+.graph-hand-guide span > small { overflow: hidden; font-size: 6px; text-overflow: ellipsis; white-space: nowrap; }
+
+.graph-hand-actions {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, .07);
+  padding: 0 9px 0 12px;
+}
+
+.graph-hand-actions button {
+  border: 0;
+  padding: 5px 0;
+  background: transparent;
+  color: rgba(235, 246, 240, .5);
+  font-family: inherit;
+  font-size: 7px;
+  cursor: pointer;
+}
+
+.graph-hand-actions button:hover { color: #fff; }
+
+.graph-hand-actions b {
+  border: 1px solid rgba(255, 157, 98, .44);
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: #ffb384;
+  font-size: 6px;
+  letter-spacing: .12em;
+  animation: graph-hand-grab 900ms ease-in-out infinite alternate;
+}
+
+@keyframes graph-hand-grab {
+  to { border-color: rgba(255, 190, 145, .78); box-shadow: 0 0 13px rgba(230, 109, 69, .32); }
 }
 
 .space-graph-caption {
@@ -6202,6 +6819,9 @@ canvas:focus-visible {
   .space-graph-stage, .space-graph-loading-shell, .space-graph-empty { min-height: 540px; }
   .space-graph-brand strong { display: none; }
   .space-graph-controls { top: 14px; right: 14px; }
+  .graph-hand-console { bottom: 38px; left: 10px; width: 190px; }
+  .graph-hand-preview { height: 108px; }
+  .graph-hand-cursor > b { display: none; }
   .space-graph-brand { top: 20px; left: 14px; }
   .space-graph-search { top: 56px; left: 14px; width: calc(100% - 28px); }
   .space-graph-search-results > div { max-height: 230px; }
