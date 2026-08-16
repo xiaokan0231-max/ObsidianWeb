@@ -73,7 +73,12 @@ export default function NoteDrawer({
   const group = getGroup(note.path);
   const trust = trustLayer(note);
   const basename = noteBasename(note.path);
-  const backlinks = allNotes.filter((candidate) => noteLinks(candidate).includes(basename));
+  // 読書進捗が scroll ごとに setState する＝この component は滚动中ほぼ毎フレーム再レンダーする。
+  // 反リンクの全库走査を裸で置くと、そのたび 300 篇ぶん回り直す。
+  const backlinks = useMemo(
+    () => allNotes.filter((candidate) => noteLinks(candidate).includes(basename)),
+    [allNotes, basename],
+  );
   const frontmatterEntries = Object.entries(note.frontmatter);
   const headings = useMemo(() => scanHeadings(note.content), [note.content]);
   const [activeHeading, setActiveHeading] = useState<string | null>(null);

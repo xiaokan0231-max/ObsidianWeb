@@ -735,13 +735,34 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     setView(nextView);
   }, []);
 
-  const runSavedQuery = (savedQuery: string) => {
+  // 以下の遷移系コールバックは全部 useCallback：視圖側は React.memo で包んであり、
+  // ここが毎レンダー新しい関数だと memo が一度も命中しない。
+  const runSavedQuery = useCallback((savedQuery: string) => {
     const params = new URLSearchParams();
     params.set("q", savedQuery);
     setLibraryQuery(savedQuery);
     navigateToView("library", params);
     setSearchOpen(false);
-  };
+  }, [navigateToView]);
+
+  const openReview = useCallback((key?: string) => {
+    setReviewInitialKey(key ?? null);
+    navigateToView("review");
+  }, [navigateToView]);
+
+  const viewJobsWithFilters = useCallback((filters?: JobsInitialFilters) => {
+    setJobsInitialFilters(filters ?? null);
+    const params = new URLSearchParams();
+    if (filters?.statuses?.length) params.set("status", filters.statuses.join(","));
+    if (filters?.ratings?.length) params.set("rating", filters.ratings.join(","));
+    navigateToView("jobs", params, true);
+  }, [navigateToView]);
+
+  const prepareInterview = useCallback((company: string) => {
+    const params = new URLSearchParams();
+    params.set("company", company);
+    navigateToView("session", params);
+  }, [navigateToView]);
 
   const syncInterviewSelection = useCallback((company: string, prepPath: string) => {
     const params = new URLSearchParams();
@@ -941,10 +962,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   onOpen={openNote}
                   onView={navigateToView}
                   onQuery={runSavedQuery}
-                  onOpenReview={(key) => {
-                    setReviewInitialKey(key ?? null);
-                    navigateToView("review");
-                  }}
+                  onOpenReview={openReview}
                 />
               )}
               {view === "review" && (
@@ -996,13 +1014,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                 <JobsAnalytics
                   notes={notes}
                   onOpen={openNote}
-                  onViewJobs={(filters) => {
-                    setJobsInitialFilters(filters ?? null);
-                    const params = new URLSearchParams();
-                    if (filters?.statuses?.length) params.set("status", filters.statuses.join(","));
-                    if (filters?.ratings?.length) params.set("rating", filters.ratings.join(","));
-                    navigateToView("jobs", params, true);
-                  }}
+                  onViewJobs={viewJobsWithFilters}
                 />
               )}
               {view === "todo" && (
@@ -1021,11 +1033,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   events={derived.calendarEvents}
                   notes={notes}
                   onOpen={openNote}
-                  onPrepare={(company) => {
-                    const params = new URLSearchParams();
-                    params.set("company", company);
-                    navigateToView("session", params);
-                  }}
+                  onPrepare={prepareInterview}
                 />
               )}
               {view === "timeline" && (

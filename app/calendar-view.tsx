@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { findInterviewPrepDocs } from "@/lib/interview-prep-doc";
 import { formatDate, type Note } from "@/lib/notes";
 import {
@@ -9,7 +9,7 @@ import {
   type CalendarEvent,
 } from "@/lib/memory-atlas-data";
 
-export default function CalendarView({
+function CalendarView({
   events,
   notes,
   onOpen,
@@ -208,3 +208,7 @@ function AgendaGroup({
     </section>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay・移动端菜单）变化时不重渲染整个视圖。
+// props 都是稳定引用（notes 整体替换・useCallback 回调・原始值），memo 直接命中。
+export default memo(CalendarView);

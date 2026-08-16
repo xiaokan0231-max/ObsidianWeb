@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildPrepKillQuestions,
   extractPrepKillMap,
@@ -977,7 +977,7 @@ function SessionAssets({
   );
 }
 
-export default function InterviewSession({
+function InterviewSession({
   notes,
   onOpen,
   onOpenWiki,
@@ -1294,3 +1294,6 @@ export default function InterviewSession({
     </div>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay）变化时不重渲染整个视圖。props 都是稳定引用。
+export default memo(InterviewSession);

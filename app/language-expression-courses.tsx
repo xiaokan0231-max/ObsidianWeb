@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -382,7 +383,7 @@ function currentSequentialQuestion(
   return null;
 }
 
-export default function LanguageExpressionCourses({
+function LanguageExpressionCourses({
   notes,
   onVaultChanged,
   onNoteWritten,
@@ -1539,3 +1540,6 @@ function PracticeUnavailable({ text }: { text: string }) {
     </section>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay）变化时不重渲染整个视圖。props 都是稳定引用。
+export default memo(LanguageExpressionCourses);

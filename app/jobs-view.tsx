@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  memo,
   Fragment,
   type ReactNode,
   useCallback,
@@ -429,7 +430,7 @@ function FilterChips({
   );
 }
 
-export default function JobsView({
+function JobsView({
   notes,
   onOpen,
   onVaultChanged,
@@ -1987,3 +1988,6 @@ function JobCompare({
     </div>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay）变化时不重渲染整个视圖。props 都是稳定引用。
+export default memo(JobsView);

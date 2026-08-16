@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, type CSSProperties } from "react";
+import { memo, Fragment, useMemo, type CSSProperties } from "react";
 import { type AppView } from "./app-route";
 import { buildFocusBrief, focusDateLabel } from "@/lib/focus-action";
 import { compareJobs, toJobCard } from "@/lib/jobs";
@@ -27,7 +27,10 @@ import {
 
 type View = AppView;
 
-export default function Overview({
+// 進行中案件の並び順：面接に近いほど上。定数なのでコンポーネントの外に置く。
+const currentStageRank: Record<string, number> = { 面接中: 0, 書類通過: 1, 応募済: 2 };
+
+function Overview({
   notes,
   derived,
   onOpen,
@@ -44,29 +47,31 @@ export default function Overview({
 }) {
   const jobs = useMemo(() => derived.cases.map(toJobCard), [derived.cases]);
   const reviewPreview = useMemo(() => buildReviewPreview(notes), [notes]);
-  const currentStageRank: Record<string, number> = { 面接中: 0, 書類通過: 1, 応募済: 2 };
-  const currentCases = jobs
+  // 四组列表原来是裸表达式：外壳任何 state 变化（⌘K・overlay）都会整段重排。
+  // 同函数里 jobs/reviewPreview/focusBrief 都已经 useMemo，只有这四组漏了。
+  const currentCases = useMemo(() => jobs
     .filter((job) => ACTIVE_JOB_STATUSES.has(job.status))
     .sort(
       (left, right) =>
         (currentStageRank[left.status] ?? 9) - (currentStageRank[right.status] ?? 9) ||
         right.statusUpdated.localeCompare(left.statusUpdated),
-    );
-  const recentChanges = jobs
+    ), [jobs]);
+  const recentChanges = useMemo(() => jobs
     .filter((job) => !ACTIVE_JOB_STATUSES.has(job.status) && job.status !== "未応募")
-    .slice(0, 3);
+    .slice(0, 3), [jobs]);
   const focusBrief = useMemo(() => buildFocusBrief(notes), [notes]);
   const primaryFocus = focusBrief.primary;
   const waitingFocus = focusBrief.waiting[0] ?? null;
 
-  const openJobs = jobs
+  const openJobs = useMemo(() => jobs
     .filter((job) => job.status === "未応募")
-    .sort((left, right) => compareJobs(left, right, "rating"));
+    .sort((left, right) => compareJobs(left, right, "rating")), [jobs]);
   const topSalary = openJobs
     .map((job) => job.salary.max ?? 0)
     .filter((value) => value > 0)
     .sort((left, right) => right - left)[0];
-  const openTodos = notes
+  // openTodos 的比较器会对 todo 笔记全文扫日期正则（getLatestNoteDate），更不该每次渲染重跑。
+  const openTodos = useMemo(() => notes
     .filter(
       (note) =>
         getType(note) === "todo" &&
@@ -77,7 +82,7 @@ export default function Overview({
       (left, right) =>
         (TODO_PRIORITY[todoPriority(left)]?.rank ?? 9) - (TODO_PRIORITY[todoPriority(right)]?.rank ?? 9) ||
         getLatestNoteDate(right).localeCompare(getLatestNoteDate(left)),
-    );
+    ), [notes]);
   const upcoming = derived.calendarEvents.filter((event) => event.phase === "upcoming");
   const scoreDoc = reviewPreview.scoreDoc;
   const actionReviewDoc = reviewPreview.actionDoc;
@@ -482,3 +487,7 @@ function MiniGraph({ notes }: { notes: Note[] }) {
     </div>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay・移动端菜单）变化时不重渲染整个视圖。
+// props 都是稳定引用（notes 整体替换・useCallback 回调・原始值），memo 直接命中。
+export default memo(Overview);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   computeStats,
   latestListeningMarks,
@@ -196,7 +196,7 @@ async function postReviewWrite<T extends WriteResponse = WriteResponse>(
   return payload;
 }
 
-export default function InterviewReview({
+function InterviewReview({
   notes,
   onVaultChanged,
   onNoteWritten,
@@ -1933,3 +1933,6 @@ function SentenceCard({
     </article>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay）变化时不重渲染整个视圖。props 都是稳定引用。
+export default memo(InterviewReview);

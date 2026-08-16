@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useCallback, useMemo, useState } from "react";
+import { memo, lazy, Suspense, useCallback, useMemo, useState } from "react";
 import {
   buildTimelineScene,
   type TimelineSceneEventInput,
@@ -26,7 +26,7 @@ const ThreeTimeCorridor = lazy(() => import("./timeline-three"));
 // 时间线视图：默认 3D「时之航道」，与关系图同一套「3D / 简洁」切换与降级路径。
 // 场景数据在这里由 Note 映射为纯数据（与 buildKnowledgeGraphScene 同分工），
 // 传给 lazy 的 ThreeTimeCorridor；WebGL 失败时退回原来的 2D 列表。
-export default function TimelineView({
+function TimelineView({
   items,
   events,
   onOpen,
@@ -151,3 +151,7 @@ function TimelineListView({ items, onOpen }: { items: { note: Note; date: string
     </div>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay・移动端菜单）变化时不重渲染整个视圖。
+// props 都是稳定引用（notes 整体替换・useCallback 回调・原始值），memo 直接命中。
+export default memo(TimelineView);

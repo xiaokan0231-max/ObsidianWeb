@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { noteDecisionMeta } from "./note-decision";
 import { jobSection } from "@/lib/jobs";
 import { getString, getType, type Note } from "@/lib/notes";
@@ -13,7 +13,7 @@ import {
   TODO_STATUS,
 } from "@/lib/memory-atlas-data";
 
-export default function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => void }) {
+function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => void }) {
   const [tab, setTab] = useState<string>("all");
   const [audience, setAudience] = useState<"user" | "system">("user");
   const todos = notes
@@ -142,3 +142,7 @@ export default function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (no
     </section>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay・移动端菜单）变化时不重渲染整个视圖。
+// props 都是稳定引用（notes 整体替换・useCallback 回调・原始值），memo 直接命中。
+export default memo(TodoView);

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  memo,
   lazy,
   Suspense,
   useCallback,
@@ -87,7 +88,7 @@ function buildKnowledgeGraphScene(
   };
 }
 
-export default function GraphView({
+function GraphView({
   notes,
   filter,
   onFilter,
@@ -390,3 +391,7 @@ function CanvasKnowledgeGraph({
     </div>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay・移动端菜单）变化时不重渲染整个视圖。
+// props 都是稳定引用（notes 整体替换・useCallback 回调・原始值），memo 直接命中。
+export default memo(GraphView);

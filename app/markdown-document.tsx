@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { stripFrontmatter } from "@/lib/notes";
 import { normalizeHeading } from "@/lib/memory-atlas-data";
 
@@ -71,7 +71,7 @@ function calloutTone(firstLine: string) {
   return null;
 }
 
-export default function MarkdownDocument({
+function MarkdownDocument({
   content,
   onWikiLink,
 }: {
@@ -179,3 +179,7 @@ export default function MarkdownDocument({
   flushTable();
   return <article className="markdown-document">{blocks}</article>;
 }
+
+// 読書進捗（scroll ごとの setState）で NoteDrawer が毎フレーム再レンダーしても、
+// 本文（content と onWikiLink が変わらない限り）を逐行パースし直さない。
+export default memo(MarkdownDocument);

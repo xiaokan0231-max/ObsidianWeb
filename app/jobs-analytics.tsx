@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import {
   jobMatchesRatingBands,
   jobRatingBand,
@@ -285,7 +285,7 @@ function condMatch(job: JobCard, cond: CondFilters, except?: keyof CondFilters) 
   );
 }
 
-export default function JobsAnalytics({
+function JobsAnalytics({
   notes,
   onOpen,
   onViewJobs,
@@ -958,3 +958,6 @@ export default function JobsAnalytics({
     </div>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay）变化时不重渲染整个视圖。props 都是稳定引用。
+export default memo(JobsAnalytics);
