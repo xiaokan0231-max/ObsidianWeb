@@ -243,3 +243,37 @@ test("prime 直後の新規ノートは、まだスキャンに現れなくて�
   const later = await cache.readAll();
   assert.equal(later.some((item) => item.path === "new.md"), false);
 });
+
+// 🔴 prime できるのは「更新後の note を組み立てられる書き手」だけで、実際には
+// writeNote の呼び出し 15 箇所のうち 2 箇所しかない。残り（課程の再生成・
+// generated-artifact の supersede など）は invalidate だけなので、権威データが無い。
+// 印を付けて取り直させても、その取り直しが metadataCache の再解析より早ければ
+// 「新しい mtime ＋ 古い frontmatter」を mtime 一致で固定してしまう——
+// supersede は既存ノートの frontmatter だけを書き換えるので Obsidian は旧 cache を即返す＝必ず踏む。
+test("prime していない書き込みでも、守り時間内は mtime で固定しない", async () => {
+  const { state, cache } = fakeVault({ "curriculum.md": 100 });
+  await cache.readAll();
+
+  // writeNote 相当：内容は磁盘に落ちたが metadataCache はまだ古い
+  cache.invalidate("curriculum.md");
+  state.stats.set("curriculum.md", 500);
+  state.contentOverride.set("curriculum.md", {
+    content: "再生成された課程",
+    frontmatter: { type: "language-curriculum", lifecycle: "superseded" },
+  });
+
+  // 取り直しは走るが、固定はしない
+  const first = await cache.readAll();
+  assert.equal(first[0].content, "再生成された課程");
+  state.readCalls.length = 0;
+  await cache.readAll();
+  assert.deepEqual(state.readCalls, ["curriculum.md"], "守り時間内は毎回突き合わせる");
+
+  // metadataCache が追いつき、守り時間も過ぎたら普通に固定される（無限に取り直さない）
+  state.clock += 10_000;
+  await cache.readAll();
+  state.readCalls.length = 0;
+  const settled = await cache.readAll();
+  assert.deepEqual(state.readCalls, [], "守り時間を過ぎたらキャッシュが効く");
+  assert.equal(settled[0].frontmatter.lifecycle, "superseded");
+});

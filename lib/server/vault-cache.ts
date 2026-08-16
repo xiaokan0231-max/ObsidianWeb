@@ -91,12 +91,58 @@ export function createVaultCache(io: VaultCacheIO) {
     string,
     { mtime: number; note: ObsidianNote; primedAt?: number }
   >();
+  /**
+   * 直近に書いたパス → 書いた時刻。
+   *
+   * prime できるのは「更新後の note を組み立てられる書き手」だけで、実際には
+   * writeNote の呼び出し 15 箇所のうち 2 箇所しかない。残りは invalidate だけなので、
+   * 印を付けて取り直させても、その取り直しが metadataCache の再解析より早ければ
+   * 「新しい mtime ＋ 古い frontmatter」をそのまま mtime 一致で固定してしまう
+   * ——prime 経路で塞いだのと同じ穴が、prime していない経路には残っていた。
+   * 特に generated-artifact の supersede は既存ノートの frontmatter だけを書き換えるので、
+   * Obsidian は旧 metadataCache を即座に返す（新規ファイルの時だけ待つ）＝必ず踏む。
+   *
+   * 権威データが無くても「書いた直後は固定しない」ことはできる。守り時間の間は
+   * 取り直した内容を配りつつ印は残し、時間が過ぎてから初めて mtime で固定する。
+   */
+  const writtenAt = new Map<string, number>();
+
   // 并发的 readAll 共享同一趟在途请求；写入 invalidate 时置空，让下一个调用者重新扫描。
   let inflight: Promise<ObsidianNote[]> | null = null;
 
+  function withinGuard(at: number | undefined) {
+    return at !== undefined && now() - at < PRIME_GUARD_MS;
+  }
+
   /** prime 直後か（＝metadataCache がまだ追いついていない可能性がある間か）。 */
   function withinPrimeGuard(entry: { primedAt?: number } | undefined) {
-    return entry?.primedAt !== undefined && now() - entry.primedAt < PRIME_GUARD_MS;
+    return withinGuard(entry?.primedAt);
+  }
+
+  /** 書いた直後で、まだ mtime で固定してはいけないパスか。 */
+  function recentlyWritten(path: string) {
+    return withinGuard(writtenAt.get(path));
+  }
+
+  /**
+   * 取り直した note をキャッシュへ収める。**固定してよい時だけ mtime を入れる**。
+   * 書いた直後（＝metadataCache が追いついている保証が無い）は印を残したまま
+   * 内容だけ更新する——次のラウンドでもう一度突き合わせるため。
+   */
+  function store(
+    path: string,
+    note: ObsidianNote,
+    scanMtime: number | undefined,
+    /** 権威データと frontmatter が一致した＝metadataCache が追いついた確証がある。 */
+    provenSettled = false,
+  ) {
+    const primedAt = entries.get(path)?.primedAt;
+    if (!provenSettled && recentlyWritten(path)) {
+      entries.set(path, { mtime: STALE_MTIME, note, ...(primedAt ? { primedAt } : {}) });
+      return;
+    }
+    writtenAt.delete(path);
+    entries.set(path, { mtime: scanMtime ?? note.stat.mtime, note });
   }
 
   /**
@@ -132,11 +178,14 @@ export function createVaultCache(io: VaultCacheIO) {
       // （書いた直後に R キーを押す＝カードが変わらないので押したくなる、が実際の踏み方）。
       const primed = new Map([...entries].filter(([, entry]) => withinPrimeGuard(entry)));
       entries.clear();
+      for (const path of [...writtenAt.keys()]) {
+        if (!recentlyWritten(path)) writtenAt.delete(path);
+      }
       for (const note of notes) {
         const kept = primed.get(note.path);
         // 印は STALE_MTIME のままなので、次のスキャンで必ずもう一度突き合わせる。
         if (kept && shouldKeepPrimed(kept, note)) entries.set(note.path, kept);
-        else entries.set(note.path, { mtime: note.stat.mtime, note });
+        else store(note.path, note, undefined, Boolean(kept));
       }
       // 列挙より後に作られたノートも落とさない（作りたての批注ノートなど）。
       for (const [path, entry] of primed) {
@@ -156,15 +205,18 @@ export function createVaultCache(io: VaultCacheIO) {
       // 権威データを守る。ここで入れると「新しい mtime ＋ 古い frontmatter」が固定される。
       // 印（STALE_MTIME）を残したまま見送れば、次のスキャンでもう一度取り直す。
       if (shouldKeepPrimed(current, note)) return;
-      entries.set(path, { mtime: stats.get(path) ?? note.stat.mtime, note });
+      // ここへ来た時 current が守り時間内の prime なら、frontmatter が権威と一致した＝
+      // metadataCache が追いついた確証。無駄に取り直し続けず固定してよい。
+      store(path, note, stats.get(path), withinPrimeGuard(current));
     });
     // 已删除的文件不会出现在扫描里，从缓存中清掉，否则删除的笔记会永远留在页面上。
     for (const [path, entry] of entries) {
       if (stats.has(path)) continue;
       // 作りたてのノートは、作成がこのラウンドのスキャンより後なら まだ現れない。
       // 守り時間内は消さない——消すと「今書いたノートが無い」画面になる。
-      if (withinPrimeGuard(entry)) continue;
+      if (withinPrimeGuard(entry) || recentlyWritten(path)) continue;
       entries.delete(path);
+      writtenAt.delete(path);
     }
     return sorted([...entries.values()].map((entry) => entry.note));
   }
@@ -189,6 +241,8 @@ export function createVaultCache(io: VaultCacheIO) {
   function invalidate(path: string) {
     const current = entries.get(path);
     if (current) entries.set(path, { ...current, mtime: STALE_MTIME });
+    // 権威データが無くても、守り時間の間は mtime で固定しない（上の writtenAt を参照）。
+    writtenAt.set(path, now());
     inflight = null;
   }
 
@@ -200,6 +254,7 @@ export function createVaultCache(io: VaultCacheIO) {
    */
   function prime(note: ObsidianNote) {
     entries.set(note.path, { mtime: STALE_MTIME, note, primedAt: now() });
+    writtenAt.set(note.path, now());
     inflight = null;
   }
 
