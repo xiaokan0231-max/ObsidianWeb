@@ -67,12 +67,18 @@ const ACTIVE_SELECTION: string[] = [...IN_FLIGHT, "内定"];
  * 「可応募」は status だけでは表せない（未応募 かつ rating 7以上）ので、
  * rating band もフィルタに含める。`7plus` は jobs.ts のしきい値ショートカット。
  */
-const GLANCE_CARDS = [
+const GLANCE_CARDS: readonly {
+  key: "active" | "interview" | "waiting" | "ready";
+  label: string;
+  sub: string;
+  tone: string;
+  filters: JobsInitialFilters & { statuses: readonly string[] };
+}[] = [
   { key: "active", label: "进行中", sub: "ACTIVE PIPELINE", tone: "active", filters: { statuses: IN_FLIGHT } },
   { key: "interview", label: "面试阶段", sub: "INTERVIEW", tone: "interview", filters: { statuses: ["面接中"] } },
   { key: "waiting", label: "结果等待", sub: "WAITING", tone: "waiting", filters: { statuses: ["応募済", "書類通過"] } },
-  { key: "ready", label: "可応募", sub: "READY TO APPLY", tone: "ready", filters: { statuses: ["未応募"], ratings: ["7plus" as const] } },
-] as const;
+  { key: "ready", label: "可応募", sub: "READY TO APPLY", tone: "ready", filters: { statuses: ["未応募"], ratings: ["7plus"] } },
+];
 
 function scheduledDate(job: JobCard) {
   return explicitNextEventDate(job.note);
@@ -339,7 +345,7 @@ export default function JobsAnalytics({
   const glanceCounts = useMemo(() => {
     const counts = {} as Record<(typeof GLANCE_CARDS)[number]["key"], number>;
     for (const card of GLANCE_CARDS) {
-      const ratings = "ratings" in card.filters ? [...card.filters.ratings] : [];
+      const ratings = [...(card.filters.ratings ?? [])];
       counts[card.key] = jobs.filter(
         (job) =>
           card.filters.statuses.includes(job.status) &&

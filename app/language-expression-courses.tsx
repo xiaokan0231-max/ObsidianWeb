@@ -562,7 +562,9 @@ function CourseWorkbench({
     ...course.safeRewrites,
   ].filter((item) => completed.has(completionKey("rewrite", item.id))).length;
 
-  const save = async (
+  // useCallback なのは、下の keydown を張る useEffect が依存に save を持つため。
+  // 素の関数だと毎レンダーで作り直され、リスナーの張り替えが起き続ける。
+  const save = useCallback(async (
     itemId: string,
     exercise: LanguageExpressionExercise,
     action: "completed" | "reopened",
@@ -594,7 +596,7 @@ function CourseWorkbench({
     } finally {
       setBusyKey("");
     }
-  };
+  }, [course.courseId, onVaultChanged]);
 
   const switchMode = (nextMode: PracticeMode) => {
     if (nextMode === "improv") {
@@ -1098,7 +1100,7 @@ function RecallPractice({
 
 function clozeCollocation(chunk: ExpressionChunk, collocation: string) {
   const predicate = collocation.match(/^(.*[をにへでとがは])([^をにへでとがは]+)$/u);
-  if (predicate?.[2]?.length >= 2) {
+  if (predicate && predicate[2].length >= 2) {
     return `${predicate[1]}＿＿＿＿`;
   }
   if (collocation.includes(chunk.japanese)) {

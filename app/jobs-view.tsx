@@ -117,10 +117,11 @@ const DEFAULT_OPPORTUNITY_FILTERS: Filters = {
   statuses: ["未応募"],
 };
 
-/** 別画面の数字カードから「その数字の中身」へ飛ぶ時に渡す初期フィルタ。 */
+/** 別画面の数字カードから「その数字の中身」へ飛ぶ時に渡す初期フィルタ。
+ * readonly なのは、送り手（分析画面の GLANCE_CARDS）が as const の定数を渡すため。 */
 export type JobsInitialFilters = {
-  statuses?: string[];
-  ratings?: JobRatingBand[];
+  statuses?: readonly string[];
+  ratings?: readonly JobRatingBand[];
 };
 
 type JobsUrlState = {
@@ -148,8 +149,8 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
   const baseFilters = seeded
     ? {
         ...EMPTY_FILTERS,
-        statuses: initialFilters?.statuses ?? [],
-        ratings: initialFilters?.ratings ?? [],
+        statuses: [...(initialFilters?.statuses ?? [])],
+        ratings: [...(initialFilters?.ratings ?? [])],
       }
     : DEFAULT_OPPORTUNITY_FILTERS;
   const hasUrlFilters = [
