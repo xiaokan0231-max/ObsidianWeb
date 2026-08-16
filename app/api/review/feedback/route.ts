@@ -6,7 +6,8 @@ import { getString as text, noteBasename as basename } from "@/lib/notes";
 import { parseInterviewAnswerReview } from "@/lib/review-deep";
 import { isReviewNotePath, reviewSiblingPath } from "@/lib/review-paths";
 import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
-import { appendNote, readNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
+import { upsertAppendNote } from "@/lib/server/note-append";
+import { readNote, readNoteOrNull } from "@/lib/server/obsidian";
 import { createSerialQueue } from "@/lib/server/serial-queue";
 import { tokyoParts, yamlScalar } from "@/lib/dojo/utils";
 
@@ -73,36 +74,52 @@ export async function POST(request: Request) {
       throw new Error("深度复盘中找不到这个问题。");
     }
 
-    const result = await inFeedbackQueue(async () => {
-      // 存在判定と本文読みは同じ 1 往復で足りる。noteExists を挟むと同じ GET を 2 回打つ。
-      const existing = await readNoteOrNull(feedbackPath);
-      const current = existing?.content ?? "";
-      if (existing) {
-        const duplicate = parseReviewFeedback(current).find(
-          (entry) => entry.blockId === blockId && entry.kind === kind && entry.text === storedText,
-        );
-        if (duplicate) return { id: duplicate.id, deduplicated: true };
-      }
-      let maxId = 0;
-      for (const match of current.matchAll(/\*\*f(\d+)｜/g)) {
-        maxId = Math.max(maxId, Number(match[1]));
-      }
-      const id = `f${String(maxId + 1).padStart(3, "0")}`;
-      const entry = `\n- **${id}｜${blockId}｜${kind}｜${todayInTokyo()}**\n    - 我:: ${storedText}\n`;
-      if (existing) {
-        await appendNote(feedbackPath, entry);
-      } else {
-        const company = text(source.frontmatter.company);
-        const date = text(source.frontmatter.date);
-        const round = text(source.frontmatter.round);
-        await writeNote(
-          feedbackPath,
-          `---\ntype: interview-answer-feedback\ncompany: ${yamlScalar(company)}\ndate: ${yamlScalar(date)}\nround: ${yamlScalar(round)}\nsource_note: ${yamlScalar(`[[${basename(notePath)}]]`)}\nreview_note: ${yamlScalar(`[[${basename(reviewPath)}]]`)}\nlayer: human-feedback\n---\n# ${date} ${company} 回答品質批注\n\n> 本人对 AI 回答质量复盘的同意、反对与事实补充。追记のみ。再生成时作为约束输入。\n\n## フィードバック\n${entry}`,
-        );
-      }
-      return { id, deduplicated: false };
+    const outcome = await inFeedbackQueue(() =>
+      upsertAppendNote({
+        path: feedbackPath,
+        plan: (existing) => {
+          const current = existing?.content ?? "";
+          if (existing) {
+            const duplicate = parseReviewFeedback(current).find(
+              (entry) => entry.blockId === blockId && entry.kind === kind && entry.text === storedText,
+            );
+            if (duplicate) return { duplicate: { id: duplicate.id } };
+          }
+          let maxId = 0;
+          for (const match of current.matchAll(/\*\*f(\d+)｜/g)) {
+            maxId = Math.max(maxId, Number(match[1]));
+          }
+          const id = `f${String(maxId + 1).padStart(3, "0")}`;
+          const entry = `\n- **${id}｜${blockId}｜${kind}｜${todayInTokyo()}**\n    - 我:: ${storedText}\n`;
+          if (existing) {
+            return { nextContent: `${current}${entry}`, value: { id } };
+          }
+          const company = text(source.frontmatter.company);
+          const date = text(source.frontmatter.date);
+          const round = text(source.frontmatter.round);
+          return {
+            nextContent: `---\ntype: interview-answer-feedback\ncompany: ${yamlScalar(company)}\ndate: ${yamlScalar(date)}\nround: ${yamlScalar(round)}\nsource_note: ${yamlScalar(`[[${basename(notePath)}]]`)}\nreview_note: ${yamlScalar(`[[${basename(reviewPath)}]]`)}\nlayer: human-feedback\n---\n# ${date} ${company} 回答品質批注\n\n> 本人对 AI 回答质量复盘的同意、反对与事实补充。追记のみ。再生成时作为约束输入。\n\n## フィードバック\n${entry}`,
+            value: { id },
+            frontmatterForNew: {
+              type: "interview-answer-feedback",
+              company,
+              date,
+              round,
+              source_note: `[[${basename(notePath)}]]`,
+              review_note: `[[${basename(reviewPath)}]]`,
+              layer: "human-feedback",
+            },
+          };
+        },
+      }),
+    );
+    return Response.json({
+      ok: true,
+      path: feedbackPath,
+      ...outcome.value,
+      deduplicated: outcome.deduplicated,
+      note: outcome.note,
     });
-    return Response.json({ ok: true, path: feedbackPath, ...result });
   } catch (error) {
     return obsidianErrorResponse(error, "AI 评价反馈写入失败");
   }

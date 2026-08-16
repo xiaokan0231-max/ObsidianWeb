@@ -433,11 +433,14 @@ export default function JobsView({
   notes,
   onOpen,
   onVaultChanged,
+  onNoteWritten,
   initialFilters,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
   onVaultChanged?: () => void | Promise<void>;
+  /** 写路由が返した更新後の note を1件だけ差し替える。全量再取得（onVaultChanged）の代替。 */
+  onNoteWritten?: (note: Note) => void;
   /**
    * 別画面（求職分析の数字カードなど）から遷移してきた時の初期フィルタ。
    * このコンポーネントは view 切替でアンマウントされるので、初期値として一度読むだけでよい。
@@ -723,11 +726,18 @@ export default function JobsView({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ path, status, statusNote }),
         });
-        const payload = (await response.json()) as { ok?: boolean; error?: string };
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          note?: Note;
+        };
         if (!response.ok || !payload.ok) throw new Error(payload.error || "写入 Vault 失败");
-        // 再取得が終わるまで savingPaths を落とさない（finally は await の後）。
+        // 画面へ反映してから savingPaths を落とす（finally は下の分岐の後）。
         // そうしないと一瞬だけ古い値に戻って、書けたのか失敗したのか読めなくなる。
-        await onVaultChanged?.();
+        // 応答が更新後の note を持っているので単条差し替えで足りる。
+        // 無い場合（unchanged 応答・旧サーバ）だけ全量再取得へ退く。
+        if (payload.note && onNoteWritten) onNoteWritten(payload.note);
+        else await onVaultChanged?.();
         return null;
       } catch (error) {
         const message = error instanceof Error ? error.message : "写入 Vault 失败";
@@ -737,7 +747,7 @@ export default function JobsView({
         setSavingPaths((current) => current.filter((item) => item !== path));
       }
     },
-    [onVaultChanged],
+    [onNoteWritten, onVaultChanged],
   );
 
   useEffect(() => {

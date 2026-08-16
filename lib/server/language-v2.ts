@@ -30,6 +30,14 @@ import {
 import { parseInterviewAnswerReview } from "../review-deep.ts";
 import type { ObsidianNote } from "./obsidian";
 
+import { createSerialQueue } from "./serial-queue.ts";
+
+// checkpoint（自動保存・beforeunload の keepalive）と complete は別ルートだが、
+// どちらも同じ批次ノートを「読む→マージ→全文書き戻す」。各自にキューを持たせると
+// ルート間の競合（保存中にタブを閉じた等）が後勝ちで片方のアクションを消すので、
+// 批次への書込は必ずこの共有キューを通す。
+export const languageBatchWriteQueue = createSerialQueue();
+
 export const CURRICULUM_START = "<!-- language-curriculum-json:start -->";
 export const CURRICULUM_END = "<!-- language-curriculum-json:end -->";
 export const BATCH_START = "<!-- language-batch-json:start -->";

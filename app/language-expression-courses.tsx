@@ -41,6 +41,8 @@ type ProgressResponse = {
   deduplicated: boolean;
   state: ProgressState;
   path: string;
+  /** 更新後の進捗ノート。これで notes 配列を1件差し替え、全量再取得を省く。 */
+  note?: Note;
 };
 
 type RewriteItem =
@@ -383,9 +385,12 @@ function currentSequentialQuestion(
 export default function LanguageExpressionCourses({
   notes,
   onVaultChanged,
+  onNoteWritten,
 }: {
   notes: Note[];
   onVaultChanged: () => Promise<void>;
+  /** 進捗保存の応答に載る更新後ノートを1件差し替える。全量再取得（onVaultChanged）の代替。 */
+  onNoteWritten?: (note: Note) => void;
 }) {
   const courses = useMemo(() => findLanguageExpressionCourses(notes), [notes]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -472,6 +477,7 @@ export default function LanguageExpressionCourses({
           course={selected}
           notes={notes}
           onVaultChanged={onVaultChanged}
+          onNoteWritten={onNoteWritten}
           positionReady={storedStudyState !== null}
           initialPosition={storedStudyState?.positions[selected.courseId]}
           onPositionChange={rememberPosition}
@@ -485,6 +491,7 @@ function CourseWorkbench({
   course,
   notes,
   onVaultChanged,
+  onNoteWritten,
   positionReady,
   initialPosition,
   onPositionChange,
@@ -492,6 +499,7 @@ function CourseWorkbench({
   course: LanguageExpressionCourse;
   notes: Note[];
   onVaultChanged: () => Promise<void>;
+  onNoteWritten?: (note: Note) => void;
   positionReady: boolean;
   initialPosition?: StudyPosition;
   onPositionChange: (courseId: string, position: StudyPosition) => void;
@@ -588,7 +596,10 @@ function CourseWorkbench({
             ? "已标记为练过"
             : "已重新打开练习",
       );
-      await onVaultChanged();
+      // state はもう画面に反映済み。vault 側の進捗ノートは応答の note で1件差し替え、
+      // 以前ここで走っていた全量再取得（サーバ 300 GET + 6MB）を省く。
+      if (result.note && onNoteWritten) onNoteWritten(result.note);
+      else await onVaultChanged();
       return true;
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "无法保存进度");
@@ -596,7 +607,7 @@ function CourseWorkbench({
     } finally {
       setBusyKey("");
     }
-  }, [course.courseId, onVaultChanged]);
+  }, [course.courseId, onNoteWritten, onVaultChanged]);
 
   const switchMode = (nextMode: PracticeMode) => {
     if (nextMode === "improv") {

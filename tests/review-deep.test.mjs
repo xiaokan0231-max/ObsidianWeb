@@ -313,7 +313,9 @@ test("deep review stays locked behind completed human decisions and an allowlist
   assert.doesNotMatch(bridge, /reviewDimension = \{[^}]*score: number/s);
   assert.match(client, /review_interview_answers/);
   assert.match(annotate, /inAnnotationQueue/);
-  assert.match(annotate, /deduplicated: true/);
+  // 去重は共通骨格（upsertAppendNote）の duplicate 分岐＋応答の deduplicated で表現される。
+  assert.match(annotate, /duplicate: \{ id: duplicate\.id \}/);
+  assert.match(annotate, /deduplicated: outcome\.deduplicated/);
   // 批注ノートが未作成でも初回の裁定が 404 で落ちないこと（面接ごとに一度必ず踏んでいた）。
   assert.match(annotate, /annotationSkeleton/);
   assert.match(annotate, /type: study-annotation/);

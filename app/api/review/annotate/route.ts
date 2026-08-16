@@ -1,5 +1,5 @@
 import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
-import { appendNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
+import { upsertAppendNote } from "@/lib/server/note-append";
 import { createSerialQueue } from "@/lib/server/serial-queue";
 import { tokyoParts } from "@/lib/dojo/utils";
 import { isReviewNotePath } from "@/lib/review-paths";
@@ -28,14 +28,24 @@ function todayInTokyo() {
 
 // 批注ノートは初回の追記で生まれる。整理稿を生成しただけでは存在せず、
 // 以前は面接ごとに「最初の一件だけ 404 で書き込めない」状態だった。
-// appendNote 任せで作ると frontmatter の無いノートになるため、規格どおりの骨組みを先に置く。
+// frontmatter の無いノートにならないよう、規格どおりの骨組みを先に置く。
+// 応答へ返す frontmatter（クライアントが notes 配列を差し替える材料）も一緒に返し、
+// 本文とオブジェクトが食い違わないようにする。
 function annotationSkeleton(notePath: string) {
   const segments = notePath.split("/");
   const company = segments.at(-2) ?? "";
   const parsed = /^(\d{4}-\d{2}-\d{2})_(.+)_批注\.md$/.exec(segments.at(-1) ?? "");
   const date = parsed?.[1] ?? todayInTokyo();
   const round = parsed?.[2] ?? "面接";
-  return [
+  const frontmatter = {
+    type: "study-annotation",
+    company,
+    date,
+    round,
+    target_note: `[[${date}_${round}_整理稿]]`,
+    updated: todayInTokyo(),
+  };
+  const content = [
     "---",
     "type: study-annotation",
     `company: ${company}`,
@@ -53,6 +63,7 @@ function annotationSkeleton(notePath: string) {
     "## エントリ",
     "",
   ].join("\n");
+  return { frontmatter, content };
 }
 
 export async function POST(request: Request) {
@@ -89,38 +100,45 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await inAnnotationQueue(async () => {
-      // 判定は「ノートが在るか」であって「本文が空でないか」ではない。
-      // content で判定すると、中身が空の既存ノートを骨組みで上書きしてしまう——
-      // 批注は追記のみの事実層なので、その上書きはそのまま事実の消失になる。
-      const existing = await readNoteOrNull(notePath);
-      let content: string;
-      if (existing === null) {
-        content = annotationSkeleton(notePath);
-        await writeNote(notePath, content);
-      } else {
-        content = existing.content;
-      }
-      const duplicate = parseAnnotations(content).find(
-        (annotation) =>
-          annotation.sentenceId === sentenceId &&
-          annotation.kind === kind &&
-          annotation.mine === text &&
-          (!target || !annotation.target || annotation.target === target),
-      );
-      if (duplicate) return { id: duplicate.id, deduplicated: true };
+    const outcome = await inAnnotationQueue(() =>
+      upsertAppendNote({
+        path: notePath,
+        plan: (existing) => {
+          // 判定は「ノートが在るか」であって「本文が空でないか」ではない。
+          // content で判定すると、中身が空の既存ノートを骨組みで上書きしてしまう——
+          // 批注は追記のみの事実層なので、その上書きはそのまま事実の消失になる。
+          const skeleton = existing === null ? annotationSkeleton(notePath) : null;
+          const content = existing?.content ?? skeleton?.content ?? "";
+          const duplicate = parseAnnotations(content).find(
+            (annotation) =>
+              annotation.sentenceId === sentenceId &&
+              annotation.kind === kind &&
+              annotation.mine === text &&
+              (!target || !annotation.target || annotation.target === target),
+          );
+          if (duplicate) return { duplicate: { id: duplicate.id } };
 
-      let maxId = 0;
-      for (const match of content.matchAll(/\*\*a(\d+)｜/g)) {
-        maxId = Math.max(maxId, Number(match[1]));
-      }
-      const id = `a${String(maxId + 1).padStart(3, "0")}`;
-      const targetLine = target ? `    - 対象:: ${target}\n` : "";
-      const entry = `\n- **${id}｜${sentenceId}｜${kind}｜open｜${todayInTokyo()}**\n${targetLine}    - 我:: ${text}\n`;
-      await appendNote(notePath, entry);
-      return { id, deduplicated: false };
+          let maxId = 0;
+          for (const match of content.matchAll(/\*\*a(\d+)｜/g)) {
+            maxId = Math.max(maxId, Number(match[1]));
+          }
+          const id = `a${String(maxId + 1).padStart(3, "0")}`;
+          const targetLine = target ? `    - 対象:: ${target}\n` : "";
+          const entry = `\n- **${id}｜${sentenceId}｜${kind}｜open｜${todayInTokyo()}**\n${targetLine}    - 我:: ${text}\n`;
+          return {
+            nextContent: `${content}${entry}`,
+            value: { id },
+            ...(skeleton ? { frontmatterForNew: skeleton.frontmatter } : {}),
+          };
+        },
+      }),
+    );
+    return Response.json({
+      ok: true,
+      ...outcome.value,
+      deduplicated: outcome.deduplicated,
+      note: outcome.note,
     });
-    return Response.json({ ok: true, ...result });
   } catch (error) {
     return obsidianErrorResponse(error, "Obsidian 写入失败");
   }

@@ -479,11 +479,13 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     window.scrollTo({ left: 0, top: 0 });
   }, [view]);
 
-  const loadVault = useCallback(async () => {
+  const loadVault = useCallback(async (options?: { fresh?: boolean }) => {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/vault", { cache: "no-store" });
+      // fresh は R キー専用の「サーバのキャッシュも信じない」通路。通常は増分キャッシュで足りる。
+      const url = options?.fresh ? "/api/vault?refresh=1" : "/api/vault";
+      const response = await fetch(url, { cache: "no-store" });
       const payload = (await response.json()) as VaultResponse;
       if (!response.ok || !payload.connected) {
         throw new Error(payload.error || "无法连接 Obsidian");
@@ -495,6 +497,21 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  /**
+   * 写路由已经把更新后的那条 note 放在响应里，这里只做单条替换。
+   * 以前每次写入都 loadVault() 整库重拉（服务端 300 个 GET + 6MB JSON），
+   * spinner 还要按住整条链路——为了换一条已经在手里的数据。
+   */
+  const patchNote = useCallback((note: Note) => {
+    setNotes((current) => {
+      const index = current.findIndex((item) => item.path === note.path);
+      if (index < 0) return [...current, note];
+      const next = [...current];
+      next[index] = note;
+      return next;
+    });
   }, []);
 
   const openPrepCard = useCallback((cardId: string) => {
@@ -678,7 +695,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
         !isTypingTarget(event.target)
       ) {
         event.preventDefault();
-        void loadVault();
+        void loadVault({ fresh: true });
       }
       if (event.key === "Escape") {
         // 回答库の上に原笔记 drawer を開いている時は、一段ずつ閉じる。
@@ -924,7 +941,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
 
           <button
             className="topbar-source"
-            onClick={() => void loadVault()}
+            onClick={() => void loadVault({ fresh: true })}
             disabled={loading}
             title={`${sourceLabel} · ${sourceDetail}（按 R 重新读取）`}
           >
@@ -990,6 +1007,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                 <InterviewReview
                   notes={notes}
                   onVaultChanged={loadVault}
+                  onNoteWritten={patchNote}
                   initialSelectedKey={reviewInitialKey}
                 />
               )}
@@ -1018,6 +1036,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                 <LanguageExpressionCourses
                   notes={notes}
                   onVaultChanged={loadVault}
+                  onNoteWritten={patchNote}
                 />
               )}
               {view === "jobs" && (
@@ -1025,6 +1044,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   notes={notes}
                   onOpen={openNote}
                   onVaultChanged={loadVault}
+                  onNoteWritten={patchNote}
                   initialFilters={jobsInitialFilters}
                 />
               )}

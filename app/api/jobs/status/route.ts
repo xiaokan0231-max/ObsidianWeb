@@ -9,6 +9,7 @@ import {
 } from "@/lib/jobs";
 import { errorResponse, readJson } from "@/lib/server/api";
 import { readNote, writeNote } from "@/lib/server/obsidian";
+import { createSerialQueue } from "@/lib/server/serial-queue";
 
 type Body = {
   path?: string;
@@ -18,6 +19,10 @@ type Body = {
 };
 
 const FRONTMATTER = /^---\n([\s\S]*?)\n---(\r?\n|$)/;
+
+// 「読む→status を差し替える→書く」は原子的ではない。看板の連打や二重送信が
+// 同時に来ると後勝ちで片方が消えるので、他の書込ルートと同じく短い直列区間にする。
+const inStatusQueue = createSerialQueue();
 
 /** 只改 status / status_updated 两行，笔记正文和其他 frontmatter 原样保留。 */
 function applyStatus(content: string, status: string, date: string) {
@@ -54,27 +59,44 @@ export async function POST(request: Request) {
 
     const value = composeJobStatus(status, statusNote);
 
-    const note = await readNote(path);
-    if (note.frontmatter.type !== JOB_CASE_TYPE) {
-      throw new Error("这条笔记不是应募案件，拒绝写入。");
-    }
-    // channel を要求するのは台帳が経路別の面接到達率をこの値で集計しているから
-    // （scripts/vault-stats.mjs）。空の channel を通すと集計に無名のバケツが生えて、
-    // generated 区块の数字が静かに壊れる。だから緩めず、代わりに逃げ道を文言で示す。
-    if (statusRequiresChannel(status) && !String(note.frontmatter.channel ?? "").trim()) {
-      throw new Error(
-        `「${status}」是応募之后的状态，必须有 channel 记录实际投递渠道（source 是求人来源，不能代替）。` +
-          `这条案件还没有 channel＝系统里没有应募记录。真投过就先在笔记里补 channel；` +
-          `没投过（例如募集終了・取扱終了）就选「保留」，把理由写进括号。`,
-      );
-    }
-    if (note.frontmatter.status === value) {
-      return Response.json({ ok: true, path, status: value, unchanged: true });
-    }
+    return await inStatusQueue(async () => {
+      const note = await readNote(path);
+      if (note.frontmatter.type !== JOB_CASE_TYPE) {
+        throw new Error("这条笔记不是应募案件，拒绝写入。");
+      }
+      // channel を要求するのは台帳が経路別の面接到達率をこの値で集計しているから
+      // （scripts/vault-stats.mjs）。空の channel を通すと集計に無名のバケツが生えて、
+      // generated 区块の数字が静かに壊れる。だから緩めず、代わりに逃げ道を文言で示す。
+      if (statusRequiresChannel(status) && !String(note.frontmatter.channel ?? "").trim()) {
+        throw new Error(
+          `「${status}」是応募之后的状态，必须有 channel 记录实际投递渠道（source 是求人来源，不能代替）。` +
+            `这条案件还没有 channel＝系统里没有应募记录。真投过就先在笔记里补 channel；` +
+            `没投过（例如募集終了・取扱終了）就选「保留」，把理由写进括号。`,
+        );
+      }
+      if (note.frontmatter.status === value) {
+        return Response.json({ ok: true, path, status: value, unchanged: true });
+      }
 
-    const { date } = tokyoParts();
-    await writeNote(path, applyStatus(note.content, value, date));
-    return Response.json({ ok: true, path, status: value, statusUpdated: date });
+      const { date } = tokyoParts();
+      const content = applyStatus(note.content, value, date);
+      await writeNote(path, content);
+      // 更新後のノートを応答へ載せる。サーバは全文を手元に持っているのに、
+      // クライアントが1件の差し替えのために全庫を再取得する理由はない。
+      const updated = {
+        ...note,
+        content,
+        stat: { ...note.stat, mtime: Date.now(), size: content.length },
+        frontmatter: { ...note.frontmatter, status: value, status_updated: date },
+      };
+      return Response.json({
+        ok: true,
+        path,
+        status: value,
+        statusUpdated: date,
+        note: updated,
+      });
+    });
   } catch (error) {
     return errorResponse(error, "更新应募状态失败");
   }

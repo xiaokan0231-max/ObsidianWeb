@@ -30,7 +30,10 @@ test("review UI connects evidence jumps and the durable practice API", async () 
   assert.match(ui, /已加入重练/);
   assert.match(route, /interview-answer-practice/);
   assert.match(route, /parseInterviewPractice/);
-  assert.match(route, /deduplicated: true/);
+  // 去重は共通骨格（upsertAppendNote）の duplicate 分岐で表現し、応答へは
+  // deduplicated として載る。どちらが欠けても「連打で二重計上」へ戻る。
+  assert.match(route, /return \{ duplicate: \{\} \}/);
+  assert.match(route, /deduplicated: outcome\.deduplicated/);
   // 追記の暦日は東京。UTC の瞬間に戻すと JST 未明の「重练」だけ前日に記録され、
   // 同じ晩の批注・フィードバック（todayInTokyo）と別の日に割れる。
   assert.match(route, /queuedAtInTokyo\(\)/);

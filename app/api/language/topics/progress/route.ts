@@ -11,13 +11,8 @@ import {
   type LanguageExpressionProgressEvent,
 } from "@/lib/language-expression-course";
 import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
-import {
-  appendNote,
-  noteExists,
-  readAllNotes,
-  readNote,
-  writeNote,
-} from "@/lib/server/obsidian";
+import { upsertAppendNote } from "@/lib/server/note-append";
+import { readAllNotes } from "@/lib/server/obsidian";
 import { createSerialQueue } from "@/lib/server/serial-queue";
 
 type Body = {
@@ -95,47 +90,63 @@ export async function POST(request: Request) {
       return badRequest("课程中不存在这个项目。");
     }
 
-    const result = await inProgressQueue(async () => {
-      const path = languageExpressionProgressPath(course);
-      const exists = await noteExists(path);
-      const current = exists ? await readNote(path) : undefined;
-      const events = current
-        ? parseLanguageExpressionProgress(current.content).filter(
-            (event) => event.courseId === course.courseId,
-          )
-        : [];
-      const duplicate = events.find((event) => event.eventId === eventId);
-      if (duplicate) {
-        return {
-          deduplicated: true,
-          event: duplicate,
-          state: deriveLanguageExpressionProgress(events),
-          path,
-        };
-      }
-
-      const event: LanguageExpressionProgressEvent = {
-        eventId,
-        courseId,
-        itemId,
-        exercise,
-        action,
-        at: new Date().toISOString(),
-      };
-      if (exists) {
-        await appendNote(path, renderLanguageExpressionProgressEvent(event));
-      } else {
-        await writeNote(path, renderLanguageExpressionProgressNote(course, event));
-      }
-      return {
-        deduplicated: false,
-        event,
-        state: deriveLanguageExpressionProgress([...events, event]),
+    const path = languageExpressionProgressPath(course);
+    // 存在判定と本文読みは同じ1往復で足りる（feedback route の教訓）。このコピーだけ
+    // noteExists + readNote + appendNote 内の再判定で同じノートに 3 回 GET を打っていた。
+    const outcome = await inProgressQueue(() =>
+      upsertAppendNote({
         path,
-      };
-    });
+        plan: (existing) => {
+          const events = existing
+            ? parseLanguageExpressionProgress(existing.content).filter(
+                (event) => event.courseId === course.courseId,
+              )
+            : [];
+          const duplicate = events.find((event) => event.eventId === eventId);
+          if (duplicate) {
+            return {
+              duplicate: {
+                event: duplicate,
+                state: deriveLanguageExpressionProgress(events),
+              },
+            };
+          }
 
-    return Response.json({ ok: true, ...result });
+          const event: LanguageExpressionProgressEvent = {
+            eventId,
+            courseId,
+            itemId,
+            exercise,
+            action,
+            at: new Date().toISOString(),
+          };
+          return {
+            nextContent: existing
+              ? `${existing.content}${renderLanguageExpressionProgressEvent(event)}`
+              : renderLanguageExpressionProgressNote(course, event),
+            value: {
+              event,
+              state: deriveLanguageExpressionProgress([...events, event]),
+            },
+            frontmatterForNew: {
+              type: "language-expression-course-progress",
+              course_id: course.courseId,
+              topic: course.topic,
+              source_note: `[[${course.notePath.replace(/\.md$/iu, "")}]]`,
+              layer: "user-action",
+            },
+          };
+        },
+      }),
+    );
+
+    return Response.json({
+      ok: true,
+      path,
+      ...outcome.value,
+      deduplicated: outcome.deduplicated,
+      note: outcome.note,
+    });
   } catch (error) {
     return obsidianErrorResponse(error, "专项训练进度写入失败。");
   }
