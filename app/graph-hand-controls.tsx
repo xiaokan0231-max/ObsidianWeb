@@ -59,8 +59,15 @@ async function resolveMediapipeAssets() {
   }
   return { wasmRoot: CDN_WASM_ROOT, modelUrl: CDN_MODEL_URL };
 }
-const INFERENCE_INTERVAL_MS = 1000 / 15;
+// 24fps：识别帧率直接决定捏合/拖动的响应下限。15fps 时一帧就有 67ms，
+// 快速短捏常整个落在两帧之间；相机流本身 ideal 24，再高也拿不到新帧。
+const INFERENCE_INTERVAL_MS = 1000 / 24;
 const RADIAL_MENU_HOLD_MS = 560;
+// 捏住多久算“抓取”。指着节点时保持 360ms，给「短捏选择」留出确认窗口；
+// 指着空无一物时没有选择语义可竞争，120ms（两三帧防抖）即可接管拖动——
+// 平移的进入成本要向触摸板按下看齐，不能让人举着手等。
+const GRAB_HOLD_MS = 360;
+const SPACE_GRAB_HOLD_MS = 120;
 const PALM_MENU_HOLD_MS = 550;
 const DUAL_TRANSFORM_HOLD_MS = 120;
 const TRACKING_GRACE_MS = 250;
@@ -170,6 +177,16 @@ type RuntimeHand = {
   worldZ: number;
 };
 
+// 握拳=「抓住空间」。分类器对 Closed_Fist 的召回远高于持续捏合（捏合在快速
+// 移动中常因运动模糊被误判松开），平移这种粗粒度操作交给它零等待接管；
+// 捏合只负责需要精度的选择与节点抓取。要求两帧证据，滤掉单帧误分类。
+function fistDragEngaged(hand: {
+  gesture: GraphHandGesture;
+  gestureHold: GestureHold | null;
+}) {
+  return hand.gesture === "Closed_Fist" && (hand.gestureHold?.evidenceFrames ?? 0) >= 2;
+}
+
 type RadialMenuState = {
   open: boolean;
   kind: "single" | "palm";
@@ -220,8 +237,8 @@ const ONBOARDING_STEPS = [
   { title: "让系统认识你的手", hint: "张开一只手，保持在画面中央" },
   { title: "用掌心射线瞄准", hint: "移动手掌，让光环吸附到任意节点" },
   { title: "短捏选择", hint: "拇指与食指快速捏合后松开" },
-  { title: "捏住抓取", hint: "捏住不放并移动手掌" },
-  { title: "双手操纵", hint: "两手同时捏住，然后把两手拉开" },
+  { title: "抓住拖动", hint: "握拳（或捏住不放）并移动手掌" },
+  { title: "双手操纵", hint: "两手同时握拳或捏住，然后把两手拉开" },
 ] as const;
 
 function cameraErrorMessage(error: unknown) {
@@ -521,7 +538,7 @@ export function GraphHandControls({
           return;
         }
         setPhase("ready");
-        setDetail("单手瞄准与抓取；双手同时捏合可平移、缩放和旋转。");
+        setDetail("单手瞄准与选择，握拳即可拖动；双手同时握拳或捏合可平移、缩放和旋转。");
 
         const detect = (now: number) => {
           if (stopped || !recognizer) return;
@@ -584,11 +601,18 @@ export function GraphHandControls({
             hand.gestureHold = updateGestureHold(hand.gestureHold, detection.gesture, now);
             hand.gesture = KNOWN_GESTURES.has(hand.gestureHold.gesture as GraphHandGesture)
               ? hand.gestureHold.gesture as GraphHandGesture : "None";
+            // 星图侧会把捏住期间锁定的目标回灌到 targets，这里读到的 kind
+            // 在整个捏合过程中保持稳定，holdMs 不会中途跳变。
+            const aimedNode = targetsRef.current
+              .find((item) => item.handId === hand.id)?.kind === "node";
             hand.pinch = updatePinchInteraction(
               hand.pinch,
               detection.pose.pinchRatio,
               now,
-              { ...thresholdsRef.current, holdMs: 360 },
+              {
+                ...thresholdsRef.current,
+                holdMs: aimedNode ? GRAB_HOLD_MS : SPACE_GRAB_HOLD_MS,
+              },
             );
             hand.landmarks = detection.landmarks;
             hand.worldZ += (detection.worldZ - hand.worldZ) * 0.22;
@@ -610,7 +634,7 @@ export function GraphHandControls({
                 null,
                 detection.pose.pinchRatio,
                 now,
-                { ...thresholdsRef.current, holdMs: 360 },
+                { ...thresholdsRef.current, holdMs: GRAB_HOLD_MS },
               ),
               landmarks: detection.landmarks,
               worldZ: detection.worldZ,
@@ -653,11 +677,18 @@ export function GraphHandControls({
 
           let action: GraphHandActionEvent | null = null;
           let transform: GraphHandTransform | null = null;
-          const pinchingHands = usableHands.filter((hand) => hand.pinch?.pinching).slice(0, 2);
-          const metrics = pinchingHands.length === 2
+          // 双手操纵的“参与”判定：捏住（且不在释放宽限期——宽限期里手已张开，
+          // 位置不可信，继续跟手会把回摆动作拖进相机）或握拳。两拳拉开缩放
+          // 和两捏一样合法，而且在快速动作里稳得多。
+          const engagedHands = usableHands
+            .filter((hand) => (
+              (hand.pinch?.pinching && !hand.pinch.releasePending) || fistDragEngaged(hand)
+            ))
+            .slice(0, 2);
+          const metrics = engagedHands.length === 2
             ? twoHandMetrics(
-                { id: pinchingHands[0].id, x: pinchingHands[0].pose.x, y: pinchingHands[0].pose.y },
-                { id: pinchingHands[1].id, x: pinchingHands[1].pose.x, y: pinchingHands[1].pose.y },
+                { id: engagedHands[0].id, x: engagedHands[0].pose.x, y: engagedHands[0].pose.y },
+                { id: engagedHands[1].id, x: engagedHands[1].pose.x, y: engagedHands[1].pose.y },
               )
             : null;
           if (metrics && metrics.distance >= MIN_DUAL_SEPARATION) {
@@ -667,8 +698,10 @@ export function GraphHandControls({
               dualStartSeparation = metrics.distance;
               previousDualMetrics = metrics;
               closeMenu();
-              pinchingHands.forEach((hand) => {
-                if (hand.pinch) hand.pinch = { ...hand.pinch, grabbed: true, progress: 1 };
+              engagedHands.forEach((hand) => {
+                if (hand.pinch?.pinching) {
+                  hand.pinch = { ...hand.pinch, grabbed: true, progress: 1 };
+                }
               });
             }
           } else if (!dualActive) {
@@ -676,23 +709,23 @@ export function GraphHandControls({
           }
 
           if (dualActive) {
-            if (metrics && pinchingHands.length === 2) {
+            if (metrics && engagedHands.length === 2) {
               transform = twoHandTransformDelta(previousDualMetrics ?? metrics, metrics);
               previousDualMetrics = metrics;
-            } else if (pinchingHands.length < 2) {
+            } else if (engagedHands.length < 2) {
               dualActive = false;
               dualCandidateSince = 0;
               previousDualMetrics = null;
-              const remaining = pinchingHands[0];
-              if (remaining?.pinch) {
+              const remaining = engagedHands[0];
+              if (remaining?.pinch?.pinching) {
                 remaining.pinch = {
                   ...remaining.pinch,
                   grabbed: true,
                   progress: 1,
-                  startedAt: now - 360,
+                  startedAt: now - GRAB_HOLD_MS,
                 };
-                primaryHandId = remaining.id;
               }
+              if (remaining) primaryHandId = remaining.id;
             }
           }
 
@@ -800,13 +833,20 @@ export function GraphHandControls({
             });
           }
 
+          // 对外的 grabbed 是“此刻应该跟手”：释放宽限期里保住抓取身份但
+          // 暂停跟手（手已张开，位置是回摆），重新捏拢无缝续拖。
+          const effectiveGrab = (hand: RuntimeHand) => (
+            (Boolean(hand.pinch?.grabbed) && !hand.pinch?.releasePending)
+            || fistDragEngaged(hand)
+          );
+
           let mode: GraphHandMode;
           if (onboardingRef.current.visible) mode = "calibration";
           else if (dualActive) mode = "dual-transform";
           else if (menu.open) mode = "palm-menu";
           else if (usableHands.length >= 2 && relationRef.current) mode = "relation-preview";
           else if (usableHands.length >= 2) mode = "dual-ready";
-          else if (primary?.pinch?.grabbed) mode = "single-grab";
+          else if (primary && effectiveGrab(primary)) mode = "single-grab";
           else if (primary?.pinch?.pinching) mode = "single-pinch";
           else mode = "single-aim";
 
@@ -818,7 +858,9 @@ export function GraphHandControls({
             ...hand.pose,
             gesture: hand.gesture,
             pinching: hand.pinch?.pinching ?? false,
-            grabbed: dualActive ? Boolean(hand.pinch?.pinching) : hand.pinch?.grabbed ?? false,
+            grabbed: dualActive
+              ? Boolean(hand.pinch?.pinching) || fistDragEngaged(hand)
+              : effectiveGrab(hand),
             pinchProgress: hand.pinch?.progress ?? 0,
             pointerX: hand.pose.x,
             pointerY: hand.pose.y,
@@ -846,7 +888,7 @@ export function GraphHandControls({
               if (onboardingEvidence >= 6) advanceOnboarding(1);
             } else if (step === 2 && primary?.pinch?.event === "select") {
               advanceOnboarding(2);
-            } else if (step === 3 && primary?.pinch?.grabbed) {
+            } else if (step === 3 && primary && effectiveGrab(primary)) {
               onboardingGrabOrigin ??= { x: primary.pose.x, y: primary.pose.y };
               if (Math.hypot(
                 primary.pose.x - onboardingGrabOrigin.x,
@@ -902,11 +944,13 @@ export function GraphHandControls({
   const targetByHand = new Map(targets.map((target) => [target.handId, target]));
   const primary = uiFrame?.hands.find((hand) => hand.id === uiFrame.primaryHandId) ?? null;
   const secondary = uiFrame?.hands.find((hand) => hand.role === "secondary") ?? null;
-  const pinchingHands = uiFrame?.hands.filter((hand) => hand.pinching) ?? [];
-  const dualTooClose = pinchingHands.length === 2
+  const engagedUiHands = uiFrame?.hands.filter(
+    (hand) => hand.pinching || hand.gesture === "Closed_Fist",
+  ) ?? [];
+  const dualTooClose = engagedUiHands.length === 2
     && Math.hypot(
-      pinchingHands[1].x - pinchingHands[0].x,
-      pinchingHands[1].y - pinchingHands[0].y,
+      engagedUiHands[1].x - engagedUiHands[0].x,
+      engagedUiHands[1].y - engagedUiHands[0].y,
     ) < MIN_DUAL_SEPARATION;
   const selectedRadialAction = RADIAL_ACTIONS.find((item) => item.action === radialMenu.selected);
   const showVideo = enabled && phase !== "error" && phase !== "idle";
@@ -1035,8 +1079,8 @@ export function GraphHandControls({
             {uiFrame?.mode === "dual-transform"
               ? "移动中点平移 · 拉开缩放 · 转动双手旋转"
               : uiFrame?.hands.length === 2
-                ? "辅助手稳定张掌可展开菜单盘；双手同时捏合可操纵空间"
-                : "短捏选择 · 捏住抓取 · ✌ 呼出菜单"}
+                ? "辅助手稳定张掌可展开菜单盘；双手同时握拳或捏合可操纵空间"
+                : "短捏选择 · 握拳拖动 · ✌ 呼出菜单"}
           </small>
         </div>
         <details className="graph-hand-guide">
@@ -1044,7 +1088,7 @@ export function GraphHandControls({
           <div>
             <span data-active={uiFrame?.mode === "single-aim" ? "true" : "false"}><b>🖐</b><small>掌心瞄准</small></span>
             <span data-active={uiFrame?.mode === "single-pinch" ? "true" : "false"}><b>🤏</b><small>短捏选择</small></span>
-            <span data-active={uiFrame?.mode === "single-grab" ? "true" : "false"}><b>🤏</b><small>捏住抓取</small></span>
+            <span data-active={uiFrame?.mode === "single-grab" ? "true" : "false"}><b>✊</b><small>握拳拖动</small></span>
             <span data-active={uiFrame?.mode === "dual-transform" ? "true" : "false"}><b>↔</b><small>双手变换</small></span>
             <span data-active={uiFrame?.mode === "relation-preview" ? "true" : "false"}><b>⛓</b><small>关系探索</small></span>
             <span data-active={uiFrame?.mode === "palm-menu" ? "true" : "false"}><b>✋</b><small>掌心菜单</small></span>

@@ -974,6 +974,9 @@ export default function ThreeKnowledgeGraph({
     }>();
     let publishedHandTargets = "";
     const gestureInertia = new THREE.Vector3();
+    // 手势平移的排出缓冲：识别帧率只有约 24fps，把位移直接搬给相机会一格一格跳。
+    // gestureFrame 只往这里累加，animate 在 60fps 里按比例排出，拖动变成连续滑动。
+    const gesturePan = new THREE.Vector3();
     let dualTransformActive = false;
     let dualAnchorWorld: THREE.Vector3 | null = null;
     let relationCandidate: { id: string; since: number } | null = null;
@@ -1523,6 +1526,7 @@ export default function ThreeKnowledgeGraph({
         gestureGrabbed = false;
         gestureTargetId = null;
         pinchTargets.clear();
+        gesturePan.set(0, 0, 0);
         dualTransformActive = false;
         dualAnchorWorld = null;
         controls.enabled = true;
@@ -1556,7 +1560,12 @@ export default function ThreeKnowledgeGraph({
           pinchTargets.delete(hand.id);
         }
       });
-      publishHandTargets(frame.hands, hits);
+      // 捏住期间对外发布“按下时锁定”的目标，而不是实时命中：捏合会把掌心
+      // 质心拉偏，实时目标常在按下到松手之间滑出节点，识别层的短捏选择
+      // 会因为看到 kind=space 而把事件丢掉——锁定目标才是用户的本意。
+      const publishedHits = new Map(hits);
+      pinchTargets.forEach((locked, handId) => publishedHits.set(handId, locked));
+      publishHandTargets(frame.hands, publishedHits);
       const actionHit = frame.action
         ? releasedPinchTargets.get(frame.action.handId)
           ?? pinchTargets.get(frame.action.handId)
@@ -1592,8 +1601,7 @@ export default function ThreeKnowledgeGraph({
         const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
         const translation = right.multiplyScalar(-frame.transform.dx * distance * 1.35)
           .add(up.multiplyScalar(frame.transform.dy * distance * 1.35));
-        camera.position.add(translation);
-        controls.target.add(translation);
+        gesturePan.add(translation);
         gestureInertia.copy(translation).multiplyScalar(0.14);
         const anchor = dualAnchorWorld ?? controls.target;
         const unclampedFactor = 1 / frame.transform.scaleRatio;
@@ -1646,8 +1654,10 @@ export default function ThreeKnowledgeGraph({
           const deadZone = (value: number, threshold: number, limit: number) => (
             Math.abs(value) < threshold ? 0 : THREE.MathUtils.clamp(value, -limit, limit)
           );
-          const dx = deadZone(primary.x - previousPrimary.x, 0.0035, 0.055);
-          const dy = deadZone(primary.y - previousPrimary.y, 0.0035, 0.055);
+          // 死区 0.002：低于每秒约 5% 画面宽的慢速微调也要跟手，低通已滤掉抖动。
+          // 钳位 0.13：识别帧率下快速挥手单帧位移可到 0.1+，钳太紧等于丢拖动量。
+          const dx = deadZone(primary.x - previousPrimary.x, 0.002, 0.13);
+          const dy = deadZone(primary.y - previousPrimary.y, 0.002, 0.13);
           const scaleDelta = deadZone(
             Math.log(primary.scale / Math.max(0.001, previousPrimary.scale)),
             0.007,
@@ -1660,8 +1670,7 @@ export default function ThreeKnowledgeGraph({
           const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
           const translation = right.multiplyScalar(-dx * distance * 1.3)
             .add(up.multiplyScalar(dy * distance * 1.3));
-          camera.position.add(translation);
-          controls.target.add(translation);
+          gesturePan.add(translation);
           gestureInertia.copy(translation).multiplyScalar(0.16);
           if (scaleDelta !== 0) {
             const nextDistance = THREE.MathUtils.clamp(
@@ -1862,6 +1871,18 @@ export default function ThreeKnowledgeGraph({
       }
 
       flightController.tick(now);
+
+      // 手势平移在 60fps 里按比例排出缓冲，识别帧之间也在滑动。
+      // 飞行运镜接管相机时丢弃残余，免得补间结束后凭空再飘一段。
+      if (flightController.active) {
+        gesturePan.set(0, 0, 0);
+      } else if (gesturePan.lengthSq() > 0) {
+        const panStep = gesturePan.clone().multiplyScalar(0.5);
+        camera.position.add(panStep);
+        controls.target.add(panStep);
+        gesturePan.multiplyScalar(0.5);
+        if (gesturePan.lengthSq() < 0.00000001) gesturePan.set(0, 0, 0);
+      }
 
       // 松手后只保留很轻的一段余势，并快速衰减；它让拖动不是“硬刹车”，
       // 又不会像持续惯性那样破坏精确定位。

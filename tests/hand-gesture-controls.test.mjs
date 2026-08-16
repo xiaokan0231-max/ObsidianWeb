@@ -109,12 +109,31 @@ test("统一捏合语法：短捏选择、长捏抓取、松手释放，并保�
   const jitter = updatePinchInteraction(pressed, 0.56, 90);
   assert.equal(jitter.pinching, true, "开合阈值之间要保持按下状态");
   assert.equal(updatePinchInteraction(jitter, 0.8, 150).event, "select");
+  assert.equal(
+    updatePinchInteraction(pressed, 0.8, 42).event,
+    "select",
+    "识别帧率下只被看到一帧的快速捏合也是合法选择",
+  );
 
   const held = updatePinchInteraction(pressed, 0.38, 380);
   assert.equal(held.event, "grab-start");
   assert.equal(held.grabbed, true);
   assert.equal(held.progress, 1);
-  assert.equal(updatePinchInteraction(held, 0.82, 460).event, "release");
+
+  const blip = updatePinchInteraction(held, 0.82, 460);
+  assert.equal(blip.event, "none", "运动模糊的单帧爆表不能打断拖动");
+  assert.equal(blip.grabbed, true);
+  assert.equal(blip.releasePending, true, "宽限期内要提示消费方暂停跟手");
+  const resumed = updatePinchInteraction(blip, 0.4, 520);
+  assert.equal(resumed.grabbed, true, "宽限期内重新捏拢必须无缝续拖");
+  assert.equal(resumed.releasePending, false);
+  const opening = updatePinchInteraction(resumed, 0.82, 600);
+  assert.equal(opening.event, "none");
+  assert.equal(
+    updatePinchInteraction(opening, 0.82, 745).event,
+    "release",
+    "持续张开超过宽限期才算真正松手",
+  );
 });
 
 test("双手轨道：识别数组换序时保持稳定 id，handedness 只作为辅助成本", () => {
@@ -170,9 +189,14 @@ test("双手几何：中点平移、手距缩放、连线旋转，并保护异�
   );
   const delta = twoHandTransformDelta(before, after);
   assert.ok(delta);
-  assert.ok(Math.abs(delta.dx - 0.05) < 1e-9, "逐帧平移应限制跳变");
+  assert.ok(Math.abs(delta.dx - 0.07) < 1e-9, "识别帧率下的正常挥手位移要完整保留");
   assert.ok(delta.scaleRatio > 1);
   assert.ok(delta.rotationDelta > 0);
+  const sweep = twoHandTransformDelta(
+    { centerX: 0.2, centerY: 0.5, distance: 0.4, angle: 0 },
+    { centerX: 0.5, centerY: 0.5, distance: 0.4, angle: 0 },
+  );
+  assert.ok(Math.abs(sweep.dx - 0.11) < 1e-9, "异常跳变仍要钳位");
   const unsafe = twoHandTransformDelta(
     { centerX: 0.5, centerY: 0.5, distance: 0.02, angle: 0 },
     { centerX: 0.51, centerY: 0.5, distance: 0.04, angle: 1 },
@@ -233,7 +257,7 @@ test("相机手势接入：抓住时平移与远近，放下后恢复 OrbitContr
   assert.ok(graph.includes("gestureFrameRef"));
   assert.ok(graph.includes("controls.enabled = false"));
   assert.ok(graph.includes("controls.enabled = true"));
-  assert.ok(graph.includes("camera.position.add(translation)"));
+  assert.ok(graph.includes("gesturePan.add(translation)"), "手势平移要经 60fps 缓冲排出，不能 15Hz 直搬相机");
   assert.ok(graph.includes("Math.exp(-scaleDelta * 3.4)"));
   assert.ok(graph.includes("controls.minDistance"));
   assert.ok(graph.includes("controls.maxDistance"));
@@ -257,7 +281,10 @@ test("主交互收敛成掌心瞄准和捏合，复杂功能放进可见的 V �
   assert.ok(controls.includes("updatePinchInteraction"));
   assert.ok(controls.includes("RADIAL_MENU_HOLD_MS"));
   assert.ok(controls.includes("radialActionAt"));
-  assert.ok(controls.includes("短捏选择 · 捏住抓取"));
+  assert.ok(controls.includes("短捏选择 · 握拳拖动"));
+  assert.ok(controls.includes("fistDragEngaged"), "握拳必须能直接接管拖动");
+  assert.ok(controls.includes("SPACE_GRAB_HOLD_MS"), "指着空间的捏合要快速进入拖动");
+  assert.ok(controls.includes("releasePending"), "释放宽限期内不能继续跟手");
   assert.ok(!controls.includes("STATIC_ACTIONS"), "点赞、倒赞和 ILY 不应再直接抢占镜头");
   assert.ok(css.includes(".graph-hand-radial"));
   assert.ok(css.includes(".graph-hand-dual-link"));

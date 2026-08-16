@@ -166,6 +166,7 @@ test("イベントが過ぎた準備 todo は primary にならず、収尾（st
   // 失効した準備 todo は ranked から消え、stale に入る
   assert.equal(brief.ranked.some((item) => item.note.path === "prep.md"), false);
   assert.deepEqual(brief.stale.map((item) => item.note.path), ["prep.md"]);
+  assert.equal(brief.stale[0].staleReason, "event-passed");
 });
 
 test("expires_at はイベント当日まで primary の資格を奪わない", () => {
@@ -268,6 +269,7 @@ test("案件が不採用になった待办は日付に関係なく収尾へ（�
   );
   assert.equal(brief.primary, null);
   assert.deepEqual(brief.stale.map((item) => item.note.path), ["prep.md"]);
+  assert.equal(brief.stale[0].staleReason, "case-closed");
 });
 
 test("常青タスク（due 無し）は focus 窗口が過ぎても失効しない", () => {
@@ -375,4 +377,39 @@ test("buildFocusBrief は渡された today で判定する（呼ぶ側の memo 
   assert.equal(buildFocusBrief([prep], "2026-08-13").primary?.note.path, "prep.md");
   assert.equal(buildFocusBrief([prep], "2026-08-14").primary, null);
   assert.equal(buildFocusBrief([prep], "2026-08-14").stale.length, 1);
+});
+
+// 🔴 画面の言い方が変わるので、失効の理由を持って回る。
+// 「事件已过去」の一語で本人が「案件が終わったのか？」と誤読した事故への対応。
+test("失効の理由を区別する：日付が過ぎた のか 案件が終わった のか", () => {
+  const brief = buildFocusBrief(
+    [
+      note("closed-case.md", {
+        type: "job-case",
+        case_id: "Acme_エンジニア",
+        company: "Acme",
+        status: "不採用（2026-08-15）",
+      }),
+      note("by-case.md", {
+        type: "todo",
+        status: "未着手",
+        priority: "high",
+        case_id: "Acme_エンジニア",
+        action: "Acme の一次面接準備",
+        due: "2026-08-25",
+      }),
+      note("by-date.md", {
+        type: "todo",
+        status: "進行中",
+        priority: "high",
+        action: "面接の準備",
+        due: "2026-08-12",
+        expires_at: "2026-08-13",
+      }),
+    ],
+    "2026-08-16",
+  );
+  const byPath = new Map(brief.stale.map((item) => [item.note.path, item.staleReason]));
+  assert.equal(byPath.get("by-case.md"), "case-closed");
+  assert.equal(byPath.get("by-date.md"), "event-passed");
 });

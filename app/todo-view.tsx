@@ -2,7 +2,7 @@
 
 import { memo, useState } from "react";
 import { noteDecisionMeta } from "./note-decision";
-import { isStaleTodo } from "@/lib/focus-action";
+import { todoStaleReason } from "@/lib/focus-action";
 import { jobSection } from "@/lib/jobs";
 import { getString, getType, type Note } from "@/lib/notes";
 import {
@@ -86,9 +86,10 @@ function TodoView({
         {visible.map((note) => {
           const pri = todoPriority(note);
           const st = todoStatus(note);
-          // 失効＝イベントが過ぎて、やること自体が意味を失った待办。
-          // 赤い催促のまま放置すると「已逾期」が嘘になるので、収尾の合図に変える。
-          const stale = st !== "完了" && isStaleTodo(note, today, notes);
+          // 失効＝やること自体が意味を失った待办。赤い催促のまま放置すると
+          // 「已逾期」が嘘になるので、収尾の合図に変える。理由で言い方を変える——
+          // 案件が終わったのに「事件已过」と出すと、何が終わったのか読めない。
+          const stale = st !== "完了" ? todoStaleReason(note, today, notes) : null;
           const decision = noteDecisionMeta(note);
           const why = jobSection(note, "なぜ必要か") || jobSection(note, "課題");
           const what = jobSection(note, "やること");
@@ -104,7 +105,11 @@ function TodoView({
                   <h2>{todoAction(note)}</h2>
                 </div>
                 <span className={`todo-status st-${st}`}>{st}</span>
-                {stale && <span className="todo-stale-badge">事件已过 · 待收尾</span>}
+                {stale && (
+                  <span className="todo-stale-badge">
+                    {stale === "case-closed" ? "案件已结束 · 可关掉" : "日子已过 · 可关掉"}
+                  </span>
+                )}
               </header>
               {getString(note.frontmatter.category) && (
                 <div className="todo-cat">{getString(note.frontmatter.category)}</div>

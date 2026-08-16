@@ -33,6 +33,8 @@ export type PinchInteraction = {
   pinching: boolean;
   grabbed: boolean;
   startedAt: number;
+  openSince: number;
+  releasePending: boolean;
   progress: number;
   event: "none" | "press" | "select" | "grab-start" | "release" | "cancel";
 };
@@ -94,7 +96,7 @@ export function updatePinchInteraction(
   previous: PinchInteraction | null,
   pinchRatio: number,
   now: number,
-  options?: number | (PinchThresholds & { holdMs?: number }),
+  options?: number | (PinchThresholds & { holdMs?: number; releaseGraceMs?: number }),
 ): PinchInteraction;
 
 export function derivePinchThresholds(

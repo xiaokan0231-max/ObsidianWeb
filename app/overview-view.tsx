@@ -16,7 +16,7 @@ import {
 } from "@/lib/interview-trends.mjs";
 import { parseInterviewPractice } from "@/lib/review-practice";
 import { joinReviewNotes } from "@/lib/review-join";
-import { formatDate, getString, getType, noteBasename, type Note } from "@/lib/notes";
+import { formatDate, getString, getTitle, getType, noteBasename, type Note } from "@/lib/notes";
 import {
   ACTIVE_JOB_STATUSES,
   buildReviewPreview,
@@ -33,6 +33,17 @@ import {
 } from "@/lib/memory-atlas-data";
 
 type View = AppView;
+
+/**
+ * 収尾入口に出す待办の名前。action の長文（88字）を切ると案件名に見えてしまうので H1 を使う。
+ * 会社名の接頭辞は落とさない——H1 は「Sharing Innovations 最終面接準備」、frontmatter は
+ * 「株式会社Sharing Innovations」と表記が揺れており、前綴照合は当てにならない。
+ * 「最終面接準備」まで見えないと、どの待办の話か分からないので、切らずに収まる長さを取る。
+ */
+function staleTitle(note: Note) {
+  const title = getTitle(note).replace(/^\d{4}-\d{2}-\d{2}[_\s]*/, "").trim();
+  return title.length > 30 ? `${title.slice(0, 29)}…` : title;
+}
 
 // 進行中案件の並び順：面接に近いほど上。定数なのでコンポーネントの外に置く。
 const currentStageRank: Record<string, number> = { 面接中: 0, 書類通過: 1, 応募済: 2 };
@@ -230,17 +241,27 @@ function Overview({
               </button>
             </div>
             {focusBrief.stale.length > 0 && (
-              // 失効した待办（イベントが過ぎたのに未完了のまま）は催促しない。
-              // 静かな一行で「収尾」を促すだけ——hero を占領させないための出口。
+              // 失効した待办は催促しない。静かな一行で「収尾」を促すだけ。
+              // 🔴 文言は必ず「待办を閉じる話」と読めること——最初は「事件已过去」と
+              // だけ書いて、本人に「案件が終わったのか？」と誤読された。案件は
+              // 「等待对方」側で生きている。理由（日付が過ぎた／案件が終わった）も
+              // 言い分けないと、同じ一行が両方の意味に読める。
               <button
                 type="button"
                 className="hero-stale-note"
                 onClick={() => onOpen(focusBrief.stale[0].note)}
               >
                 <i aria-hidden="true">✓</i>
-                {focusBrief.stale.length === 1
-                  ? `「${focusBrief.stale[0].action.slice(0, 26)}」的事件已过去，打开笔记收尾`
-                  : `${focusBrief.stale.length} 件待办的事件已过去，逐一收尾`}
+                {focusBrief.stale.length === 1 ? (
+                  <>
+                    待办「{staleTitle(focusBrief.stale[0].note)}」
+                    {focusBrief.stale[0].staleReason === "case-closed"
+                      ? "所属的案件已结束，可以关掉"
+                      : "的日子已经过了，可以关掉"}
+                  </>
+                ) : (
+                  `${focusBrief.stale.length} 件待办已经不用做了，逐一关掉`
+                )}
                 <span aria-hidden="true">→</span>
               </button>
             )}
