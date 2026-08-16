@@ -27,7 +27,10 @@ export type PrepInline =
 
 export type PrepNoteTone = "zh" | "follow" | "tip";
 
-export type PrepBlock =
+/** 展開元の共通資産（準備稿の本文に直接書かれた ![[…]]）。入れ子の埋め込みは最外の資産に帰属させる。 */
+export type PrepEmbedOrigin = { target: string; section: string };
+
+type PrepBlockBody =
   // level は表示用（3=青見出し・4=紫見出し）、depth は Markdown の実際の階層。
   // 両方要る：#### と ##### は同じ紫で描くが、範囲を切るには区別が要る。
   | { kind: "heading"; level: 3 | 4; depth: number; inline: PrepInline[] }
@@ -37,6 +40,11 @@ export type PrepBlock =
   | { kind: "list"; ordered: boolean; start?: number; items: PrepInline[][] }
   | { kind: "table"; head: PrepInline[][]; rows: PrepInline[][][] }
   | { kind: "code"; text: string };
+
+// embed＝このブロックが共通資産の展開由来である印。コンテナ型にせず平らなまま印だけ付けるのは、
+// 節の切り出し（殺傷7題の答案参照・小節スライス）や検索が埋め込みの有無を知らずに済むようにするため。
+// 畳んで見せるかどうかは表示層だけの判断で、データ層の消費者は embed を無視してよい。
+export type PrepBlock = PrepBlockBody & { embed?: PrepEmbedOrigin };
 
 export type PrepSection = {
   id: string;
@@ -448,6 +456,13 @@ export function prepBlockText(block: PrepBlock): string {
   }
 }
 
+// 展開した共通資産の範囲を parseBlocks へ運ぶ行印。NUL(U+0000) は Markdown 本文に現れ得ないので
+// 「本文にたまたま同じ文字列があった」事故が起きない。展開＝文字列結合の設計を保ったまま、
+// どの行が資産由来かだけを後段へ伝える。
+const EMBED_MARK = "\u0000";
+const EMBED_OPEN = `${EMBED_MARK}embed${EMBED_MARK}`;
+const EMBED_CLOSE = `${EMBED_MARK}/embed`;
+
 function expandEmbeds(
   markdown: string,
   byName: Map<string, Note>,
@@ -492,7 +507,14 @@ function expandEmbeds(
     }
     record.resolved = true;
     body = shiftHeadings(body, Math.max(0, contextLevel - sourceLevel));
-    out.push(expandEmbeds(body, byName, embeds, depth + 1, new Set([...seen, key])));
+    const inner = expandEmbeds(body, byName, embeds, depth + 1, new Set([...seen, key]));
+    // 印は準備稿の本文に直接書かれた埋め込み（depth 0）にだけ付ける。資産の中の埋め込みまで
+    // 個別に印を付けると「資産の一部だけ別の畳みになる」表示になり、正本の一体性が壊れる。
+    if (depth === 0) {
+      out.push(`${EMBED_OPEN}${target}${EMBED_MARK}${section}`, inner, EMBED_CLOSE);
+    } else {
+      out.push(inner);
+    }
   }
   return out.join("\n");
 }
@@ -536,9 +558,15 @@ export function parseBlocks(markdown: string): PrepBlock[] {
   const lines = markdown.split("\n");
   let list: { ordered: boolean; start?: number; items: PrepInline[][] } | null = null;
   let table: { head: PrepInline[][]; rows: PrepInline[][][] } | null = null;
+  // expandEmbeds が付けた行印の内側にいる間だけ値を持つ。リスト・表は行印で必ず閉じるので、
+  // 「閉じた時の origin」と「開いた時の origin」が食い違うことはない。
+  let origin: PrepEmbedOrigin | null = null;
+  const push = (block: PrepBlock) => {
+    blocks.push(origin ? { ...block, embed: origin } : block);
+  };
 
   const closeList = () => {
-    if (list) blocks.push({
+    if (list) push({
       kind: "list",
       ordered: list.ordered,
       ...(list.start ? { start: list.start } : {}),
@@ -547,7 +575,7 @@ export function parseBlocks(markdown: string): PrepBlock[] {
     list = null;
   };
   const closeTable = () => {
-    if (table) blocks.push({ kind: "table", head: table.head, rows: table.rows });
+    if (table) push({ kind: "table", head: table.head, rows: table.rows });
     table = null;
   };
   const closeAll = () => {
@@ -559,15 +587,29 @@ export function parseBlocks(markdown: string): PrepBlock[] {
     const line = lines[i].replace(/\s+$/, "");
     const trimmed = line.trim();
 
+    if (line.startsWith(EMBED_MARK)) {
+      closeAll();
+      if (line.startsWith(EMBED_OPEN)) {
+        const [target, section = ""] = line.slice(EMBED_OPEN.length).split(EMBED_MARK);
+        origin = { target, section };
+      } else {
+        origin = null;
+      }
+      continue;
+    }
+
     if (trimmed.startsWith("```")) {
       closeAll();
       const buffer: string[] = [];
       i += 1;
-      while (i < lines.length && !lines[i].trim().startsWith("```")) {
+      // 行印はフェンスの中でも必ず境界として扱う。閉じ忘れのフェンスが行印を飲み込むと
+      // origin が復位せず、以降の本文が丸ごと「資産由来」扱いになってしまう。
+      while (i < lines.length && !lines[i].trim().startsWith("```") && !lines[i].startsWith(EMBED_MARK)) {
         buffer.push(lines[i]);
         i += 1;
       }
-      blocks.push({ kind: "code", text: buffer.join("\n") });
+      if (lines[i]?.startsWith(EMBED_MARK)) i -= 1;
+      push({ kind: "code", text: buffer.join("\n") });
       continue;
     }
 
@@ -594,7 +636,7 @@ export function parseBlocks(markdown: string): PrepBlock[] {
     if (heading) {
       closeList();
       const level = heading[1].length;
-      blocks.push({
+      push({
         kind: "heading",
         level: level <= 3 ? 3 : 4,
         depth: level,
@@ -609,27 +651,27 @@ export function parseBlocks(markdown: string): PrepBlock[] {
 
     if (body.startsWith("【あなた】")) {
       closeList();
-      blocks.push({ kind: "say", speaker: "you", inline: parseInline(body.slice(5)) });
+      push({ kind: "say", speaker: "you", inline: parseInline(body.slice(5)) });
       continue;
     }
     if (body.startsWith("【面接官】")) {
       closeList();
-      blocks.push({ kind: "say", speaker: "interviewer", inline: parseInline(body.slice(5)) });
+      push({ kind: "say", speaker: "interviewer", inline: parseInline(body.slice(5)) });
       continue;
     }
     if (body.startsWith("▷")) {
       closeList();
-      blocks.push({ kind: "note", tone: "zh", inline: parseInline(body.slice(1).trim()) });
+      push({ kind: "note", tone: "zh", inline: parseInline(body.slice(1).trim()) });
       continue;
     }
     if (body.startsWith("▶")) {
       closeList();
-      blocks.push({ kind: "note", tone: "follow", inline: parseInline(body.slice(1).trim()) });
+      push({ kind: "note", tone: "follow", inline: parseInline(body.slice(1).trim()) });
       continue;
     }
     if (quoted) {
       closeList();
-      blocks.push({ kind: "note", tone: "tip", inline: parseInline(body) });
+      push({ kind: "note", tone: "tip", inline: parseInline(body) });
       continue;
     }
     if (/^[-*]\s+/.test(trimmed)) {
@@ -646,7 +688,7 @@ export function parseBlocks(markdown: string): PrepBlock[] {
       continue;
     }
     closeList();
-    blocks.push({ kind: "paragraph", inline: parseInline(trimmed) });
+    push({ kind: "paragraph", inline: parseInline(trimmed) });
   }
   closeAll();
   return blocks;
