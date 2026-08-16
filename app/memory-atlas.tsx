@@ -55,6 +55,7 @@ import {
   GROUPS,
   localDateKey,
   mergePendingWrites,
+  type PendingWrite,
   type GroupKey,
 } from "@/lib/memory-atlas-data";
 
@@ -469,7 +470,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
    * だから「サーバがまだ追いついていない書き込み」だけをここに保持し、
    * 着地したスナップショットへ被せ直す。内容が一致した時点で台帳から落とす。
    */
-  const pendingWrites = useRef(new Map<string, Note>());
+  const pendingWrites = useRef(new Map<string, PendingWrite>());
 
   const applyPendingWrites = useCallback((incoming: Note[]) => {
     const { notes: merged, settled } = mergePendingWrites(incoming, pendingWrites.current);
@@ -508,7 +509,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
    */
   const patchNote = useCallback((note: Note) => {
     // 在途の全量取得が写前スナップショットを持って着地しても潰されないよう、台帳にも残す。
-    pendingWrites.current.set(note.path, note);
+    // 時刻を持たせるのは期限切れの判定用（食い違ったまま永久に貼り続けないため）。
+    pendingWrites.current.set(note.path, { note, at: Date.now() });
     setNotes((current) => {
       const index = current.findIndex((item) => item.path === note.path);
       if (index < 0) return [...current, note];
@@ -766,7 +768,13 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     [notes, notesByBasename],
   );
 
-  const derived = useMemo(() => buildDerivedData(notes), [notes]);
+  // today を依存に入れるのは、日历事件の upcoming/past が「今日」で決まるため。
+  // 入れないと、日付を跨いだ時に見出しの日付だけ進んで、昨日の面接が「未来の予定」の
+  // まま残る——頂栏は実時間で「1 日前」と出すので、同じ画面の中で矛盾する。
+  const derived = useMemo(
+    () => buildDerivedData(notes, new Date(`${today}T00:00:00`)),
+    [notes, today],
+  );
 
   // 顶栏「下一件」：只取已确定日程里最近的一场，没有就不占位。
   const nextEvent = useMemo(
@@ -1037,6 +1045,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               {view === "session" && (
                 <InterviewSession
                   notes={notes}
+                  today={today}
                   onOpen={openNote}
                   onOpenWiki={openWikiLink}
                   onOpenCard={openPrepCard}

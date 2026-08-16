@@ -46,6 +46,21 @@ const STALE_MTIME = -1;
  */
 const PRIME_GUARD_MS = 5_000;
 
+/** frontmatter が同値か。キー順に依存しない（Obsidian のパーサと自前の組み立てで順序が違い得る）。 */
+function sameFrontmatter(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+) {
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every(
+    (key, index) =>
+      rightKeys[index] === key &&
+      JSON.stringify(left[key]) === JSON.stringify(right[key]),
+  );
+}
+
 async function mapConcurrent<T, R>(
   values: T[],
   limit: number,
@@ -79,9 +94,27 @@ export function createVaultCache(io: VaultCacheIO) {
   // 并发的 readAll 共享同一趟在途请求；写入 invalidate 时置空，让下一个调用者重新扫描。
   let inflight: Promise<ObsidianNote[]> | null = null;
 
-  /** prime 直後か（＝磁盘や metadataCache がまだ追いついていない可能性がある間か）。 */
+  /** prime 直後か（＝metadataCache がまだ追いついていない可能性がある間か）。 */
   function withinPrimeGuard(entry: { primedAt?: number } | undefined) {
     return entry?.primedAt !== undefined && now() - entry.primedAt < PRIME_GUARD_MS;
+  }
+
+  /**
+   * 取り直した note が prime した権威データを上書きしてよいか。
+   *
+   * 🔴 判定は **frontmatter** で行う。content で見てはいけない——
+   * Local REST API の content は磁盘（PUT 完了後なので必ず新しい）、frontmatter は
+   * 非同期に再解析される metadataCache から来る。つまり滞留中は
+   * 「新しい mtime ＋ 新しい content ＋ 古い frontmatter」であって、
+   * content は必ず一致してしまう＝判定にならない。この守りの最初の版が
+   * content を見ていて、防ぎたかった当の場面（看板の status 巻き戻り）で空振りした。
+   */
+  function shouldKeepPrimed(
+    current: { note: ObsidianNote; primedAt?: number } | undefined,
+    fetched: ObsidianNote,
+  ) {
+    return withinPrimeGuard(current) &&
+      !sameFrontmatter(current!.note.frontmatter, fetched.frontmatter);
   }
 
   function sorted(notes: ObsidianNote[]) {
@@ -91,13 +124,25 @@ export function createVaultCache(io: VaultCacheIO) {
   async function refresh(force: boolean): Promise<ObsidianNote[]> {
     const stats = force ? null : await io.statAllNotes();
     if (!stats || stats.size === 0) {
-      // 拿不到变更信号就退回全量爬取＝旧行为；顺手重建缓存，让下一轮能走增量。
+      // 拿不到变更信号就退回全量爬取＝旧行为；顺手重建缓存，让下一轮能走増分。
       const notes = await io.crawlAllNotes();
+      // ただし prime した権威データは守り時間内なら残す。crawl は「全部読み直す」であって
+      // 「metadataCache の再解析を待つ」ではないので、無条件に採用すると増分側と同じ
+      // 「新しい content ＋ 古い frontmatter」を、今度は取り直しの機会も無いまま固定する
+      // （書いた直後に R キーを押す＝カードが変わらないので押したくなる、が実際の踏み方）。
+      const primed = new Map([...entries].filter(([, entry]) => withinPrimeGuard(entry)));
       entries.clear();
       for (const note of notes) {
-        entries.set(note.path, { mtime: note.stat.mtime, note });
+        const kept = primed.get(note.path);
+        // 印は STALE_MTIME のままなので、次のスキャンで必ずもう一度突き合わせる。
+        if (kept && shouldKeepPrimed(kept, note)) entries.set(note.path, kept);
+        else entries.set(note.path, { mtime: note.stat.mtime, note });
       }
-      return sorted([...notes]);
+      // 列挙より後に作られたノートも落とさない（作りたての批注ノートなど）。
+      for (const [path, entry] of primed) {
+        if (!entries.has(path)) entries.set(path, entry);
+      }
+      return sorted([...entries.values()].map((entry) => entry.note));
     }
 
     const stale: string[] = [];
@@ -108,10 +153,9 @@ export function createVaultCache(io: VaultCacheIO) {
     fetched.forEach((note, index) => {
       const path = stale[index];
       const current = entries.get(path);
-      // 権威データを守る：取り直した内容がまだ prime した内容と違う＝磁盘／metadataCache が
-      // 追いついていない。ここで入れると「新しい mtime ＋ 古い frontmatter」が固定される。
+      // 権威データを守る。ここで入れると「新しい mtime ＋ 古い frontmatter」が固定される。
       // 印（STALE_MTIME）を残したまま見送れば、次のスキャンでもう一度取り直す。
-      if (withinPrimeGuard(current) && current!.note.content !== note.content) return;
+      if (shouldKeepPrimed(current, note)) return;
       entries.set(path, { mtime: stats.get(path) ?? note.stat.mtime, note });
     });
     // 已删除的文件不会出现在扫描里，从缓存中清掉，否则删除的笔记会永远留在页面上。

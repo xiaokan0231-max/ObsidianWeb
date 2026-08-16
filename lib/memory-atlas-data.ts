@@ -582,20 +582,41 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
  * 突き合わせは本文の一致で行う（mtime はサーバ側とクライアント組み立てで基準が違う）。
  * 一致したものは settled として返し、呼ぶ側が台帳から落とす。
  */
+export type PendingWrite = { note: Note; at: number };
+
+/**
+ * 台帳に残せる上限。守りたいのは「この書き込みより前に発行された全量取得が後から着地する」
+ * ことだけで、それは最長でも強制爬取の1秒程度。桁で余裕を取った値にしてある。
+ *
+ * 期限が要る理由：突き合わせは本文の一致で行うので、Obsidian 側で手編集された等で
+ * サーバと食い違ったままになると、期限が無ければ自分の版を**永久に**貼り続ける
+ * （その間サーバ側の実際の内容は画面に出てこない）。
+ */
+export const PENDING_WRITE_TTL_MS = 30_000;
+
 export function mergePendingWrites(
   incoming: Note[],
-  pending: ReadonlyMap<string, Note>,
+  pending: ReadonlyMap<string, PendingWrite>,
+  now = Date.now(),
 ): { notes: Note[]; settled: string[] } {
   if (pending.size === 0) return { notes: incoming, settled: [] };
   const byPath = new Map(incoming.map((note) => [note.path, note]));
   const settled: string[] = [];
   for (const [path, written] of pending) {
-    const server = byPath.get(path);
-    if (server && server.content === written.content) {
+    // 期限切れはサーバ側を正とする。食い違いの理由（手編集・削除・改名）を
+    // クライアントからは区別できないので、時間で降りる。
+    if (now - written.at > PENDING_WRITE_TTL_MS) {
       settled.push(path);
       continue;
     }
-    byPath.set(path, written);
+    const server = byPath.get(path);
+    if (server && server.content === written.note.content) {
+      settled.push(path);
+      continue;
+    }
+    // server が居ない＝この書き込みより前に発行されたスナップショット（新規作成が典型）。
+    // 期限内はこちらを残す。期限を過ぎれば上の分岐で降りるので、幽霊にはならない。
+    byPath.set(path, written.note);
   }
   return {
     notes: [...byPath.values()].sort((left, right) => right.stat.mtime - left.stat.mtime),

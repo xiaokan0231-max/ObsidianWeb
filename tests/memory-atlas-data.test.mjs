@@ -10,6 +10,7 @@ import {
   getLatestNoteDate,
   libraryScopeMatches,
   mergePendingWrites,
+  PENDING_WRITE_TTL_MS,
   noteMatches,
   trustLayer,
   typeLabel,
@@ -261,9 +262,9 @@ test("在途の全量スナップショットは、まだ追いついていな�
     note("20_求職/A/A_Data.md", "job-case", { status: "応募済" }, "書く前の本文"),
     note("99_系统/_索引.md", "moc", {}, "索引"),
   ];
-  const pending = new Map([[written.path, written]]);
+  const pending = new Map([[written.path, { note: written, at: 1_000 }]]);
 
-  const { notes, settled } = mergePendingWrites(staleSnapshot, pending);
+  const { notes, settled } = mergePendingWrites(staleSnapshot, pending, 1_500);
   const merged = notes.find((item) => item.path === written.path);
   assert.match(merged.content, /書いた後の本文/, "写前スナップショットに潰されない");
   assert.equal(merged.frontmatter.status, "不採用");
@@ -275,7 +276,7 @@ test("サーバが追いついたら台帳から落とす（永久に貼り付�
   const written = note("20_求職/A/A_Data.md", "job-case", { status: "不採用" }, "書いた後の本文");
   const freshSnapshot = [note("20_求職/A/A_Data.md", "job-case", { status: "不採用" }, "書いた後の本文")];
 
-  const { settled } = mergePendingWrites(freshSnapshot, new Map([[written.path, written]]));
+  const { settled } = mergePendingWrites(freshSnapshot, new Map([[written.path, { note: written, at: 1_000 }]]), 1_500);
   assert.deepEqual(settled, [written.path]);
 });
 
@@ -319,4 +320,37 @@ test("リンク抽出：frontmatter からしか繋がっていないノート�
     content: `---\ntype: language-expression-course-progress\nsource_note: "[[素材ノート]]"\n---\n# 進捗\n`,
   };
   assert.deepEqual(extractLinks(withLink.content), ["素材ノート"]);
+});
+
+// 🔴 突き合わせは本文の一致でしか出来ないので、Obsidian 側で手編集された等で
+// サーバと食い違ったままになると、期限が無ければ自分の版を永久に貼り続ける
+// （その間サーバの実際の内容が画面に出てこない）。時間で降りる。
+test("台帳の書き込みは期限が来たらサーバ側へ譲る（永久に貼り付かない）", () => {
+  const written = note("20_求職/A/A_Data.md", "job-case", { status: "不採用" }, "こちらの版");
+  const serverDiverged = [note("20_求職/A/A_Data.md", "job-case", { status: "保留" }, "Obsidian で手編集された版")];
+  const pending = new Map([[written.path, { note: written, at: 1_000 }]]);
+
+  // 期限内はこちらが勝つ
+  const inside = mergePendingWrites(serverDiverged, pending, 1_000 + PENDING_WRITE_TTL_MS - 1);
+  assert.match(inside.notes[0].content, /こちらの版/);
+  assert.deepEqual(inside.settled, []);
+
+  // 期限を過ぎたらサーバ側を正とし、台帳から落とす
+  const outside = mergePendingWrites(serverDiverged, pending, 1_000 + PENDING_WRITE_TTL_MS + 1);
+  assert.match(outside.notes[0].content, /Obsidian で手編集された版/);
+  assert.deepEqual(outside.settled, [written.path]);
+});
+
+test("サーバのスナップショットに無い書き込みは期限内だけ残す（新規作成 → 幽霊にしない）", () => {
+  const created = note("20_求職/A/2026-08-16_一次面接_批注.md", "study-annotation", {}, "初回の批注");
+  const snapshotWithout = [note("99_系统/_索引.md", "moc", {}, "索引")];
+  const pending = new Map([[created.path, { note: created, at: 1_000 }]]);
+
+  const inside = mergePendingWrites(snapshotWithout, pending, 1_500);
+  assert.equal(inside.notes.length, 2, "作りたての批注ノートが消えない");
+
+  // サーバ側で本当に消された（あるいは改名された）場合、期限が過ぎれば追随する
+  const outside = mergePendingWrites(snapshotWithout, pending, 1_000 + PENDING_WRITE_TTL_MS + 1);
+  assert.equal(outside.notes.length, 1);
+  assert.deepEqual(outside.settled, [created.path]);
 });

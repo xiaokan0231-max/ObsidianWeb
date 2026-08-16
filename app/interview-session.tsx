@@ -28,7 +28,6 @@ import {
 import {
   calendarCompanyIdentity,
   countdownLabel,
-  localDateKey,
 } from "@/lib/memory-atlas-data";
 import { formatDate, getType, type Note } from "@/lib/notes";
 import { REVIEW_DIMENSION_META } from "@/lib/review-deep";
@@ -979,6 +978,7 @@ function SessionAssets({
 
 function InterviewSession({
   notes,
+  today,
   onOpen,
   onOpenWiki,
   onOpenCard,
@@ -995,9 +995,11 @@ function InterviewSession({
   initialCompany?: string;
   initialPath?: string;
   onSelectionChange?: (company: string, prepPath: string) => void;
+  /** 「今日」は殻が持つ。memo 越しなので中で求めると、日付を跨いでも昨日のまま凍る
+   *  ——当日かどうかで既定モード（确认/冲刺/深度）が変わる画面なので、ここが一番効く。 */
+  today: string;
 }) {
   const docs = useMemo(() => findInterviewPrepDocs(notes), [notes]);
-  const today = localDateKey();
   const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
   const digest = useMemo(() => buildDigest(notes), [notes]);
   // 既定で開くのは「次の確定面接 → 日程調整中の次回 → 直近の終了回」。

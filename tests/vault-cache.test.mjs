@@ -150,35 +150,83 @@ test("在途リフレッシュ中に別のノートを書いても、そのノ�
   );
 });
 
-// 🔴 Obsidian の metadataCache は非同期に再解析される。書いた直後の GET は
-// 「新しい mtime ＋ 古い frontmatter」を返し得る。それを鵜呑みにすると mtime が一致して
-// しまい、古い frontmatter が永久に居座る（看板の status が巻き戻り、R キーまで直らない）。
-test("prime した権威データは、磁盘が追いつくまで古い読み取りに上書きされない", async () => {
+// 🔴 実際の Local REST API の形：content と stat は磁盘（PUT 完了後なので新しい）、
+// frontmatter と tags は**非同期に再解析される metadataCache**（しばらく古いまま）。
+// つまり滞留中は「新しい mtime ＋ 新しい content ＋ 古い frontmatter」。
+// content で追いつき判定をすると必ず一致してしまい、古い frontmatter が
+// 磁盘と同じ mtime で落ちて**永久に固定**される（看板の status が巻き戻り、
+// R キーを押しても直らない）。この形でしか捕まらないので、こう組む。
+test("prime した権威データは、metadataCache が追いつくまで古い frontmatter に上書きされない", async () => {
   const { state, cache } = fakeVault({ "a.md": 100 });
   await cache.readAll();
 
-  // 書き込み：権威データをキャッシュへ置く。磁盘側の mtime は進むが、
-  // GET はまだ書き込み前の内容を返す状態を作る。
-  const authoritative = { ...note("a.md", 500), content: "new body", frontmatter: { status: "不採用" } };
+  const authoritative = {
+    ...note("a.md", 500),
+    content: "書き換え後の本文",
+    frontmatter: { type: "job-case", status: "不採用" },
+  };
   cache.prime(authoritative);
   state.stats.set("a.md", 500);
-  state.contentOverride.set("a.md", { content: "stale body", frontmatter: { status: "応募済" } });
+  // 磁盘は追いついている（content も mtime も新しい）が metadataCache だけ古い
+  state.contentOverride.set("a.md", {
+    content: "書き換え後の本文",
+    frontmatter: { type: "job-case", status: "応募済" },
+  });
 
   const first = await cache.readAll();
-  assert.equal(first[0].content, "new body", "追いつく前の読み取りで権威データを潰さない");
-  assert.equal(first[0].frontmatter.status, "不採用");
+  assert.equal(first[0].frontmatter.status, "不採用", "古い frontmatter で権威データを潰さない");
 
-  // 磁盘が追いついたら、その値を素直に受け入れる（＝キャッシュが固定化しない）
-  state.contentOverride.set("a.md", { content: "new body", frontmatter: { status: "不採用" } });
+  // 何度読んでも固定されない（＝mtime 一致で取り直しを諦めていない）
   const second = await cache.readAll();
-  assert.equal(second[0].content, "new body");
+  assert.equal(second[0].frontmatter.status, "不採用");
 
-  // 守り時間を過ぎれば、磁盘側の変更（Obsidian で手編集など）は無条件に通る
+  // metadataCache が追いついたら素直に受け入れる
+  state.contentOverride.set("a.md", {
+    content: "書き換え後の本文",
+    frontmatter: { type: "job-case", status: "不採用" },
+  });
+  const third = await cache.readAll();
+  assert.equal(third[0].frontmatter.status, "不採用");
+  state.readCalls.length = 0;
+  await cache.readAll();
+  assert.equal(state.readCalls.length, 0, "追いついた後は普通にキャッシュが効く");
+
+  // 守り時間を過ぎれば、Obsidian 側の手編集は無条件に通る（固定ではなく逃げ道）
   state.clock += 10_000;
   state.stats.set("a.md", 900);
-  state.contentOverride.set("a.md", { content: "edited in obsidian", frontmatter: {} });
-  const third = await cache.readAll();
-  assert.equal(third[0].content, "edited in obsidian", "守り時間は逃げ道であって固定ではない");
+  state.contentOverride.set("a.md", {
+    content: "Obsidian で手編集",
+    frontmatter: { type: "job-case", status: "保留" },
+  });
+  const fourth = await cache.readAll();
+  assert.equal(fourth[0].frontmatter.status, "保留");
+  assert.equal(fourth[0].content, "Obsidian で手編集");
+});
+
+// R キー（force）は crawl 分岐へ落ちる。ここが守りを見ていないと、書いた直後に
+// R を押した時——カードが変わらないので押したくなる——同じ古い frontmatter が、
+// 今度は取り直しの機会も無いまま固定される。
+test("force（R キー）の全量爬取でも、prime した権威データは守り時間内なら残る", async () => {
+  const { state, cache } = fakeVault({ "a.md": 100 });
+  await cache.readAll();
+
+  cache.prime({
+    ...note("a.md", 500),
+    content: "書き換え後の本文",
+    frontmatter: { type: "job-case", status: "不採用" },
+  });
+  state.stats.set("a.md", 500);
+  state.contentOverride.set("a.md", {
+    content: "書き換え後の本文",
+    frontmatter: { type: "job-case", status: "応募済" },
+  });
+
+  const forced = await cache.readAll({ force: true });
+  assert.equal(forced[0].frontmatter.status, "不採用", "R キーでも古い frontmatter を固定しない");
+
+  // その後の増分読みでも固定されていない
+  const next = await cache.readAll();
+  assert.equal(next[0].frontmatter.status, "不採用");
 });
 
 test("prime 直後の新規ノートは、まだスキャンに現れなくても消えない", async () => {
