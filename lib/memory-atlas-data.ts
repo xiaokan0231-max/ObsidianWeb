@@ -4,12 +4,14 @@
 
 import { graphGroup, type GraphGroup } from "./knowledge-graph.ts";
 import {
+  companyIdentity,
   getString,
   getTitle,
   getType,
   noteBasename,
   stripFrontmatter,
   stripMarkdown,
+  stripNonLinkRegions,
   type Note,
 } from "./notes.ts";
 import { joinReviewNotes } from "./review-join.ts";
@@ -224,19 +226,46 @@ export function noteFolder(path: string) {
 }
 
 export function extractLinks(content: string) {
-  return Array.from(content.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g))
+  // 剥离规则与知识图谱（extractWikiLinks）同一口径。以前这边不剥 frontmatter/代码块，
+  // 同一篇笔记在首页孤点统计和图谱里的「有没有关系」可能不一致。
+  return Array.from(stripNonLinkRegions(content).matchAll(/\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g))
     .map((match) => match[1].trim())
     .filter(Boolean);
+}
+
+// 同一批 notes 会被反复问「这篇有哪些链接」（派生统计、资料库排序、反链、卡片角标）。
+// 内容不变时答案不变，所以按 note 对象缓存。notes 数组整体替换、单条 patch 都会
+// 产生新对象，WeakMap 自然失效，不需要手动清理。
+const noteLinksCache = new WeakMap<Note, string[]>();
+
+export function noteLinks(note: Note): string[] {
+  const cached = noteLinksCache.get(note);
+  if (cached) return cached;
+  const links = extractLinks(note.content);
+  noteLinksCache.set(note, links);
+  return links;
 }
 
 export function countMatches(content: string, expression: RegExp) {
   return Array.from(content.matchAll(expression)).length;
 }
 
+// 搜索的干草堆按 note 缓存。以前每敲一个字都对全库 300 篇重建小写 haystack
+// （含 JSON.stringify frontmatter，约 5.5MB 字符串分配/键击）。
+const haystackCache = new WeakMap<Note, string>();
+
+function noteHaystack(note: Note) {
+  const cached = haystackCache.get(note);
+  if (cached) return cached;
+  const haystack = `${note.path}\n${note.content}\n${JSON.stringify(note.frontmatter)}`.toLowerCase();
+  haystackCache.set(note, haystack);
+  return haystack;
+}
+
 export function noteMatches(note: Note, rawQuery: string) {
   const query = rawQuery.trim().toLowerCase();
   if (!query) return true;
-  const haystack = `${note.path}\n${note.content}\n${JSON.stringify(note.frontmatter)}`.toLowerCase();
+  const haystack = noteHaystack(note);
   // 空白分隔的多个 token 是 AND；单个 token 的值里用 | 分隔是 OR。
   // 「進行中の選考」这种跨多个枚举值的条件，没有 OR 就一条都写不出来。
   return query.split(/\s+/).every((token) => {
@@ -402,11 +431,8 @@ export function calendarEventLabel(text: string) {
  * 残すことで、見た目の揺れだけを吸収する。
  */
 export function calendarCompanyIdentity(company: string) {
-  return company
-    .normalize("NFKC")
-    .toLocaleLowerCase("en-US")
-    .replace(/株式会社|有限会社|合同会社|\(株\)|incorporated|inc\.?|co\.?,?\s*ltd\.?|ltd\.?/gu, "")
-    .replace(/[^\p{L}\p{N}]+/gu, "");
+  // 実体は notes.ts の companyIdentity（review-join と共用）。名前だけ日历の文脈で残す。
+  return companyIdentity(company);
 }
 
 function calendarCompanyDisplayScore(company: string) {
@@ -534,11 +560,12 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
 }
 
 export function buildDerivedData(notes: Note[], now = new Date()): DerivedData {
-  const links = notes.flatMap((note) => extractLinks(note.content));
+  // 每篇只解析一次链接（以前 flatMap 扫一遍、orphan filter 再扫一遍）。
+  const links = notes.flatMap((note) => noteLinks(note));
   const linkedNames = new Set(links);
   const orphanCount = notes.filter(
     (note) =>
-      extractLinks(note.content).length === 0 &&
+      noteLinks(note).length === 0 &&
       !linkedNames.has(noteBasename(note.path)) &&
       getType(note) !== "moc",
   ).length;

@@ -5,6 +5,7 @@ import {
   noteBasename,
   stripFrontmatter,
   stripMarkdown,
+  stripNonLinkRegions,
   type Note,
 } from "./notes.ts";
 
@@ -180,11 +181,7 @@ function graphLayer(note: Note): KnowledgeGraphNode["layer"] {
  * 再区分嵌入与普通双链；结构化 frontmatter 由独立规则读取。
  */
 export function extractWikiLinks(content: string): WikiLink[] {
-  const body = stripFrontmatter(content)
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/~~~[\s\S]*?~~~/g, " ")
-    .replace(/<!--([\s\S]*?)-->/g, " ")
-    .replace(/`[^`\n]*`/g, " ");
+  const body = stripNonLinkRegions(content);
   return Array.from(
     body.matchAll(/(!)?\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|([^\]]+))?\]\]/g),
     (match) => ({

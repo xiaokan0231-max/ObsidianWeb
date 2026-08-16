@@ -68,7 +68,13 @@ const PREP_SECTION_GROUPS = [
   { id: "tools", label: "当日工具", numbers: [9, 10, 12] },
 ] as const;
 
-function prepSectionNumber(title: string) {
+/**
+ * 節タイトル「３．職位拆解」から節番号を取る。番号の書式（全角数字・区切りの
+ * 「.」「、」「．」）をどこまで許すかはこの1関数だけが知っている——
+ * 以前は本場面試側に同じ関数と第三のインライン正規表現があり、字符類が既に
+ * 「．」の有無で割れていた（NFKC が先に走るせいで挙動差が隠れていただけ）。
+ */
+export function prepSectionNumber(title: string) {
   const normalized = title.normalize("NFKC");
   return Number(normalized.match(/^(\d+)[.、．]/)?.[1] ?? 0);
 }

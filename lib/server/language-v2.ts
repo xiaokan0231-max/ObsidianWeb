@@ -28,6 +28,7 @@ import {
   uniqueAnnotations,
 } from "../review.ts";
 import { parseInterviewAnswerReview } from "../review-deep.ts";
+import { findDayNote, findRoundNote } from "../review-join.ts";
 import type { ObsidianNote } from "./obsidian";
 
 import { createSerialQueue } from "./serial-queue.ts";
@@ -85,10 +86,6 @@ function basename(path: string) {
   return path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/i, "");
 }
 
-function interviewPrefix(path: string) {
-  return basename(path).replace(/_整理稿$/, "");
-}
-
 function interviewKey(note: ObsidianNote) {
   return `${text(note.frontmatter.date) || basename(note.path).slice(0, 10)}|${text(
     note.frontmatter.company,
@@ -111,18 +108,17 @@ function markerJson<T>(content: string, start: string, end: string): T | undefin
   }
 }
 
-function sourceNote(
-  notes: ObsidianNote[],
-  study: ObsidianNote,
-  suffix: string,
-  type: string,
-) {
-  const dir = directory(study.path);
-  const prefix = interviewPrefix(study.path);
-  return notes.find((note) =>
-    note.path === `${dir}/${prefix}_${suffix}.md` ||
-    (directory(note.path) === dir && text(note.frontmatter.type) === type && basename(note.path).startsWith(prefix)),
-  );
+/**
+ * 整理稿と同じ回のノートの照合は review-join が唯一の持ち主（frontmatter の
+ * company+date(+round)）。以前ここにはファイル名の前綴で探す別実装があり、
+ * 命名規約のおかげで結果がたまたま一致しているだけだった。
+ */
+function interviewIdentity(study: ObsidianNote) {
+  return {
+    company: text(study.frontmatter.company),
+    date: text(study.frontmatter.date),
+    round: text(study.frontmatter.round),
+  };
 }
 
 function evidence(
@@ -353,7 +349,7 @@ function extractStudyItems(notes: ObsidianNote[]) {
   for (const study of studies) {
     const key = interviewKey(study);
     const parsed = parseSeirikou(study.content);
-    const annotation = sourceNote(notes, study, "批注", "study-annotation");
+    const annotation = findDayNote(notes, "study-annotation", interviewIdentity(study));
     const annotations = annotation
       ? uniqueAnnotations(parseAnnotations(annotation.content))
       : [];
@@ -414,8 +410,8 @@ function extractStudyItems(notes: ObsidianNote[]) {
       }
     }
 
-    const deep = sourceNote(notes, study, "回答品質復盤", "interview-answer-review");
-    const feedback = sourceNote(notes, study, "回答品質批注", "interview-answer-feedback");
+    const deep = findRoundNote(notes, "interview-answer-review", interviewIdentity(study));
+    const feedback = findRoundNote(notes, "interview-answer-feedback", interviewIdentity(study));
     if (!deep) continue;
     if (feedback && feedback.stat.mtime > deep.stat.mtime) {
       staleReviewPaths.push(deep.path);

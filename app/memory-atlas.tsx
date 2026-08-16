@@ -72,7 +72,7 @@ import {
   buildReviewPreview,
   calendarCompanyIdentity,
   careerStatus,
-  extractLinks,
+  noteLinks,
   getGroup,
   countdownLabel,
   getLatestNoteDate,
@@ -2668,7 +2668,7 @@ function LibraryView({
     const result = groupMatched.filter((note) => libraryScopeMatches(note, scope));
     return result.toSorted((left, right) => {
       if (sort === "connections") {
-        return extractLinks(right.content).length - extractLinks(left.content).length ||
+        return noteLinks(right).length - noteLinks(left).length ||
           right.stat.mtime - left.stat.mtime;
       }
       if (sort === "title") {
@@ -2773,7 +2773,7 @@ function LibraryView({
               const group = getGroup(note.path);
               const trust = trustLayer(note);
               const decision = noteDecisionMeta(note);
-              const links = extractLinks(note.content).length;
+              const links = noteLinks(note).length;
               return (
                 <button
                   className="note-card"
@@ -2891,7 +2891,7 @@ function NoteDrawer({
   const group = getGroup(note.path);
   const trust = trustLayer(note);
   const basename = noteBasename(note.path);
-  const backlinks = allNotes.filter((candidate) => extractLinks(candidate.content).includes(basename));
+  const backlinks = allNotes.filter((candidate) => noteLinks(candidate).includes(basename));
   const frontmatterEntries = Object.entries(note.frontmatter);
   const headings = useMemo(() => scanHeadings(note.content), [note.content]);
   const [activeHeading, setActiveHeading] = useState<string | null>(null);
@@ -2988,7 +2988,7 @@ function NoteDrawer({
             <div className="drawer-meta">
               <span>更新于 {formatDate(note.stat.mtime, true)}</span>
               <span>{Math.round(note.stat.size / 1024 * 10) / 10} KB</span>
-              <span>{extractLinks(note.content).length} 条外链</span>
+              <span>{noteLinks(note).length} 条外链</span>
               <span>{backlinks.length} 条反链</span>
             </div>
             {frontmatterEntries.length > 0 && (

@@ -52,12 +52,15 @@ const annotation = note(
   "study-annotation",
   `---
 type: study-annotation
+company: Test
+date: 2026-07-01
 ---
 - **a001｜s003｜裁定｜open｜2026-07-02**
     - 対象:: error:1
     - 我:: 誤1は学習者誤りで確定（実際にそう発話した）
 `,
   11,
+  { company: "Test", date: "2026-07-01" },
 );
 
 const deep = note(
@@ -65,6 +68,9 @@ const deep = note(
   "interview-answer-review",
   `---
 type: interview-answer-review
+company: Test
+date: 2026-07-01
+round: 一次面接
 ---
 <!-- interview-answer-review-data -->
 \`\`\`json
@@ -96,6 +102,7 @@ ${JSON.stringify({
 \`\`\`
 `,
   12,
+  { company: "Test", date: "2026-07-01", round: "一次面接" },
 );
 
 test("v2 curriculum keeps confirmed learner errors and excludes transcript errors", () => {
@@ -131,6 +138,7 @@ test("newer human feedback makes a deep review stale", () => {
     "interview-answer-feedback",
     "---\ntype: interview-answer-feedback\n---\n",
     13,
+    { company: "Test", date: "2026-07-01", round: "一次面接" },
   );
   const curriculum = buildLanguageCurriculum([study, annotation, deep, feedback]);
   assert.deepEqual(curriculum.profile.staleReviewPaths, [deep.path]);

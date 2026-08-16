@@ -9,6 +9,7 @@ import {
   groupPrepSections,
   prepBlockText,
   prepInlineText,
+  prepSectionNumber,
   shortLabel,
   type InterviewPrepDoc,
   type PrepBlock,
@@ -97,10 +98,6 @@ const SESSION_MODES: {
   { id: "deep", duration: "完整", label: "深度准备", description: "公司、问答与全部材料" },
 ];
 
-function prepSectionNumber(title: string) {
-  return Number(title.normalize("NFKC").match(/^(\d+)[.、．]/)?.[1] ?? 0);
-}
-
 function prepSectionByNumber(doc: InterviewPrepDoc, number: number) {
   return doc.sections.find((section) => prepSectionNumber(section.title) === number) ?? null;
 }
@@ -174,8 +171,8 @@ const SECTION_TAB_LABELS: Record<number, string> = {
 
 function sectionTabLabel(title: string) {
   const normalized = title.normalize("NFKC");
-  const number = Number(normalized.match(/^(\d+)[.、]/)?.[1] ?? 0);
-  return SECTION_TAB_LABELS[number] ?? shortLabel(normalized.replace(/^\d+[.、]\s*/, ""), 10);
+  const number = prepSectionNumber(title);
+  return SECTION_TAB_LABELS[number] ?? shortLabel(normalized.replace(/^\d+[.、．]\s*/, ""), 10);
 }
 
 function subsectionTabLabel(title: string) {
