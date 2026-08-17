@@ -13,8 +13,10 @@ import type {
 import {
   HAND_CONNECTIONS,
   derivePinchThresholds,
+  fistDragEngagement,
   gestureScoreThreshold,
   handPoseFromLandmarks,
+  isPinchPose,
   matchHandDetections,
   resolvePrimaryHandId,
   smoothHandPose,
@@ -59,14 +61,27 @@ async function resolveMediapipeAssets() {
   }
   return { wasmRoot: CDN_WASM_ROOT, modelUrl: CDN_MODEL_URL };
 }
-const INFERENCE_INTERVAL_MS = 1000 / 15;
+// 24fps：识别帧率直接决定捏合/拖动的响应下限。15fps 时一帧就有 67ms，
+// 快速短捏常整个落在两帧之间；相机流本身 ideal 24，再高也拿不到新帧。
+// GPU 委托专用——CPU 回退时单次推理就要几十毫秒，24fps 会和 Three 渲染
+// 抢主线程，越慢的机器拖动越黏，退回 15fps（见 CPU_INFERENCE_INTERVAL_MS）。
+const INFERENCE_INTERVAL_MS = 1000 / 24;
+const CPU_INFERENCE_INTERVAL_MS = 1000 / 15;
 const RADIAL_MENU_HOLD_MS = 560;
+const ONBOARDING_STEP_TIMEOUT_MS = 22000;
+// 捏住不动多久算“我要原地抓取”。真正的拖动由位移即时接管（见 lib 的
+// moveThreshold），这里只是给“捏住不动想缩放”的兜底，因此可以放得很宽——
+// 放窄会把人正常的确认捏合（300–500ms）判成抓取，短捏选择就永远发不出。
+const GRAB_HOLD_MS = 620;
 const PALM_MENU_HOLD_MS = 550;
 const DUAL_TRANSFORM_HOLD_MS = 120;
 const TRACKING_GRACE_MS = 250;
 const PRIMARY_GRACE_MS = 350;
 const MIN_DUAL_SEPARATION = 0.12;
-const ONBOARDING_STORAGE_KEY = "echo:graph-hand-onboarding:v2";
+// 键名随捏合判定模型一起升版。存盘的阈值会原样覆盖代码里的默认值，
+// 旧版标定出的偏紧阈值会让改过默认值的新版本对老用户完全不起作用——
+// 表现就是「代码明明改了，捏下去还是没反应」。
+const ONBOARDING_STORAGE_KEY = "echo:graph-hand-onboarding:v3";
 
 export type GraphHandGesture =
   | "None"
@@ -129,12 +144,28 @@ export type GraphHandActionEvent = {
   handId: string;
 };
 
+/** 主手的实时判定量。手势失灵时肉眼无从判断卡在哪一环，面板直接摊开。 */
+export type GraphHandDiagnostics = {
+  pinchRatio: number;
+  closeThreshold: number;
+  releaseThreshold: number;
+  calibrated: boolean;
+  gesture: string;
+  pinchPose: boolean;
+  suppressed: boolean;
+  travel: number;
+  moveThreshold: number;
+  lastEvent: string;
+  targetKind: string;
+};
+
 export type GraphHandNavigationFrame = {
   hands: GraphTrackedHandFrame[];
   mode: GraphHandMode;
   primaryHandId: string | null;
   transform: GraphHandTransform | null;
   action: GraphHandActionEvent | null;
+  diagnostics?: GraphHandDiagnostics;
 };
 
 export type GraphHandTargetFeedback = {
@@ -164,11 +195,55 @@ type RuntimeHand = {
   visible: boolean;
   pose: HandPose;
   gesture: GraphHandGesture;
+  /** 当帧原始观测（未经 updateGestureHold 宽限保持），驱动握拳的即时停手。 */
+  rawGesture: GraphHandGesture;
   gestureHold: GestureHold | null;
   pinch: PinchInteraction | null;
+  /**
+   * 握拳时拇指食指本来就贴在一起，捏合状态机会把整个拳读成一次长捏，
+   * 松拳瞬间误发 select/release（节点上=误选中并起飞运镜，菜单里=误确认）。
+   * 拳一旦接管拖动，这只手当前这轮捏合的全部事件都作废，直到彻底松开。
+   */
+  pinchSuppressed: boolean;
+  /** 最近一次捏合 press 的时刻；菜单确认用它区分“菜单打开后才按下”的捏合。 */
+  lastPressAt: number;
+  /** 连续观测到「非拳非 None」手势的帧数；连续两帧才判拳真正结束。 */
+  fistBreakStreak: number;
+  /** 几何判定的捏合姿势；为真时这只手不走握拳语法。 */
+  pinchPose: boolean;
+  /** 未经平滑的当帧捏合比值。判定用它，校准采样也必须用它。 */
+  rawPinchRatio: number;
   landmarks: NormalizedLandmark[];
   worldZ: number;
 };
+
+// 握拳=「抓住空间」。分类器对 Closed_Fist 的召回远高于持续捏合（捏合在快速
+// 移动中常因运动模糊被误判松开），平移这种粗粒度操作交给它零等待接管；
+// 捏合只负责需要精度的选择与节点抓取。判定本体在 lib（带行为测试）。
+//
+// pinchPose 一票否决：分类器同样会把捏合判成 Closed_Fist（捏合时其余三指
+// 也蜷缩），而拳一接管就会整轮作废这只手的捏合事件——短捏选择因此永远
+// 发不出来。几何上确认是捏合的手，一律走捏合语法。
+function fistDragEngaged(hand: {
+  gestureHold: GestureHold | null;
+  rawGesture: GraphHandGesture;
+  pinchPose: boolean;
+}) {
+  if (hand.pinchPose) return false;
+  return fistDragEngagement(hand.gestureHold, hand.rawGesture);
+}
+
+// 拳的“身份”维持：保持轨道仍是拳就算数（单帧误分类不夺权）。跟不跟手
+// 再看 fistDragEngaged 的 raw 层——身份在、当帧观测异常时暂停跟手，
+// 和捏合的 releasePending 同一原则：保身份、停动作。
+function fistMaintained(hand: {
+  gestureHold: GestureHold | null;
+  pinchPose: boolean;
+}) {
+  if (hand.pinchPose) return false;
+  return hand.gestureHold?.gesture === "Closed_Fist"
+    && (hand.gestureHold.evidenceFrames ?? 0) >= 2;
+}
 
 type RadialMenuState = {
   open: boolean;
@@ -178,6 +253,12 @@ type RadialMenuState = {
   centerX: number;
   centerY: number;
   selected: GraphHandAction | null;
+  /**
+   * 菜单打开时刻。确认只认「打开之后才按下」的捏合：光标手若在打开前就
+   * 捏着拖拽，收手的 release 不能被当成确认——否则菜单一开用户连
+   * “松手作罢”都做不到，随便一收手就执行了落点扇区的动作。
+   */
+  openedAt: number;
 };
 
 const DEFAULT_THRESHOLDS: PinchThresholds = {
@@ -220,8 +301,8 @@ const ONBOARDING_STEPS = [
   { title: "让系统认识你的手", hint: "张开一只手，保持在画面中央" },
   { title: "用掌心射线瞄准", hint: "移动手掌，让光环吸附到任意节点" },
   { title: "短捏选择", hint: "拇指与食指快速捏合后松开" },
-  { title: "捏住抓取", hint: "捏住不放并移动手掌" },
-  { title: "双手操纵", hint: "两手同时捏住，然后把两手拉开" },
+  { title: "抓住拖动", hint: "握拳（或捏住不放）并移动手掌" },
+  { title: "双手操纵", hint: "两手同时握拳或捏住，然后把两手拉开" },
 ] as const;
 
 function cameraErrorMessage(error: unknown) {
@@ -303,12 +384,15 @@ function readStoredPreferences() {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY) ?? "null");
     const thresholds = parsed?.thresholds;
+    // 存盘值只接受“比默认更宽松”的一侧。标定偏紧的话用户怎么捏都进不了
+    // 按下状态，而他无从知道问题出在一次很久以前的采样上。
+    const usable = Number.isFinite(thresholds?.closeThreshold)
+      && Number.isFinite(thresholds?.releaseThreshold)
+      && thresholds.closeThreshold >= DEFAULT_THRESHOLDS.closeThreshold
+      && thresholds.releaseThreshold > thresholds.closeThreshold;
     return {
       seen: parsed?.seen === true,
-      thresholds: Number.isFinite(thresholds?.closeThreshold)
-        && Number.isFinite(thresholds?.releaseThreshold)
-        ? thresholds as PinchThresholds
-        : DEFAULT_THRESHOLDS,
+      thresholds: usable ? thresholds as PinchThresholds : DEFAULT_THRESHOLDS,
     };
   } catch {
     return { seen: false, thresholds: DEFAULT_THRESHOLDS };
@@ -342,6 +426,7 @@ export function GraphHandControls({
     centerX: 0.5,
     centerY: 0.5,
     selected: null,
+    openedAt: 0,
   });
   const thresholdsRef = useRef<PinchThresholds>(DEFAULT_THRESHOLDS);
   const onboardingRef = useRef({ visible: false, step: 0 });
@@ -360,6 +445,7 @@ export function GraphHandControls({
     centerX: 0.5,
     centerY: 0.5,
     selected: null,
+    openedAt: 0,
   });
   const [onboarding, setOnboarding] = useState({ visible: false, step: 0 });
 
@@ -404,6 +490,22 @@ export function GraphHandControls({
     setOnboarding({ visible: true, step: 0 });
   };
 
+  // 校准出的阈值会写进 localStorage 长期生效。若首次校准时捏得比平时紧，
+  // closeThreshold 会被固化成一个之后再也够不着的值，捏多少次都没反应，
+  // 而用户无从知道问题出在一次旧采样上——所以留一个一键回默认的出口。
+  const resetCalibration = () => {
+    calibrationSamplesRef.current = { open: [], closed: [] };
+    thresholdsRef.current = DEFAULT_THRESHOLDS;
+    try {
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+        seen: true,
+        thresholds: DEFAULT_THRESHOLDS,
+      }));
+    } catch {
+      // 隐私模式下写不进去也没关系，本次会话已经用上默认阈值。
+    }
+  };
+
   useEffect(() => {
     if (!active || !enabled) {
       onFrameRef.current(null);
@@ -414,6 +516,7 @@ export function GraphHandControls({
     let stream: MediaStream | null = null;
     let recognizer: GestureRecognizer | null = null;
     let animationFrame = 0;
+    let inferenceIntervalMs = INFERENCE_INTERVAL_MS;
     let lastInferenceAt = -Infinity;
     let lastVideoTime = -1;
     let nextHandNumber = 1;
@@ -429,6 +532,10 @@ export function GraphHandControls({
     let feedbackTimer = 0;
     let onboardingEvidence = 0;
     let onboardingGrabOrigin: { x: number; y: number } | null = null;
+    let onboardingStepAt = 0;
+    // select 只出现一帧，肉眼追不上；留住最近一次非空事件供诊断面板显示。
+    let lastPinchEvent = "none";
+    let lastPinchEventAt = 0;
 
     const stopStream = () => {
       stream?.getTracks().forEach((track) => track.stop());
@@ -449,6 +556,7 @@ export function GraphHandControls({
       const nextStep = step + 1;
       onboardingEvidence = 0;
       onboardingGrabOrigin = null;
+      onboardingStepAt = 0;
       if (nextStep >= ONBOARDING_STEPS.length) {
         finishOnboarding(false);
       } else {
@@ -514,6 +622,7 @@ export function GraphHandControls({
             ...commonOptions,
             baseOptions: { modelAssetPath: assets.modelUrl, delegate: "CPU" },
           });
+          inferenceIntervalMs = CPU_INFERENCE_INTERVAL_MS;
         }
         if (stopped) {
           recognizer.close();
@@ -521,14 +630,14 @@ export function GraphHandControls({
           return;
         }
         setPhase("ready");
-        setDetail("单手瞄准与抓取；双手同时捏合可平移、缩放和旋转。");
+        setDetail("单手瞄准与选择，握拳即可拖动；双手同时握拳或捏合可平移、缩放和旋转。");
 
         const detect = (now: number) => {
           if (stopped || !recognizer) return;
           animationFrame = window.requestAnimationFrame(detect);
           if (
             video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
-            || now - lastInferenceAt < INFERENCE_INTERVAL_MS
+            || now - lastInferenceAt < inferenceIntervalMs
             || video.currentTime === lastVideoTime
           ) return;
           lastInferenceAt = now;
@@ -581,15 +690,85 @@ export function GraphHandControls({
             hand.lastSeen = now;
             hand.handedness = detection.handedness;
             hand.pose = smoothHandPose(hand.pose, detection.pose);
+            const heldFistBefore = fistMaintained(hand);
+            hand.rawGesture = detection.gesture;
+            // 捏合姿势带滞回：几何闸门（指尖距 0.62 掌尺度）比松手阈值
+            // (0.68) 先一步失效，松手那一帧 pinchPose 必然翻假——而 select
+            // 正好在那一帧发出，拳会当场接管并把它作废。只要这轮捏合还没
+            // 结束，就一直按捏合对待。
+            hand.pinchPose = isPinchPose(detection.landmarks)
+              || (hand.pinch?.pinching ?? false);
+            hand.rawPinchRatio = detection.pose.pinchRatio;
             hand.gestureHold = updateGestureHold(hand.gestureHold, detection.gesture, now);
+            // 拳→其他明确手势连续两帧＝真的松拳，立刻结束保持轨道。
+            // 一帧就砍会让单帧误分类拆掉双拳操纵；只等 240ms 宽限自然过期
+            // 又会让松拳后立刻发起的捏合被 raw=None 重新读成拳、拖着目标跑。
+            if (
+              hand.gestureHold.gesture === "Closed_Fist"
+              && detection.gesture !== "Closed_Fist"
+              && detection.gesture !== "None"
+            ) {
+              hand.fistBreakStreak += 1;
+              if (hand.fistBreakStreak >= 2) {
+                hand.gestureHold = updateGestureHold(null, detection.gesture, now);
+                hand.fistBreakStreak = 0;
+              }
+            } else {
+              hand.fistBreakStreak = 0;
+            }
             hand.gesture = KNOWN_GESTURES.has(hand.gestureHold.gesture as GraphHandGesture)
               ? hand.gestureHold.gesture as GraphHandGesture : "None";
+            // 抓取由位移触发，不再按“瞄的是节点还是空间”分流 holdMs——
+            // 那套分流依赖 targetsRef 的一帧回灌延迟，按下当帧读到旧值就会
+            // 把 360ms 悄悄换成 120ms，本想选节点的捏合被吞成拖动。
+            const pinchOptions = {
+              ...thresholdsRef.current,
+              holdMs: GRAB_HOLD_MS,
+              // 位移判据必须吃原始坐标：EMA 平滑后的质心在按下瞬间还落后
+              // 真实位置一两帧，接下来几帧的“追赶”会被当成用户在拖动。
+              x: detection.pose.x,
+              y: detection.pose.y,
+              scale: detection.pose.scale,
+              // 菜单里没有拖动可保：释放宽限只会让确认迟 130ms 且跟着
+              // 回摆漂移到别的扇区，光标手在菜单打开期间即时释放。
+              releaseGraceMs: menu.open && menu.cursorHandId === hand.id ? 0 : undefined,
+            };
             hand.pinch = updatePinchInteraction(
               hand.pinch,
               detection.pose.pinchRatio,
               now,
-              { ...thresholdsRef.current, holdMs: 360 },
+              pinchOptions,
             );
+            // 拳结束的瞬间重启捏合状态机：拳期间的“长捏”已整轮作废，若让它
+            // 从释放宽限里无缝续接，紧接着的真捏合会永远发不出 select。
+            // 但不能盖掉本帧已经产生的事件——重启会把它抹成 press/none，
+            // 恰好在拳刚松、用户接着短捏的那一帧把 select 吃掉。
+            if (
+              heldFistBefore
+              && !fistMaintained(hand)
+              && hand.pinch.event !== "select"
+              && hand.pinch.event !== "release"
+            ) {
+              hand.pinch = updatePinchInteraction(
+                null,
+                detection.pose.pinchRatio,
+                now,
+                pinchOptions,
+              );
+              hand.pinchSuppressed = false;
+            }
+            if (hand.pinch.event === "press") hand.lastPressAt = now;
+            if (fistDragEngaged(hand)) {
+              hand.pinchSuppressed = true;
+            } else if (
+              hand.pinchPose
+              || (!hand.pinch.pinching && hand.pinch.event === "none")
+            ) {
+              // 几何确认是捏合就立刻解除作废（拳转捏合时 pinching 不会落回
+              // false，只等空闲帧会把这轮捏合整个锁死）；否则等一个空闲帧，
+              // 因为 release/select 事件帧本身仍属于拳的作废期。
+              hand.pinchSuppressed = false;
+            }
             hand.landmarks = detection.landmarks;
             hand.worldZ += (detection.worldZ - hand.worldZ) * 0.22;
           });
@@ -598,6 +777,18 @@ export function GraphHandControls({
             const id = `hand-${nextHandNumber}`;
             nextHandNumber += 1;
             const gestureHold = updateGestureHold(null, detection.gesture, now);
+            const pinch = updatePinchInteraction(
+              null,
+              detection.pose.pinchRatio,
+              now,
+              {
+                ...thresholdsRef.current,
+                holdMs: GRAB_HOLD_MS,
+                x: detection.pose.x,
+                y: detection.pose.y,
+                scale: detection.pose.scale,
+              },
+            );
             runtimeHands.set(id, {
               id,
               handedness: detection.handedness,
@@ -605,13 +796,14 @@ export function GraphHandControls({
               visible: true,
               pose: detection.pose,
               gesture: detection.gesture,
+              rawGesture: detection.gesture,
+              pinchSuppressed: false,
+              lastPressAt: pinch.event === "press" ? now : 0,
+              fistBreakStreak: 0,
+              pinchPose: isPinchPose(detection.landmarks),
+              rawPinchRatio: detection.pose.pinchRatio,
               gestureHold,
-              pinch: updatePinchInteraction(
-                null,
-                detection.pose.pinchRatio,
-                now,
-                { ...thresholdsRef.current, holdMs: 360 },
-              ),
+              pinch,
               landmarks: detection.landmarks,
               worldZ: detection.worldZ,
             });
@@ -641,23 +833,44 @@ export function GraphHandControls({
           if (primary && primary.id !== primaryHandId) primaryHandId = primary.id;
 
           visibleHands.forEach((hand) => {
+            // 采样必须和判定用同一个量：判定吃的是原始 pinchRatio，采样若取
+            // EMA 平滑后的 pose，标定出来的阈值就落在另一个域里，随手速漂移。
             if (hand.gesture === "Open_Palm" && !hand.pinch?.pinching) {
-              calibrationSamplesRef.current.open.push(hand.pose.pinchRatio);
+              calibrationSamplesRef.current.open.push(hand.rawPinchRatio);
               calibrationSamplesRef.current.open = calibrationSamplesRef.current.open.slice(-40);
             }
-            if (hand.pinch?.pinching) {
-              calibrationSamplesRef.current.closed.push(hand.pose.pinchRatio);
+            if (hand.pinch?.pinching && !hand.pinchSuppressed) {
+              calibrationSamplesRef.current.closed.push(hand.rawPinchRatio);
               calibrationSamplesRef.current.closed = calibrationSamplesRef.current.closed.slice(-40);
             }
           });
 
           let action: GraphHandActionEvent | null = null;
           let transform: GraphHandTransform | null = null;
-          const pinchingHands = usableHands.filter((hand) => hand.pinch?.pinching).slice(0, 2);
-          const metrics = pinchingHands.length === 2
+          // 双手操纵的“参与”：捏住（拳接管时捏合作废）或握拳。两拳拉开缩放
+          // 和两捏一样合法，而且在快速动作里稳得多。参与≠稳定：参与决定
+          // 双手态是否维持，稳定才喂 metrics——不稳定就暂停变换而不是拆台，
+          // 否则剩下那只手的对称运动会被当成全额单手平移灌进相机。
+          const maintainedHands = usableHands
+            .filter((hand) => (
+              (hand.pinch?.pinching && !hand.pinchSuppressed) || fistMaintained(hand)
+            ))
+            .slice(0, 2);
+          // 不稳定的三种情形：丢帧手（状态冻结，位置是幽灵）；捏合在释放宽限
+          // （已张开、在回摆）；拳被单帧误分类（raw 异常）。拳手忽略它那条
+          // 被作废捏合的 releasePending——那个宽限防“张开回摆”，对拳不成立，
+          // 否则拳内指尖距离的单帧噪声会让双拳变换周期性冻结 130ms。
+          const steadyHands = maintainedHands.filter((hand) => (
+            hand.visible && (
+              fistMaintained(hand)
+                ? fistDragEngaged(hand)
+                : !hand.pinch?.releasePending
+            )
+          ));
+          const metrics = steadyHands.length === 2
             ? twoHandMetrics(
-                { id: pinchingHands[0].id, x: pinchingHands[0].pose.x, y: pinchingHands[0].pose.y },
-                { id: pinchingHands[1].id, x: pinchingHands[1].pose.x, y: pinchingHands[1].pose.y },
+                { id: steadyHands[0].id, x: steadyHands[0].pose.x, y: steadyHands[0].pose.y },
+                { id: steadyHands[1].id, x: steadyHands[1].pose.x, y: steadyHands[1].pose.y },
               )
             : null;
           if (metrics && metrics.distance >= MIN_DUAL_SEPARATION) {
@@ -667,8 +880,10 @@ export function GraphHandControls({
               dualStartSeparation = metrics.distance;
               previousDualMetrics = metrics;
               closeMenu();
-              pinchingHands.forEach((hand) => {
-                if (hand.pinch) hand.pinch = { ...hand.pinch, grabbed: true, progress: 1 };
+              steadyHands.forEach((hand) => {
+                if (hand.pinch?.pinching) {
+                  hand.pinch = { ...hand.pinch, grabbed: true, progress: 1 };
+                }
               });
             }
           } else if (!dualActive) {
@@ -676,23 +891,27 @@ export function GraphHandControls({
           }
 
           if (dualActive) {
-            if (metrics && pinchingHands.length === 2) {
+            if (metrics && steadyHands.length === 2) {
               transform = twoHandTransformDelta(previousDualMetrics ?? metrics, metrics);
               previousDualMetrics = metrics;
-            } else if (pinchingHands.length < 2) {
+            } else if (maintainedHands.length >= 2) {
+              // 一只手在释放宽限期：暂停变换（transform=null）但保持双手态；
+              // 重新捏拢后从新的相对位置续算，不产生突跳。
+              previousDualMetrics = null;
+            } else {
               dualActive = false;
               dualCandidateSince = 0;
               previousDualMetrics = null;
-              const remaining = pinchingHands[0];
-              if (remaining?.pinch) {
+              const remaining = maintainedHands[0];
+              if (remaining?.pinch?.pinching) {
                 remaining.pinch = {
                   ...remaining.pinch,
                   grabbed: true,
                   progress: 1,
-                  startedAt: now - 360,
+                  startedAt: now - GRAB_HOLD_MS,
                 };
-                primaryHandId = remaining.id;
               }
+              if (remaining) primaryHandId = remaining.id;
             }
           }
 
@@ -728,6 +947,7 @@ export function GraphHandControls({
                 centerX: secondary.pose.x,
                 centerY: secondary.pose.y,
                 selected: null,
+                openedAt: now,
               };
               publishMenu();
               supportPalm = null;
@@ -749,6 +969,7 @@ export function GraphHandControls({
                 centerX: primary.pose.x,
                 centerY: primary.pose.y,
                 selected: null,
+                openedAt: now,
               };
               singleMenuEmitted = true;
               publishMenu();
@@ -777,7 +998,11 @@ export function GraphHandControls({
               );
               menu.selected = picked?.action ?? null;
               publishMenu();
-              if (cursorHand.pinch?.event === "select" || cursorHand.pinch?.event === "release") {
+              if (
+                !cursorHand.pinchSuppressed
+                && cursorHand.lastPressAt >= menu.openedAt
+                && (cursorHand.pinch?.event === "select" || cursorHand.pinch?.event === "release")
+              ) {
                 if (picked && (!picked.requiresSelection || selectedLabelRef.current)) {
                   action = { type: picked.action, handId: cursorHand.id };
                 }
@@ -788,9 +1013,13 @@ export function GraphHandControls({
 
           if (!dualActive && !menu.open) {
             visibleHands.forEach((hand) => {
-              if (action || hand.pinch?.event !== "select") return;
+              if (action || hand.pinchSuppressed || hand.pinch?.event !== "select") return;
+              // 只丢弃「明确瞄着空白」的短捏。targetsRef 由星图侧经 React 回灌，
+              // 至少落后一帧；极快的捏合在松手帧还读不到自己的记录，要求它
+              // 等于 node 会把这类选择整个吞掉。没有记录时放行，交给星图侧
+              // 用按下帧锁定的目标裁决——那边本来就是权威，没命中即 no-op。
               const target = targetsRef.current.find((item) => item.handId === hand.id);
-              if (target?.kind !== "node") return;
+              if (target && target.kind !== "node") return;
               const secondarySelection = hand.id !== primaryHandId && Boolean(selectedLabelRef.current);
               action = {
                 type: secondarySelection ? "toggle-relation-target" : "select-target",
@@ -800,13 +1029,20 @@ export function GraphHandControls({
             });
           }
 
+          // 对外的 grabbed 是“此刻应该跟手”：释放宽限期里保住抓取身份但
+          // 暂停跟手（手已张开，位置是回摆），重新捏拢无缝续拖。
+          const effectiveGrab = (hand: RuntimeHand) => (
+            (Boolean(hand.pinch?.grabbed) && !hand.pinch?.releasePending && !hand.pinchSuppressed)
+            || fistDragEngaged(hand)
+          );
+
           let mode: GraphHandMode;
           if (onboardingRef.current.visible) mode = "calibration";
           else if (dualActive) mode = "dual-transform";
           else if (menu.open) mode = "palm-menu";
           else if (usableHands.length >= 2 && relationRef.current) mode = "relation-preview";
           else if (usableHands.length >= 2) mode = "dual-ready";
-          else if (primary?.pinch?.grabbed) mode = "single-grab";
+          else if (primary && effectiveGrab(primary)) mode = "single-grab";
           else if (primary?.pinch?.pinching) mode = "single-pinch";
           else mode = "single-aim";
 
@@ -817,24 +1053,61 @@ export function GraphHandControls({
             visible: hand.visible,
             ...hand.pose,
             gesture: hand.gesture,
-            pinching: hand.pinch?.pinching ?? false,
-            grabbed: dualActive ? Boolean(hand.pinch?.pinching) : hand.pinch?.grabbed ?? false,
-            pinchProgress: hand.pinch?.progress ?? 0,
+            pinching: (hand.pinch?.pinching ?? false) && !hand.pinchSuppressed,
+            grabbed: dualActive
+              ? Boolean(hand.pinch?.pinching && !hand.pinchSuppressed) || fistDragEngaged(hand)
+              : effectiveGrab(hand),
+            pinchProgress: hand.pinchSuppressed ? 0 : hand.pinch?.progress ?? 0,
             pointerX: hand.pose.x,
             pointerY: hand.pose.y,
             worldZ: hand.worldZ,
           }));
+          // 引导期间只拦「会把镜头甩走」的导航类动作，选择照常生效。
+          // 早期版本把动作整体吞掉，于是首次使用的人做对了短捏也毫无反应，
+          // 而引导第 3 步的过关条件恰恰就是这个选择——它自己把自己锁死了。
+          const publishedAction = onboardingRef.current.visible
+            && action
+            && action.type !== "select-target"
+            && action.type !== "toggle-relation-target"
+              ? null
+              : action;
+          if (primary?.pinch && primary.pinch.event !== "none") {
+            lastPinchEvent = primary.pinch.event;
+            lastPinchEventAt = now;
+          }
           const frame: GraphHandNavigationFrame = {
             hands: frameHands,
             mode,
             primaryHandId,
             transform,
-            action: onboardingRef.current.visible ? null : action,
+            action: publishedAction,
+            diagnostics: primary
+              ? {
+                  pinchRatio: primary.pose.pinchRatio,
+                  closeThreshold: thresholdsRef.current.closeThreshold,
+                  releaseThreshold: thresholdsRef.current.releaseThreshold,
+                  calibrated: thresholdsRef.current.calibrated === true,
+                  gesture: primary.rawGesture,
+                  pinchPose: primary.pinchPose,
+                  suppressed: primary.pinchSuppressed,
+                  travel: primary.pinch?.travel ?? 0,
+                  moveThreshold: 0.038,
+                  lastEvent: now - lastPinchEventAt <= 1600 ? lastPinchEvent : "none",
+                  targetKind: targetsRef.current
+                    .find((item) => item.handId === primary.id)?.kind ?? "—",
+                }
+              : undefined,
           };
 
           if (onboardingRef.current.visible) {
             const step = onboardingRef.current.step;
-            if (step === 0) {
+            // 每步都能超时放行。引导是教学不是考卷：最后一步要两只手，单手
+            // 的人（或第二只手不在画面里）永远做不到，而走不完就不写 seen，
+            // 于是每次进全屏都从第一步重来，正常操作被引导永久挡在门外。
+            if (onboardingStepAt === 0) onboardingStepAt = now;
+            if (now - onboardingStepAt >= ONBOARDING_STEP_TIMEOUT_MS) {
+              advanceOnboarding(step);
+            } else if (step === 0) {
               onboardingEvidence = primary?.visible && primary.gesture === "Open_Palm"
                 ? onboardingEvidence + 1 : 0;
               if (onboardingEvidence >= 8) advanceOnboarding(0);
@@ -844,14 +1117,22 @@ export function GraphHandControls({
                 : null;
               onboardingEvidence = target?.kind === "node" ? onboardingEvidence + 1 : 0;
               if (onboardingEvidence >= 6) advanceOnboarding(1);
-            } else if (step === 2 && primary?.pinch?.event === "select") {
-              advanceOnboarding(2);
-            } else if (step === 3 && primary?.pinch?.grabbed) {
-              onboardingGrabOrigin ??= { x: primary.pose.x, y: primary.pose.y };
-              if (Math.hypot(
-                primary.pose.x - onboardingGrabOrigin.x,
-                primary.pose.y - onboardingGrabOrigin.y,
-              ) >= 0.035) advanceOnboarding(3);
+            } else if (step === 2) {
+              // 拳接管期间作废的 select 不算数，否则短促握拳会替用户“完成”短捏教学。
+              if (primary?.pinch?.event === "select" && !primary.pinchSuppressed) {
+                advanceOnboarding(2);
+              }
+            } else if (step === 3) {
+              if (primary && effectiveGrab(primary)) {
+                onboardingGrabOrigin ??= { x: primary.pose.x, y: primary.pose.y };
+                if (Math.hypot(
+                  primary.pose.x - onboardingGrabOrigin.x,
+                  primary.pose.y - onboardingGrabOrigin.y,
+                ) >= 0.035) advanceOnboarding(3);
+              } else {
+                // 松开就重置原点：否则在 A 点短抓、移到 B 再抓会用陈旧原点瞬间过关。
+                onboardingGrabOrigin = null;
+              }
             } else if (
               step === 4
               && dualActive
@@ -865,8 +1146,8 @@ export function GraphHandControls({
 
           onFrameRef.current(frame);
           setUiFrame(frame);
-          if (action) {
-            setActionFeedback(action.type);
+          if (publishedAction) {
+            setActionFeedback(publishedAction.type);
             window.clearTimeout(feedbackTimer);
             feedbackTimer = window.setTimeout(() => setActionFeedback(null), 920);
           }
@@ -902,11 +1183,16 @@ export function GraphHandControls({
   const targetByHand = new Map(targets.map((target) => [target.handId, target]));
   const primary = uiFrame?.hands.find((hand) => hand.id === uiFrame.primaryHandId) ?? null;
   const secondary = uiFrame?.hands.find((hand) => hand.role === "secondary") ?? null;
-  const pinchingHands = uiFrame?.hands.filter((hand) => hand.pinching) ?? [];
-  const dualTooClose = pinchingHands.length === 2
+  const engagedUiHands = uiFrame?.hands.filter(
+    (hand) => hand.pinching || hand.gesture === "Closed_Fist",
+  ) ?? [];
+  // 只作为“进入双手态前”的引导：变换进行中（合法的捏拢缩小会把间距收进
+  // 阈值内）不再改口，否则用户会被指挥去撤销自己的正常操作。
+  const dualTooClose = uiFrame?.mode !== "dual-transform"
+    && engagedUiHands.length === 2
     && Math.hypot(
-      pinchingHands[1].x - pinchingHands[0].x,
-      pinchingHands[1].y - pinchingHands[0].y,
+      engagedUiHands[1].x - engagedUiHands[0].x,
+      engagedUiHands[1].y - engagedUiHands[0].y,
     ) < MIN_DUAL_SEPARATION;
   const selectedRadialAction = RADIAL_ACTIONS.find((item) => item.action === radialMenu.selected);
   const showVideo = enabled && phase !== "error" && phase !== "idle";
@@ -920,6 +1206,8 @@ export function GraphHandControls({
         ? "正在探索节点关系"
         : uiFrame?.mode === "palm-menu"
           ? selectedRadialAction?.label ?? "空间菜单"
+          : primary?.grabbed
+            ? "拖动星图中 · 张开手结束"
           : primary?.pinching
             ? "快速松手选择 · 继续捏住抓取"
             : primary ? "掌心射线已就绪" : phase === "ready" ? "举起一只手开始探索" : detail;
@@ -929,9 +1217,9 @@ export function GraphHandControls({
       {uiFrame?.hands.filter((hand) => hand.visible).map((hand) => {
         const target = targetByHand.get(hand.id);
         const label = hand.grabbed
-          ? `已抓住${target?.kind === "node" ? ` · ${target.label}` : "空间"}`
+          ? `拖动星图中${target?.kind === "node" ? ` · 锚定 ${target.label}` : ""}`
           : hand.pinching
-            ? target?.kind === "node" ? `${target.label} · 松手选择` : "继续捏住以抓取"
+            ? target?.kind === "node" ? `${target.label} · 松手选择` : "继续捏住以拖动"
             : target?.kind === "node" ? `${target.label} · 捏合选择` : hand.role === "primary" ? "主手" : "辅助手";
         return (
           <div
@@ -1035,8 +1323,8 @@ export function GraphHandControls({
             {uiFrame?.mode === "dual-transform"
               ? "移动中点平移 · 拉开缩放 · 转动双手旋转"
               : uiFrame?.hands.length === 2
-                ? "辅助手稳定张掌可展开菜单盘；双手同时捏合可操纵空间"
-                : "短捏选择 · 捏住抓取 · ✌ 呼出菜单"}
+                ? "辅助手稳定张掌可展开菜单盘；双手同时握拳或捏合可操纵空间"
+                : "短捏选择 · 握拳拖动 · ✌ 呼出菜单"}
           </small>
         </div>
         <details className="graph-hand-guide">
@@ -1044,11 +1332,54 @@ export function GraphHandControls({
           <div>
             <span data-active={uiFrame?.mode === "single-aim" ? "true" : "false"}><b>🖐</b><small>掌心瞄准</small></span>
             <span data-active={uiFrame?.mode === "single-pinch" ? "true" : "false"}><b>🤏</b><small>短捏选择</small></span>
-            <span data-active={uiFrame?.mode === "single-grab" ? "true" : "false"}><b>🤏</b><small>捏住抓取</small></span>
+            <span data-active={uiFrame?.mode === "single-grab" ? "true" : "false"}><b>✊</b><small>握拳拖动</small></span>
             <span data-active={uiFrame?.mode === "dual-transform" ? "true" : "false"}><b>↔</b><small>双手变换</small></span>
             <span data-active={uiFrame?.mode === "relation-preview" ? "true" : "false"}><b>⛓</b><small>关系探索</small></span>
             <span data-active={uiFrame?.mode === "palm-menu" ? "true" : "false"}><b>✋</b><small>掌心菜单</small></span>
           </div>
+        </details>
+        <details className="graph-hand-debug">
+          <summary>手势没反应？看这里</summary>
+          {uiFrame?.diagnostics ? (
+            <dl>
+              <div data-ok={uiFrame.diagnostics.pinchRatio <= uiFrame.diagnostics.closeThreshold ? "true" : "false"}>
+                <dt>捏合度</dt>
+                <dd>
+                  {uiFrame.diagnostics.pinchRatio.toFixed(2)}
+                  <i>需 ≤ {uiFrame.diagnostics.closeThreshold.toFixed(2)}</i>
+                </dd>
+              </div>
+              <div data-ok={uiFrame.diagnostics.pinchPose ? "true" : "false"}>
+                <dt>姿势</dt>
+                <dd>
+                  {uiFrame.diagnostics.pinchPose ? "捏合" : "非捏合"}
+                  <i>分类 {uiFrame.diagnostics.gesture}</i>
+                </dd>
+              </div>
+              <div data-ok={uiFrame.diagnostics.suppressed ? "false" : "true"}>
+                <dt>捏合语法</dt>
+                <dd>{uiFrame.diagnostics.suppressed ? "被握拳作废" : "生效中"}</dd>
+              </div>
+              <div data-ok={uiFrame.diagnostics.targetKind === "node" ? "true" : "false"}>
+                <dt>瞄准</dt>
+                <dd>{uiFrame.diagnostics.targetKind === "node" ? "节点" : uiFrame.diagnostics.targetKind === "space" ? "空间" : "无"}</dd>
+              </div>
+              <div>
+                <dt>位移</dt>
+                <dd>
+                  {uiFrame.diagnostics.travel.toFixed(3)}
+                  <i>≥ {uiFrame.diagnostics.moveThreshold} 转拖动</i>
+                </dd>
+              </div>
+              <div data-ok={uiFrame.diagnostics.lastEvent === "select" ? "true" : "false"}>
+                <dt>最近事件</dt>
+                <dd>{uiFrame.diagnostics.lastEvent}</dd>
+              </div>
+            </dl>
+          ) : (
+            <p>把手举到画面里，这里会显示实时判定数值。</p>
+          )}
+          <button type="button" onClick={resetCalibration}>恢复默认灵敏度</button>
         </details>
         <div className="graph-hand-actions">
           {phase === "error" ? (

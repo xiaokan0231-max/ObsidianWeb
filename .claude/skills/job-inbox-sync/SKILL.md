@@ -268,6 +268,13 @@ action: 88字内的动作短句  # 首页・待办页显示用；纯文本不含
 category: 応募経路    # 简短分类（「台帳整合」「観測基盤」保留给 audience: system）
 case_id: <case_id>    # 挂在具体案件上时必写（vault:check 验证案件存在），不能只靠公司名
 due: YYYY-MM-DD       # 回复期限等本人行动期限，有才写；不是期限的日期别塞这里
+expires_at: YYYY-MM-DD # 失効日：**只有面接準備类**（锚定具体面试日时的准备）写＝事件当天。
+                      # 过了这天任务本身失去意义，Web 转「待收尾」而不是继续催办。
+                      # 与 due 方向相反（due 过了更紧急）。
+                      # 🔴 日程調整・返信类**不写**——错过 due 是更紧急（管线停摆），
+                      # 不是失效；它们只在事件被取消/被新日程取代时由本 skill 显式关闭。
+                      # 🔴 面试改期时 due / focus_until / expires_at / focus_reason
+                      # 四个字段是一个单元，必须同时改（改一处不等于改完）。
 updated: YYYY-MM-DD
 ```
 

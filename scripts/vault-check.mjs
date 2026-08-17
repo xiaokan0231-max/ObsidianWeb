@@ -287,6 +287,23 @@ for (const path of files) {
     if (frontmatter.due && !validCalendarDate(String(frontmatter.due))) {
       problems.push(`${relativePath}: due "${frontmatter.due}" が実在する YYYY-MM-DD ではない`);
     }
+    // expires_at（失効日）は Web 側が「過ぎたら収尾へ」判定に使う。書式が壊れていると
+    // 静かに無効になり、失効したはずの待办が首页を占領し続ける——normalizeJobStatus の
+    // 静默失効と同型の坑なので、ここで赤くする。
+    if (frontmatter.expires_at) {
+      if (!validCalendarDate(String(frontmatter.expires_at))) {
+        problems.push(`${relativePath}: expires_at "${frontmatter.expires_at}" が実在する YYYY-MM-DD ではない`);
+      } else if (
+        frontmatter.due &&
+        validCalendarDate(String(frontmatter.due)) &&
+        String(frontmatter.expires_at) < String(frontmatter.due)
+      ) {
+        problems.push(
+          `${relativePath}: expires_at (${frontmatter.expires_at}) が due (${frontmatter.due}) より前。` +
+            `失効日は期限より後（イベント当日）のはずで、逆なら書き間違い`,
+        );
+      }
+    }
     if (frontmatter.next_event_at && !validCalendarDateTime(String(frontmatter.next_event_at))) {
       problems.push(`${relativePath}: next_event_at "${frontmatter.next_event_at}" は YYYY-MM-DD または YYYY-MM-DD HH:MM ではない`);
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, Fragment, useMemo, type CSSProperties } from "react";
+import { memo, Fragment, useCallback, useMemo, type CSSProperties } from "react";
 import { type AppView } from "./app-route";
 import { buildFocusBrief, focusDateLabel } from "@/lib/focus-action";
 import { compareJobs, toJobCard } from "@/lib/jobs";
@@ -8,7 +8,15 @@ import {
   REVIEW_DIMENSION_META,
   type ReviewDimensionKey,
 } from "@/lib/review-deep";
-import { formatDate, getString, getType, type Note } from "@/lib/notes";
+import {
+  buildCardCoverage,
+  buildInterviewTrends,
+  interviewKeyFromNoteName,
+  reviewTrendEntry,
+} from "@/lib/interview-trends.mjs";
+import { parseInterviewPractice } from "@/lib/review-practice";
+import { joinReviewNotes } from "@/lib/review-join";
+import { formatDate, getString, getTitle, getType, noteBasename, type Note } from "@/lib/notes";
 import {
   ACTIVE_JOB_STATUSES,
   buildReviewPreview,
@@ -25,6 +33,17 @@ import {
 } from "@/lib/memory-atlas-data";
 
 type View = AppView;
+
+/**
+ * 収尾入口に出す待办の名前。action の長文（88字）を切ると案件名に見えてしまうので H1 を使う。
+ * 会社名の接頭辞は落とさない——H1 は「Sharing Innovations 最終面接準備」、frontmatter は
+ * 「株式会社Sharing Innovations」と表記が揺れており、前綴照合は当てにならない。
+ * 「最終面接準備」まで見えないと、どの待办の話か分からないので、切らずに収まる長さを取る。
+ */
+function staleTitle(note: Note) {
+  const title = getTitle(note).replace(/^\d{4}-\d{2}-\d{2}[_\s]*/, "").trim();
+  return title.length > 30 ? `${title.slice(0, 29)}…` : title;
+}
 
 // 進行中案件の並び順：面接に近いほど上。定数なのでコンポーネントの外に置く。
 const currentStageRank: Record<string, number> = { 面接中: 0, 書類通過: 1, 応募済: 2 };
@@ -61,7 +80,10 @@ function Overview({
   const recentChanges = useMemo(() => jobs
     .filter((job) => !ACTIVE_JOB_STATUSES.has(job.status) && job.status !== "未応募")
     .slice(0, 3), [jobs]);
-  const focusBrief = useMemo(() => buildFocusBrief(notes), [notes]);
+  // today を渡し、依存にも入れる。入れないと日付を跨いでも focusBrief が昨日の判定のまま
+  // 凍り、expires_at をまたいだ待办が hero に居座り続ける——H5 で直したのと同型の穴を
+  // stale 机制で作り直すところだった。
+  const focusBrief = useMemo(() => buildFocusBrief(notes, today), [notes, today]);
   const primaryFocus = focusBrief.primary;
   const waitingFocus = focusBrief.waiting[0] ?? null;
 
@@ -85,6 +107,96 @@ function Overview({
         (TODO_PRIORITY[todoPriority(left)]?.rank ?? 9) - (TODO_PRIORITY[todoPriority(right)]?.rank ?? 9) ||
         getLatestNoteDate(right).localeCompare(getLatestNoteDate(left)),
     ), [notes]);
+  // —— 面试手感（BETWEEN ROUNDS）面板的数据。组装配方与 interview-session 的
+  // buildDigest 同款；全部经 useMemo，数字一律来自 lib 实时计算，不写死。
+  const trends = useMemo(() => {
+    const library = notes.find((note) => getType(note) === "interview-prep-library");
+    const coverage = buildCardCoverage(library?.content ?? "");
+    const entries = notes
+      .filter((note) => getType(note) === "interview-answer-review")
+      .map((note) => reviewTrendEntry(note.path, note.frontmatter, note.content));
+    return entries.length > 0 ? buildInterviewTrends(entries, coverage) : null;
+  }, [notes]);
+  const trendsNote = useMemo(
+    () => notes.find((note) => noteBasename(note.path) === "面接傾向_横断") ?? null,
+    [notes],
+  );
+  const libraryNote = useMemo(
+    () => notes.find((note) => getType(note) === "interview-prep-library") ?? null,
+    [notes],
+  );
+  const joinedReviews = useMemo(() => joinReviewNotes(notes), [notes]);
+  // 復盤側の「面接キー」（例 2026-08-05_一次面接）から整理稿 doc の key（=path）へ。
+  // company+date の逆引きは同日2場（8/10 実在）で曖昧になるので、キー照合で行く。
+  const reviewKeyForInterviewKey = useCallback((interviewKey?: string) => {
+    if (!interviewKey) return null;
+    const doc = joinedReviews.find(
+      (item) => interviewKeyFromNoteName(noteBasename(item.note.path)) === interviewKey,
+    );
+    return doc?.key ?? null;
+  }, [joinedReviews]);
+  const practiceQueue = useMemo(() =>
+    notes
+      .filter((note) => getType(note) === "interview-answer-practice")
+      .flatMap((note) =>
+        parseInterviewPractice(note.content).map((entry) => ({
+          ...entry,
+          company: getString(note.frontmatter.company),
+          date: getString(note.frontmatter.date),
+          round: getString(note.frontmatter.round),
+        })),
+      )
+      .filter((entry) => entry.status === "queued")
+      .sort((left, right) => (right.queuedAt || "").localeCompare(left.queuedAt || "")),
+    [notes]);
+  const lastInterview = trends?.interviews.at(-1) ?? null;
+  const daysSinceInterview =
+    lastInterview?.date
+      ? Math.max(0, Math.round((Date.parse(`${today}T00:00:00`) - Date.parse(`${lastInterview.date}T00:00:00`)) / 86_400_000))
+      : null;
+  const recentInterviewCount = trends
+    ? trends.interviews.filter((item) =>
+        item.date &&
+        Date.parse(`${today}T00:00:00`) - Date.parse(`${item.date}T00:00:00`) <= 14 * 86_400_000,
+      ).length
+    : 0;
+  const activeHabits = trends
+    ? trends.tags.filter((tag) => tag.repeated && tag.inRecent)
+    : [];
+  const weakestLabel = trends?.weakestDimension
+    ? REVIEW_DIMENSION_META[trends.weakestDimension].label
+    : null;
+  // 「今日素振り」の的：重練隊列の最新 → 無ければ標準卡未起票の優先ブロック → 兜底は回答集。
+  const drillTarget = useMemo(() => {
+    const queued = practiceQueue[0];
+    if (queued) {
+      const doc = joinedReviews.find(
+        (item) =>
+          item.company === queued.company &&
+          item.date === queued.date &&
+          item.round === queued.round,
+      );
+      return {
+        kicker: "今日素振り",
+        label: `${queued.blockId} ${queued.questionTitle}${queued.company ? ` · ${queued.company}` : ""}`,
+        onClick: () => (doc ? onOpenReview(doc.key) : onOpenReview()),
+      };
+    }
+    const uncovered = trends?.uncoveredBlocks[0];
+    if (uncovered) {
+      return {
+        kicker: `先起卡 · ${trends!.uncoveredBlocks.length} 个优先块无标准卡`,
+        label: `${uncovered.blockId} ${uncovered.title}`,
+        onClick: () => (libraryNote ? onOpen(libraryNote) : onOpenReview()),
+      };
+    }
+    return {
+      kicker: "队列已清空",
+      label: "翻一张标准卡，保持口感",
+      onClick: () => (libraryNote ? onOpen(libraryNote) : onOpenReview()),
+    };
+  }, [practiceQueue, joinedReviews, trends, libraryNote, onOpen, onOpenReview]);
+
   const upcoming = derived.calendarEvents.filter((event) => event.phase === "upcoming");
   const scoreDoc = reviewPreview.scoreDoc;
   const actionReviewDoc = reviewPreview.actionDoc;
@@ -128,6 +240,31 @@ function Overview({
                 查看全部行动
               </button>
             </div>
+            {focusBrief.stale.length > 0 && (
+              // 失効した待办は催促しない。静かな一行で「収尾」を促すだけ。
+              // 🔴 文言は必ず「待办を閉じる話」と読めること——最初は「事件已过去」と
+              // だけ書いて、本人に「案件が終わったのか？」と誤読された。案件は
+              // 「等待对方」側で生きている。理由（日付が過ぎた／案件が終わった）も
+              // 言い分けないと、同じ一行が両方の意味に読める。
+              <button
+                type="button"
+                className="hero-stale-note"
+                onClick={() => onOpen(focusBrief.stale[0].note)}
+              >
+                <i aria-hidden="true">✓</i>
+                {focusBrief.stale.length === 1 ? (
+                  <>
+                    待办「{staleTitle(focusBrief.stale[0].note)}」
+                    {focusBrief.stale[0].staleReason === "case-closed"
+                      ? "所属的案件已结束，可以关掉"
+                      : "的日子已经过了，可以关掉"}
+                  </>
+                ) : (
+                  `${focusBrief.stale.length} 件待办已经不用做了，逐一关掉`
+                )}
+                <span aria-hidden="true">→</span>
+              </button>
+            )}
           </div>
 
           <aside className="hero-watch">
@@ -381,41 +518,86 @@ function Overview({
           </div>
         </article>
 
-        <article className="panel memory-health">
+        {/* 旧「记忆健康度」（vault 卫生的抽象百分比）は本人が一度も使わなかったので撤去。
+            代わりに、複盤が算出済みなのに首页に出口が無かった「跨場の癖」と重練隊列を出す。
+            結果待ち期＝面接空窗期にこそ、次に開口する前の「今日磨く一箇所」を毎朝渡す。 */}
+        <article className="panel drill-panel">
           <PanelHeading
-            kicker="MEMORY HEALTH"
-            title="记忆健康度"
-            action="查看全部"
-            onAction={() => onView("library")}
+            kicker="BETWEEN ROUNDS"
+            title="面试手感"
+            action="打开横断报告"
+            onAction={() => {
+              if (trendsNote) onOpen(trendsNote);
+              else onOpenReview();
+            }}
           />
-          <div className="health-score-row">
-            <div className="health-score">
-              <strong>{Math.max(0, derived.selfNotes - derived.incompleteSelf)}</strong>
-              <span>/ {derived.selfNotes}</span>
-            </div>
-            <p>“关于我”权威文档已完成</p>
-          </div>
-          <div className="health-bars">
-            <HealthBar label="证据字段完整度" value={derived.evidenceCompleteness} tone="green" />
-            <HealthBar
-              label="个人事实完整度"
-              value={derived.selfNotes ? ((derived.selfNotes - derived.incompleteSelf) / derived.selfNotes) * 100 : 0}
-              tone="orange"
-            />
-            <HealthBar
-              label="关系连接度"
-              value={notes.length ? ((notes.length - derived.orphanCount) / notes.length) * 100 : 0}
-              tone="violet"
-            />
-          </div>
-          <button className="health-alert" onClick={() => onQuery("folder:10_关于我 迁移时") }>
-            <span>!</span>
-            <div>
-              <strong>{derived.incompleteSelf} 份权威文档仍有待补字段</strong>
-              <small>技术栈、STAR、硬性约束与日语定稿应优先人工确认</small>
-            </div>
-            <b>→</b>
-          </button>
+          {!trends ? (
+            <p className="panel-empty">完成第一份回答品質復盤后，这里会显示下一场开口前要改的癖。</p>
+          ) : (
+            <>
+              <div className="drill-gap-row">
+                <div className={`drill-gap ${daysSinceInterview !== null && daysSinceInterview >= 3 ? "long" : ""}`}>
+                  <strong>{daysSinceInterview ?? "—"}</strong>
+                  <span>天</span>
+                </div>
+                <div className="drill-gap-copy">
+                  <p>没有真人开口</p>
+                  <small>
+                    上次 {lastInterview ? `${formatDate(lastInterview.date)} ${lastInterview.round || ""}` : "—"}
+                  </small>
+                  <small className="drill-gap-meta">
+                    {trends.interviews.length} 场已复盘{recentInterviewCount > 0 && ` · 最近两周 ${recentInterviewCount} 场`}
+                  </small>
+                </div>
+              </div>
+
+              <div className="drill-habits">
+                {trends.interviews.length < 2 ? (
+                  // 単場では repeated が立たない。単場の標签を癖として見せない——
+                  // 単家の反馈は信号にならない（MEMORY の教訓と同じ口径）。
+                  <p className="drill-habits-guard">再复盘一场，才能区分「癖」与「偶发」。</p>
+                ) : activeHabits.length === 0 ? (
+                  <p className="drill-habits-guard">近两场没有反复出现的癖。</p>
+                ) : (
+                  activeHabits.slice(0, 3).map((tag) => (
+                    <button
+                      key={tag.tag}
+                      type="button"
+                      onClick={() => {
+                        const key = reviewKeyForInterviewKey(tag.examples[0]?.key);
+                        if (key) onOpenReview(key);
+                        else onOpenReview();
+                      }}
+                    >
+                      {tag.inLatest && <i className="drill-habit-hot" aria-label="最近一场仍出现" />}
+                      <strong>{tag.label}</strong>
+                      <span>{tag.interviews}場·{tag.occurrences}問</span>
+                    </button>
+                  ))
+                )}
+                <p className="drill-habits-foot">
+                  {weakestLabel && (
+                    <span>五维最弱 {weakestLabel} · {trends.interviews.length}场平均 {trends.dimensionAverages[trends.weakestDimension!]}</span>
+                  )}
+                  {trends.quietRecently.length > 0 && (
+                    // 「消えた」ではなく「静かになった」。その設問が出なかっただけの
+                    // 可能性が残る——改善済とは絶対に書かない（lib と同じ免責口径）。
+                    <span title="近2场未出现≠已改善——可能只是没被问到">
+                      另 {trends.quietRecently.length} 项近两场沉默
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              <button className="drill-action" type="button" onClick={drillTarget.onClick}>
+                <span>
+                  <small>{drillTarget.kicker}</small>
+                  <strong>{drillTarget.label}</strong>
+                </span>
+                <b>→</b>
+              </button>
+            </>
+          )}
         </article>
 
         <article className="panel graph-preview-panel wide">
@@ -451,16 +633,6 @@ function PanelHeading({
     <div className="panel-heading">
       <div><span className="panel-kicker">{kicker}</span><h2>{title}</h2></div>
       <button onClick={onAction}>{action} <span>↗</span></button>
-    </div>
-  );
-}
-
-function HealthBar({ label, value, tone }: { label: string; value: number; tone: string }) {
-  const safeValue = Math.max(0, Math.min(100, Math.round(value)));
-  return (
-    <div className="health-bar-row">
-      <div><span>{label}</span><strong>{safeValue}%</strong></div>
-      <div className="health-bar"><i className={tone} style={{ width: `${safeValue}%` }} /></div>
     </div>
   );
 }

@@ -972,14 +972,35 @@ export default function ThreeKnowledgeGraph({
       id: string | null;
       worldPosition: THREE.Vector3;
     }>();
+    // 捏合闭合的最后一两帧会把掌心质心拉偏，press 当帧的命中常常已滑出节点。
+    // 记住每只手最近一次命中的节点，按下时在短窗口内回溯，锁定“捏合动作
+    // 开始前瞄准的目标”——否则本想选节点的捏合被锁成空间，120ms 后变成拖动。
+    const lastNodeHits = new Map<string, {
+      id: string;
+      worldPosition: THREE.Vector3;
+      at: number;
+    }>();
     let publishedHandTargets = "";
     const gestureInertia = new THREE.Vector3();
+    // 手势平移的排出缓冲：识别帧率只有约 24fps，把位移直接搬给相机会一格一格跳。
+    // gestureFrame 只往这里累加，animate 在渲染帧里按比例排出，拖动变成连续滑动。
+    const gesturePan = new THREE.Vector3();
+    let lastPanDrainAt = 0;
     let dualTransformActive = false;
     let dualAnchorWorld: THREE.Vector3 | null = null;
     let relationCandidate: { id: string; since: number } | null = null;
     let relationTargetId: string | null = null;
     let relationTargetLocked = false;
     let activeRelationKey = "";
+
+    // 鼠标甩动的阻尼残余存在 OrbitControls 内部，enabled=false 拦不住
+    // update() 继续释放它（残余约一秒的漂移会叠在手势拖动上）。关掉阻尼跑
+    // 一次 update 让残余一次性结清并归零，再交给手势接管。
+    const flushOrbitInertia = () => {
+      controls.enableDamping = false;
+      controls.update();
+      controls.enableDamping = true;
+    };
 
     const flightController = createFlightController({
       camera,
@@ -1370,7 +1391,10 @@ export default function ThreeKnowledgeGraph({
       hands: GraphTrackedHandFrame[],
       hits: Map<string, { id: string | null; worldPosition: THREE.Vector3 }>,
     ) => {
-      const targets = hands.filter((hand) => hand.visible).map((hand) => {
+      // 短暂丢帧但仍握着锁定目标的手也要占位：一旦从 targets 里消失，
+      // 识别层的 holdMs 分流会在恢复帧读不到 kind 而从 360ms 跳到 120ms，
+      // 节点上的短捏被吞成空间拖动。
+      const targets = hands.filter((hand) => hand.visible || hits.has(hand.id)).map((hand) => {
         const id = hits.get(hand.id)?.id ?? null;
         const node = id ? nodeById.get(id) : null;
         return node
@@ -1523,6 +1547,8 @@ export default function ThreeKnowledgeGraph({
         gestureGrabbed = false;
         gestureTargetId = null;
         pinchTargets.clear();
+        lastNodeHits.clear();
+        gesturePan.set(0, 0, 0);
         dualTransformActive = false;
         dualAnchorWorld = null;
         controls.enabled = true;
@@ -1546,9 +1572,22 @@ export default function ThreeKnowledgeGraph({
         if (!hit) return;
         hits.set(hand.id, hit);
         showGestureContact(hand, hit.worldPosition, hit.id);
+        // 只在“瞄准”状态下记忆节点：拖动扫掠时射线会划过一堆节点，
+        // 若也记下来，下一次紧接着的空间捏合会被错误回溯锁到路过的节点。
+        if (hit.id && !hand.pinching && !hand.grabbed) {
+          lastNodeHits.set(hand.id, {
+            id: hit.id,
+            worldPosition: hit.worldPosition.clone(),
+            at: performance.now(),
+          });
+        }
         const previous = previousHands.get(hand.id);
         if (hand.pinching && !previous?.pinching) {
-          pinchTargets.set(hand.id, { id: hit.id, worldPosition: hit.worldPosition.clone() });
+          const recent = lastNodeHits.get(hand.id);
+          const locked = !hit.id && recent && performance.now() - recent.at <= 150
+            ? { id: recent.id, worldPosition: recent.worldPosition.clone() }
+            : { id: hit.id, worldPosition: hit.worldPosition.clone() };
+          pinchTargets.set(hand.id, locked);
         }
         if (!hand.pinching && previous?.pinching) {
           const lockedTarget = pinchTargets.get(hand.id);
@@ -1556,7 +1595,12 @@ export default function ThreeKnowledgeGraph({
           pinchTargets.delete(hand.id);
         }
       });
-      publishHandTargets(frame.hands, hits);
+      // 捏住期间对外发布“按下时锁定”的目标，而不是实时命中：捏合会把掌心
+      // 质心拉偏，实时目标常在按下到松手之间滑出节点，识别层的短捏选择
+      // 会因为看到 kind=space 而把事件丢掉——锁定目标才是用户的本意。
+      const publishedHits = new Map(hits);
+      pinchTargets.forEach((locked, handId) => publishedHits.set(handId, locked));
+      publishHandTargets(frame.hands, publishedHits);
       const actionHit = frame.action
         ? releasedPinchTargets.get(frame.action.handId)
           ?? pinchTargets.get(frame.action.handId)
@@ -1571,11 +1615,18 @@ export default function ThreeKnowledgeGraph({
         return;
       }
 
-      if (frame.mode === "dual-transform" && frame.transform) {
+      if (frame.mode === "dual-transform") {
         controls.enabled = false;
         gestureGrabbed = true;
+        if (!frame.transform) {
+          // 双手暂停帧（一只手在释放宽限期）：保持接管但不动相机。
+          // 落回下面的单手分支会把对称运动的一半当成全额平移灌进相机。
+          frame.hands.forEach((hand) => previousHands.set(hand.id, hand));
+          return;
+        }
         if (!dualTransformActive) {
           flightController.cancel();
+          flushOrbitInertia();
           gestureInertia.set(0, 0, 0);
           const selectedPosition = selectedRef.current
             ? positionById.get(selectedRef.current)
@@ -1592,8 +1643,7 @@ export default function ThreeKnowledgeGraph({
         const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
         const translation = right.multiplyScalar(-frame.transform.dx * distance * 1.35)
           .add(up.multiplyScalar(frame.transform.dy * distance * 1.35));
-        camera.position.add(translation);
-        controls.target.add(translation);
+        gesturePan.add(translation);
         gestureInertia.copy(translation).multiplyScalar(0.14);
         const anchor = dualAnchorWorld ?? controls.target;
         const unclampedFactor = 1 / frame.transform.scaleRatio;
@@ -1603,17 +1653,20 @@ export default function ThreeKnowledgeGraph({
           controls.maxDistance,
         );
         const zoomFactor = nextDistance / Math.max(0.001, camera.position.distanceTo(controls.target));
-        camera.position.copy(anchor).add(camera.position.clone().sub(anchor).multiplyScalar(zoomFactor));
-        controls.target.copy(anchor).add(controls.target.clone().sub(anchor).multiplyScalar(zoomFactor));
+        // 偏移必须先算完再写回：copy(anchor) 会先执行、再求 add 的实参，
+        // 链式写法里 clone() 克隆到的已经是 anchor，偏移恒为零向量，
+        // 相机每次缩放/旋转都直接坍缩到锚点上。
+        const zoomCameraOffset = camera.position.clone().sub(anchor).multiplyScalar(zoomFactor);
+        const zoomTargetOffset = controls.target.clone().sub(anchor).multiplyScalar(zoomFactor);
+        camera.position.copy(anchor).add(zoomCameraOffset);
+        controls.target.copy(anchor).add(zoomTargetOffset);
         if (frame.transform.rotationDelta !== 0) {
           const yaw = -frame.transform.rotationDelta * 1.4;
           const worldUp = new THREE.Vector3(0, 1, 0);
-          camera.position.copy(anchor).add(
-            camera.position.clone().sub(anchor).applyAxisAngle(worldUp, yaw),
-          );
-          controls.target.copy(anchor).add(
-            controls.target.clone().sub(anchor).applyAxisAngle(worldUp, yaw),
-          );
+          const yawCameraOffset = camera.position.clone().sub(anchor).applyAxisAngle(worldUp, yaw);
+          const yawTargetOffset = controls.target.clone().sub(anchor).applyAxisAngle(worldUp, yaw);
+          camera.position.copy(anchor).add(yawCameraOffset);
+          controls.target.copy(anchor).add(yawTargetOffset);
         }
         camera.updateMatrixWorld();
         frame.hands.forEach((hand) => previousHands.set(hand.id, hand));
@@ -1639,6 +1692,7 @@ export default function ThreeKnowledgeGraph({
         gestureGrabbed = true;
         if (!previousPrimary?.grabbed) {
           flightController.cancel();
+          flushOrbitInertia();
           gestureInertia.set(0, 0, 0);
         }
         if (displayTarget) showGestureContact(primary, displayTarget.worldPosition, displayTarget.id);
@@ -1646,8 +1700,10 @@ export default function ThreeKnowledgeGraph({
           const deadZone = (value: number, threshold: number, limit: number) => (
             Math.abs(value) < threshold ? 0 : THREE.MathUtils.clamp(value, -limit, limit)
           );
-          const dx = deadZone(primary.x - previousPrimary.x, 0.0035, 0.055);
-          const dy = deadZone(primary.y - previousPrimary.y, 0.0035, 0.055);
+          // 死区 0.002：低于每秒约 5% 画面宽的慢速微调也要跟手，低通已滤掉抖动。
+          // 钳位 0.13：识别帧率下快速挥手单帧位移可到 0.1+，钳太紧等于丢拖动量。
+          const dx = deadZone(primary.x - previousPrimary.x, 0.002, 0.13);
+          const dy = deadZone(primary.y - previousPrimary.y, 0.002, 0.13);
           const scaleDelta = deadZone(
             Math.log(primary.scale / Math.max(0.001, previousPrimary.scale)),
             0.007,
@@ -1660,8 +1716,7 @@ export default function ThreeKnowledgeGraph({
           const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
           const translation = right.multiplyScalar(-dx * distance * 1.3)
             .add(up.multiplyScalar(dy * distance * 1.3));
-          camera.position.add(translation);
-          controls.target.add(translation);
+          gesturePan.add(translation);
           gestureInertia.copy(translation).multiplyScalar(0.16);
           if (scaleDelta !== 0) {
             const nextDistance = THREE.MathUtils.clamp(
@@ -1671,12 +1726,11 @@ export default function ThreeKnowledgeGraph({
             );
             const zoomFactor = nextDistance / distance;
             const anchor = pinchTarget?.worldPosition ?? controls.target;
-            camera.position.copy(anchor).add(
-              camera.position.clone().sub(anchor).multiplyScalar(zoomFactor),
-            );
-            controls.target.copy(anchor).add(
-              controls.target.clone().sub(anchor).multiplyScalar(zoomFactor),
-            );
+            // 同上：偏移先算完再写回，避免 copy(anchor) 先改掉被克隆的向量。
+            const zoomCameraOffset = camera.position.clone().sub(anchor).multiplyScalar(zoomFactor);
+            const zoomTargetOffset = controls.target.clone().sub(anchor).multiplyScalar(zoomFactor);
+            camera.position.copy(anchor).add(zoomCameraOffset);
+            controls.target.copy(anchor).add(zoomTargetOffset);
           }
           camera.updateMatrixWorld();
         }
@@ -1720,7 +1774,11 @@ export default function ThreeKnowledgeGraph({
       }
       frame.hands.forEach((hand) => previousHands.set(hand.id, hand));
       [...previousHands.keys()].forEach((id) => {
-        if (!frame.hands.some((hand) => hand.id === id)) previousHands.delete(id);
+        if (!frame.hands.some((hand) => hand.id === id)) {
+          previousHands.delete(id);
+          lastNodeHits.delete(id);
+          pinchTargets.delete(id);
+        }
       });
     };
 
@@ -1862,6 +1920,22 @@ export default function ThreeKnowledgeGraph({
       }
 
       flightController.tick(now);
+
+      // 手势平移在渲染帧里按比例排出缓冲，识别帧之间也在滑动。
+      // 排出速率按真实帧间隔换算（半衰期＝一个 60fps 帧），渲染掉帧的机器
+      // 不会越掉越黏。飞行运镜接管相机时丢弃残余，免得补间结束后凭空再飘。
+      const panDt = lastPanDrainAt > 0 ? Math.min(120, now - lastPanDrainAt) : 16.7;
+      lastPanDrainAt = now;
+      if (flightController.active) {
+        gesturePan.set(0, 0, 0);
+      } else if (gesturePan.lengthSq() > 0) {
+        const drainRatio = 1 - Math.pow(0.5, panDt / 16.7);
+        const panStep = gesturePan.clone().multiplyScalar(drainRatio);
+        camera.position.add(panStep);
+        controls.target.add(panStep);
+        gesturePan.multiplyScalar(1 - drainRatio);
+        if (gesturePan.lengthSq() < 0.00000001) gesturePan.set(0, 0, 0);
+      }
 
       // 松手后只保留很轻的一段余势，并快速衰减；它让拖动不是“硬刹车”，
       // 又不会像持续惯性那样破坏精确定位。

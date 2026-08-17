@@ -33,6 +33,11 @@ export type PinchInteraction = {
   pinching: boolean;
   grabbed: boolean;
   startedAt: number;
+  openSince: number;
+  releasePending: boolean;
+  pressX: number;
+  pressY: number;
+  travel: number;
   progress: number;
   event: "none" | "press" | "select" | "grab-start" | "release" | "cancel";
 };
@@ -83,6 +88,15 @@ export function inferCommandGestureFromLandmarks(
   landmarks: readonly HandLandmarkPoint[],
 ): RecognizedHandGesture;
 
+export function isPinchPose(
+  landmarks: readonly HandLandmarkPoint[],
+): boolean;
+
+export function fistDragEngagement(
+  gestureHold: GestureHold | null,
+  observedGesture: string,
+): boolean;
+
 export function updateGestureHold(
   previous: GestureHold | null,
   observedGesture: string,
@@ -94,7 +108,14 @@ export function updatePinchInteraction(
   previous: PinchInteraction | null,
   pinchRatio: number,
   now: number,
-  options?: number | (PinchThresholds & { holdMs?: number }),
+  options?: number | (PinchThresholds & {
+    holdMs?: number;
+    releaseGraceMs?: number;
+    moveThreshold?: number;
+    scale?: number;
+    x?: number;
+    y?: number;
+  }),
 ): PinchInteraction;
 
 export function derivePinchThresholds(
