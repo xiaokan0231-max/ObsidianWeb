@@ -1977,6 +1977,99 @@
 .graph-hand-status strong { font-size: 9px; font-weight: 620; line-height: 1.45; }
 .graph-hand-status small { color: rgba(239, 249, 244, .44); font-size: 7px; line-height: 1.55; }
 
+/* 手势判定的实时数值。识别失灵时肉眼看不出卡在哪一环，把每一步摊开， */
+/* 达标绿、不达标橙，用户扫一眼就能说清是没捏够、被误判成拳，还是没瞄准。 */
+.graph-hand-debug {
+  border-top: 1px solid rgba(255, 255, 255, .07);
+}
+
+.graph-hand-debug summary {
+  padding: 8px 12px;
+  color: rgba(236, 247, 241, .48);
+  font-size: 7px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.graph-hand-debug summary::after {
+  float: right;
+  color: rgba(131, 242, 197, .5);
+  content: "+";
+}
+
+.graph-hand-debug[open] summary::after { content: "−"; }
+
+.graph-hand-debug dl {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0 12px 8px;
+}
+
+.graph-hand-debug dl > div {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 3px 6px;
+  border-left: 2px solid rgba(255, 255, 255, .12);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .03);
+}
+
+.graph-hand-debug dl > div[data-ok="true"] {
+  border-left-color: rgba(131, 242, 197, .8);
+}
+
+.graph-hand-debug dl > div[data-ok="false"] {
+  border-left-color: rgba(255, 157, 98, .8);
+}
+
+.graph-hand-debug dt {
+  flex: 0 0 auto;
+  color: rgba(236, 247, 241, .42);
+  font-size: 7px;
+}
+
+.graph-hand-debug dd {
+  display: flex;
+  gap: 5px;
+  align-items: baseline;
+  margin: 0;
+  color: rgba(239, 249, 244, .86);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 8px;
+}
+
+.graph-hand-debug dd > i {
+  color: rgba(236, 247, 241, .34);
+  font-size: 6px;
+  font-style: normal;
+}
+
+.graph-hand-debug p {
+  margin: 0;
+  padding: 0 12px 8px;
+  color: rgba(236, 247, 241, .38);
+  font-size: 7px;
+}
+
+.graph-hand-debug > button {
+  margin: 0 12px 10px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(236, 247, 241, .6);
+  font-size: 7px;
+  cursor: pointer;
+}
+
+.graph-hand-debug > button:hover {
+  border-color: rgba(131, 242, 197, .5);
+  color: rgba(131, 242, 197, .9);
+}
+
 .graph-hand-guide {
   border-top: 1px solid rgba(255, 255, 255, .07);
 }
