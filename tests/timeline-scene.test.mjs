@@ -31,7 +31,7 @@ function event(id, date, extra = {}) {
     noteId: `20_求職/${id}.md`,
     date,
     time: "10:00",
-    company: "Sharing Innovations",
+    company: "Nova Systems",
     label: "一次面接",
     phase: "upcoming",
     ...extra,

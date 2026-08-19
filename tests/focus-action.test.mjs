@@ -26,7 +26,7 @@ test("an active manual focus wins and produces display-safe copy", () => {
         type: "todo",
         status: "進行中",
         priority: "high",
-        company: "Sharing Innovations",
+        company: "Nova Systems",
         category: "面接対策",
         action: "**一次面接準備**を始める [[回答品質復盤]]",
         due: "2026-08-02",

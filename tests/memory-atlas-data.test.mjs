@@ -140,22 +140,22 @@ test("日历：同じ会社・同じ日は信頼度が高い出所だけを残�
 
 test("日历：法人格・空白・下線だけが違う会社名は同じ予定として束ねる", () => {
   assert.equal(
-    calendarCompanyIdentity("株式会社Sharing Innovations"),
-    calendarCompanyIdentity("Sharing_Innovations"),
+    calendarCompanyIdentity("株式会社Nova Systems"),
+    calendarCompanyIdentity("Nova_Systems"),
   );
   const events = buildCalendarEvents([
-    note("20_求職/Sharing/2026-08-13_最終面接.md", "review", {
-      company: "Sharing_Innovations",
+    note("20_求職/Nova/2026-08-13_最終面接.md", "review", {
+      company: "Nova_Systems",
       date: "2026-08-13",
     }),
-    note("20_求職/Sharing/Sharing_Data.md", "job-case", {
-      company: "株式会社Sharing Innovations",
+    note("20_求職/Nova/Nova_Data.md", "job-case", {
+      company: "株式会社Nova Systems",
       next_event_at: "2026-08-13 13:30",
       next_action: "最終面接（対面）",
     }),
   ], NOW);
   assert.equal(events.length, 1);
-  assert.equal(events[0].company, "株式会社Sharing Innovations");
+  assert.equal(events[0].company, "株式会社Nova Systems");
   assert.equal(events[0].time, "13:30");
 });
 

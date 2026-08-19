@@ -15,8 +15,8 @@ const QUEUE_BODY = `
 | 発見日 | 媒体 | 会社 | 職種名 | 求人ID/URL | kw |
 |---|---|---|---|---|---|
 | 2026-07-22 | Indeed | ソニー株式会社 | データ基盤エンジニア（リーダークラス） | jp.indeed.com/viewjob?jk=7a02 | Hadoop |
-| 2026-07-22 | Green | 株式会社福岡銀行 | データエンジニア（データレイク＋分析基盤） | green-japan.com/job/188059 | Hadoop |
-| 2026-07-21 | RA | 株式会社リクルート | データスペシャリスト | PDT検索 kw=Hive | Hive |
+| 2026-07-22 | Green | 株式会社サンプル銀行 | データエンジニア（データレイク＋分析基盤） | green-japan.com/job/188059 | Hadoop |
+| 2026-07-21 | RA | 株式会社サンプルテック | データスペシャリスト | PDT検索 kw=Hive | Hive |
 `;
 
 test("parseQueue reads rows and skips the header and separator", () => {
@@ -33,8 +33,8 @@ test("parseQueue reads rows and skips the header and separator", () => {
 });
 
 test("queueCompanyKey absorbs 株式会社 position, width and bracket noise", () => {
-  assert.equal(queueCompanyKey("株式会社ＳＵＮＰＩＮ　ＪＡＰＡＮ"), queueCompanyKey("SUNPIN JAPAN株式会社"));
-  assert.equal(queueCompanyKey("株式会社キタムラ(カメラのキタムラ)"), queueCompanyKey("キタムラ"));
+  assert.equal(queueCompanyKey("株式会社ＡＬＰＨＡ　ＴＥＣＨ"), queueCompanyKey("ALPHA TECH株式会社"));
+  assert.equal(queueCompanyKey("株式会社ホシノ(ホシノカメラ)"), queueCompanyKey("ホシノ"));
 });
 
 test("queueRefKey pulls a stable posting id out of each site's URL form", () => {
@@ -82,7 +82,7 @@ test("a different posting at the same company stays pending", () => {
 test("rows without a posting id fall back to company and position matching", () => {
   const rows = parseQueue(QUEUE_BODY);
   const notes = [
-    { company: "株式会社リクルート", position: "データスペシャリスト（オープンポジション）", url: "", kind: "job-case" },
+    { company: "株式会社サンプルテック", position: "データスペシャリスト（オープンポジション）", url: "", kind: "job-case" },
   ];
   const reconciled = reconcileQueue(rows, notes);
   assert.equal(reconciled[2].reviewed, true, "RA検索行はIDが無いので会社＋職種で拾う");
@@ -92,7 +92,7 @@ test("queueStats counts pending rows and breaks them down by media", () => {
   const rows = parseQueue(QUEUE_BODY);
   const notes = [
     {
-      company: "株式会社福岡銀行",
+      company: "株式会社サンプル銀行",
       position: "データエンジニア（データレイク＋分析基盤）",
       url: "green-japan.com/job/188059",
       kind: "job-case",

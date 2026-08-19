@@ -41,10 +41,10 @@ test("wiki link extractor separates embeds and ignores examples in code/comments
 });
 
 test("company and skill normalization is deterministic but not fuzzy", () => {
-  assert.deepEqual(normalizeCompany("株式会社 Sharing_Innovations"), {
-    id: "company:sharinginnovations",
-    key: "sharinginnovations",
-    label: "Sharing Innovations",
+  assert.deepEqual(normalizeCompany("株式会社 Nova_Systems"), {
+    id: "company:novasystems",
+    key: "novasystems",
+    label: "Nova Systems",
   });
   assert.deepEqual(normalizeSkill("GCP"), {
     id: "skill:google-cloud",

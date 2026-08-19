@@ -52,3 +52,13 @@ next-env.d.ts
 
 # MediaPipe の wasm とモデル（計 34MB）。scripts/fetch-mediapipe.mjs が dev/build 前に用意する
 /public/mediapipe/
+
+# 本机私有作业规则（个人事实・账号・具体案件）。公开仓库只保留机制
+/AGENTS.local.md
+/CLAUDE.local.md
+
+# 求职操作 skill：含真实公司名・账号・选考结果。本机照常可用，不进公开仓库
+/.claude/skills/job-inbox-sync/
+/.claude/skills/job-posting-review/
+/.claude/skills/job-search-scan/
+/.agents/skills/job-inbox-sync

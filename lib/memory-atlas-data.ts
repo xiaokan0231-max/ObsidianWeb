@@ -438,7 +438,7 @@ export function calendarEventLabel(text: string) {
 
 /**
  * 日历の重複判定に使う会社 identity。
- * 表示名は出所ごとに `株式会社Sharing Innovations` / `Sharing_Innovations` のように
+ * 表示名は出所ごとに `株式会社Nova Systems` / `Nova_Systems` のように
  * 揺れるが、人間には同じ会社である。法人格・空白・区切りだけを落とし、語そのものは
  * 残すことで、見た目の揺れだけを吸収する。
  */
@@ -557,7 +557,7 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
       }
       if (!/(?:面接|面談|面试|面谈|カジュアル|セミナー|说明会)/.test(line)) return;
       // 「拒」は中文表記の拒否（书类拒 等）。拒否の叙述行に他社の日付が混ざり、
-      // 別会社の予定として出ていた実例がある（FPTコンサル に FPTソフトウェア の日付）。
+      // 別会社の予定として出ていた実例がある（NTXコンサル に NTXソフトウェア の日付）。
       if (!trusted && /(?:通知|リマインド|案内|お礼|準備|証拠|応募|スカウト|不採用|結果|拒)/.test(line)) return;
       const date = line.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
       if (date) addEvent(note, date, line, priority);

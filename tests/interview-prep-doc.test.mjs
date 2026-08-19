@@ -499,7 +499,7 @@ type: material
 ---
 # 自己紹介_音読台本
 
-【あなた】肖侃（しょうかん）と申します。
+【あなた】王明（おうめい）と申します。
 
 ![[当日フレーズ集#A. オンライン]]
 `,
@@ -534,7 +534,7 @@ type: material
     ),
   );
   const embeddedText = embedded.map(prepBlockText).join("\n");
-  assert.match(embeddedText, /肖侃/);
+  assert.match(embeddedText, /王明/);
   assert.match(embeddedText, /お世話/, "入れ子の埋め込みも本文として残る");
   // 本輪の手書き部分（埋め込みの前後どちらも）に印が付かない＝畳まれない
   const own = section.blocks.filter((block) => !block.embed).map(prepBlockText).join("\n");

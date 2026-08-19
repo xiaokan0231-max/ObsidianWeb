@@ -27,9 +27,9 @@ company: テスト社
     - 訳:: 你好。
     - 語:: こんにちは＝挨拶
 - **s002｜私**
-    - 正:: 肖侃と«申しいます»。
-    - 原:: 匠官と申しいます。
-    - 訳:: 我叫肖侃。
+    - 正:: 王明と«申しいます»。
+    - 原:: 皇明と申しいます。
+    - 訳:: 我叫王明。
     - 誤1:: «申しいます» → 申します ｜疑（転写か語形か）｜型:: 語形
 
 ## q01 志望理由
@@ -66,7 +66,7 @@ test("parseSeirikou: ブロック・文・フィールドを構造化する", ()
   assert.equal(s001.yaku, "你好。");
 
   const s002 = q00.sentences[1];
-  assert.equal(s002.gen, "匠官と申しいます。");
+  assert.equal(s002.gen, "皇明と申しいます。");
   assert.equal(s002.errors.length, 1);
   assert.equal(s002.errors[0].kind, "疑");
   assert.equal(s002.errors[0].span, "申しいます");

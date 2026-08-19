@@ -2,6 +2,7 @@
 // 刻意不引第三方依赖：这两个脚本要能在任何时候直接 node 跑起来。
 
 import { readdir, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   CHANNEL_REQUIRED_FROM,
@@ -12,7 +13,7 @@ import {
 import { JOB_CASE_TYPE, isOperationalPath } from "../lib/vault-boundary.mjs";
 
 export const VAULT =
-  process.env.OBSIDIAN_VAULT_PATH ?? "/Users/kanxiao/obsidian/xiaokan";
+  process.env.OBSIDIAN_VAULT_PATH ?? join(homedir(), "obsidian/xiaokan");
 
 export const JOB_CASE_ROOT = join(VAULT, "20_求職");
 export const LEDGER = join(VAULT, "20_求職/_不採用台帳_正.md");
@@ -25,7 +26,11 @@ export const TRENDS = join(VAULT, "20_求職/_素材/面接傾向_横断.md");
 /** CSV は iCloud 側にある（vault 外）。無い環境でも壊れないよう呼び出し側で握る。 */
 export const REJECTIONS_CSV =
   process.env.REJECTIONS_CSV ??
-  "/Users/kanxiao/Library/Mobile Documents/com~apple~CloudDocs/日本就职/面试/履歴書/分析/job_search_rejections.csv";
+  join(
+    homedir(),
+    "Library/Mobile Documents/com~apple~CloudDocs",
+    "日本就职/面试/履歴書/分析/job_search_rejections.csv",
+  );
 
 export { CHANNEL_REQUIRED_FROM, JOB_STATUSES, KNOWN_CHANNELS };
 

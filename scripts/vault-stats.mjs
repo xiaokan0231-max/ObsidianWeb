@@ -3,7 +3,7 @@
 // 数字・表・列挙を手で書かないための本体。`npm run vault:stats [--check]`
 //
 // 上流は3つ:
-//   1) job_search_rejections.csv（175社・2026-07-20 で凍結した過去分）
+//   1) job_search_rejections.csv（ある時点で凍結した過去分。件数は CSV が持つ）
 //   2) 20_求職 配下の type: job-case frontmatter（凍結後の応募はここが唯一の記録先）
 //   3) vault-lib.mjs の列挙定数（status / channel の正）
 // CSV に既にある会社は 2) 側を無視する（二重計上を避ける）。
@@ -54,8 +54,9 @@ const normalizeChannel = (value) => CHANNEL_ALIAS[value] ?? (value || "その他
 const isDocStage = (stage) => stage.includes("书类") || stage.includes("書類");
 
 // 上流が欠けたまま派生を書き換えない——欠測は 0 件ではなく「計算不能」。
-// CSV は凍結済み 175社＝台帳の数字のほぼ全部を占める。読めないまま続行すると
-// 「CSV 0 件」で集計し、181社を 10社で、2025年の月別推移ごと上書きしてしまう。
+// CSV は凍結済みの過去分＝台帳の数字のほぼ全部を占める。読めないまま続行すると
+// 「CSV 0 件」で集計し、全期間の合計を直近ノート分だけの数で、過去の月別推移ごと
+// 上書きしてしまう。
 // 2026-07-25 実際に踏んだ：iCloud のフルディスクアクセスが外れて読めなくなり、
 // 旧実装は warning だけ出して続行 → --check が「台帳がずれている、vault:stats を実行せよ」と
 // 破壊的な指示を出した（Stop hook 経由で AI に届く）。中止が正しい。

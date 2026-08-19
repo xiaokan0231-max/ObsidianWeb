@@ -25,7 +25,7 @@ if printf '%s' "$INPUT" | node -e '
   exit 0
 fi
 
-VAULT_DIR="${OBSIDIAN_VAULT_PATH:-/Users/kanxiao/obsidian/xiaokan}"
+VAULT_DIR="${OBSIDIAN_VAULT_PATH:-$HOME/obsidian/xiaokan}"
 [ -d "$VAULT_DIR" ] || exit 0
 
 OUTPUT="$(cd "$PROJECT_DIR" && {

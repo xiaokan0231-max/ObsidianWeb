@@ -34,7 +34,7 @@ vault 側が正本。各社の準備ノートは ![[…]] で埋め込むだけ�
 
 用法：
   python build_interview_html.py --input prep.md --output prep.html \
-      --title "MCT JAPAN 最終面接準備｜肖侃" \
+      --title "○○社 最終面接準備" \
       --subtitle "決裁者×本部長の2対1／対面・約1時間"
   # 埋め込み先の vault は $OBSIDIAN_VAULT_PATH（既定 ~/obsidian/xiaokan）／--vault で上書き
 """

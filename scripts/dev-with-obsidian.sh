@@ -2,7 +2,7 @@
 
 set -eu
 
-OBSIDIAN_VAULT_PATH="${OBSIDIAN_VAULT_PATH:-/Users/kanxiao/obsidian/xiaokan}"
+OBSIDIAN_VAULT_PATH="${OBSIDIAN_VAULT_PATH:-$HOME/obsidian/xiaokan}"
 OBSIDIAN_CONFIG_PATH="${OBSIDIAN_CONFIG_PATH:-$OBSIDIAN_VAULT_PATH/.obsidian/plugins/obsidian-local-rest-api/data.json}"
 
 if [ ! -f "$OBSIDIAN_CONFIG_PATH" ]; then

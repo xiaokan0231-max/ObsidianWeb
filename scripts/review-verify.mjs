@@ -7,6 +7,7 @@
 //   パスは絶対パスでも vault 相対（20_求職/...）でもよい。批注は省略時 _整理稿→_批注 で探す。
 
 import { readFile, access } from "node:fs/promises";
+import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import {
   computeStats,
@@ -16,7 +17,8 @@ import {
 } from "../lib/review.ts";
 import { reviewSiblingPath } from "../lib/review-paths.ts";
 
-const VAULT = process.env.OBSIDIAN_VAULT_PATH ?? "/Users/kanxiao/obsidian/xiaokan";
+const VAULT =
+  process.env.OBSIDIAN_VAULT_PATH ?? join(homedir(), "obsidian/xiaokan");
 
 function resolvePath(input) {
   return isAbsolute(input) ? input : join(VAULT, input);

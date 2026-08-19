@@ -152,7 +152,7 @@ test("daily flow fills the gap days so the line has no holes", () => {
 });
 
 test("pending never goes negative when the window has no resolutions", () => {
-  // 窓の外（181社の過去の不採用）を混ぜるとここがマイナスに振れる。混ぜていないことの確認。
+  // 窓の外（過去分）の不採用を混ぜるとここがマイナスに振れる。混ぜていないことの確認。
   const flow = buildDailyFlow([
     { appliedOn: "2026-07-20", resolvedOn: null },
     { appliedOn: "2026-07-21", resolvedOn: null },
@@ -177,15 +177,15 @@ test("the applied ledger falls back to the literal name when no match name is gi
   const note = [
     "| 応募日 | 会社名 | 照合名 | 職種名 | 経路 | 証拠 |",
     "|---|---|---|---|---|---|",
-    "| 2026-07-20 | 株式会社ＳＵＮＰＩＮ　ＪＡＰＡＮ |  | データPFエンジニア | Recruit Agent | K2026 |",
-    "| 2026-07-20 | ＦＰＴジャパンホールディングス株式会社 | FPTソフトウェアジャパン株式会社 | DE | 企業直投/ATS | 応募ID |",
+    "| 2026-07-20 | 株式会社ＡＬＰＨＡ　ＴＥＣＨ |  | データPFエンジニア | Recruit Agent | K2026 |",
+    "| 2026-07-20 | ＮＴＸジャパンホールディングス株式会社 | NTXソフトウェアジャパン株式会社 | DE | 企業直投/ATS | 応募ID |",
   ].join("\n");
   const rows = parseAppliedLedger(note);
 
   assert.equal(rows.length, 2);
-  assert.equal(rows[0].matchName, "株式会社ＳＵＮＰＩＮ　ＪＡＰＡＮ", "空なら会社名をそのまま使う");
+  assert.equal(rows[0].matchName, "株式会社ＡＬＰＨＡ　ＴＥＣＨ", "空なら会社名をそのまま使う");
   // 受理メールの社名が持株会社で、不採用台帳側の社名と違うケース
-  assert.equal(rows[1].matchName, "FPTソフトウェアジャパン株式会社");
+  assert.equal(rows[1].matchName, "NTXソフトウェアジャパン株式会社");
 });
 
 test("the applied ledger ignores the duplicate-receipt table and other tables", () => {
@@ -205,7 +205,7 @@ test("parseAppliedKnownFrom reads the boundary that decides unknown-vs-zero", ()
 });
 
 test("the small-sample threshold flags the channels that actually mislead", () => {
-  // 実データ：直投 8社・Green 10社 は注記が要る／RA 163社 は要らない。
+  // 分母が一桁・二桁の経路は注記が要る／三桁ある経路は要らない。
   assert.ok(8 < SMALL_SAMPLE_THRESHOLD);
   assert.ok(10 < SMALL_SAMPLE_THRESHOLD);
   assert.ok(163 >= SMALL_SAMPLE_THRESHOLD);

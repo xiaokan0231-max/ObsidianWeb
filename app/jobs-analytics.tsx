@@ -408,7 +408,7 @@ function JobsAnalytics({
    *
    * 🔴 選考が動いている案件（応募済〜内定）は評点に関わらず必ず残す。
    * 評点は「投げるかどうか」の判断軸であって、既に投げた案件を隠す軸ではない。
-   * 実例：面接中の Sharing Innovations は rating 未記入（＝0 点扱い）で、
+   * 実例：面接中の Nova Systems は rating 未記入（＝0 点扱い）で、
    * 素直に `rating >= 7` で絞ると**唯一の面接中案件が状態内訳から消えた**。
    * この例外があるおかげで、状態内訳の進行中の合計は上の KPI「進行中」と必ず一致する。
    */
@@ -760,7 +760,7 @@ function JobsAnalytics({
           </div>
 
           <div className="stat-row analytics-history-stats">
-            <Tile value={`${stats.rejections.total}`} label="不採用（累計）" note="凍結CSV 175 ＋ ノート" />
+            <Tile value={`${stats.rejections.total}`} label="不採用（累計）" note="凍結CSV ＋ ノート" />
             <Tile
               value={pct1(reachRate(stats.rejections.reachedInterview, stats.rejections.total))}
               label="面接到達率"
