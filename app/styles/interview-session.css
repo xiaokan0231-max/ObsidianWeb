@@ -98,7 +98,9 @@
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 22px;
   padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface-raised);
 }
+/* 導読を持たない準備稿ではボタンが2つになる。固定3列だと空きが出る */
 .session-mode-nav > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.session-mode-nav > div[data-modes="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .session-mode-nav button {
   min-width: 0; display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: baseline; gap: 7px;
   padding: 10px 13px; border: 1px solid var(--line); border-radius: var(--radius-control);
@@ -111,71 +113,95 @@
 .session-mode-nav button small { overflow: hidden; color: inherit; font-size: 10px; opacity: .68; text-overflow: ellipsis; white-space: nowrap; }
 .session-mode-nav > p { max-width: 22ch; margin: 0 10px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.55; }
 
-.session-confirm {
-  overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-feature); background: #fff;
-  box-shadow: var(--shadow-soft);
+/* 導読は「読み物」。当日その場で引く速査・冲刺と違い、探すための装飾は付けず、
+   1段組・1行 40字前後・行間広めの本文組みだけで出す。 */
+/* 🔴 overflow: hidden にしない。目次の position: sticky から見た「スクロール容器」に
+   なってしまい、吸着が丸ごと効かなくなる（実際に踏んだ）。clip はスクロール容器を
+   作らないので、角の切り落としだけを得られる。 */
+.session-brief {
+  overflow: clip; border: 1px solid var(--line); border-radius: var(--radius-feature);
+  background: #fff; box-shadow: var(--shadow-soft);
 }
-.session-confirm > header {
-  display: flex; align-items: center; justify-content: space-between; gap: 24px;
-  padding: 16px 22px; border-bottom: 1px solid var(--line); background: #f7f8f5;
+/* 読み幅は 64ch。ただの左寄せだと広い画面で右側が丸ごと死ぬので、
+   目次と本文を1組にして中央へ寄せる（目次は6節ある長文の実用でもある）。 */
+/* measure は px で持つ。ch は基準フォントサイズで揺れ、CJK では1行の字数が読めない
+   （620px ≒ 15px の全角40字＝中文の読みやすい行長） */
+/* measure は「上限」。残り幅がこれ未満なら残り幅いっぱいまで広がる。
+   960px ≒ 16.5px の全角58字：CJK の読みやすさの上限で、これ以上は行を追えなくなる。 */
+.session-brief {
+  --brief-rail: 200px; --brief-gap: 48px; --brief-measure: 960px; --brief-pad: 32px;
 }
-.session-confirm > header span, .session-confirm section > span {
-  display: block; color: var(--green); font-size: 9.5px; font-weight: 800; letter-spacing: .1em;
+.session-brief > header {
+  padding: 28px var(--brief-pad) 24px; border-bottom: 1px solid var(--line); background: #f7f8f5;
 }
-.session-confirm > header h2 { margin: 4px 0 0; font-size: 18px; }
-.session-confirm > header ul { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.session-confirm > header li {
-  padding: 4px 9px; border: 1px solid rgba(230,109,69,.38); border-radius: 999px;
-  background: #fff6f2; color: #8a3c1d; font-size: 10.5px;
+/* 目次は左端に置く（本人指示）。中央寄せにすると左にも余白ができて、
+   欄外索引ではなく「中途半端に浮いた列」に見える。
+   本文は残り幅を埋める。固定幅だと右が大きく空くため（本人指示）、
+   上限だけ決めて流動させる——超広幅で1行が伸びきるのを防ぐのが上限の役目。 */
+.session-brief > header > div { max-width: none; margin-inline: 0; }
+.session-brief-main { max-width: none; margin-inline: 0; }
+.session-brief > header span {
+  display: block; color: var(--green); font-size: 9.5px; font-weight: 800; letter-spacing: .12em;
 }
-.session-confirm-goal {
-  padding: 15px 22px; border-bottom: 1px solid var(--line); background: var(--ink); color: #f7f4ea;
+.session-brief > header h2 {
+  margin: 7px 0 0; font-family: "Songti SC", "Hiragino Mincho ProN", serif;
+  font-size: 29px; font-weight: 520; line-height: 1.35;
 }
-.session-confirm-goal p { margin: 0; font-size: 15px; line-height: 1.75; }
-.session-confirm-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, .8fr); }
-.session-confirm-script { padding: 22px 24px; border-right: 1px solid var(--line); }
-.session-confirm-script .prep-doc-note,
-.session-confirm-script .prep-doc-say,
-.session-confirm-script > p {
-  margin: 12px 0 0; padding: 14px 16px; border-left: 3px solid var(--green);
-  background: #eef4f0; font-size: 16px; line-height: 2.15;
+.session-brief > header p {
+  max-width: var(--brief-measure); margin: 10px 0 0;
+  color: var(--text-secondary); font-size: 13.5px; line-height: 1.8;
 }
-.session-confirm-side { display: grid; grid-template-rows: 1fr auto; }
-.session-confirm-side > section { padding: 20px 22px; }
-.session-confirm-side > section + section { border-top: 1px solid var(--line); }
-.session-confirm-side p { margin: 9px 0 0; font-size: 13.5px; line-height: 1.85; }
-.session-confirm-close { background: #fdf6e4; }
-.session-confirm ruby,
+.session-brief-main {
+  display: grid; grid-template-columns: var(--brief-rail) minmax(0, var(--brief-measure));
+  gap: var(--brief-gap); align-items: start; padding: 32px var(--brief-pad) 44px;
+  justify-content: start;
+}
+/* 目次は読みながら現在地を追う欄外索引。枠で囲わず、罫と字色だけで示す */
+.session-brief-index { position: sticky; top: 92px; }
+.session-brief-index > span {
+  display: block; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line);
+  color: var(--text-tertiary); font-size: 9px; font-weight: 800; letter-spacing: .16em;
+}
+.session-brief-index ol { margin: 0; padding: 0; list-style: none; }
+.session-brief-index a {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; align-items: baseline;
+  padding: 7px 0; color: var(--text-secondary); font-size: 12.5px; line-height: 1.55;
+  text-decoration: none; transition: color .16s ease;
+}
+.session-brief-index a > b {
+  color: var(--line-strong); font: 700 9.5px/1.7 var(--font-geist-mono), monospace;
+  transition: color .16s ease;
+}
+.session-brief-index a:hover { color: var(--ink); }
+.session-brief-index a.active { color: var(--ink); font-weight: 650; }
+.session-brief-index a.active > b { color: var(--orange); }
+/* 読み物としての本文組み。見出し・段落・引用だけを整え、他は素のまま流す */
+.session-brief-body > * { max-width: var(--brief-measure); }
+/* 導読の中の見出しは `#### 小标题`（親が `### 本轮导读` なので一段深い）＝ h4 で出る */
+.session-brief-body h3,
+.session-brief-body h4 {
+  margin: 38px 0 14px; padding-top: 22px; border-top: 1px solid var(--line);
+  font-size: 18.5px; font-weight: 700; letter-spacing: .01em;
+}
+.session-brief-body > :is(h3, h4):first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+/* 本文は16.5px。長文を通読する画面なので、当日の速査より一段大きく組む
+   （720px ≒ 全角40字強で、字を大きくしても1行の字数は読みやすい範囲に収まる） */
+.session-brief-body p { margin: 0 0 17px; font-size: 16.5px; line-height: 1.95; }
+.session-brief-body strong { font-weight: 700; background: linear-gradient(transparent 62%, #fbe6c8 62%); }
+.session-brief-body li { margin-bottom: 8px; font-size: 16.5px; line-height: 1.9; }
+.session-brief-body blockquote,
+.session-brief-body .prep-doc-note {
+  margin: 0 0 18px; padding: 14px 19px; border-left: 3px solid var(--gold);
+  background: #fdf6e4; font-size: 15.5px; line-height: 1.9;
+}
+.session-brief-body a { color: var(--interactive); text-underline-offset: 3px; }
+.session-brief ruby,
 .session-sprint ruby { ruby-position: over; }
-.session-confirm rt,
+.session-brief rt,
 .session-sprint rt { color: var(--green); font-size: 9px; font-weight: 400; }
 
-/* 30秒確認では復盤の摘要をカード内に再掲する。上部を畳み、1画面に台詞まで入れる。 */
-.session-view.mode-confirm { gap: 9px; }
-.session-view.mode-confirm > .prep-weakness { display: none; }
-.session-view.mode-confirm .session-hero { gap: 10px 24px; padding: 14px 20px 11px; }
-.session-view.mode-confirm .session-hero h1 { margin-top: 5px; font-size: 30px; }
-.session-view.mode-confirm .session-context-meta {
-  grid-template-columns: 1fr 1.35fr; padding-top: 9px;
-}
-.session-view.mode-confirm .session-context-meta > div { padding-inline: 12px; }
-.session-view.mode-confirm .session-context-meta > div:nth-child(2),
-.session-view.mode-confirm .session-context-meta > div:nth-child(4) { display: none; }
-.session-view.mode-confirm .session-context-meta > div:nth-child(3) { border-left: 1px solid var(--line); }
-.session-view.mode-confirm .session-mode-nav { padding: 5px; }
-.session-view.mode-confirm .session-mode-nav button { padding-block: 8px; }
-.session-view.mode-confirm .session-confirm > header { padding: 11px 18px; }
-.session-view.mode-confirm .session-confirm > header h2 { font-size: 16px; }
-.session-view.mode-confirm .session-confirm-goal { padding: 10px 18px; }
-.session-view.mode-confirm .session-confirm-goal p { font-size: 13px; line-height: 1.55; }
-.session-view.mode-confirm .session-confirm-script { padding: 14px 18px; }
-.session-view.mode-confirm .session-confirm-script .prep-doc-note,
-.session-view.mode-confirm .session-confirm-script .prep-doc-say,
-.session-view.mode-confirm .session-confirm-script > p {
-  margin-top: 8px; padding: 9px 12px; font-size: 15px; line-height: 1.95;
-}
-.session-view.mode-confirm .session-confirm-side > section { padding: 13px 16px; }
-.session-view.mode-confirm .session-confirm-side p { margin-top: 6px; font-size: 12.5px; line-height: 1.65; }
+/* 導読を読んでいる間は、当日用の警告帯を出さない（読む妨げにしかならない） */
+.session-view.mode-brief > .prep-weakness { display: none; }
 
 .session-sprint {
   overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-feature); background: #fff; box-shadow: var(--shadow-soft);
@@ -1422,6 +1448,21 @@ button.prep-doc-ref.card::after { content: " →"; font-size: 0.85em; }
 .expression-unavailable p { margin: 0; color: var(--muted); font-size: 11px; }
 .expression-unavailable { min-height: 320px; }
 
+/* 目次を出す余地が無くなったら本文だけにする。読み幅は最後まで守る */
+@media (max-width: 1080px) {
+  .session-brief-main { grid-template-columns: minmax(0, var(--brief-measure)); }
+  .session-brief-index { display: none; }
+  .session-brief > header > div { max-width: var(--brief-measure); }
+  .session-brief-main { max-width: calc(var(--brief-measure) + var(--brief-pad) * 2); }
+}
+
+/* 目次が消える幅では本文だけが残る。左寄せのままだと右が大きく空くので、
+   その時だけ中央へ戻す（目次という左の錨が無くなるため） */
+@media (max-width: 1080px) {
+  .session-brief > header > div,
+  .session-brief-main { margin-inline: auto; }
+}
+
 @media (max-width: 1180px) {
   .expression-course-shell { grid-template-columns: 190px minmax(0, 1fr); }
   .expression-course-header { grid-template-columns: 1fr; }
@@ -1478,3 +1519,14 @@ button.prep-doc-ref.card::after { content: " →"; font-size: 0.85em; }
   .expression-complete-group { flex-wrap: wrap; }
   .expression-complete-group > button:first-child { flex: 1; }
 }
+.interview-route-state .prep-empty h2 { margin-top: 24px; font-size: 20px; }
+.interview-route-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.interview-route-actions button {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.interview-route-actions button:focus-visible { outline: 2px solid var(--interactive); outline-offset: 3px; }

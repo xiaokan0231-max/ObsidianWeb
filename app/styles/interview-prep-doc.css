@@ -95,22 +95,27 @@
 .prep-doc-search button {
   border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 11px; padding: 0;
 }
+/* 子項目は「モジュールの中身」であって第二のタブ列ではない。上の pill と同じ強さで
+   描くと 2 本のナビが競り合い、どちらが現在地か分からなくなる——1段下げて、
+   選択中は淡い塗りだけで示す（橙の下線は上の緑 pill と色が競っていた）。 */
 .prep-doc-section-tabs {
-  grid-column: 1 / -1; display: flex; align-items: center; gap: 7px;
-  margin-top: -3px; padding: 7px 10px 0; border-top: 1px solid var(--line); background: var(--paper);
-}
-.prep-doc-section-tabs > span {
-  margin-right: 5px; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .1em;
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 2px;
+  margin: 2px 0 0 13px; padding: 0; background: transparent;
 }
 .prep-doc-section-tabs button {
-  position: relative; padding: 5px 11px; border: 0; border-bottom: 2px solid transparent;
-  background: transparent; color: var(--muted); font-family: inherit; font-size: 10.5px; cursor: pointer;
+  position: relative; padding: 5px 10px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--text-tertiary); font-family: inherit; font-size: 11px; cursor: pointer;
+  transition: background-color .16s ease, color .16s ease;
 }
-.prep-doc-section-tabs button:hover { color: var(--green); }
-.prep-doc-section-tabs button.active { border-bottom-color: var(--orange); color: var(--ink); font-weight: 700; }
+.prep-doc-section-tabs button:hover { background: var(--surface-soft); color: var(--ink); }
+.prep-doc-section-tabs button.active { background: var(--paper-deep); color: var(--ink); font-weight: 650; }
 .prep-doc-section-tabs button > i {
-  position: absolute; top: 1px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--orange);
+  position: absolute; top: 2px; right: 2px; width: 5px; height: 5px; border-radius: 50%; background: var(--orange);
 }
+/* 既定の focus ring は offset 3px。小さなタブに当たると外周に大きな四角が浮き、
+   壊れて見える（実際に指摘を受けた）。ここだけ控えに寄せる */
+.prep-doc-section-tabs button:focus-visible,
+.prep-doc-nav button:focus-visible { outline-offset: 1px; }
 .prep-doc-hits {
   display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
   padding: 9px 12px; background: #fdf6e4; border-left: 3px solid var(--gold); font-size: 11px;
@@ -391,31 +396,35 @@
 }
 
 /* 過去の復盤から出す「次に気をつけること」。数字は lib/interview-trends.mjs が唯一の計算元。 */
+/* 畳んだ状態は「本番前に一瞬だけ見る帯」。橙を要素ごとに使うと、3つの再発タグが
+   全部警告色になって行全体が騒がしくなる——アクセントは左の罫と点だけに絞る。 */
 .prep-weakness {
   border: 1px solid var(--line); border-left: 3px solid var(--orange); background: var(--surface);
 }
 .prep-weakness > summary {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
-  padding: 11px 16px; cursor: pointer; list-style: none;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 9px 16px; cursor: pointer; list-style: none;
 }
 .prep-weakness > summary::-webkit-details-marker { display: none; }
 .prep-weakness > summary::before {
-  content: "▸"; color: var(--muted); font-size: 10px;
+  content: "▸"; color: var(--text-tertiary); font-size: 10px;
 }
 .prep-weakness[open] > summary::before { content: "▾"; }
-.prep-weakness > summary > span { font-size: 12.5px; font-weight: 500; }
-.prep-weakness > summary > em { color: var(--muted); font-size: 11px; font-style: normal; }
-.prep-weakness > summary > em b { color: var(--orange); }
+.prep-weakness > summary > span { font-size: 12px; font-weight: 650; }
+.prep-weakness > summary > em { color: var(--text-secondary); font-size: 11.5px; font-style: normal; }
+.prep-weakness > summary > em b { color: var(--interactive); font-weight: 650; }
 .prep-weakness-peek { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .prep-weakness-peek li {
-  display: flex; align-items: center; gap: 5px;
-  padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px;
-  background: #fff; color: var(--muted); font-size: 10.5px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px;
+  background: #fff; color: var(--text-secondary); font-size: 11px;
 }
-.prep-weakness-peek li.hot { border-color: var(--orange); color: #8a3c1d; }
+/* 再発は塗りラベルではなく点で示す。語は行末の凡例に一度だけ置く */
+.prep-weakness-peek li.hot { border-color: #e9b9a5; color: var(--ink); }
 .prep-weakness-peek li i {
-  padding: 0 4px; background: var(--orange); color: #fff; font-size: 9px; font-style: normal; border-radius: 2px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--orange);
 }
+.prep-weakness-legend { margin-left: auto; color: var(--text-tertiary); font-size: 10.5px; }
 .prep-weakness-body { padding: 0 16px 14px 34px; }
 .prep-weakness-body > p { margin: 0 0 10px; color: var(--muted); font-size: 11px; }
 .prep-weakness-body ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
@@ -423,11 +432,12 @@
   display: flex; align-items: baseline; gap: 8px;
   padding: 7px 12px; border: 1px solid var(--line); background: #fff;
 }
-.prep-weakness-body li.hot { border-color: var(--orange); background: #fdf1ec; }
+.prep-weakness-body li.hot { border-color: #e9b9a5; background: #fdf5f1; }
 .prep-weakness-body li strong { font-size: 12px; }
-.prep-weakness-body li span { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.prep-weakness-body li span { color: var(--text-tertiary); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+/* 展開側も塗りラベルをやめる。行ごとに橙のブロックが並ぶと数字が読めない */
 .prep-weakness-body li i {
-  padding: 1px 6px; background: var(--orange); color: #fff; font-size: 9px; font-style: normal;
+  color: var(--interactive); font-size: 10.5px; font-style: normal; font-weight: 650;
 }
 @media (max-width: 780px) {
   .prep-weakness { grid-template-columns: minmax(0, 1fr); gap: 14px; }

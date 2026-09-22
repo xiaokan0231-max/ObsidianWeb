@@ -5,57 +5,6 @@
    页面可以有不同任务密度，但同级标题、统计、卡片和操作必须长得像同一套产品。
    ============================================================ */
 
-.page-head {
-  display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(500px, .9fr);
-  align-items: end;
-  gap: 48px;
-  margin: 0;
-  padding: 4px 0 24px;
-  border-bottom: 1px solid var(--line);
-}
-
-.page-head-simple {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.page-head .eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--green);
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .16em;
-}
-
-.page-head .eyebrow i {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  display: block;
-  background: var(--orange);
-  border-radius: 50%;
-}
-
-.page-head h1 {
-  margin: 8px 0 7px;
-  font-family: "Songti SC", "Noto Serif CJK SC", serif;
-  font-size: var(--page-title-size);
-  font-weight: 500;
-  line-height: 1.08;
-  letter-spacing: -.045em;
-}
-
-.page-head p {
-  max-width: 680px;
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--page-copy-size);
-  line-height: 1.65;
-}
-
 .page-stat-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -117,14 +66,6 @@
 .module-stat-strip.focus-language-glance dd,
 .module-stat-strip.jobs-stat strong {
   font-size: 22px;
-}
-
-.module-control-row {
-  display: flex;
-  min-height: 42px;
-  align-items: center;
-  justify-content: flex-start;
-  margin-bottom: 10px;
 }
 
 /* 复盘摘要是业务数据，不再借深色“大标题卡”承载。 */
@@ -270,12 +211,6 @@
 }
 
 @media (max-width: 1050px) {
-  .page-head {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: start;
-    gap: 22px;
-  }
-
   .page-stat-strip {
     width: min(680px, 100%);
   }
@@ -286,11 +221,6 @@
     --page-title-size: 38px;
     --page-copy-size: 11px;
     --radius-feature: 13px;
-  }
-
-  .page-head {
-    gap: 18px;
-    padding-bottom: 21px;
   }
 
   .page-stat-strip {
@@ -306,15 +236,6 @@
   .page-stat-strip > div:nth-child(-n+2),
   .page-stat-strip > span:nth-child(-n+2) {
     border-bottom: 1px solid var(--line);
-  }
-
-  .module-control-row {
-    min-height: 0;
-    justify-content: flex-start;
-  }
-
-  .module-control-row .group-filters {
-    justify-content: flex-start;
   }
 
   .review-view .rv-agg {
@@ -615,16 +536,6 @@
 .todo-card[data-semantic] {
   border-left-color: var(--semantic-tone);
   background: linear-gradient(90deg, var(--semantic-wash), transparent 34%), var(--surface);
-}
-
-.calendar-event[data-semantic] {
-  border-left-color: var(--semantic-tone);
-  background: var(--semantic-wash);
-}
-
-.calendar-event[data-semantic="fact"] {
-  opacity: .58;
-  filter: saturate(.45);
 }
 
 .agenda-list > button[data-semantic] {

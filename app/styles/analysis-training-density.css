@@ -1,0 +1,177 @@
+/* 摘要不依赖相邻区块顺序，移动到页面顶部后仍保持紧凑。 */
+.analytics > .analytics-head-glance {
+  gap: 8px;
+  margin: 0;
+}
+.analytics > .analytics-head-glance > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 0;
+  padding: 14px 16px;
+  border-radius: var(--radius-control);
+  box-shadow: none;
+}
+.analytics > .analytics-head-glance dt { align-self: center; font-size: 13px; white-space: normal; }
+.analytics > .analytics-head-glance dd { align-self: center; gap: 4px; margin: 0; }
+.analytics > .analytics-head-glance dd strong { font-size: 26px; line-height: 1.1; }
+.analytics > .analytics-head-glance dd small { font-size: 12px; }
+.focus-language-glance dt { font-size: 12px; line-height: 1.4; white-space: normal; }
+
+/* 先展示汇总，按需展开操作；不同长度的内容不互相撑高。 */
+.analytics > .analytics-command-disclosure {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.analytics-command-disclosure > summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 16px 20px;
+  list-style: none;
+  cursor: pointer;
+}
+.analytics-command-disclosure > summary::-webkit-details-marker { display: none; }
+.analytics-command-disclosure > summary strong { font-size: 14px; }
+.analytics-command-disclosure > summary span { color: var(--muted); font-size: 12px; }
+.analytics-command-disclosure > summary i { margin-left: auto; font-style: normal; }
+.analytics-command-disclosure > summary i::before { content: "＋"; }
+.analytics-command-disclosure[open] > summary i::before { content: "−"; }
+.analytics-command-disclosure[open] > summary { border-bottom: 1px solid var(--line); }
+.analytics-command-disclosure > summary:focus-visible,
+.language-operation-help > summary:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.analytics-command-disclosure > header { justify-content: flex-end; margin: 0; padding: 8px 20px; }
+.analytics-command-disclosure > header button { font-size: 12px; }
+.analytics-command-disclosure > .chart-empty { padding: 0 20px 16px; }
+.analytics-command-disclosure .analytics-command-grid { border: 0; border-radius: 0 0 12px 12px; box-shadow: none; align-items: start; }
+.analytics-command-disclosure .analytics-priority-card { min-height: 0; grid-template-rows: none; padding: 16px 20px; }
+.analytics-command-disclosure .analytics-priority-card > strong { margin-top: 12px; font-size: 22px; overflow-wrap: anywhere; }
+.analytics-command-disclosure .analytics-priority-action { margin-top: 12px; }
+.analytics-command-disclosure .analytics-priority-card > small,
+.analytics-command-disclosure .analytics-priority-card dt,
+.analytics-command-disclosure .analytics-priority-topline b,
+.analytics-command-disclosure .analytics-priority-topline i,
+.analytics-command-disclosure .analytics-priority-action span,
+.analytics-command-disclosure .analytics-priority-open,
+.analytics-command-disclosure .analytics-watch-list small,
+.analytics-command-disclosure .analytics-watch-row i { font-size: 12px; }
+.analytics-command-disclosure .analytics-watch-row { grid-template-columns: 46px minmax(0, 1fr) minmax(0, .9fr) auto; }
+.analytics-command-disclosure .analytics-watch-row > span:nth-child(2) strong,
+.analytics-command-disclosure .analytics-watch-row > span:nth-child(2) small,
+.analytics-command-disclosure .analytics-watch-row > span:nth-child(3) small {
+  display: -webkit-box;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.analytics-command-disclosure .analytics-watch-row > span:nth-child(2) strong { font-size: 14px; }
+.analytics .analytics-hand > summary small,
+.analytics .analytics-history > summary small { font-size: 12px; }
+
+.focus-language-view { padding-bottom: 32px; }
+.focus-language-resume { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.focus-language-resume > span { color: var(--muted); font-size: 12px; }
+.focus-language-resume button { min-height: 36px; padding: 6px 12px; border: 1px solid var(--green); border-radius: 6px; background: transparent; color: var(--green); font-size: 13px; font-weight: 650; cursor: pointer; }
+.focus-language-resume button:hover { background: var(--paper); }
+.focus-language-resume button:disabled { opacity: .5; cursor: wait; }
+.focus-language-now { gap: 16px; padding: 16px 20px; grid-template-columns: auto minmax(0, 1fr) auto auto; }
+.focus-language-now-copy h2 { margin-top: 0; }
+.focus-language-now-copy p,
+.focus-language-now-steps span,
+.focus-language-size span,
+.focus-language-now-action { font-size: 12px; }
+.focus-language-now-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.focus-language-now-steps span { white-space: normal; }
+.focus-language-now-mark { width: 46px; height: 46px; font-size: 22px; }
+.focus-language-two-column { gap: 16px; align-items: start; }
+.focus-language-two-column > div,
+.focus-profile-summary > div,
+.focus-stage-grid article,
+.focus-language-empty { padding: 16px 20px; }
+.focus-language-two-column h2,
+.focus-language-panel-page > header h2 { margin: 0 0 12px; font-size: 22px; }
+.focus-language-panel-page { padding: 0; }
+.focus-stage-grid article { min-height: 0; }
+.focus-issue-compact strong { font-size: 14px; }
+.focus-issue-compact span,
+.focus-profile-summary span,
+.focus-stage-grid small,
+.focus-language-stale span,
+.focus-review-warning code,
+.focus-language-table .head,
+.focus-language-table article > small,
+.focus-language-table article span,
+.focus-language-table article > b,
+.focus-issue-map summary span,
+.focus-issue-map summary b,
+.focus-issue-map article small { font-size: 12px; }
+.focus-language-table article p { font-size: 14px; }
+.focus-language-table article > *,
+.focus-issue-map summary > *,
+.focus-issue-map article > * { min-width: 0; overflow-wrap: anywhere; }
+.focus-language-table .head,
+.focus-language-table article { grid-template-columns: 100px minmax(0, .8fr) minmax(0, 1.2fr) 96px; gap: 14px; }
+.focus-library-filters button { font-size: 12px; }
+.focus-language-tabs { flex-wrap: wrap; }
+.focus-language-tabs button { min-width: 0; padding: 10px 16px; }
+.language-operation-help > summary { color: var(--green); font-size: 12px; font-weight: 650; cursor: pointer; }
+.language-operation-help > summary + p { margin-top: 10px; }
+.language-operation-help strong,
+.language-operation-help p,
+.language-operation-help small { font-size: 12px; line-height: 1.6; }
+.language-input-guide.language-operation-help { padding: 12px 16px; }
+
+@media (max-width: 1200px) and (min-width: 701px) {
+  .focus-language-now { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .focus-language-now-steps,
+  .focus-language-now .focus-language-size { grid-column: 2; }
+  .focus-language-now-action { grid-column: 3; grid-row: 1 / 3; }
+  .focus-stage-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1080px) {
+  .analytics-command-disclosure .analytics-command-grid { grid-template-columns: 1fr; }
+  .analytics-command-disclosure .analytics-priority-card { border-right: 0; border-bottom: 1px solid var(--line); }
+}
+
+@media (max-width: 900px) {
+  .focus-language-table .head { display: none; }
+  .focus-language-table article { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+  .focus-language-table article > div,
+  .focus-language-table article > p { grid-column: 1 / -1; }
+  .focus-language-table article > b { grid-column: 2; grid-row: 1; }
+  .focus-issue-map summary { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 16px; }
+  .focus-issue-map summary strong { grid-column: 1 / -1; grid-row: 2; }
+  .focus-issue-map article { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .focus-issue-map article > span { display: none; }
+}
+
+@media (max-width: 700px) {
+  .analytics-command-disclosure > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; padding: 16px; gap: 6px; }
+  .analytics-command-disclosure > summary span { grid-column: 1; }
+  .analytics-command-disclosure > summary i { grid-column: 2; grid-row: 1 / 3; }
+  .analytics-command-disclosure .analytics-watch-row { grid-template-columns: 42px minmax(0, 1fr) auto; }
+  .focus-language-now { grid-template-columns: auto minmax(0, 1fr); padding: 16px; }
+  .focus-language-now-steps,
+  .focus-language-now .focus-language-size,
+  .focus-language-now-action { grid-column: 1 / -1; grid-row: auto; }
+  .focus-language-tabs button { flex: 1 1 auto; padding: 10px 8px; }
+  .focus-language-two-column > div,
+  .focus-profile-summary > div,
+  .focus-stage-grid article,
+  .focus-language-empty { padding: 16px; }
+}
+
+@media (max-width: 580px) {
+  .analytics > .analytics-head-glance > div { padding: 12px; }
+  .focus-language-glance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .focus-language-glance > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 10px; align-items: center; }
+  .focus-language-glance > div:nth-child(2) { border-right: 0; }
+  .focus-language-glance > div:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+}

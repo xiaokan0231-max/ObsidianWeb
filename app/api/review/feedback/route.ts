@@ -8,7 +8,7 @@ import { isReviewNotePath, reviewSiblingPath } from "@/lib/review-paths";
 import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
 import { upsertAppendNote } from "@/lib/server/note-append";
 import { readNote, readNoteOrNull } from "@/lib/server/obsidian";
-import { createSerialQueue } from "@/lib/server/serial-queue";
+import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
 import { tokyoParts, yamlScalar } from "@/lib/dojo/utils";
 
 type Body = {
@@ -19,7 +19,7 @@ type Body = {
 };
 
 const KINDS = new Set<ReviewFeedbackKind>(["agree", "disagree", "context"]);
-const inFeedbackQueue = createSerialQueue();
+const inFeedbackQueue = createKeyedSerialQueue();
 
 function todayInTokyo() {
   return tokyoParts().date;
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
       throw new Error("深度复盘中找不到这个问题。");
     }
 
-    const outcome = await inFeedbackQueue(() =>
+    const outcome = await inFeedbackQueue(feedbackPath, () =>
       upsertAppendNote({
         path: feedbackPath,
         plan: (existing) => {

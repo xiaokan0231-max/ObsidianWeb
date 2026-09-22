@@ -61,4 +61,5 @@ next-env.d.ts
 /.claude/skills/job-inbox-sync/
 /.claude/skills/job-posting-review/
 /.claude/skills/job-search-scan/
+/.claude/skills/ra-batch-apply/
 /.agents/skills/job-inbox-sync

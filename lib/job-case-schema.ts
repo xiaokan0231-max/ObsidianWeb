@@ -36,6 +36,35 @@ export type JobCaseVerification = "verified" | "warned" | "unchecked";
 
 export const WAITING_FOR_VALUES = ["self", "company", "agent", "platform"];
 
+export const FIT_BANDS = ["A", "B", "C", "D"];
+export const HARD_GATE_VALUES = ["pass", "hold", "reject"];
+export const PRIMARY_COHORT_VALUES = [
+  "modernization_governance",
+  "data_ai_platform",
+  "modern_data_platform",
+  "unclassified",
+];
+export const EXACT_EVIDENCE_VALUES = ["present", "absent"];
+export const ROLE_FAMILY_VALUES = [
+  "senior_data_platform",
+  "data_platform_lead",
+  "data_ai_platform_lead",
+  "modernization_lead",
+  "first_data_engineer",
+  "data_heavy_backend",
+  "data_infra_sre",
+  "other",
+];
+export const CLIENT_FRONTLOAD_VALUES = ["low", "medium", "high", "unknown"];
+export const SALARY_RANGE_CLASS_VALUES = [
+  "high_only",
+  "high_possible",
+  "mid_only",
+  "below_floor",
+  "undisclosed",
+];
+export const ACCESS_STATE_VALUES = ["company_selected", "direct", "company_received", "not_sent", "agent_only"];
+
 /**
  * Web の詳細カードが読む節の名前。**lib/jobs.ts はここを import する**ので、
  * 見出しを変えるならこの1箇所だけ直せばよい（以前は書く側と読む側に別々に書いてあった）。
@@ -83,6 +112,38 @@ export const JOB_CASE_FIELDS: Record<string, FieldRule> = {
   follow_up_at: { date: true, requiresField: "waiting_for" },
   next_event_at: { dateTime: true },
   rating: { intRange: [0, 10] },
+  rating_version: { enum: ["v2"] },
+  document_gap_waived: { enum: ["yes", "no"] },
+  fit_score_100: { intRange: [0, 100] },
+  fit_rating_raw: { intRange: [0, 10] },
+  fit_band_raw: { enum: FIT_BANDS },
+  fit_band_final: { enum: FIT_BANDS },
+  fit_band: { enum: FIT_BANDS },
+  hard_gate: { enum: HARD_GATE_VALUES },
+  salary_feasibility: { enum: HARD_GATE_VALUES },
+  gate_employment_visa: { enum: HARD_GATE_VALUES },
+  gate_salary: { enum: HARD_GATE_VALUES },
+  gate_english: { enum: HARD_GATE_VALUES },
+  gate_role_center: { enum: HARD_GATE_VALUES },
+  gate_japanese_client: { enum: HARD_GATE_VALUES },
+  gate_original: { enum: HARD_GATE_VALUES },
+  score_technical_value: { intRange: [0, 25] },
+  score_document_match: { intRange: [0, 10] },
+  score_transferability: { intRange: [0, 15] },
+  score_org_legibility: { intRange: [0, 20] },
+  score_client_deployability: { intRange: [0, 20] },
+  score_role_coherence: { intRange: [0, 10] },
+  primary_cohort: { enum: PRIMARY_COHORT_VALUES },
+  exact_evidence: { enum: EXACT_EVIDENCE_VALUES },
+  role_family: { enum: ROLE_FAMILY_VALUES },
+  client_frontload_current: { enum: CLIENT_FRONTLOAD_VALUES },
+  salary_min: { intRange: [0, 10000] },
+  salary_max: { intRange: [0, 10000] },
+  salary_range_class: { enum: SALARY_RANGE_CLASS_VALUES },
+  access_level: { intRange: [0, 3] },
+  access_state: { enum: ACCESS_STATE_VALUES },
+  fit_score_current: { intRange: [0, 100] },
+  fit_revision_on: { date: true },
 };
 
 /**
@@ -136,6 +197,175 @@ export function validateJobCaseFrontmatter(frontmatter: Frontmatter): string[] {
     }
     if (rule.requiresField && !fm[rule.requiresField]) {
       problems.push(`${key} があるなら ${rule.requiresField} も必要`);
+    }
+  }
+
+  if (String(fm.rating_version ?? "") === "v2") {
+    const requiredV2 = [
+      "fit_score_100",
+      "fit_rating_raw",
+      "fit_band_raw",
+      "fit_band_final",
+      "fit_band",
+      "cap_reasons",
+      "document_gap_waived",
+      "application_decision",
+      "hard_gate",
+      "salary_feasibility",
+      "gate_employment_visa",
+      "gate_salary",
+      "gate_english",
+      "gate_role_center",
+      "gate_japanese_client",
+      "gate_original",
+      "score_technical_value",
+      "score_document_match",
+      "score_transferability",
+      "score_org_legibility",
+      "score_client_deployability",
+      "score_role_coherence",
+      "primary_cohort",
+      "problem_families",
+      "exact_evidence",
+      "role_family",
+      "client_frontload_current",
+      "salary_range_class",
+      "access_level",
+      "access_state",
+      "fit_score_current",
+      "fit_revision_on",
+    ];
+    for (const key of requiredV2) {
+      const value = fm[key];
+      if (value === undefined || value === null || value === "") {
+        problems.push(`rating_version v2 なら \`${key}\` が要る`);
+      }
+    }
+
+    const scoreKeys = [
+      "score_technical_value",
+      "score_document_match",
+      "score_transferability",
+      "score_org_legibility",
+      "score_client_deployability",
+      "score_role_coherence",
+    ];
+    const scores = scoreKeys.map((key) => Number(fm[key]));
+    const fitScore = Number(fm.fit_score_100);
+    if (scores.every(Number.isFinite) && Number.isFinite(fitScore)) {
+      const total = scores.reduce((sum, score) => sum + score, 0);
+      if (total !== fitScore) {
+        problems.push(`v2の6軸合計 ${total} と fit_score_100 ${fitScore} が一致しない`);
+      }
+      const rawRating = Number(fm.fit_rating_raw);
+      if (!Number.isFinite(rawRating) || Math.abs(rawRating - fitScore / 10) > 0.0001) {
+        problems.push(`fit_rating_raw は fit_score_100 ÷ 10 である必要がある`);
+      }
+      const rawBand = fitScore >= 80 ? "A" : fitScore >= 70 ? "B" : fitScore >= 50 ? "C" : "D";
+      if (String(fm.fit_band_raw ?? "") !== rawBand) {
+        problems.push(`fit_score_100 ${fitScore} の fit_band_raw は ${rawBand}`);
+      }
+    }
+
+    if (String(fm.fit_band ?? "") !== String(fm.fit_band_final ?? "")) {
+      problems.push(`fit_band は fit_band_final と同じ値にする`);
+    }
+    const bandCaps: Record<string, number> = { A: 10, B: 7.9, C: 6.9, D: 4.9 };
+    const bandRank: Record<string, number> = { A: 3, B: 2, C: 1, D: 0 };
+    const finalBand = String(fm.fit_band_final ?? "");
+    const rawRating = Number(fm.fit_rating_raw);
+    const rating = Number(fm.rating);
+    const cap = bandCaps[finalBand];
+    if (Number.isFinite(rawRating) && Number.isFinite(rating) && cap !== undefined) {
+      const expected = Math.min(rawRating, cap);
+      if (Math.abs(rating - expected) > 0.0001) {
+        problems.push(`rating ${rating} は raw ${rawRating} と ${finalBand} capから ${expected} にする`);
+      }
+    }
+
+    const technicalValue = Number(fm.score_technical_value);
+    const documentMatch = Number(fm.score_document_match);
+    const clientDeployability = Number(fm.score_client_deployability);
+    const capReasons = String(fm.cap_reasons ?? "");
+    let maximumBand = "A";
+    if (Number.isFinite(technicalValue) && technicalValue < 15) maximumBand = "C";
+    if (
+      Number.isFinite(documentMatch) &&
+      documentMatch <= 3 &&
+      String(fm.document_gap_waived ?? "") !== "yes"
+    ) {
+      maximumBand = "C";
+    }
+    if (Number.isFinite(clientDeployability) && clientDeployability >= 1 && clientDeployability <= 5) {
+      maximumBand = "C";
+    }
+    if (maximumBand === "A" && capReasons.includes("org_legibility_unknown")) maximumBand = "B";
+    if (finalBand in bandRank && bandRank[finalBand] > bandRank[maximumBand]) {
+      problems.push(`v2の軸・cap_reasonsから fit_band_final は最大${maximumBand}`);
+    }
+
+    const gateKeys = [
+      "gate_employment_visa",
+      "gate_salary",
+      "gate_english",
+      "gate_role_center",
+      "gate_japanese_client",
+      "gate_original",
+    ];
+    const gateRank: Record<string, number> = { pass: 0, hold: 1, reject: 2 };
+    const gates = gateKeys.map((key) => String(fm[key] ?? ""));
+    if (gates.every((gate) => gate in gateRank)) {
+      const worstRank = Math.max(...gates.map((gate) => gateRank[gate]));
+      const expected = Object.keys(gateRank).find((gate) => gateRank[gate] === worstRank);
+      if (String(fm.hard_gate ?? "") !== expected) {
+        problems.push(`hard_gate は各Gateの最悪値 ${expected} にする`);
+      }
+    }
+    if (String(fm.salary_feasibility ?? "") !== String(fm.gate_salary ?? "")) {
+      problems.push(`salary_feasibility は gate_salary と同じ値にする`);
+    }
+    if (String(fm.hard_gate ?? "") === "reject") {
+      if (finalBand !== "D" || !Number.isFinite(rating) || rating > 4.9) {
+        problems.push(`hard_gate reject なら fit_band_final は D、rating は4.9以下にする`);
+      }
+    }
+
+    const accessLevelByState: Record<string, number> = {
+      company_selected: 3,
+      direct: 2,
+      company_received: 1,
+      not_sent: 0,
+      agent_only: 0,
+    };
+    const accessState = String(fm.access_state ?? "");
+    if (accessState in accessLevelByState && Number(fm.access_level) !== accessLevelByState[accessState]) {
+      problems.push(`access_state ${accessState} の access_level は ${accessLevelByState[accessState]}`);
+    }
+
+    const salaryMin = Number(fm.salary_min);
+    const salaryMax = Number(fm.salary_max);
+    const salaryClass = String(fm.salary_range_class ?? "");
+    const hasSalaryMin = fm.salary_min !== undefined && fm.salary_min !== null && fm.salary_min !== "";
+    const hasSalaryMax = fm.salary_max !== undefined && fm.salary_max !== null && fm.salary_max !== "";
+    if (salaryClass === "undisclosed") {
+      if (hasSalaryMin || hasSalaryMax) {
+        problems.push(`salary_range_class が undisclosed なら salary_min/max は省略する`);
+      }
+    } else if (!hasSalaryMin || !hasSalaryMax) {
+      problems.push(`salary_range_class ${salaryClass} なら salary_min/max が要る`);
+    } else if (Number.isFinite(salaryMin) && Number.isFinite(salaryMax)) {
+      if (salaryMin > salaryMax) problems.push(`salary_min は salary_max 以下にする`);
+      const expectedClass =
+        salaryMax < 700
+          ? "below_floor"
+          : salaryMin >= 1000
+            ? "high_only"
+            : salaryMax >= 1000
+              ? "high_possible"
+              : "mid_only";
+      if (salaryClass !== expectedClass) {
+        problems.push(`salary_min/maxから salary_range_class は ${expectedClass}`);
+      }
     }
   }
 

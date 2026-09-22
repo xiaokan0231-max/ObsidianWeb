@@ -41,6 +41,8 @@ test("queueRefKey pulls a stable posting id out of each site's URL form", () => 
   assert.equal(queueRefKey("jp.indeed.com/viewjob?jk=7A02C827B5F44E6D"), "indeed:7a02c827b5f44e6d");
   assert.equal(queueRefKey("green-japan.com/job/188059"), "green:188059");
   assert.equal(queueRefKey("https://www.green-japan.com/company/6789/job/188059"), "green:188059");
+  assert.equal(queueRefKey("https://findy-code.io/companies/1/jobs/abc123XYZ"), "findy:abc123XYZ");
+  assert.equal(queueRefKey("https://www.bizreach.jp/jobs/123456/"), "bizreach:123456");
   assert.equal(queueRefKey("https://www.r-agent.com/viewjob/jk4b9daf9a67f13b3d/"), "ra:4b9daf9a67f13b3d");
   assert.equal(queueRefKey("PDT検索 kw=Spark"), null, "IDが無い行は null");
   assert.equal(queueRefKey(""), null);

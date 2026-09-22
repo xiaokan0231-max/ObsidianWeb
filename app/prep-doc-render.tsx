@@ -107,6 +107,7 @@ function renderBlock(
   index: number,
   refs?: PrepRefHandlers,
   numbers?: Map<number, number>,
+  idPrefix = "prep",
 ) {
   switch (block.kind) {
     case "heading": {
@@ -118,8 +119,8 @@ function renderBlock(
           <i className="prep-h-no" aria-hidden="true">{String(no).padStart(2, "0")}</i>
         ) : null;
       return block.level === 3
-        ? <h3 key={index} id={`prep-h-${index}`}>{badge}<Inlines nodes={block.inline} refs={refs} /></h3>
-        : <h4 key={index} id={`prep-h-${index}`}><Inlines nodes={block.inline} refs={refs} /></h4>;
+        ? <h3 key={index} id={`${idPrefix}-h-${index}`}>{badge}<Inlines nodes={block.inline} refs={refs} /></h3>
+        : <h4 key={index} id={`${idPrefix}-h-${index}`}><Inlines nodes={block.inline} refs={refs} /></h4>;
     }
     case "say":
       return (
@@ -277,6 +278,7 @@ export function Blocks({
   refs,
   collapseEmbeds,
   headingNumbers,
+  idPrefix = "prep",
 }: {
   blocks: PrepBlock[];
   refs?: PrepRefHandlers;
@@ -287,9 +289,10 @@ export function Blocks({
   collapseEmbeds?: boolean;
   /** 「この節の構成」目次と同じ採番（ブロック下標→番号）。渡した画面だけ見出しに番号が付く。 */
   headingNumbers?: Map<number, number>;
+  idPrefix?: string;
 }) {
   if (!collapseEmbeds) {
-    return <>{blocks.map((block, index) => renderBlock(block, index, refs, headingNumbers))}</>;
+    return <>{blocks.map((block, index) => <div className="reader-block-anchor" data-reading-anchor={`${idPrefix}-block-${index}`} key={index}>{renderBlock(block, index, refs, headingNumbers, idPrefix)}</div>)}</>;
   }
   return (
     <>

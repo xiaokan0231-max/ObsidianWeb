@@ -68,6 +68,7 @@ export const HAND_CONNECTIONS: readonly (readonly [number, number])[];
 
 export function handPoseFromLandmarks(
   landmarks: readonly HandLandmarkPoint[],
+  options?: { aspect?: number },
 ): HandPose | null;
 
 export function nextGrabState(
@@ -94,8 +95,40 @@ export function updatePinchInteraction(
   previous: PinchInteraction | null,
   pinchRatio: number,
   now: number,
-  options?: number | (PinchThresholds & { holdMs?: number }),
+  options?: number | (PinchThresholds & { holdMs?: number; selectFloorMs?: number }),
 ): PinchInteraction;
+
+export type PinchEnvelope = {
+  min: number | null;
+  max: number | null;
+  updatedAt: number | null;
+  closeThreshold: number | null;
+  releaseThreshold: number | null;
+  confident: boolean;
+};
+
+export const PINCH_ENVELOPE_DEFAULTS: Readonly<{
+  closeAt: number;
+  releaseAt: number;
+  minSpan: number;
+  relaxPerSecond: number;
+  minCloseAt: number;
+  maxCloseAt: number;
+}>;
+
+export function updatePinchEnvelope(
+  previous: PinchEnvelope | null,
+  pinchRatio: number,
+  now: number,
+  options?: Partial<{
+    closeAt: number;
+    releaseAt: number;
+    minSpan: number;
+    relaxPerSecond: number;
+    minCloseAt: number;
+    maxCloseAt: number;
+  }>,
+): PinchEnvelope;
 
 export function derivePinchThresholds(
   openSamples: readonly number[],

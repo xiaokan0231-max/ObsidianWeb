@@ -1,0 +1,131 @@
+/* 工具栏按可用宽度换行；月历本身的横向滚动保持在卡片内。 */
+.calendar-toolbar {
+  min-height: 0;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  padding: 16px 20px;
+}
+
+.calendar-toolbar h2 {
+  flex: 0 0 auto;
+  font-size: 22px;
+}
+
+.calendar-toolbar .calendar-legend {
+  flex: 1 1 auto;
+  gap: 8px 12px;
+  padding: 0;
+  border: 0;
+}
+
+.calendar-toolbar .calendar-legend-item {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.calendar-toolbar .calendar-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.calendar-actions button,
+.calendar-weekday,
+.calendar-day-number time,
+.calendar-day-number span,
+.calendar-event span,
+.calendar-more {
+  font-size: 12px;
+}
+
+.calendar-event strong {
+  display: -webkit-box;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.calendar-day:last-child,
+.calendar-day:nth-last-child(-n + 7) {
+  border-bottom: 0;
+}
+
+@media (max-width: 820px) {
+  .calendar-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 14px 16px;
+  }
+
+  .calendar-toolbar h2 { font-size: 20px; }
+
+  .calendar-toolbar .calendar-legend {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .calendar-toolbar .calendar-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .calendar-actions button { min-height: 40px; }
+}
+
+.calendar-agenda .agenda-copy > strong {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.calendar-agenda .agenda-copy small,
+.calendar-agenda .agenda-main time span,
+.calendar-agenda .agenda-source,
+.calendar-agenda .agenda-empty { font-size: 12px; }
+
+/* 去向始终可见，触屏和键盘访问也能在打开前知道会进入哪一场面试。 */
+.calendar-view .calendar-interview-destination {
+  display: block;
+  margin-top: 3px;
+  color: var(--commitment-tone);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.calendar-agenda .agenda-source {
+  min-height: 32px;
+  margin: 0 9px 8px 61px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.calendar-agenda .agenda-source:hover { color: var(--commitment-tone); }
+
+.calendar-view .calendar-event:focus-visible,
+.calendar-agenda .agenda-main:focus-visible,
+.calendar-agenda .agenda-source:focus-visible {
+  outline: 2px solid var(--commitment-tone);
+  outline-offset: -2px;
+}
+
+@media (max-width: 820px) {
+  .calendar-agenda .agenda-source { min-height: 40px; }
+}

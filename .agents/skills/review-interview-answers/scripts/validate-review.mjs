@@ -273,6 +273,11 @@ async function main() {
     fail("strengths and weaknesses must be string arrays");
   }
   if (typeof review.summaryZh !== "string" || !review.summaryZh.trim()) fail("summaryZh is empty");
+  if (review.overviewZh === undefined) {
+    warnings.push("overviewZh is missing: legacy review has no holistic introduction");
+  } else if (typeof review.overviewZh !== "string" || !review.overviewZh.trim()) {
+    fail("overviewZh must be a non-empty string when present");
+  }
   if (blockIds.size === 0) warnings.push("review contains no blocks");
 
   const result = {

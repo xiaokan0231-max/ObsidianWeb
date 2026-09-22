@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildPrepKillQuestions,
+  extractPrepBriefing,
   extractPrepKillMap,
   extractPrepTalentMap,
   findInterviewPrepDocs,
@@ -41,6 +42,10 @@ import {
   type SharedAssetTarget,
 } from "@/lib/interview-shared-assets";
 import { Blocks, Inlines } from "./prep-doc-render";
+import PrepMaterialReader from "./prep-material-reader";
+import InterviewSessionV2 from "./interview-session-v2";
+import { buildCompanyOverviews, resolveCompanyOverview, type CompanyOverview } from "@/lib/company-overview";
+import CompanyOverviewContent, { COMPANY_COMPARE_LIMIT, CompanyCompare, CompanyCompareButton, CompanyCompareSelector, CompanyCompareTray, toggleCompanyComparison } from "./company-overview";
 import { copySelectionWithoutRuby } from "./ruby-copy";
 import { isTypingTarget, PrepSearchBox, useSlashFocus } from "./prep-search";
 
@@ -84,7 +89,7 @@ function hasInterviewDate(date: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date);
 }
 
-type SessionMode = "confirm" | "sprint" | "deep";
+type SessionMode = "brief" | "sprint" | "deep";
 
 const SESSION_MODES: {
   id: SessionMode;
@@ -92,7 +97,7 @@ const SESSION_MODES: {
   label: string;
   description: string;
 }[] = [
-  { id: "confirm", duration: "30秒", label: "确认", description: "只看开场、定位与收尾" },
+  { id: "brief", duration: "通读", label: "导读", description: "这场面谈的来龙去脉" },
   { id: "sprint", duration: "5分钟", label: "冲刺", description: "按临场顺序快速热身" },
   { id: "deep", duration: "完整", label: "深度准备", description: "公司、问答与全部材料" },
 ];
@@ -120,11 +125,6 @@ function prepSubsection(section: PrepSection | null, title: RegExp) {
   return section.blocks.slice(start + 1, end < 0 ? undefined : end);
 }
 
-function prepBlockAfterLead(blocks: PrepBlock[], label: RegExp) {
-  const index = blocks.findIndex((block) => label.test(prepBlockText(block)));
-  return index >= 0 ? blocks.slice(index + 1, index + 2) : [];
-}
-
 function prepTableValue(blocks: PrepBlock[], label: string) {
   for (const block of blocks) {
     if (block.kind !== "table") continue;
@@ -134,14 +134,17 @@ function prepTableValue(blocks: PrepBlock[], label: string) {
   return "";
 }
 
-function defaultSessionMode(doc: InterviewPrepDoc, today: string): SessionMode {
-  if (!hasInterviewDate(doc.date)) return "deep";
+/**
+ * 当日〜前日は「開く道具」、それより前は「まず一度通して読む」。
+ * 導読を持たない回（他社の準備稿）は従来どおり深度準備から入る。
+ */
+function defaultSessionMode(doc: InterviewPrepDoc, today: string, hasBriefing: boolean): SessionMode {
+  if (!hasInterviewDate(doc.date)) return hasBriefing ? "brief" : "deep";
   const interviewDay = new Date(`${doc.date}T00:00:00`).getTime();
   const currentDay = new Date(`${today}T00:00:00`).getTime();
   const days = Math.round((interviewDay - currentDay) / 86_400_000);
-  if (days <= 0) return "confirm";
   if (days <= 1) return "sprint";
-  return "deep";
+  return hasBriefing ? "brief" : "deep";
 }
 
 function buildDigest(notes: Note[]) {
@@ -320,58 +323,91 @@ function SessionQuickActions({
   );
 }
 
-function SessionConfirm({
-  doc,
-  digest,
+/**
+ * 導読＝この面接がどういう局面なのかを、面談の数日前に一度通して読むための本文。
+ * 速査や想定問答と違って**その場で引く道具ではない**ので、探すための装飾（チップ・
+ * 折り畳み・目次）は付けず、読みやすい一段組みの文章としてだけ出す。
+ */
+function SessionBrief({
+  briefing,
+  meta,
 }: {
-  doc: InterviewPrepDoc;
-  digest: ReturnType<typeof buildDigest>;
+  briefing: PrepSection;
+  meta: { company: string; round: string };
 }) {
-  const quick = prepSectionByNumber(doc, 1);
-  const live = prepSubsection(quick, LIVE_FRAME_RE);
-  const goal = prepSubsection(quick, /今日のゴール/);
-  const position = prepSubsection(quick, /一文の定位/);
-  const opening = prepBlockAfterLead(live, /^開幕/);
-  const closing = prepBlockAfterLead(live, /^最後/);
-  const fallback = quick?.blocks.slice(0, 5) ?? [];
+  // 見出しの id は Blocks が付ける `prep-h-<ブロック下標>`。同じ配列を渡すので下標は一致する。
+  const headings = useMemo(
+    () =>
+      briefing.blocks
+        .map((block, index) => ({ block, index }))
+        .filter(({ block }) => block.kind === "heading")
+        .map(({ block, index }) => ({
+          id: `prep-h-${index}`,
+          label: block.kind === "heading" ? prepInlineText(block.inline).trim() : "",
+        })),
+    [briefing.blocks],
+  );
+  const [active, setActive] = useState("");
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  // 長い読み物なので現在地が分からないと目次が飾りになる（冲刺と同じ扱い）
+  useEffect(() => {
+    const root = bodyRef.current;
+    if (!root || headings.length === 0) return;
+    const targets = headings
+      .map((heading) => root.querySelector<HTMLElement>(`#${CSS.escape(heading.id)}`))
+      .filter((node): node is HTMLElement => node !== null);
+    if (targets.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (visible?.target.id) setActive(visible.target.id);
+      },
+      { rootMargin: "-10% 0px -72% 0px", threshold: 0 },
+    );
+    targets.forEach((node) => observer.observe(node));
+    return () => observer.disconnect();
+  }, [headings]);
 
   return (
-    <section className="session-confirm" aria-label="30秒确认">
+    <article className="session-brief" aria-label="导读">
       <header>
         <div>
-          <span>本场唯一目标</span>
-          <h2>现在只确认，不再学习新内容</h2>
+          <span>面谈前通读一次</span>
+          <h2>{meta.company}／{meta.round}</h2>
+          <p>
+            读完这一篇，就能整体明白这场面谈是怎么回事：对方是谁、这家公司和这个岗位是什么、
+            我的定位在哪、以及我自己最容易栽的地方。具体话术在「冲刺」和「深度准备」里。
+          </p>
         </div>
-        {digest && digest.tags.some((tag) => tag.repeated) && (
-          <ul>
-            {digest.tags.filter((tag) => tag.repeated).slice(0, 3).map((tag) => (
-              <li key={tag.tag}>{tag.label}</li>
-            ))}
-          </ul>
-        )}
       </header>
-
-      <div className="session-confirm-goal">
-        {goal.length > 0 ? <Blocks blocks={goal} /> : <Blocks blocks={fallback.slice(0, 2)} />}
-      </div>
-
-      <div className="session-confirm-grid">
-        <section className="session-confirm-script">
-          <span>开场 · 直接朗读</span>
-          {opening.length > 0 ? <Blocks blocks={opening} /> : <Blocks blocks={fallback} />}
-        </section>
-        <div className="session-confirm-side">
-          <section>
-            <span>一句定位</span>
-            {position.length > 0 ? <Blocks blocks={position} /> : <p>先说结论，再用一个事实支撑。</p>}
-          </section>
-          <section className="session-confirm-close">
-            <span>结束 · 必须说</span>
-            {closing.length > 0 ? <Blocks blocks={closing} /> : <p>明确表达长期加入和贡献的意愿。</p>}
-          </section>
+      <div className="session-brief-main">
+        {headings.length > 1 && (
+          <nav className="session-brief-index" aria-label="导读目录">
+            <span>目录</span>
+            <ol>
+              {headings.map((heading, index) => (
+                <li key={heading.id}>
+                  <a
+                    href={`#${heading.id}`}
+                    className={heading.id === active ? "active" : ""}
+                    aria-current={heading.id === active ? "true" : undefined}
+                  >
+                    <b>{String(index + 1).padStart(2, "0")}</b>
+                    <span>{heading.label}</span>
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        )}
+        <div className="session-brief-body" ref={bodyRef}>
+          <Blocks blocks={briefing.blocks} />
         </div>
       </div>
-    </section>
+    </article>
   );
 }
 
@@ -524,6 +560,7 @@ function DocReader({
 }) {
   const [active, setActive] = useState(0);
   const [query, setQuery] = useState("");
+  const [readerOpen, setReaderOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLElement>(null);
   // §6 の「殺傷質問7題・当日の型」と「人材育成」は、当日その一枚を直接開きたいので
@@ -753,10 +790,25 @@ function DocReader({
           placeholder="全章搜索（/ 聚焦）"
           label="在这份准备文档里搜索"
         />
+        <button type="button" className="reader-entry" onClick={() => setReaderOpen(true)}>
+          全文阅读
+        </button>
+        {readerOpen && (
+          <PrepMaterialReader
+            documentKey={`prep-document:${doc.note.path}`}
+            title={doc.title}
+            sections={doc.sections}
+            notice={broken.length > 0 ? `${broken.length} 处引用未解析，相关内容可能不完整。` : undefined}
+            onClose={() => setReaderOpen(false)}
+            onOpenCard={onOpenCard}
+            onOpenWiki={onOpenWiki}
+          />
+        )}
 
+        {/* 子項目の行に群名は出さない。上のモジュール pill が既に示しており、
+            同じ語が2行に並ぶと、どれが選択中の子項目かが読み取りにくくなる */}
         {currentGroup?.sectionIndexes.length > 1 && (
           <nav className="prep-doc-section-tabs" aria-label={`${currentGroup.label}の子項目`}>
-            <span>{currentGroup.label}</span>
             {currentGroup.sectionIndexes.map((sectionIndex) => {
               const section = sections[sectionIndex];
               return (
@@ -798,7 +850,7 @@ function DocReader({
       )}
 
       {/* 振り仮名は読むための飾りで、貼り付け先には要らない。ここを外すと
-          「王明しょう・かん」のようにコピー結果へ読みが混ざる——当日いちばん多く
+          「王明おう・めい」のようにコピー結果へ読みが混ざる——当日いちばん多く
           選択される画面なので、他の2画面と同じく rt/rp を落として渡す。 */}
       <div className="prep-doc-main">
         {!isKillMap && needsSubnav && subheads.length >= 3 && (
@@ -985,6 +1037,9 @@ function InterviewSession({
   onOpenAsset,
   initialCompany = "",
   initialPath = "",
+  initialContextPath = "",
+  forceOverviewOnly = false,
+  onContextChange,
   onSelectionChange,
 }: {
   notes: Note[];
@@ -994,6 +1049,10 @@ function InterviewSession({
   onOpenAsset: (asset: SharedAssetTarget) => void;
   initialCompany?: string;
   initialPath?: string;
+  initialContextPath?: string;
+  /** 日历已判定本场无准备稿时，只显示公司画像，不借用同案件其他轮次。 */
+  forceOverviewOnly?: boolean;
+  onContextChange?: (company: string, contextPath: string, prepPath: string) => void;
   onSelectionChange?: (company: string, prepPath: string) => void;
   /** 「今日」は殻が持つ。memo 越しなので中で求めると、日付を跨いでも昨日のまま凍る
    *  ——当日かどうかで既定モード（确认/冲刺/深度）が変わる画面なので、ここが一番効く。 */
@@ -1002,39 +1061,100 @@ function InterviewSession({
   const docs = useMemo(() => findInterviewPrepDocs(notes), [notes]);
   const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
   const digest = useMemo(() => buildDigest(notes), [notes]);
-  // 既定で開くのは「次の確定面接 → 日程調整中の次回 → 直近の終了回」。
-  const [selectedPath, setSelectedPath] = useState<string | null>(() => {
-    const exact = initialPath
-      ? docs.find((doc) => doc.note.path === initialPath) ?? null
-      : null;
+  const contexts = useMemo(() => buildCompanyOverviews(notes), [notes]);
+  const docContexts = useMemo(() => new Map(docs.map((doc) => [doc.note.path, resolveCompanyOverview(notes, doc.note)])), [docs, notes]);
+  const [selection, setSelection] = useState<{ prepPath: string | null; contextPath: string | null }>(() => {
+    const exact = initialPath ? docs.find((doc) => doc.note.path === initialPath) ?? null : null;
+    if (exact) return { prepPath: exact.note.path, contextPath: docContexts.get(exact.note.path)?.note.path ?? null };
+    const context = initialContextPath ? resolveCompanyOverview(notes, initialContextPath) : null;
+    if (context) {
+      if (forceOverviewOnly) return { prepPath: null, contextPath: context.note.path };
+      const next = selectRelevantInterviewPrepDoc(docs.filter((doc) => docContexts.get(doc.note.path)?.key === context.key), today);
+      return { prepPath: next?.note.path ?? null, contextPath: context.note.path };
+    }
+    // 指定了正本却无法解析时不能打开另一家公司的准备稿。
+    if (initialContextPath || initialPath) return { prepPath: null, contextPath: initialContextPath || null };
     const companyKey = calendarCompanyIdentity(initialCompany);
-    const companySeries = companyKey
-      ? series.find((item) => calendarCompanyIdentity(item.company) === companyKey) ?? null
-      : null;
-    return (exact ??
-      (companySeries ? selectRelevantInterviewPrepDoc(companySeries.rounds, today) : null))
-      ?.note.path ?? null;
+    const candidates = companyKey ? docs.filter((doc) => calendarCompanyIdentity(doc.company) === companyKey) : docs;
+    const next = selectRelevantInterviewPrepDoc(candidates, today);
+    const companyContext = !next && companyKey ? contexts.find((item) => calendarCompanyIdentity(item.company) === companyKey) : null;
+    return { prepPath: next?.note.path ?? null, contextPath: next ? docContexts.get(next.note.path)?.note.path ?? null : companyContext?.note.path ?? null };
   });
-  const selected =
-    docs.find((doc) => doc.note.path === selectedPath) ??
-    selectRelevantInterviewPrepDoc(docs, today);
+  const selected = docs.find((doc) => doc.note.path === selection.prepPath) ?? null;
+  const context = selected ? docContexts.get(selected.note.path) ?? null : contexts.find((item) => item.note.path === selection.contextPath) ?? null;
+  const [legacyPrepPath, setLegacyPrepPath] = useState<string | null>(null);
+  const [comparePaths, setComparePaths] = useState<string[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [compareSelectorOpen, setCompareSelectorOpen] = useState(false);
+  const compared = comparePaths.flatMap((path) => { const item = contexts.find((candidate) => candidate.note.path === path); return item ? [item] : []; });
   const selectDoc = (doc: InterviewPrepDoc) => {
-    setSelectedPath(doc.note.path);
-    onSelectionChange?.(doc.company, doc.note.path);
+    const nextContext = docContexts.get(doc.note.path) ?? null;
+    setSelection({ prepPath: doc.note.path, contextPath: nextContext?.note.path ?? null });
+    setLegacyPrepPath(null);
+    if (nextContext && onContextChange) onContextChange(doc.company, nextContext.note.path, doc.note.path);
+    else onSelectionChange?.(doc.company, doc.note.path);
   };
+  const selectContext = (nextContext: CompanyOverview) => {
+    const calendarContext = forceOverviewOnly && initialContextPath ? resolveCompanyOverview(notes, initialContextPath) : null;
+    const next = calendarContext?.key === nextContext.key ? null : selectRelevantInterviewPrepDoc(docs.filter((doc) => docContexts.get(doc.note.path)?.key === nextContext.key), today);
+    setSelection({ prepPath: next?.note.path ?? null, contextPath: nextContext.note.path });
+    setLegacyPrepPath(null);
+    onContextChange?.(nextContext.company, nextContext.note.path, next?.note.path ?? "");
+  };
+  const removeCompare = (path: string) => {
+    setComparePaths((current) => current.filter((item) => item !== path));
+    if (compared.length <= 2) setCompareOpen(false);
+  };
+  const openCompareSelector = () => {
+    setCompareOpen(false);
+    if (!compared.length && context) setComparePaths([context.note.path]);
+    setCompareSelectorOpen(true);
+  };
+  const companyAction = <div className="co-header-actions"><button type="button" className="co-compare-entry" onClick={openCompareSelector}>公司对比<span aria-hidden="true">{compared.length ? ` ${compared.length} / 3` : " ↗"}</span></button><CompanyCompareButton context={context} compared={!!context && compared.some((item) => item.key === context.key)} full={compared.length >= COMPANY_COMPARE_LIMIT} onToggle={() => {
+    if (!context) return;
+    if (compared.some((item) => item.key === context.key)) removeCompare(context.note.path);
+    else setComparePaths((current) => toggleCompanyComparison(current, context.note.path));
+  }} /></div>;
+  const contextPicker = <label className="co-context-picker">公司／岗位或面谈<select aria-label="切换公司、案件或面谈" value={context ? `context:${context.note.path}` : selectedSeriesKey()} onChange={(event) => {
+    const value = event.target.value;
+    if (value.startsWith("context:")) { const next = contexts.find((item) => item.note.path === value.slice(8)); if (next) selectContext(next); }
+    else { const item = series.find((item) => `series:${item.key}` === value); const next = item && selectRelevantInterviewPrepDoc(item.rounds, today); if (next) selectDoc(next); }
+  }}>
+    {!context && !selected && <option value="">请选择公司／岗位或面谈</option>}
+    {[...contexts].sort((left, right) => Number(!!right.assessment) - Number(!!left.assessment) || left.company.localeCompare(right.company)).map((item) => <option key={item.key} value={`context:${item.note.path}`}>{item.company}｜{item.title}{item.assessment ? " · 已评估" : ""}</option>)}
+    {series.filter((item) => !item.rounds.some((doc) => docContexts.get(doc.note.path))).map((item) => <option key={item.key} value={`series:${item.key}`}>{item.company}｜{item.caseLink || item.meetingLink || "历史准备"}（{item.rounds.length}轮）</option>)}
+  </select></label>;
+  function selectedSeriesKey() { const item = selected ? interviewPrepSeriesForDoc(series, selected) : null; return item ? `series:${item.key}` : ""; }
+  const companyContent = <CompanyOverviewContent context={context} historical={!!selected && ["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today))} onOpenWiki={onOpenWiki} />;
+  const compareUI = <><CompanyCompareTray contexts={compared} onRemove={removeCompare} onClear={() => { setComparePaths([]); setCompareOpen(false); }} onOpen={() => setCompareOpen(true)} />
+    {compareSelectorOpen && <CompanyCompareSelector contexts={contexts} selected={compared} onToggle={(path) => setComparePaths((current) => toggleCompanyComparison(current, path))} onClose={() => setCompareSelectorOpen(false)} onCompare={() => { setCompareSelectorOpen(false); setCompareOpen(true); }} />}
+    {compareOpen && compared.length >= 2 && <CompanyCompare contexts={compared} onClose={() => setCompareOpen(false)} onEdit={openCompareSelector} onRemove={removeCompare} onDetail={(item) => { setCompareOpen(false); selectContext(item); window.scrollTo({ top: 0, behavior: "instant" }); }} onOpenWiki={(target) => { setCompareOpen(false); onOpenWiki(target); }} />}</>;
+  // 導読を持たない準備稿ではモード自体を出さない。空のモードに入れると
+  // 「壊れている」と読めてしまうし、既存の他社ノートは全部それに当たる。
+  const briefing = useMemo(
+    () => (selected ? extractPrepBriefing(selected.sections) : null),
+    [selected],
+  );
+  const availableModes = useMemo(
+    () => SESSION_MODES.filter((mode) => mode.id !== "brief" || briefing !== null),
+    [briefing],
+  );
   const [sessionModeChoice, setSessionModeChoice] = useState<{
     path: string | null;
     mode: SessionMode;
   }>(() => ({
     path: selected?.note.path ?? null,
-    mode: selected ? defaultSessionMode(selected, today) : "deep",
+    mode: selected ? defaultSessionMode(selected, today, briefing !== null) : "deep",
   }));
-  const sessionMode =
+  const chosenMode =
     selected && sessionModeChoice.path === selected.note.path
       ? sessionModeChoice.mode
       : selected
-        ? defaultSessionMode(selected, today)
+        ? defaultSessionMode(selected, today, briefing !== null)
         : "deep";
+  // 導読の無い回へ切り替えた直後も、選択が "brief" のまま残ると本文が消える
+  const sessionMode: SessionMode =
+    availableModes.some((mode) => mode.id === chosenMode) ? chosenMode : "deep";
   const selectedSeries = selected
     ? interviewPrepSeriesForDoc(series, selected)
     : null;
@@ -1072,14 +1192,19 @@ function InterviewSession({
             {" "}平均 {digest.dimensionAverages[digest.weakestDimension]}
           </em>
         )}
+        {/* 「最近一场仍出现」を各チップに繰り返すと、同じ橙のラベルが3つ並んで
+            他の情報を潰す。印は点だけにして、意味は行末に一度だけ置く */}
         <ul className="prep-weakness-peek">
           {digest.tags.filter((tag) => tag.repeated).slice(0, 3).map((tag) => (
             <li key={tag.tag} className={tag.inLatest ? "hot" : ""}>
+              {tag.inLatest && <i aria-hidden="true" />}
               {tag.label}
-              {tag.inLatest && <i>最近一场仍出现</i>}
             </li>
           ))}
         </ul>
+        {digest.tags.some((tag) => tag.repeated && tag.inLatest) && (
+          <small className="prep-weakness-legend">● 最近一场仍出现</small>
+        )}
       </summary>
       <div className="prep-weakness-body">
         <p>根据 {digest.interviews.length} 场回答质量复盘统计；正本来自 vault 的「面接傾向_横断」。</p>
@@ -1096,35 +1221,21 @@ function InterviewSession({
     </details>
   );
 
-  if (docs.length === 0) {
-    return (
-      <div className="prep-view">
-        <header className="prep-hero">
-          <div>
-            <p className="eyebrow"><i /> THIS INTERVIEW · 単場の準備</p>
-            <h1>本场面试</h1>
-            <p>某一家公司、某一场面试的准备文档。共通の話術は「面试准备」の回答库が正本で、ここには**その回に固有の内容**だけが載る。</p>
-          </div>
-        </header>
-        {digestBand}
-        <div className="prep-empty">
-          <span>NO PREP DOC YET</span>
-          <h1>还没有单场面试的准备文档</h1>
-          <p>
-            这里读取 vault 里 <code>type: interview-prep</code> 的笔记
-            （每轮一份，例如 <code>20_求職/&lt;会社&gt;/面接準備_案件_s02_一次面接.md</code>）。
-          </p>
-          <p>
-            要新建一份，把面接連絡邮件或求人 URL 交给 AI，说「帮我准备〇〇社的面试」即可
-            —— <code>japan-interview-prep</code> skill 会先读同一案件的旧轮次和复盘，再新建本轮笔记。
-            日程未定也可以先进入 <code>preparing</code>，不会覆盖上一轮。
-          </p>
-        </div>
-      </div>
-    );
+  if (selected?.prepVersion === 2) {
+    return <><InterviewSessionV2 key={selected.note.path} doc={selected} series={series} selectedSeries={selectedSeries}
+      sources={externalLinks} today={today} onSelect={selectDoc} onOpen={onOpen} onOpenWiki={onOpenWiki}
+      onOpenCard={onOpenCard} onOpenAsset={onOpenAsset} companyOverview={companyContent} contextPicker={contextPicker} companyAction={companyAction} />{compareUI}</>;
+  }
+
+  if (!selected || legacyPrepPath !== selected.note.path) {
+    return <><div className="co-shell"><header className="co-shell-head"><div><p className="co-kicker">公司画像{context?.kind === "meeting" ? " · 面谈" : ""}</p><h1>{context?.company || selected?.company || initialCompany || "公司总览"}</h1><p className="co-context-title">{context?.title || selected?.round || "选择一个真实案件或面谈，查看公司与岗位的最新资料。"}</p></div><div className="co-shell-controls">{contextPicker}{companyAction}</div></header>
+      <nav className="co-legacy-tabs" aria-label="公司与面谈视图"><button type="button" aria-pressed="true">公司总览</button><button type="button" disabled={!selected} aria-pressed="false" onClick={() => selected && setLegacyPrepPath(selected.note.path)}>面谈准备</button>{!selected && <span className="co-prep-unavailable">本场尚无准备稿</span>}</nav>
+      {companyContent}{context && <button type="button" className="co-compare-toggle" onClick={() => onOpen(context.note)}>{context.kind === "meeting" ? "打开面谈记录" : "打开案件记录"} ↗</button>}
+    </div>{compareUI}</>;
   }
 
   return (
+    <><div className="co-legacy-tabs co-legacy-return" role="navigation" aria-label="公司与面谈视图"><button type="button" aria-pressed="false" onClick={() => { setLegacyPrepPath(null); window.scrollTo({ top: 0, behavior: "instant" }); }}>公司总览</button><button type="button" aria-pressed="true">面谈准备</button>{companyAction}</div>
     <div className={`prep-view session-view mode-${sessionMode}`}>
       {selected && (
         <>
@@ -1132,7 +1243,9 @@ function InterviewSession({
             <div className="session-hero-main">
               <p className="eyebrow">
                 <i />
-                当前面试
+                {["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today))
+                  ? "最近一场"
+                  : "当前面试"}
                 <b
                   className={
                     ["preparing", "scheduled", "upcoming"].includes(
@@ -1153,9 +1266,9 @@ function InterviewSession({
             <div className="session-hero-side">
               {series.length > 1 && (
                 <label className="session-company-switch">
-                  <span>公司／应募案件</span>
+                  <span>公司／案件或面谈</span>
                   <select
-                    aria-label="切换公司或应募案件"
+                    aria-label="切换公司、案件或面谈"
                     value={selectedSeries?.key ?? ""}
                     onChange={(event) => {
                       const nextSeries = series.find(
@@ -1170,8 +1283,8 @@ function InterviewSession({
                     {series.map((item) => (
                       <option key={item.key} value={item.key}>
                         {item.company}
-                        {duplicateCompanyNames.get(item.company)! > 1 && item.caseLink
-                          ? `｜${item.caseLink}`
+                        {duplicateCompanyNames.get(item.company)! > 1 && (item.caseLink || item.meetingLink)
+                          ? `｜${item.caseLink || item.meetingLink}`
                           : ""}
                         {`（${item.rounds.length}轮）`}
                       </option>
@@ -1205,9 +1318,9 @@ function InterviewSession({
                   <button type="button" onClick={() => onOpen(selected.note)}>
                     打开 Obsidian 原笔记 ↗
                   </button>
-                  {selected.caseLink && (
-                    <button type="button" onClick={() => onOpenWiki(selected.caseLink)}>
-                      打开案件正本 ↗
+                  {(selected.caseLink || selected.meetingLink) && (
+                    <button type="button" onClick={() => onOpenWiki(selected.caseLink || selected.meetingLink)}>
+                      {selected.caseLink ? "打开案件正本" : "打开面谈记录"} ↗
                     </button>
                   )}
                 </div>
@@ -1235,8 +1348,8 @@ function InterviewSession({
           </header>
 
           <nav className="session-mode-nav" aria-label="准备模式">
-            <div>
-              {SESSION_MODES.map((mode) => (
+            <div data-modes={availableModes.length}>
+              {availableModes.map((mode) => (
                 <button
                   key={mode.id}
                   type="button"
@@ -1255,7 +1368,15 @@ function InterviewSession({
 
           {digestBand}
 
-          {sessionMode === "confirm" && <SessionConfirm doc={selected} digest={digest} />}
+          {sessionMode === "brief" && briefing && (
+            <SessionBrief
+              briefing={briefing}
+              meta={{
+                company: selected.company || selected.title,
+                round: selected.round || "面談",
+              }}
+            />
+          )}
           {sessionMode === "sprint" && (
             <SessionSprint
               doc={selected}
@@ -1293,7 +1414,7 @@ function InterviewSession({
           </details>
         </>
       )}
-    </div>
+    </div>{compareUI}</>
   );
 }
 

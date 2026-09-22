@@ -1,0 +1,135 @@
+/* 星图与时间航道的阅读层仍属于舞台；只换呈现，不离开全屏、不重置场景。 */
+.novel-reader.reading-mode.scene-reader {
+  --nr-ink: #dce4df;
+  --nr-muted: #93a49d;
+  --nr-line: #283630;
+  --nr-paper: #0c1211;
+  --scene-accent: #b0cbbb;
+  color: var(--nr-ink);
+  background:
+    radial-gradient(ellipse at 15% 0, #27463940, transparent 52%),
+    radial-gradient(ellipse at 95% 100%, #20394038, transparent 48%),
+    #080e0df2;
+  color-scheme: dark;
+}
+.novel-reader.reading-mode.scene-reader--embedded {
+  position: absolute;
+  inset: 12px;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #41594c80;
+  border-radius: 10px;
+  box-shadow: 0 24px 90px #0009, 0 0 45px #7eb49508;
+  backdrop-filter: blur(18px);
+  animation: scene-reader-enter 240ms ease-out both;
+}
+.scene-reader .nr-toolbar {
+  min-height: 60px;
+  padding: 10px 24px;
+  background: #0a100ff0;
+  border-color: var(--nr-line);
+}
+.scene-reader .nr-toolbar-title { color: #afc1b6; font-size: 15px; letter-spacing: .12em; }
+.scene-reader .nr-toolbar .nr-exit { color: #bbcfc2; }
+.scene-reader .nr-controls { gap: 18px; }
+.scene-reader .nr-toolbar .scene-reader-close {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #3b4d43;
+  border-radius: 5px;
+  color: #c8d5ce;
+  background: #17231d;
+  font-size: 21px;
+  line-height: 1;
+}
+.scene-reader .nr-toolbar .scene-reader-close:hover { color: #fff; background: #293c31; }
+.scene-reader button:focus-visible,
+.scene-reader .nr-scroll:focus-visible,
+.scene-reader .reader-prose .md-table:focus-visible { outline-color: #b0cbbb; }
+.scene-reader ::selection { color: #f3f7f4; background: #405f4e; }
+.scene-reader .nr-progress-track { background: #1c2b23; }
+.scene-reader .nr-progress-track > i { background: #9dc6ad; box-shadow: 0 0 9px #9dc6ad48; }
+.scene-reader .nr-scroll { background: transparent; scrollbar-color: #496055 transparent; }
+.scene-reader .nr-paper {
+  width: min(100%, 860px);
+  padding: 42px 64px 58px;
+  border-color: #25372d8c;
+  background: linear-gradient(180deg, #111a16f2, #0c1211f7 380px);
+}
+.scene-reader .nr-book-heading { padding-bottom: 30px; }
+.scene-reader .nr-book-heading h1 { color: #e4ece6; font-size: clamp(25px, 2.7vw, 34px); }
+.scene-reader .nr-book-heading .nr-eyebrow { color: #9fb8a8; letter-spacing: .16em; }
+.scene-reader .nr-eyebrow > span { color: #536d5e; }
+.scene-reader .nr-book-meta { color: #a0b2a8; }
+.scene-reader .nr-reading-note { color: #8a9e92; }
+.scene-reader .nr-reading-note > span { padding: 0 8px; color: #4e6859; }
+.scene-reader .nr-status { border-color: var(--nr-line); color: #9caf9f; background: #0a100f; }
+.scene-reader .nr-status > span[role="progressbar"] { color: #b6cfbe; }
+.scene-reader .nr-colophon { border-color: var(--nr-line); }
+.scene-reader .nr-end-mark { color: #819f8b; }
+.scene-reader .nr-colophon > span:not(.nr-end-mark) { color: #95aa9d; }
+.scene-reader .nr-colophon button { border-color: #42594a; color: #c7d7cd; }
+.scene-reader .nr-colophon button:hover { background: #213328; }
+.scene-reader .nr-toc { border-color: #3a5043; background: #111d17; box-shadow: 0 18px 45px #0008; }
+.scene-reader .nr-toc > header button { color: #a1b8a9; }
+.scene-reader .nr-toc > p { color: #94ab9d; }
+.scene-reader .nr-toc > button { border-color: #293c30; }
+.scene-reader .nr-toc > button > span:first-child { color: #8aaa97; }
+.scene-reader .nr-toc > button[aria-current="location"],
+.scene-reader .nr-toc > button:hover { background: #263c2e; }
+.scene-reader .nr-language { border-color: #415548; }
+.scene-reader .nr-language button { color: #adbfaf; }
+.scene-reader .nr-language button[aria-pressed="true"] { color: #0b1510; background: #b4cbbb; }
+.reading-mode.scene-reader .reader-information p { color: #b0c1b6; }
+.reading-mode.scene-reader .reader-information dt { color: #93ab9b; }
+.reading-mode.scene-reader .reader-prose { color: var(--nr-ink); }
+.reading-mode.scene-reader .reader-prose :is(h2, h3, h4, h5, h6) { color: #e1eae4; border-color: var(--nr-line); }
+.reading-mode.scene-reader .reader-prose :is(a, .wiki-link, .prep-doc-ref) {
+  color: #c0d9c8;
+  text-decoration-color: #61846e;
+}
+.reading-mode.scene-reader .reader-prose a:hover,
+.reading-mode.scene-reader .reader-prose button:hover { color: #edf5ee; text-decoration-color: #b0cbbb; }
+.reading-mode.scene-reader .reader-prose rt { color: #91a899; }
+.reading-mode.scene-reader .reader-prose :is(blockquote, .md-callout, .prep-doc-note) {
+  color: #b5c6bb;
+  border-left-color: #567561;
+  background: transparent;
+}
+.reading-mode.scene-reader .reader-prose .md-list-item > i { color: #86a490; }
+.reading-mode.scene-reader .reader-prose pre { border-color: #304538; color: #c8dacf; background: #080e0b; }
+.reading-mode.scene-reader .reader-prose code { color: #c9dccf; background: #223128; }
+.reading-mode.scene-reader .reader-prose pre code { background: transparent; }
+.reading-mode.scene-reader .reader-prose :is(.md-table, .prep-doc-tablewrap) { border-color: #344d3d; background: #0c1410; }
+.reading-mode.scene-reader .reader-prose :is(th, td) { border-color: #2e4336; color: #cedcd2; }
+.reading-mode.scene-reader .reader-prose th { color: #deebe1; background: #1c2e22; }
+.reading-mode.scene-reader .reader-prose tbody tr:nth-child(even) { background: #12201770; }
+.reading-mode.scene-reader .reader-prose hr { border-color: var(--nr-line); }
+
+@keyframes scene-reader-enter {
+  from { opacity: 0; translate: 0 8px; }
+  to { opacity: 1; translate: 0 0; }
+}
+@media (max-width: 900px) {
+  .scene-reader .nr-paper { padding: 34px 36px 50px; }
+  .scene-reader .nr-toolbar { padding-inline: 16px; }
+  .scene-reader .nr-controls { gap: 10px; }
+}
+@media (max-width: 700px) {
+  .novel-reader.reading-mode.scene-reader--embedded { inset: 0; border: 0; border-radius: 0; }
+  .scene-reader .nr-paper { padding: 30px 24px 44px; border: 0; }
+  .scene-reader .nr-toolbar { padding: 10px 12px; }
+  .scene-reader .nr-toolbar-title { display: none; }
+  .scene-reader .reader-info-toggle > span:last-child { display: none; }
+  .scene-reader .nr-controls { gap: 8px; }
+  .scene-reader .nr-book-heading { padding-bottom: 24px; }
+  .scene-reader .nr-reading-note { font-size: 11px; }
+  .scene-reader .nr-status { padding-inline: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .novel-reader.reading-mode.scene-reader--embedded { animation: none; }
+}

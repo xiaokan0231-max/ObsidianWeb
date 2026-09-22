@@ -12,6 +12,7 @@ import { Blocks, Inlines } from "./prep-doc-render";
 import { copySelectionWithoutRuby } from "./ruby-copy";
 import { PrepSearchBox, useSlashFocus } from "./prep-search";
 import { useCopyFlash } from "./copy-flash";
+import PrepMaterialReader from "./prep-material-reader";
 
 export default function InterviewSharedAsset({
   note,
@@ -34,6 +35,7 @@ export default function InterviewSharedAsset({
   );
   const [active, setActive] = useState(initialActive);
   const [query, setQuery] = useState("");
+  const [readerOpen, setReaderOpen] = useState(false);
   // この画面のコピー対象は「いま開いている節」1つだけなので、id は固定でよい。
   const { copiedId, flash, clear } = useCopyFlash();
   const copied = copiedId === "section";
@@ -82,29 +84,11 @@ export default function InterviewSharedAsset({
     .map((_, index) => index)
     .filter((index) => !needle || hits[index] > 0);
   const roundSpecific = isRoundSpecificAsset(target);
+  const isV2 = roundSpecific && String(note.frontmatter.prep_version) === "2";
 
   return (
-    <div className="shared-asset-view">
-      <header className="shared-asset-hero">
-        <div>
-          <p className="eyebrow">
-            <i />
-            {roundSpecific ? "THIS ROUND · MOTIVATION" : "COMMON INTERVIEW ASSET"}
-          </p>
-          <h1>{target.label}</h1>
-          <p>
-            {target.hint}。
-            {roundSpecific
-              ? "内容来自当前所选轮次，不会串到同公司的其他轮次。"
-              : "内容来自 Obsidian 共通资产，网页只重新整理阅读结构。"}
-          </p>
-        </div>
-        <dl>
-          <div><dt>章节</dt><dd>{doc.sections.length}</dd></div>
-          <div><dt>注音</dt><dd>显示</dd></div>
-          <div><dt>复制</dt><dd>无假名</dd></div>
-        </dl>
-      </header>
+    <div className={`shared-asset-view${isV2 ? " shared-asset-v2" : ""}`}>
+      <h1 className="sr-only">{target.label}</h1>
 
       <div className="shared-asset-tools">
         <PrepSearchBox
@@ -115,10 +99,14 @@ export default function InterviewSharedAsset({
           label={roundSpecific ? "搜索本轮志望動機" : "搜索共通资产"}
         />
         <p>
+          {doc.sections.length} 章 · {" "}
           {doc.restrictedToSection
             ? "仅展示面试可直接朗读的指定区段"
             : doc.sourceTitle}
         </p>
+        <button type="button" className="reader-entry" onClick={() => setReaderOpen(true)}>
+          全文阅读
+        </button>
       </div>
 
       {doc.intro.length > 0 && (
@@ -197,6 +185,19 @@ export default function InterviewSharedAsset({
           </footer>
         </article>
       </div>
+      {readerOpen && (
+        <PrepMaterialReader
+          prepVersion={isV2 ? 2 : 1}
+          documentKey={`prep-asset:${note.path}#${target.section ?? ""}`}
+          title={target.label}
+          sections={doc.sections}
+          intro={doc.intro}
+          notice={doc.restrictedToSection ? "按原有范围，连续呈现指定区段的全部内容。" : undefined}
+          onClose={() => setReaderOpen(false)}
+          onOpenCard={onOpenCard}
+          onOpenWiki={onOpenWiki}
+        />
+      )}
     </div>
   );
 }

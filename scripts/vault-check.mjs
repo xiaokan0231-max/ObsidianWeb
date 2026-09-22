@@ -4,6 +4,7 @@
 
 import { readFile } from "node:fs/promises";
 import { relative } from "node:path";
+import { load as loadYaml, JSON_SCHEMA } from "js-yaml";
 import {
   VAULT,
   findFrontmatterDefects,
@@ -19,7 +20,12 @@ import {
   validateJobCaseFrontmatter,
 } from "../lib/job-case-schema.ts";
 import { listEmbeds, listHeadings, sliceSection, stripFrontmatter } from "../lib/interview-prep-embed.mjs";
-import { companyMotivationIssues } from "../lib/interview-prep-validation.mjs";
+import {
+  companyMotivationIssues,
+  interviewPrepStructureIssues,
+  interviewPrepVersion,
+  prepCarryForwardIssues,
+} from "../lib/interview-prep-validation.mjs";
 import {
   isLanguageExpressionCourseNote,
   parseLanguageExpressionCourse,
@@ -30,8 +36,9 @@ import {
   parseConfirmedSkillTable,
 } from "../lib/knowledge-graph.ts";
 import { GENERATED_LIFECYCLES, markerJson } from "../lib/vault-compact.mjs";
+import { validateCompanyOverviewNotes } from "../lib/company-overview.ts";
 
-const PREP_REQUIRED = ["company", "round", "format", "interviewers", "case"];
+const PREP_REQUIRED = ["company", "round", "format", "interviewers"];
 const PREP_SESSION_STATUSES = ["preparing", "scheduled", "completed", "cancelled"];
 const TODO_STATUSES = ["未着手", "進行中", "保留", "完了"];
 const TODO_PRIORITIES = ["high", "medium", "low"];
@@ -96,13 +103,22 @@ const languageExpressionCoursePathsById = new Map();
 const files = await listMarkdownFiles();
 const contents = new Map();
 const prepSessionIds = new Map();
-const prepCaseOrders = new Map();
+const prepContextOrders = new Map();
 const focusedTodos = [];
 
 function wikiTarget(value) {
   const raw = String(value ?? "").trim().replace(/^["']|["']$/g, "");
   const inner = raw.match(/^\[\[([^\]]+)\]\]$/)?.[1] ?? raw;
   return inner.split("|")[0].split("#")[0].trim();
+}
+
+// 独立面谈不等于应募案件；类型前缀让两种正本的轮次各自保持唯一。
+function prepContext(frontmatter) {
+  const fields = ["case", "meeting"].filter((field) => frontmatter[field] !== undefined);
+  if (fields.length !== 1) return null;
+  const field = fields[0];
+  const target = wikiTarget(frontmatter[field]);
+  return target ? { field, target, key: `${field}:${target}` } : null;
 }
 
 function validCalendarDate(value) {
@@ -133,16 +149,33 @@ for (const path of files) {
   }
 }
 
+const structuredFrontmatter = new Map();
 const graphNotes = files.map((path) => {
   const content = contents.get(path);
+  let frontmatter = parseFrontmatter(content);
+  // 旧校验器只读顶层标量；新画像含嵌套对象，须与 Obsidian 的 YAML 读取一致。
+  // 只扩展新结构，避免改变历史笔记既有校验口径。JSON_SCHEMA 不把日期变成 Date。
+  if (frontmatter.company_profile !== undefined ||
+    String(frontmatter.report_kind ?? "").replace(/^["']|["']$/g, "") === "company-fit") {
+    const raw = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? "";
+    try {
+      const parsed = loadYaml(raw, { schema: JSON_SCHEMA });
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("frontmatter 不是对象");
+      frontmatter = parsed;
+    } catch (error) {
+      problems.push(`${relative(VAULT, path)}: company overview YAML 无法解析: ${error.message}`);
+    }
+  }
+  structuredFrontmatter.set(path, frontmatter);
   return {
     path: relative(VAULT, path),
     stat: { ctime: 0, mtime: 0, size: content.length },
     tags: [],
-    frontmatter: parseFrontmatter(content),
+    frontmatter,
     content,
   };
 });
+problems.push(...validateCompanyOverviewNotes(graphNotes));
 const graphIndex = buildGraphNoteIndex(graphNotes);
 const knowledgeGraph = buildKnowledgeGraph(graphNotes);
 // 同名ノートが2つあること自体は Obsidian では合法（パスで消歧できる）。
@@ -173,7 +206,7 @@ const skillIds = new Map();
 
 for (const path of files) {
   const content = contents.get(path);
-  const frontmatter = parseFrontmatter(content);
+  const frontmatter = structuredFrontmatter.get(path);
   const relativePath = relative(VAULT, path);
   const type = String(frontmatter.type ?? "");
   if (VERSIONED_ARTIFACT_TYPES.has(type)) {
@@ -200,7 +233,8 @@ for (const path of files) {
       if (!curriculum) problems.push(`${relativePath}: language-curriculum JSON 区块が読めない`);
     }
   }
-  if (ANALYSIS_TYPES.has(type)) {
+  // company-fit 的版本与作者／日期／证据规则由画像校验负责，不套用分析归档的 schema v2。
+  if (ANALYSIS_TYPES.has(type) && frontmatter.report_kind !== "company-fit") {
     const lifecycle = String(frontmatter.lifecycle ?? "");
     if (!GENERATED_LIFECYCLES.includes(lifecycle)) {
       problems.push(`${relativePath}: ${type} lifecycle は ${GENERATED_LIFECYCLES.join(" / ")} のいずれかが必須`);
@@ -366,8 +400,16 @@ for (const path of files) {
   // Web と当日用 HTML から章がまるごと消える。しかも「空の章」は目視で気づきにくい。
   if (frontmatter.type === "interview-prep") {
     prepCount += 1;
+    const prepVersion = interviewPrepVersion(frontmatter.prep_version);
+    if (prepVersion === null) {
+      problems.push(`${relativePath}: prep_version 只支持省略、1 或 2（当前 ${String(frontmatter.prep_version)}）`);
+    }
     for (const key of PREP_REQUIRED) {
       if (!frontmatter[key]) problems.push(`${relativePath}: frontmatter に \`${key}\` が無い`);
+    }
+    const context = prepContext(frontmatter);
+    if (!context) {
+      problems.push(`${relativePath}: case / meeting は空でない参照をどちらか一つだけ指定する`);
     }
     const hasSessionContract =
       Boolean(frontmatter.session_id) ||
@@ -415,11 +457,11 @@ for (const path of files) {
         sessionPaths.push(relativePath);
         prepSessionIds.set(String(frontmatter.session_id), sessionPaths);
       }
-      if (frontmatter.case && Number.isInteger(sessionOrder) && sessionOrder >= 1) {
-        const key = `${wikiTarget(frontmatter.case)}::${sessionOrder}`;
-        const sessionPaths = prepCaseOrders.get(key) ?? [];
+      if (context && Number.isInteger(sessionOrder) && sessionOrder >= 1) {
+        const key = `${context.key}::${sessionOrder}`;
+        const sessionPaths = prepContextOrders.get(key) ?? [];
         sessionPaths.push(relativePath);
-        prepCaseOrders.set(key, sessionPaths);
+        prepContextOrders.set(key, sessionPaths);
       }
 
       if (sessionOrder > 1) {
@@ -433,9 +475,9 @@ for (const path of files) {
           } else if (previousFrontmatter.type !== "interview-prep") {
             problems.push(`${relativePath}: previous_prep [[${previousTarget}]] は type: interview-prep ではない`);
           } else if (
-            wikiTarget(previousFrontmatter.case) !== wikiTarget(frontmatter.case)
+            !context || prepContext(previousFrontmatter)?.key !== context.key
           ) {
-            problems.push(`${relativePath}: previous_prep は同じ case の準備ノートではない`);
+            problems.push(`${relativePath}: previous_prep は同じ case / meeting の準備ノートではない`);
           } else {
             const previousOrder = Number(previousFrontmatter.session_order);
             if (
@@ -462,26 +504,34 @@ for (const path of files) {
             problems.push(`${relativePath}: evidence_inputs「${target}」が同名複数あり曖昧`);
           }
         }
-        if (!/^###\s+前回から今回への回流\s*$/m.test(content)) {
-          problems.push(`${relativePath}: §2 に「### 前回から今回への回流」が無い`);
+        if (prepVersion !== null) {
+          for (const issue of prepCarryForwardIssues(content, prepVersion)) {
+            problems.push(`${relativePath}: ${issue}`);
+          }
         }
       }
     }
-    for (const issue of companyMotivationIssues(content)) {
-      problems.push(`${relativePath}: ${issue}`);
+    if (prepVersion !== null) {
+      for (const issue of [
+        ...interviewPrepStructureIssues(content, prepVersion),
+        ...companyMotivationIssues(content, prepVersion),
+      ]) {
+        problems.push(`${relativePath}: ${issue}`);
+      }
     }
     if (/{{[^}]+}}/.test(content)) {
       problems.push(`${relativePath}: テンプレートの {{…}} が残っている`);
     }
-    if (frontmatter.case) {
-      const caseTarget = wikiTarget(frontmatter.case);
-      const targetFrontmatter = frontmatterByName.get(caseTarget);
+    if (context) {
+      const { field, target } = context;
+      const targetFrontmatter = frontmatterByName.get(target);
+      const expectedType = field === "case" ? "job-case" : "todo";
       if (!targetFrontmatter) {
-        problems.push(`${relativePath}: case の参照先が無い [[${caseTarget}]]`);
-      } else if (duplicateNames.has(caseTarget)) {
-        problems.push(`${relativePath}: case の参照先「${caseTarget}」が同名複数あり曖昧`);
-      } else if (targetFrontmatter.type !== "job-case") {
-        problems.push(`${relativePath}: case [[${caseTarget}]] は type: job-case ではない`);
+        problems.push(`${relativePath}: ${field} の参照先が無い [[${target}]]`);
+      } else if (duplicateNames.has(target)) {
+        problems.push(`${relativePath}: ${field} の参照先「${target}」が同名複数あり曖昧`);
+      } else if (targetFrontmatter.type !== expectedType) {
+        problems.push(`${relativePath}: ${field} [[${target}]] は type: ${expectedType} ではない`);
       }
     }
     for (const embed of listEmbeds(content)) {
@@ -544,9 +594,9 @@ for (const [sessionId, sessionPaths] of prepSessionIds) {
     problems.push(`面接準備 session_id「${sessionId}」が重複: ${sessionPaths.join(" と ")}`);
   }
 }
-for (const [caseOrder, sessionPaths] of prepCaseOrders) {
+for (const [contextOrder, sessionPaths] of prepContextOrders) {
   if (sessionPaths.length > 1) {
-    problems.push(`同じ case と session_order「${caseOrder}」が重複: ${sessionPaths.join(" と ")}`);
+    problems.push(`同じ case / meeting と session_order「${contextOrder}」が重複: ${sessionPaths.join(" と ")}`);
   }
 }
 if (focusedTodos.length > 1) {

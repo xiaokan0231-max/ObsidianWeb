@@ -15,10 +15,12 @@ export type TimelineSceneNoteInput = {
   updatedLabel: string;
   // 全文（去 Markdown 后），供舞台内全文搜索与档案卡使用，与星图同口径。
   excerpt: string;
+  searchText?: string;
   date: string;
 };
 
 export type TimelineSceneEventInput = {
+  searchText?: string;
   id: string;
   noteId: string;
   date: string;

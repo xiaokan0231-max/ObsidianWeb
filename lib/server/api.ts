@@ -4,6 +4,13 @@
 // 合成一个的话，「复盘还没生成」会变成 500，调用方就分不清该重试还是该先去生成它。
 // 前端今天只看 response.ok，所以改错了不会有人报错 —— 正因如此才写在这里。
 export function errorResponse(error: unknown, fallback = "请求失败") {
+  if (error instanceof Error && Number.isInteger((error as { status?: number }).status)) {
+    const status = (error as { status?: number }).status;
+    if (status !== undefined) {
+      return Response.json({ ok: false, error: error.message || fallback }, { status: status! });
+    }
+  }
+
   const rawMessage = error instanceof Error ? error.message : fallback;
   const timedOut = /timed out|SIGTERM|SIGKILL|分钟内未完成/i.test(rawMessage);
   const looksLikeInternalOutput =
@@ -33,10 +40,41 @@ export function obsidianErrorResponse(error: unknown, fallback: string) {
   return Response.json({ error: message }, { status });
 }
 
+function badRequestError(message: string) {
+  const error = new Error(message);
+  (error as { status?: number }).status = 400;
+  return error;
+}
+
 // 入参校验统一从这里回。响应体只有 { error }，不加 ok ——
 // 前端读的是 payload.error，形状变了没人会报错，只会变成一句更差的提示。
 export function badRequest(message: string) {
   return Response.json({ error: message }, { status: 400 });
+}
+
+// 字段解析复用，保证「空字符串」统一转成未传，非法类型直接 400。
+export function parseOptionalText(value: unknown, fieldName: string) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw badRequestError(`${fieldName} 必须是文本。`);
+  const text = value.trim();
+  return text || undefined;
+}
+
+export function parseRequiredText(value: unknown, fieldName: string) {
+  const text = parseOptionalText(value, fieldName);
+  if (!text) throw badRequestError(`${fieldName} 是必填字段。`);
+  return text;
+}
+
+export function parseExpectedMtime(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  const raw = typeof value === "string" ? value.trim() : undefined;
+  const parsed = typeof value === "number" ? value : raw === "" ? undefined : Number(raw);
+  if (parsed === undefined) return undefined;
+  if (!Number.isInteger(parsed) || !Number.isFinite(parsed) || parsed < 0) {
+    throw badRequestError("expectedMtime 必须是非负整数。");
+  }
+  return parsed;
 }
 
 export async function readJson<T>(request: Request): Promise<T> {

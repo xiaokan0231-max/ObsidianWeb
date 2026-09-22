@@ -15,21 +15,27 @@ import {
 } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { compareTimelineTimes, nearestTimelineDate } from "@/lib/timeline-browser";
 import type { TimelineScene, TimelineSceneNote } from "@/lib/timeline-scene";
 import {
+  NODE_FRAGMENT_SHADER,
+  NODE_VERTEX_SHADER,
   createCometTexture,
   createFlightController,
   createFocusArtifact,
   createLabelLayer,
   createNebulaTexture,
+  createStageBloom,
+  createStageInteractionUniforms,
+  createStagePointerEffects,
   createStageRenderer,
   createStarfield,
   disposeStage,
-  NODE_FRAGMENT_SHADER,
-  NODE_VERTEX_SHADER,
   projectLabelItems,
   seeded,
   type StageLabelItem,
+  writeStageFogUniforms,
+  writeStageInteractionUniforms,
 } from "./three-stage";
 import {
   isEditableTarget,
@@ -43,6 +49,7 @@ import {
 } from "./three-stage-chrome";
 
 type Props = {
+  today: string;
   scene: TimelineScene;
   onOpen: (id: string) => void;
   onFallback: () => void;
@@ -60,16 +67,19 @@ const WHEEL_VELOCITY = 0.09;
 const VELOCITY_DECAY = 4.2;
 const SNAP_RATE = 4;
 // 标签池的规模：航道可能有几百个站点，但 DOM 里最多只挂这些常驻元素。
-const DATE_LABEL_POOL = 18;
+const DATE_LABEL_POOL = 10;
 const MONTH_LABEL_POOL = 4;
-const EVENT_FLAG_POOL = 8;
+const EVENT_FLAG_POOL = 4;
 
-export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) {
+export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  const clearSearchRef = useRef<() => void>(() => undefined);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const scrubberRef = useRef<HTMLDivElement>(null);
   const resetViewRef = useRef<() => void>(() => undefined);
+  const closeDossierRef = useRef<() => void>(() => undefined);
+  const goToStationRef = useRef<(index: number) => void>(() => undefined);
   const selectNodeRef = useRef<(id: string) => void>(() => undefined);
   const stepStationRef = useRef<(direction: number) => void>(() => undefined);
   const goToMonthRef = useRef<(index: number) => void>(() => undefined);
@@ -86,6 +96,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
   const applyViewModeRef = useRef<(mode: ViewMode) => void>(() => undefined);
   const onFallbackRef = useRef(onFallback);
   const [viewMode, setViewMode] = useState<ViewMode>("overview");
+  const [activeDayIndex, setActiveDayIndex] = useState(0);
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -115,23 +126,46 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     () => new Map(scene.events.map((event) => [event.noteId, event])),
     [scene.events],
   );
+  const eventById = useMemo(() => new Map(scene.events.map((event) => [event.id, event])), [scene.events]);
   const canOpen = useCallback(
     (id: string) => noteById.has(id) || eventByNoteId.has(id),
     [eventByNoteId, noteById],
   );
   const { openingId, openNode } = useStagePortal({ stageRef, onOpen, canOpen });
-  const pickSearchResult = useCallback((id: string) => selectNodeRef.current(id), []);
+  const searchItems = useMemo<TimelineSceneNote[]>(() => [
+    ...scene.notes,
+    ...scene.events.map((event) => ({
+      id: `event:${event.id}`, title: `${event.company} · ${event.label}`, date: event.date,
+      dayIndex: event.dayIndex, slot: 0, group: "event", groupLabel: "日程", kindLabel: "日程",
+      path: event.noteId, color: event.phase === "upcoming" ? WARM_ACCENT : COOL_ACCENT,
+      searchText: `${event.date} ${event.time} ${event.searchText ?? noteById.get(event.noteId)?.searchText ?? ""}`,
+      updatedLabel: event.date, excerpt: `${event.time} ${event.label} ${noteById.get(event.noteId)?.excerpt ?? ""}`,
+    })),
+  ], [scene.notes, scene.events, noteById]);
+  const pickSearchResult = useCallback((id: string) => {
+    const event = id.startsWith("event:") ? eventById.get(id.slice(6)) : null;
+    if (event) goToStationRef.current(event.dayIndex);
+    else selectNodeRef.current(id);
+    clearSearchRef.current();
+    hostRef.current?.querySelector("canvas")?.focus();
+  }, [eventById]);
   const searchTiebreak = useCallback(
     (left: TimelineSceneNote, right: TimelineSceneNote) => right.date.localeCompare(left.date),
     [],
   );
   const search = useStageSearch({
-    items: scene.notes,
+    items: searchItems,
     inputRef: searchInputRef,
     onPick: pickSearchResult,
     tiebreak: searchTiebreak,
   });
 
+  const setSearchQuery = search.setQuery;
+  useEffect(() => { clearSearchRef.current = () => setSearchQuery(""); }, [setSearchQuery]);
+
+  const currentStation = scene.stations[activeDayIndex] ?? scene.stations[0];
+  const currentDayNotes = currentStation?.noteIds.map((id) => noteById.get(id)).filter((note): note is TimelineSceneNote => Boolean(note)) ?? [];
+  const currentDayEvents = currentStation?.eventIds.map((id) => eventById.get(id)).filter((event) => Boolean(event)).toSorted((a, b) => compareTimelineTimes(a?.time, b?.time)) ?? [];
   const activeNote = noteById.get(selectedId ?? hoveredId ?? "") ?? null;
   const selectedNote = noteById.get(selectedId ?? "") ?? null;
   const selectedStation = selectedNote ? scene.stations[selectedNote.dayIndex] : null;
@@ -185,6 +219,9 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
   useEffect(() => {
     const handleDeckShortcut = (event: KeyboardEvent) => {
       if (
+        event.defaultPrevented ||
+        stageRef.current?.closest("[inert]") ||
+        !stageRef.current?.contains(event.target as Node) ||
         event.metaKey ||
         event.ctrlKey ||
         event.altKey ||
@@ -200,6 +237,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       }
       if (key === "r") {
         event.preventDefault();
+        event.stopPropagation();
         resetViewRef.current();
         return;
       }
@@ -274,10 +312,14 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     const months = scene.months;
     const events = scene.events;
     const deepestZ = stations[stations.length - 1].z;
+    const homeDate = nearestTimelineDate(stations.map((station) => station.date), today);
+    const homeIndex = Math.max(0, stations.findIndex((station) => station.date === homeDate));
+    const homeDepth = stations[homeIndex].z;
+    setActiveDayIndex(homeIndex);
 
     const stageScene = new THREE.Scene();
     let fogTargetDensity = FOG_DENSITY[viewModeRef.current];
-    const stageFog = new THREE.FogExp2(0x101b17, fogTargetDensity);
+    const stageFog = new THREE.FogExp2(0x030807, fogTargetDensity);
     stageScene.fog = stageFog;
 
     const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 260);
@@ -353,6 +395,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         uTime: { value: 0 },
         uMotion: { value: reducedMotion ? 0 : 1 },
         uSearchActive: { value: 0 },
+        ...createStageInteractionUniforms(0),
       },
       vertexColors: true,
       transparent: true,
@@ -362,18 +405,16 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     const nodePoints = new THREE.Points(nodeGeometry, nodeMaterial);
     nodePoints.renderOrder = 4;
     root.add(nodePoints);
+    const pointerEffects = createStagePointerEffects(host, canvas);
+    const bloom = createStageBloom(renderer);
 
     // 搜索命中的实体能量球：与星图同一模式。
     const searchSphereGeometry = new THREE.SphereGeometry(1, 32, 20);
-    const searchSphereMaterial = new THREE.MeshPhysicalMaterial({
+    // 同样不用 transmission：搜索一激活整个场景就要多渲染一遍。
+    const searchSphereMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       roughness: 0.12,
       metalness: 0.14,
-      transmission: 0.46,
-      thickness: 0.78,
-      ior: 1.34,
-      clearcoat: 1,
-      clearcoatRoughness: 0.035,
       transparent: true,
       opacity: 0.76,
       depthWrite: false,
@@ -544,6 +585,10 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     const riverCount = Math.min(2200, stations.length * 14 + 600);
     const riverPositions = new Float32Array(riverCount * 3);
     const riverColors = new Float32Array(riverCount * 3);
+    const riverSizes = new Float32Array(riverCount);
+    const riverPhases = new Float32Array(riverCount);
+    const riverFocus = new Float32Array(riverCount);
+    const riverSearch = new Float32Array(riverCount);
     const warmDust = new THREE.Color(0xe6b08a);
     const coolDust = new THREE.Color(0x79d7b8);
     for (let index = 0; index < riverCount; index += 1) {
@@ -559,16 +604,29 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         .lerp(coolDust, Math.min(1, Math.max(0, depth / Math.max(1, deepestZ))))
         .lerp(new THREE.Color("#ffffff"), 0.2);
       riverColors.set(tone.toArray(), index * 3);
+      riverSizes[index] = 0.1 + seeded(`river:${index}:size`) * 0.16;
+      riverPhases[index] = seeded(`river:${index}:phase`) * Math.PI * 2;
     }
     const riverGeometry = new THREE.BufferGeometry();
     riverGeometry.setAttribute("position", new THREE.BufferAttribute(riverPositions, 3));
     riverGeometry.setAttribute("color", new THREE.BufferAttribute(riverColors, 3));
-    const riverMaterial = new THREE.PointsMaterial({
-      size: 0.035,
-      sizeAttenuation: true,
+    riverGeometry.setAttribute("aSize", new THREE.BufferAttribute(riverSizes, 1));
+    riverGeometry.setAttribute("aPhase", new THREE.BufferAttribute(riverPhases, 1));
+    riverGeometry.setAttribute("aFocus", new THREE.BufferAttribute(riverFocus, 1));
+    riverGeometry.setAttribute("aSearch", new THREE.BufferAttribute(riverSearch, 1));
+    // 与星图共用节点着色器：航道的伴生微尘同样吃指针动量（uDeform=1），
+    // 站牌节点仍然不形变，否则和 Raycaster、日期标签分家。
+    const riverMaterial = new THREE.ShaderMaterial({
+      vertexShader: NODE_VERTEX_SHADER,
+      fragmentShader: NODE_FRAGMENT_SHADER,
+      uniforms: {
+        uTime: { value: 0 },
+        uMotion: { value: reducedMotion ? 0 : 1 },
+        uSearchActive: { value: 0 },
+        ...createStageInteractionUniforms(1),
+      },
       vertexColors: true,
       transparent: true,
-      opacity: 0.58,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
@@ -668,16 +726,16 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       new THREE.Vector3(0, 0, -(depth + lookLeadFor(viewModeRef.current)));
     camera.position.copy(
       vantageFor(viewModeRef.current).add(
-        new THREE.Vector3(0, 0, -lookLeadFor(viewModeRef.current)),
+        new THREE.Vector3(0, 0, -homeDepth - lookLeadFor(viewModeRef.current)),
       ),
     );
     const controls = new OrbitControls(camera, canvas);
-    controls.target.set(0, 0, -lookLeadFor(viewModeRef.current));
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.065;
+    controls.target.set(0, 0, -homeDepth - lookLeadFor(viewModeRef.current));
+    controls.enableDamping = !reducedMotion;
+    controls.dampingFactor = 0.042;
     controls.enableZoom = false;
     controls.enablePan = false;
-    controls.rotateSpeed = 0.42;
+    controls.rotateSpeed = 0.58;
     const applyModeConstraints = (mode: ViewMode) => {
       if (mode === "overview") {
         controls.minPolarAngle = Math.PI * 0.22;
@@ -699,12 +757,11 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     const pointer = new THREE.Vector2();
     const selectedRef = { current: null as string | null };
     const hoveredRef = { current: null as string | null };
-    let travel = 0;
+    let travel = homeDepth;
     let travelVelocity = 0;
     let flightTargetTravel: number | null = null;
     let pointerStart: [number, number] | null = null;
     let pointerHeld = false;
-    let keyboardIndex = 0;
     let visible = true;
 
     const flightController = createFlightController({
@@ -712,8 +769,8 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       target: controls.target,
       warp: {
         material: starfield.material,
-        baseSize: 0.027,
-        baseOpacity: 0.48,
+        baseSize: 0.042,
+        baseOpacity: 0.58,
       },
       onComplete: () => {
         if (flightTargetTravel !== null) {
@@ -732,7 +789,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       const anchor = flightAnchor(travel);
       flightTargetTravel = travel;
       travelVelocity = 0;
-      flightController.start(anchor.clone().add(vantageFor(mode)), anchor, 860);
+      flightController.start(anchor.clone().add(vantageFor(mode)), anchor, reducedMotion ? 1 : 860);
     };
     applyViewModeRef.current = applyViewMode;
 
@@ -796,7 +853,6 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       const localPosition = positionById.get(id);
       const note = noteById.get(id);
       if (index === undefined || !localPosition || !note) return;
-      keyboardIndex = index;
       selectedRef.current = id;
       setSelectedId(id);
       focusAttributes(id);
@@ -807,6 +863,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       flightController.start(
         worldPosition.clone().add(new THREE.Vector3(0, 0.15, 4.6)),
         worldPosition,
+        reducedMotion ? 1 : 820,
       );
     };
     selectNodeRef.current = selectNote;
@@ -823,37 +880,43 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         const anchor = flightAnchor(travel);
         flightTargetTravel = travel;
         travelVelocity = 0;
-        flightController.start(anchor.clone().add(vantageFor(viewModeRef.current)), anchor, 760);
+        flightController.start(anchor.clone().add(vantageFor(viewModeRef.current)), anchor, reducedMotion ? 1 : 760);
       }
     };
 
+    closeDossierRef.current = () => clearSelection(true);
+
     const resetView = () => {
       clearSelection(false);
-      const anchor = flightAnchor(0);
-      flightTargetTravel = 0;
+      const anchor = flightAnchor(homeDepth);
+      flightTargetTravel = homeDepth;
+      setActiveDayIndex(homeIndex);
       travelVelocity = 0;
       flightController.start(
         anchor.clone().add(vantageFor(viewModeRef.current)),
         anchor,
-        900,
+        reducedMotion ? 1 : 900,
       );
     };
     resetViewRef.current = resetView;
 
     const goToStation = (index: number) => {
+      clearSelection(false);
       const clamped = Math.min(stations.length - 1, Math.max(0, index));
       const station = stations[clamped];
+      setActiveDayIndex(clamped);
       const anchor = flightAnchor(station.z);
       flightTargetTravel = station.z;
       travelVelocity = 0;
       flightController.start(
         anchor.clone().add(vantageFor(viewModeRef.current)),
         anchor,
-        720,
+        reducedMotion ? 1 : 720,
       );
     };
+    goToStationRef.current = goToStation;
     stepStationRef.current = (direction: number) => {
-      goToStation(nearestStationIndex(travel) + direction);
+      goToStation(nearestStationIndex(flightTargetTravel ?? travel) + direction);
     };
     goToMonthRef.current = (index: number) => {
       const month = months[index];
@@ -887,6 +950,13 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     };
     const onPointerMove = (event: PointerEvent) => {
       const hit = hitTest(event);
+      pointerEffects.setAccent(
+        hit?.kind === "note"
+          ? noteById.get(hit.id)?.color ?? "#dff7ec"
+          : hit?.kind === "event"
+            ? eventById.get(hit.id)?.phase === "upcoming" ? WARM_ACCENT : PAST_EVENT_ACCENT
+            : "#dff7ec",
+      );
       canvas.style.cursor = hit ? "pointer" : "grab";
       const nextHover = hit?.kind === "note" ? hit.id : null;
       if (nextHover === hoveredRef.current) return;
@@ -932,6 +1002,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
+      if (selectedRef.current) clearSelection(false);
       const px = event.deltaY * (
         event.deltaMode === 1 ? 24 : event.deltaMode === 2 ? host.clientHeight : 1
       );
@@ -987,10 +1058,9 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         return;
       }
       event.preventDefault();
-      // scene.notes 本来就是时间序（新→旧），线性步进即按时间穿行。
+      // 按日期移动，只有日程的站点也可以用键盘到达。
       const direction = ["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1;
-      keyboardIndex = (keyboardIndex + direction + notes.length) % notes.length;
-      selectNote(notes[keyboardIndex].id);
+      stepStationRef.current(direction);
     };
     const onContextLost = (event: Event) => {
       event.preventDefault();
@@ -1010,7 +1080,9 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       if (!entry) return;
       const width = Math.max(1, entry.contentRect.width);
       const height = Math.max(1, entry.contentRect.height);
+      pointerEffects.resize();
       renderer.setSize(width, height, false);
+      bloom?.setSize(width, height);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
     });
@@ -1060,10 +1132,10 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       activeLabelItems = [];
       // 俯瞰时视距更远，标签的可见窗口与衰减距离一并放宽。
       const overview = viewModeRef.current === "overview";
-      const dateFadeSpan = overview ? 90 : 40;
+      const dateFadeSpan = overview ? 46 : 30;
       const monthRange = overview ? 120 : 60;
-      const eventRange = overview ? 80 : 42;
-      const eventFadeSpan = overview ? 80 : 34;
+      const eventRange = overview ? 34 : 24;
+      const eventFadeSpan = overview ? 46 : 34;
 
       const start = Math.max(0, centerIndex - Math.floor(DATE_LABEL_POOL / 2));
       const windowStations = stations.slice(start, start + DATE_LABEL_POOL);
@@ -1079,7 +1151,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         // 否则远处站牌全亮，在灭点处叠成一摞。
         label.element.style.setProperty(
           "--label-depth-fade",
-          Math.max(0.08, 1 - Math.abs(station.z - travel) / dateFadeSpan).toFixed(3),
+          Math.max(0.65, 1 - Math.abs(station.z - travel) / dateFadeSpan).toFixed(3),
         );
         label.element.style.setProperty(
           "--label-accent",
@@ -1114,6 +1186,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       const nearbyEvents = events
         .map((event, index) => ({ event, index }))
         .filter(({ event }) => Math.abs(stations[event.dayIndex].z - travel) < eventRange)
+        .sort((a, b) => Math.abs(stations[a.event.dayIndex].z - travel) - Math.abs(stations[b.event.dayIndex].z - travel))
         .slice(0, EVENT_FLAG_POOL);
       eventFlags.forEach((label, index) => {
         const entry = nearbyEvents[index];
@@ -1126,7 +1199,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         label.element.dataset.phase = entry.event.phase;
         label.element.style.setProperty(
           "--label-depth-fade",
-          Math.max(0.08, 1 - Math.abs(stations[entry.event.dayIndex].z - travel) / eventFadeSpan).toFixed(3),
+          Math.max(0.65, 1 - Math.abs(stations[entry.event.dayIndex].z - travel) / eventFadeSpan).toFixed(3),
         );
         const position = eventPositionByIndex[entry.index];
         label.position.set(position.x, position.y + 0.2, position.z);
@@ -1141,7 +1214,14 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       : [];
     let lastProgress = -1;
     let lastMonthIndex = -1;
+    let lastDayIndex = homeIndex;
     const updateScrubber = () => {
+      // 仅跨日更新 React；逐帧的 travel 留在渲染器里。
+      const dayIndex = nearestStationIndex(flightTargetTravel ?? travel);
+      if (dayIndex !== lastDayIndex) {
+        lastDayIndex = dayIndex;
+        setActiveDayIndex(dayIndex);
+      }
       const stageElement = stageRef.current;
       if (!stageElement) return;
       const progress = deepestZ > 0 ? travel / deepestZ : 0;
@@ -1154,11 +1234,13 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         lastMonthIndex = monthIndex;
         scrubberButtons.forEach((button, index) => {
           button.dataset.active = index === monthIndex ? "true" : "false";
+          button.setAttribute("aria-pressed", String(index === monthIndex));
         });
       }
     };
 
     let lastFrameAt = performance.now();
+    let tiltWeight = 1;
     const animate = (now: number) => {
       if (!visible) {
         lastFrameAt = now;
@@ -1167,8 +1249,16 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       const dt = Math.min(0.1, (now - lastFrameAt) / 1000);
       lastFrameAt = now;
       const seconds = now / 1000;
+      pointerEffects.tick(now, !pauseRef.current && !reducedMotion);
       nodeMaterial.uniforms.uTime.value = seconds;
       nodeMaterial.uniforms.uMotion.value = pauseRef.current || reducedMotion ? 0 : 1;
+      writeStageInteractionUniforms(nodeMaterial.uniforms, pointerEffects);
+      // 站牌节点的雾轻一点：它们是要读的日期锚点；伴生尘埃全吃雾，远处沉下去。
+      writeStageFogUniforms(nodeMaterial.uniforms, stageFog, 0.7);
+      riverMaterial.uniforms.uTime.value = seconds;
+      riverMaterial.uniforms.uMotion.value = pauseRef.current || reducedMotion ? 0 : 1;
+      writeStageInteractionUniforms(riverMaterial.uniforms, pointerEffects);
+      writeStageFogUniforms(riverMaterial.uniforms, stageFog, 1.4);
 
       if (searchActive && searchSpheres.visible) {
         notes.forEach((note, index) => {
@@ -1216,6 +1306,12 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         }
       }
 
+      // 航道的视差幅度只给星图的四成：站牌是规则圆环，歪多了会被读成变形而不是转头。
+      const tiltWanted = pauseRef.current || reducedMotion ? 0 : 1;
+      tiltWeight += (tiltWanted - tiltWeight) * (1 - Math.exp(-dt * 5.5));
+      root.rotation.x = pointerEffects.tiltX * 0.4 * tiltWeight;
+      root.rotation.y = pointerEffects.tiltY * 0.4 * tiltWeight;
+
       if (!pauseRef.current && !reducedMotion) {
         river.rotation.z = seconds * 0.02;
         const flowAttribute = flowGeometry.getAttribute("position") as THREE.BufferAttribute;
@@ -1232,12 +1328,21 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       focusArtifact.tick(seconds, !pauseRef.current && !reducedMotion);
 
       starfield.points.position.copy(camera.position);
-      controls.update();
+      starfield.setInteraction(
+        pointerEffects.pointer.x,
+        pointerEffects.pointer.y,
+        pointerEffects.energy,
+        pointerEffects.dragEnergy > 0.12,
+        pointerEffects.energy < 0.08,
+      );
+      starfield.tick(seconds, !pauseRef.current && !reducedMotion);
+      controls.update(dt);
       stageScene.updateMatrixWorld(true);
       updateLabelWindow();
       projectLabelItems(activeLabelItems, root, camera, host);
       updateScrubber();
-      renderer.render(stageScene, camera);
+      if (bloom) bloom.render(stageScene, camera);
+      else renderer.render(stageScene, camera);
     };
     renderer.setAnimationLoop(animate);
     const readyFrame = window.requestAnimationFrame(() => setReady(true));
@@ -1248,6 +1353,8 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       resizeObserver.disconnect();
       visibilityObserver.disconnect();
       controls.dispose();
+      bloom?.dispose();
+      pointerEffects.dispose();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerleave", onPointerLeave);
@@ -1267,14 +1374,16 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
       updateSearchRef.current = () => undefined;
       stepStationRef.current = () => undefined;
       goToMonthRef.current = () => undefined;
+      goToStationRef.current = () => undefined;
+      closeDossierRef.current = () => undefined;
     };
-  }, [noteById, openNode, scene]);
+  }, [eventById, noteById, openNode, scene, today]);
 
   if (scene.stations.length === 0) {
     return <div className="space-graph-empty">还没有带日期的记忆。</div>;
   }
 
-  const maxMonthCount = Math.max(1, ...scene.months.map((month) => month.noteCount));
+  const maxMonthCount = Math.max(1, ...scene.months.map((month) => month.noteCount + month.eventCount));
 
   return (
     <div
@@ -1297,17 +1406,34 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         <span>TIME CORRIDOR</span>
         <strong>沿着时间，重访每一天。</strong>
       </div>
+      {!selectedNote && currentStation && <aside className="time-corridor-day-panel" aria-label="当前日期的记录">
+        <header><span>正在回看</span><button type="button" onClick={onFallback}>时间列表 ↗</button></header>
+        <h2>{currentStation.dateLabel}</h2><p>{currentStation.weekdayLabel} · {currentDayNotes.length} 篇笔记 · {currentDayEvents.length} 场日程</p>
+        <div className="time-corridor-day-nav">
+          <button type="button" disabled={activeDayIndex === 0} onClick={() => stepStationRef.current(-1)}>← 较近一天</button>
+          <button type="button" disabled={activeDayIndex >= scene.stations.length - 1} onClick={() => stepStationRef.current(1)}>更早一天 →</button>
+        </div>
+        <label className="time-corridor-date-jump">定位日期<input type="date" aria-label="在航道定位日期" value={currentStation.date} min={scene.stations.at(-1)?.date} max={scene.stations[0]?.date} onChange={(event) => {
+          if (!event.target.value) return;
+          const date = nearestTimelineDate(scene.stations.map((station) => station.date), event.target.value);
+          goToStationRef.current(scene.stations.findIndex((station) => station.date === date));
+        }} /></label>
+        <div className="time-corridor-day-entries">
+          {currentDayEvents.map((event) => event && <button type="button" key={event.id} data-kind="event" onClick={() => openNode(event.noteId)}><small>日程 · {event.time || "时间待定"}</small><strong>{event.company}</strong><span>{event.label} ↗</span></button>)}
+          {currentDayNotes.map((note) => <button type="button" key={note.id} onClick={() => selectNodeRef.current(note.id)}><small>{note.kindLabel} · {note.groupLabel}</small><strong>{note.title}</strong><span>查看记忆 →</span></button>)}
+        </div>
+      </aside>}
       <StageSearchRadar
         inputRef={searchInputRef}
         search={search}
         meta={(note) => `${scene.stations[note.dayIndex]?.dateLabel ?? note.date} · ${note.kindLabel}`}
         resultsId="time-corridor-search-results"
-        placeholder="搜索标题与全文"
+        placeholder="搜索笔记、日程与全文"
         inputAriaLabel="在时间航道中搜索标题与全文"
         listAriaLabel="时间航道全文搜索结果"
         clearAriaLabel="清空时间航道搜索"
-        hitUnit="记忆"
-        enterLabel="飞向记忆"
+        hitUnit="记录"
+        enterLabel="定位记录"
         emptyHint="尝试更短的关键词，或搜索正文中的日语、公司名和技术词。"
       />
       {activeNote && !selectedNote && (
@@ -1364,8 +1490,8 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
               </button>
               <button
                 type="button"
-                aria-label="收起记忆档案并回到当下"
-                onClick={() => resetViewRef.current()}
+                aria-label="收起记忆档案，留在当前日期"
+                onClick={() => closeDossierRef.current()}
               >
                 ×
               </button>
@@ -1477,20 +1603,6 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
             >
               {viewMode === "overview" ? "巡航视角" : "俯瞰全线"} <kbd>V</kbd>
             </button>
-            <button
-              type="button"
-              aria-label="回到更近的一天"
-              onClick={() => stepStationRef.current(-1)}
-            >
-              上一天
-            </button>
-            <button
-              type="button"
-              aria-label="驶向更早的一天"
-              onClick={() => stepStationRef.current(1)}
-            >
-              下一天
-            </button>
           </>
         )}
       />
@@ -1507,7 +1619,7 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
             { keys: ["O"], label: "打开完整记忆" },
             { keys: ["＋", "－"], label: "文字缩放" },
             { keys: ["0"], label: "恢复 100%" },
-            { keys: ["←", "→"], label: "按时间切换记忆" },
+            { keys: ["←", "→"], label: "切换日期" },
             { keys: ["[", "]"], label: "月份跳跃" },
             { keys: ["Home"], label: "回到当下" },
             { keys: ["End"], label: "最早的一站" },
@@ -1535,9 +1647,9 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
             <button
               type="button"
               key={month.key}
-              title={`${month.label} · ${month.noteCount} 篇记忆`}
+              title={`${month.label} · ${month.noteCount} 篇笔记 · ${month.eventCount} 场日程`}
               style={{
-                "--bucket-scale": Math.sqrt(month.noteCount) / Math.sqrt(maxMonthCount),
+                "--bucket-scale": Math.sqrt(month.noteCount + month.eventCount) / Math.sqrt(maxMonthCount),
               } as CSSProperties}
               onClick={() => goToMonthRef.current(index)}
             >
@@ -1548,8 +1660,9 @@ export default function ThreeTimeCorridor({ scene, onOpen, onFallback }: Props) 
         </div>
       </div>
       <details className="space-graph-index">
-        <summary>用列表访问全部记忆</summary>
+        <summary>用列表访问全部记忆与日程</summary>
         <div>
+          {scene.events.map((event) => <button type="button" key={`event:${event.id}`} onClick={() => openNode(event.noteId)}><i style={{ background: WARM_ACCENT }} /><span>{event.company} · {event.label}</span><small>{event.date} {event.time}</small></button>)}
           {scene.notes.map((note) => (
             <button type="button" key={note.id} onClick={() => openNode(note.id)}>
               <i style={{ background: note.color }} />

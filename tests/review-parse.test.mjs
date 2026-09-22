@@ -172,3 +172,68 @@ test("uniqueAnnotations: 連打でできた同一追記を一件として扱う"
   assert.equal(annotations.length, 5);
   assert.equal(uniqueAnnotations(annotations).length, 4);
 });
+
+const DECISION_SENTENCES = parseSeirikou(`## q00 裁定の更新
+- **s010｜私?**
+    - 正:: «甲»と«乙»。
+    - 誤1:: «甲» → A ｜疑
+    - 誤2:: «乙» → B ｜疑
+`).sentences;
+
+function decision(id, mine, target = "speaker") {
+  return { id, sentenceId: "s010", kind: "裁定", status: "open", date: "2026-01-01", target, mine };
+}
+
+test("reviewDecisionTasks: 最新の話者訂正が旧確認を上書きする（open でも明示的確認は有効）", () => {
+  const annotations = [
+    decision("a001", "話者裁定：この文は自分の発言"),
+    decision("a002", "話者裁定：この文は面接官の発言"),
+  ];
+  const speaker = reviewDecisionTasks(DECISION_SENTENCES, annotations).find((task) => task.target === "speaker");
+  assert.equal(speaker.resolution, "speaker-interviewer");
+  assert.equal(speaker.resolvedBy, "a002");
+  assert.deepEqual(annotations.map((item) => item.id), ["a001", "a002"], "入力の追記順を変えない");
+});
+
+test("reviewDecisionTasks: 最新の不確かな話者申告は旧確認に戻らず未解決になる", () => {
+  for (const mine of ["这句好像不是我说的，不过也可能我记错了。", "話者裁定：自分の発言か覚えていない", "話者裁定：この文は自分の発言ではない"] ) {
+    const annotations = [
+      decision("a001", "話者裁定：この文は自分の発言"),
+      decision("a002", mine),
+    ];
+    const speaker = reviewDecisionTasks(DECISION_SENTENCES, annotations).find((task) => task.target === "speaker");
+    assert.equal(speaker.resolution, "unknown", mine);
+    assert.equal(speaker.resolvedBy, undefined, mine);
+  }
+});
+
+test("reviewDecisionTasks: 同じ文の別対象は独立し、旧自由文の誤り裁定も保つ", () => {
+  const annotations = [
+    decision("a001", "話者裁定：この文は自分の発言"),
+    decision("a002", "«甲»は学習者誤りで確定", "error:1"),
+    decision("a003", "誰の発言か記憶が曖昧です"),
+    decision("a004", "«甲»は転写誤りで確定", "error:1"),
+    { ...decision("a005", "«乙»と言ったつもり → 転写扱い", "error:2"), target: undefined },
+  ];
+  const tasks = reviewDecisionTasks(DECISION_SENTENCES, annotations);
+  assert.equal(tasks.find((task) => task.target === "speaker").resolvedBy, undefined);
+  assert.equal(tasks.find((task) => task.target === "error:1").resolvedBy, "a004");
+  assert.equal(tasks.find((task) => task.target === "error:1").resolution, "transcript");
+  assert.equal(tasks.find((task) => task.target === "error:2").resolvedBy, "a005");
+  assert.equal(tasks.find((task) => task.target === "error:2").resolution, "unknown");
+});
+
+test("reviewDecisionTasks: A→B→A の最新確認を上流の去重後も保つ", () => {
+  const annotations = [
+    decision("a001", "話者裁定：この文は自分の発言"),
+    decision("a002", "話者裁定：この文は面接官の発言"),
+    decision("a003", "話者裁定：この文は自分の発言"),
+  ];
+  const unique = uniqueAnnotations(annotations);
+  assert.deepEqual(unique.map((item) => item.id), ["a002", "a003"]);
+  for (const input of [annotations, unique]) {
+    const speaker = reviewDecisionTasks(DECISION_SENTENCES, input).find((task) => task.target === "speaker");
+    assert.equal(speaker.resolution, "speaker-self");
+    assert.equal(speaker.resolvedBy, "a003");
+  }
+});

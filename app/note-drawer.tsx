@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import MarkdownDocument, { headingAnchor } from "./markdown-document";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import MarkdownDocument from "./markdown-document";
+import NoteReader from "./note-reader";
+import { captureReadingPosition, restoreReadingPosition, type ReadingPosition } from "./reading-mode";
+import { scanReadingHeadings } from "@/lib/reading-document";
 import {
   formatDate,
   getString,
   getTitle,
   getType,
   noteBasename,
-  stripFrontmatter,
   type Note,
 } from "@/lib/notes";
 import {
@@ -19,40 +21,7 @@ import {
   trustLayer,
   typeLabel,
 } from "@/lib/memory-atlas-data";
-
-/** 目次用の見出しだけを拾う。**強調** や [[リンク]] の記号は目次では邪魔なので落とす。 */
-function headingPlainText(text: string) {
-  return text
-    .replace(/!?\[\[([^\]]+)\]\]/g, (_, body: string) => {
-      const [targetWithHeading, alias] = String(body).split("|");
-      return alias || targetWithHeading.split("#")[0];
-    })
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .trim();
-}
-
-/**
- * MarkdownDocument と同じ順序で本文を舐めて見出しを集める。
- * 走査規則（コードフェンス内は無視・冒頭 H1 はノート題名なので捨てる）を
- * 本文レンダラと揃えていないと、目次のリンク先がずれる。
- */
-function scanHeadings(content: string) {
-  const found: { id: string; level: number; text: string }[] = [];
-  let inCode = false;
-  let seenTitle = false;
-  stripFrontmatter(content).split("\n").forEach((line, index) => {
-    if (line.startsWith("```")) { inCode = !inCode; return; }
-    if (inCode || line.startsWith(">")) return;
-    const heading = line.match(/^(#{1,4})\s+(.+)/);
-    if (!heading) return;
-    const level = heading[1].length;
-    if (level === 1 && !seenTitle) { seenTitle = true; return; }
-    if (level > 3) return;
-    found.push({ id: headingAnchor(index), level: level === 1 ? 2 : level, text: headingPlainText(heading[2]) });
-  });
-  return found;
-}
+import { useDialogFocus } from "./use-dialog-focus";
 
 export default function NoteDrawer({
   note,
@@ -70,6 +39,8 @@ export default function NoteDrawer({
   onOpen: (note: Note) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  useDialogFocus(dialogRef);
   const group = getGroup(note.path);
   const trust = trustLayer(note);
   const basename = noteBasename(note.path);
@@ -80,7 +51,14 @@ export default function NoteDrawer({
     [allNotes, basename],
   );
   const frontmatterEntries = Object.entries(note.frontmatter);
-  const headings = useMemo(() => scanHeadings(note.content), [note.content]);
+  const headings = useMemo(() => scanReadingHeadings(note.content), [note.content]);
+  const [readerOpen, setReaderOpen] = useState(false);
+  const [readerPosition, setReaderPosition] = useState<{ path: string; position: ReadingPosition } | null>(null);
+  useLayoutEffect(() => {
+    if (!readerOpen && readerPosition?.path === note.path && scrollRef.current) {
+      restoreReadingPosition(scrollRef.current, readerPosition.position);
+    }
+  }, [readerOpen, note.path, readerPosition]);
   const [activeHeading, setActiveHeading] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
 
@@ -144,10 +122,14 @@ export default function NoteDrawer({
   };
 
   return (
-    <div className="drawer-backdrop drawer-backdrop--full">
-      <aside className="note-drawer note-drawer--full" aria-label="记忆详情" aria-modal="true" role="dialog">
+    <div className="drawer-backdrop drawer-backdrop--full" inert={readerOpen} aria-hidden={readerOpen || undefined}>
+      <aside ref={dialogRef} tabIndex={-1} className="note-drawer note-drawer--full" aria-label="记忆详情" aria-modal="true" role="dialog">
         <header className="drawer-header">
           <div><span style={{ color: GROUPS[group].color }}>{GROUPS[group].label}</span><small>{note.path}</small></div>
+          <button className="reader-entry" onClick={() => {
+            if (scrollRef.current) setReaderPosition({ path: note.path, position: captureReadingPosition(scrollRef.current) });
+            setReaderOpen(true);
+          }}>阅读模式</button>
           <span className="drawer-esc-hint"><kbd>Esc</kbd> 返回</span>
           <button onClick={onClose} aria-label="关闭详情">×</button>
           <i className="drawer-progress" style={{ transform: `scaleX(${progress})` }} aria-hidden />
@@ -202,6 +184,9 @@ export default function NoteDrawer({
           </div>
         </div>
       </aside>
+      {readerOpen && <NoteReader note={note} section={section} backlinks={backlinks} onOpen={onOpen} onOpenWiki={onOpenWiki}
+        initialPosition={readerPosition?.path === note.path ? readerPosition.position : undefined}
+        onClose={(position) => { setReaderPosition({ path: note.path, position }); setReaderOpen(false); }} />}
     </div>
   );
 }

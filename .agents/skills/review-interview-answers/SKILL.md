@@ -1,7 +1,7 @@
 ---
 name: review-interview-answers
 description: >-
-  Analyze completed interview transcripts as evidence-backed answer-quality reviews: recover interviewer intent and compound subquestions, identify answered and missed points or off-target answers, score question understanding, coverage, directness, evidence credibility, and risk control, produce concise Japanese improved answers, and attach stable strategy tags for cross-interview trends. Use for 面试复盘、深度复盘、回答质量、漏答、答非所问、日本面试风险、五维评分、AI/MCP/DDD 复合问题，or when generating, regenerating, or auditing ObsidianWeb `*_回答品質復盤.md` from a `*_整理稿.md` after human transcript decisions are complete.
+  Analyze completed interview transcripts with a natural-language holistic introduction covering candidate performance, interviewer priorities, evidence of employer interest, and remaining uncertainty; then produce evidence-backed answer-quality reviews, recover compound subquestions, identify missed or off-target answers, score five dimensions, produce concise Japanese improved answers, and attach stable strategy tags for cross-interview trends. Use for 面试复盘、面试导读、深度复盘、回答质量、漏答、答非所问、日本面试风险、五维评分、AI/MCP/DDD 复合问题，or when generating, regenerating, or auditing ObsidianWeb `*_回答品質復盤.md` from a `*_整理稿.md` after human transcript decisions are complete.
 ---
 
 # 面试回答深度复盘
@@ -87,7 +87,20 @@ Bridge 模式不得为了读取参考而突破调用方的“不可调用工具�
 
 不修改或删除反馈。撤回和修正也应由新的人工条目表达。
 
-### 7. 选出优先项并输出
+### 7. 写整场综合导读，选出优先项并输出
+
+每份新生成的复盘必须有 `overviewZh`，在评分与逐题分析之前显示为「综合导读」。用自然、连贯的中文把整场谈话串起来，让本人先理解这场面试发生了什么、双方是否对上了、目前走到哪一步。通常写成几段完整叙述，按材料调整长度；不要用扣分清单、逐题流水账或固定问答模板代替导读。
+
+导读综合解释以下线索，而不是只评价候选人的表现：
+
+- 面试的阶段、实际重心与互动走向：对方主要在核对条件、了解经历，还是深入验证技术；哪些追问或转折改变了谈话。
+- 本人的回答带来了什么实际效果：对方接住了哪些能力与定位，哪里仍需解释；结合已确认的本人背景和意图。
+- 对方可能在作什么判断、推进意愿如何：把具体追问、复述、下一步安排与一般赞美、寒暄区别开来，用对应证据解释信号的分量。
+- 当前已确认的结果、尚未确定的条件，以及下一步最值得关注的事情。
+
+**观察、推断和未知要在叙述中分清。** 可以写“从这几次追问看，更像是在确认……”，不能声称读到了对方心思、内部笔记或决策。没有追问不等于已认可能力；礼貌称赞不等于录用；提出谈条件不等于已经发出正式 offer。不要把回答评分换算成录用概率，也不要为了显得严厉或积极而选择性引用信号。材料不足时说明哪些意愿暂时看不出来。
+
+已有后续结果时标明时间关系，例如“单看现场……；结合面试后收到的通知，现在可以确认……”，不能把后来发生的事写成面试当时就已确定。`overviewZh` 负责整场的综合理解，`summaryZh` 保留回答质量与评分解释；两者不要重复粘贴。人工要求只补导读时，只增补导读并标注作者/日期，保留旧报告评分与逐题正文，必要时说明新导读使用了哪些后续事实。
 
 - `priorityBlockIds` 最多 8 个，优先选择漏答、答非所问、高风险表达和岗位关键能力缺口。
 - 强项和弱项都引用具体 qNN，不写空泛人格评价。
@@ -126,3 +139,4 @@ node .agents/skills/review-interview-answers/scripts/validate-review.mjs \
 5. 本人反对或补充已被重新核对，旧 AI 结论没有被机械复读。
 6. 原文与人工事实层没有被改写。
 7. 已对本场优先失分点做回流检查：或更新/新增面试标准回答库卡片（证据回链本场），或说明本场无需回流。
+8. 评分前有独立的自然语言综合导读，同时解释本人表现、对方可能的判断与推进意愿；可观察证据、合理推断、后续确认与未知没有混淆。

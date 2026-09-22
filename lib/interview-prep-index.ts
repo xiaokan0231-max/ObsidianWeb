@@ -8,6 +8,7 @@ export type InterviewPrepSeries = {
   key: string;
   company: string;
   caseLink: string;
+  meetingLink: string;
   rounds: InterviewPrepDoc[];
 };
 
@@ -21,11 +22,12 @@ function prepDirectory(doc: InterviewPrepDoc) {
 }
 
 /**
- * 同じ会社に複数求人があっても混ぜないため、面接シリーズの正本は company 表記ではなく case。
- * 古いノートに case が無い場合だけ同じ会社ディレクトリへ退避する。
+ * 同公司多个职位或独立面谈不能混轮，系列按带类型的正本引用划分。
+ * 旧笔记没有 case / meeting 时，保留原来的目录兜底。
  */
 function interviewPrepSeriesKey(doc: InterviewPrepDoc) {
   if (doc.caseLink) return `case:${doc.caseLink}`;
+  if (doc.meetingLink) return `meeting:${doc.meetingLink}`;
   const directory = prepDirectory(doc);
   if (directory) return `directory:${directory}`;
   return `company:${doc.company.normalize("NFKC").trim() || doc.note.path}`;
@@ -79,6 +81,37 @@ function compareRounds(left: InterviewPrepDoc, right: InterviewPrepDoc) {
   return left.note.path.localeCompare(right.note.path);
 }
 
+function hasMixedPrepVersions(docs: InterviewPrepDoc[]) {
+  return docs.some((doc) => doc.prepVersion === 2) && docs.some((doc) => doc.prepVersion !== 2);
+}
+
+function orderedRounds(docs: InterviewPrepDoc[]) {
+  if (!hasMixedPrepVersions(docs)) return [...docs].sort(compareRounds);
+  // 显式接触序号与旧稿的 10/20/90 推断值不是同一尺度。分别排序再合并，
+  // 保住各队列内部顺序，也避免按比较对象切换尺度造成不传递的 comparator。
+  const explicit = docs.filter((doc) => doc.sessionOrder !== null).sort(compareRounds);
+  const legacy = docs.filter((doc) => doc.sessionOrder === null).sort(compareRounds);
+  const result: InterviewPrepDoc[] = [];
+  while (explicit.length && legacy.length) {
+    const left = legacy[0], right = explicit[0];
+    const byRound = (inferredInterviewRoundOrder(left.round) ?? 50) - (inferredInterviewRoundOrder(right.round) ?? 50);
+    const dateKey = (doc: InterviewPrepDoc) => /^\d{4}-\d{2}-\d{2}$/.test(doc.date) ? doc.date : "9999-99-99";
+    const order = byRound || dateKey(left).localeCompare(dateKey(right)) || left.note.path.localeCompare(right.note.path);
+    result.push((order <= 0 ? legacy : explicit).shift()!);
+  }
+  return [...result, ...legacy, ...explicit];
+}
+
+function latestInterviewPrepDate(series: InterviewPrepSeries) {
+  // 轮次顺序不一定与日期一致；「未定」也不能参与日期字符串比较。
+  return series.rounds.reduce(
+    (latest, doc) => /^\d{4}-\d{2}-\d{2}$/.test(doc.date) && doc.date > latest
+      ? doc.date
+      : latest,
+    "",
+  );
+}
+
 export function groupInterviewPrepDocs(docs: InterviewPrepDoc[]): InterviewPrepSeries[] {
   const bySeries = new Map<string, InterviewPrepSeries>();
   for (const doc of docs) {
@@ -92,16 +125,18 @@ export function groupInterviewPrepDocs(docs: InterviewPrepDoc[]): InterviewPrepS
       key,
       company: doc.company || doc.title,
       caseLink: doc.caseLink,
+      meetingLink: doc.meetingLink,
       rounds: [doc],
     });
   }
   return [...bySeries.values()]
-    .map((series) => ({ ...series, rounds: [...series.rounds].sort(compareRounds) }))
+    .map((series) => ({ ...series, rounds: orderedRounds(series.rounds) }))
     .sort((left, right) =>
-      (left.company || left.caseLink).localeCompare(
-        right.company || right.caseLink,
+      latestInterviewPrepDate(right).localeCompare(latestInterviewPrepDate(left)) ||
+      (left.company || left.caseLink || left.meetingLink).localeCompare(
+        right.company || right.caseLink || right.meetingLink,
         "ja",
-      ),
+      ) || left.key.localeCompare(right.key),
     );
 }
 
@@ -113,6 +148,11 @@ export function selectRelevantInterviewPrepDoc(
   docs: InterviewPrepDoc[],
   today: string,
 ): InterviewPrepDoc | null {
+  const mixed = hasMixedPrepVersions(docs);
+  const rank = new Map(orderedRounds(docs).map((doc, index) => [doc.note.path, index]));
+  const compareOrder = (left: InterviewPrepDoc, right: InterviewPrepDoc) => mixed
+    ? rank.get(left.note.path)! - rank.get(right.note.path)!
+    : (interviewRoundOrder(left) ?? 50) - (interviewRoundOrder(right) ?? 50);
   const active = docs.filter((doc) => {
     const status = interviewPrepTemporalStatus(doc, today);
     return (
@@ -125,7 +165,7 @@ export function selectRelevantInterviewPrepDoc(
     return [...active].sort(
       (left, right) =>
         left.date.localeCompare(right.date) ||
-        (interviewRoundOrder(left) ?? 50) - (interviewRoundOrder(right) ?? 50) ||
+        compareOrder(left, right) ||
         left.note.path.localeCompare(right.note.path),
     )[0];
   }
@@ -136,7 +176,7 @@ export function selectRelevantInterviewPrepDoc(
   if (preparing.length > 0) {
     return [...preparing].sort(
       (left, right) =>
-        (interviewRoundOrder(right) ?? 50) - (interviewRoundOrder(left) ?? 50) ||
+        compareOrder(right, left) ||
         right.note.path.localeCompare(left.note.path),
     )[0];
   }
@@ -148,7 +188,7 @@ export function selectRelevantInterviewPrepDoc(
   return [...source].sort(
     (left, right) =>
       (right.date || "").localeCompare(left.date || "") ||
-      (interviewRoundOrder(right) ?? 50) - (interviewRoundOrder(left) ?? 50) ||
+      compareOrder(right, left) ||
       right.note.path.localeCompare(left.note.path),
   )[0] ?? null;
 }
@@ -173,7 +213,16 @@ export function prepDocsThroughRound(
     (doc) => doc.note.path === selected.note.path,
   );
   const rounds = index < 0 ? [selected] : series.rounds.slice(0, index + 1);
-  return [selected, ...rounds.slice(0, -1).reverse()];
+  const prior = rounds.slice(0, -1).reverse();
+  if (!hasMixedPrepVersions(series.rounds) || !/^\d{4}-\d{2}-\d{2}$/.test(selected.date)) return [selected, ...prior];
+  // 混合历史的显示位置不能单独证明当时已经知道某条资料。
+  return [selected, ...prior.filter((doc) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(doc.date) || doc.date > selected.date) return false;
+    if (doc.date < selected.date) return true;
+    if (doc.sessionOrder !== null && selected.sessionOrder !== null) return doc.sessionOrder < selected.sessionOrder;
+    const before = inferredInterviewRoundOrder(doc.round), after = inferredInterviewRoundOrder(selected.round);
+    return before !== null && after !== null && before < after;
+  })];
 }
 
 export function mergePrepExternalLinks(

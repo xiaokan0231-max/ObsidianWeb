@@ -32,15 +32,17 @@ import {
 
 const ThreeKnowledgeGraph = lazy(() => import("./knowledge-graph-three"));
 
+type GraphScene = {
+  nodes: KnowledgeGraphSceneNode[];
+  links: KnowledgeGraphSceneLink[];
+};
+
 function buildKnowledgeGraphScene(
   graph: KnowledgeGraph,
   mode: GraphViewMode,
   filter: GroupKey | "all",
   kind: GraphNodeKind | "all",
-): {
-  nodes: KnowledgeGraphSceneNode[];
-  links: KnowledgeGraphSceneLink[];
-} {
+): GraphScene {
   const view = selectKnowledgeGraphView(graph, { mode, group: filter, kind });
   const degree = new Map<string, number>();
   const outbound = new Map<string, number>();
@@ -88,6 +90,24 @@ function buildKnowledgeGraphScene(
   };
 }
 
+function graphNeighborhood(scene: GraphScene, focusId: string | null): GraphScene {
+  if (!focusId || !scene.nodes.some((node) => node.id === focusId)) return { nodes: [], links: [] };
+  const neighborIds = new Set<string>([focusId]);
+  const firstHop = scene.links
+    .filter((link) => link.source === focusId || link.target === focusId)
+    .toSorted((left, right) => left.relation.localeCompare(right.relation))
+    .slice(0, 28);
+  firstHop.forEach((link) => {
+    neighborIds.add(link.source);
+    neighborIds.add(link.target);
+  });
+  const links = scene.links.filter((link) => neighborIds.has(link.source) && neighborIds.has(link.target));
+  return {
+    nodes: scene.nodes.filter((node) => neighborIds.has(node.id)),
+    links,
+  };
+}
+
 function GraphView({
   notes,
   filter,
@@ -99,14 +119,33 @@ function GraphView({
   onFilter: (filter: GroupKey | "all") => void;
   onOpen: (note: Note) => void;
 }) {
-  const [renderer, setRenderer] = useState<"space" | "map">("space");
+  const [renderer, setRenderer] = useState<"space" | "map">(() =>
+    typeof window !== "undefined" && window.localStorage.getItem("echo.graph.renderer") === "space"
+      ? "space"
+      : "map",
+  );
   const [mode, setMode] = useState<GraphViewMode>("semantic");
   const [kind, setKind] = useState<GraphNodeKind | "all">("all");
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const [graphQuery, setGraphQuery] = useState("");
+  useEffect(() => window.localStorage.setItem("echo.graph.renderer", renderer), [renderer]);
   const graph = useMemo(() => buildKnowledgeGraph(notes), [notes]);
-  const scene = useMemo(
+  const fullScene = useMemo(
     () => buildKnowledgeGraphScene(graph, mode, filter, kind),
     [filter, graph, kind, mode],
   );
+  const localScene = useMemo(() => graphNeighborhood(fullScene, focusId), [focusId, fullScene]);
+  // 3D 是主动进入的探索层，保留全图；默认 2D 只承担围绕一个对象的检索。
+  const scene = renderer === "space" ? fullScene : localScene;
+  const graphSearchResults = useMemo(() => {
+    const normalized = graphQuery.trim().toLocaleLowerCase();
+    return fullScene.nodes
+      .filter((node) => !normalized || `${node.title} ${node.path} ${node.excerpt}`.toLocaleLowerCase().includes(normalized))
+      .toSorted((left, right) => right.degree - left.degree || left.title.localeCompare(right.title))
+      .slice(0, normalized ? 12 : 8);
+  }, [fullScene.nodes, graphQuery]);
+  const focusedNode = fullScene.nodes.find((node) => node.id === focusId) ?? null;
+  const legendScene = renderer === "map" && !focusedNode ? fullScene : scene;
   // 分区ボタンには「今のモードで何件出るか」を出す。0 のまま押せると
   // 「データが入っていない」と誤解する（日本語学習・系统が既定ビューで丸ごと消えていた）。
   const modeCounts = useMemo(() => {
@@ -118,7 +157,7 @@ function GraphView({
     }
     return counts;
   }, [graph, kind, mode]);
-  const emptyGroup = filter !== "all" && scene.nodes.length === 0;
+  const emptyGroup = filter !== "all" && fullScene.nodes.length === 0;
   // 「全部关系」に切り替えれば実際に出るときだけ、そう案内する。
   // 空の原因が节点类型フィルタ側のときに「双链だから」と説明すると帰因を誤る。
   const recoverableInAllMode = useMemo(() => {
@@ -136,27 +175,52 @@ function GraphView({
   const fallBackToMap = useCallback(() => setRenderer("map"), []);
 
   return (
-    <section className="graph-view">
-      <div className="module-control-row">
+    <section className={`graph-view${renderer === "space" ? " stage-immersive" : ""}`}>
+      <h1 className="sr-only">关系图</h1>
+      <div className="stage-toolbar">
         <GroupFilters value={filter} onChange={onFilter} counts={modeCounts} />
         <div className="graph-control-cluster">
-          <div className="graph-renderer-toggle" aria-label="关系范围">
-            <button type="button" className={mode === "semantic" ? "active" : ""} onClick={() => setMode("semantic")} title="只看 frontmatter 声明的强类型关系（关于公司・派生自・要求技能…）">语义关系</button>
-            <button type="button" className={mode === "all" ? "active" : ""} onClick={() => setMode("all")} title="语义关系＋正文里的普通双链，全部显示">全部关系</button>
+          <div className="graph-renderer-toggle" role="group" aria-label="关系范围">
+            <span aria-hidden="true">关系</span>
+            <button type="button" className={mode === "semantic" ? "active" : ""} aria-pressed={mode === "semantic"} onClick={() => setMode("semantic")} title="只看 frontmatter 声明的强类型关系（关于公司・派生自・要求技能…）">语义关系</button>
+            <button type="button" className={mode === "all" ? "active" : ""} aria-pressed={mode === "all"} onClick={() => setMode("all")} title="语义关系＋正文里的普通双链，全部显示">全部关系</button>
           </div>
-          <div className="graph-renderer-toggle" aria-label="节点类型">
+          <div className="graph-renderer-toggle" role="group" aria-label="节点类型">
+            <span aria-hidden="true">节点</span>
             {(["all", "note", "company", "skill"] as const).map((value) => (
-              <button key={value} type="button" className={kind === value ? "active" : ""} onClick={() => setKind(value)}>
+              <button key={value} type="button" className={kind === value ? "active" : ""} aria-pressed={kind === value} onClick={() => setKind(value)}>
                 {{ all: "全部", note: "笔记", company: "公司", skill: "技能" }[value]}
               </button>
             ))}
           </div>
-          <div className="graph-renderer-toggle" aria-label="关系图显示方式">
-            <button type="button" className={renderer === "space" ? "active" : ""} onClick={() => setRenderer("space")}>3D 星图</button>
-            <button type="button" className={renderer === "map" ? "active" : ""} onClick={() => setRenderer("map")}>简洁模式</button>
+          <div className="graph-renderer-toggle" role="group" aria-label="关系图显示方式">
+            <span aria-hidden="true">视图</span>
+            <button type="button" className={renderer === "space" ? "active" : ""} aria-pressed={renderer === "space"} onClick={() => setRenderer("space")}>探索模式 · 3D</button>
+            <button type="button" className={renderer === "map" ? "active" : ""} aria-pressed={renderer === "map"} onClick={() => setRenderer("map")}>关系地图</button>
           </div>
         </div>
       </div>
+      {renderer === "map" && (
+        <div className="graph-focus-bar">
+          <label>
+            <span aria-hidden="true">⌕</span>
+            <input
+              value={graphQuery}
+              onChange={(event) => setGraphQuery(event.target.value)}
+              placeholder="搜索公司、技能或笔记，建立局部关系图"
+              aria-label="搜索关系图中心节点"
+            />
+          </label>
+          {focusedNode && (
+            <div>
+              <small>当前中心</small>
+              <strong>{focusedNode.title}</strong>
+              <span>{localScene.nodes.length} 节点 · {localScene.links.length} 关系</span>
+              <button type="button" onClick={() => setFocusId(null)}>重新选择</button>
+            </div>
+          )}
+        </div>
+      )}
       <div className="graph-layout" data-renderer={renderer}>
         {emptyGroup && (
           <div className="graph-empty-note" role="status">
@@ -174,7 +238,25 @@ function GraphView({
             )}
           </div>
         )}
-        {renderer === "space" ? (
+        {renderer === "map" && !focusedNode ? (
+          <section className="graph-start" aria-label="选择关系图中心节点">
+            <header>
+              <span>START LOCAL</span>
+              <h2>{graphQuery ? "选择一个搜索结果" : "先从一个对象开始"}</h2>
+              <p>选择公司、技能或笔记后，只显示它的一跳邻域。需要鸟瞰全部关系时，再切到 3D 探索模式。</p>
+            </header>
+            <div className="graph-start-results">
+              {graphSearchResults.map((node) => (
+                <button key={node.id} type="button" onClick={() => { setFocusId(node.id); setGraphQuery(""); }}>
+                  <span>{node.nodeKind === "company" ? "公司" : node.nodeKind === "skill" ? "技能" : node.kindLabel}</span>
+                  <strong>{node.title}</strong>
+                  <small>{node.degree} 条直接关系</small>
+                </button>
+              ))}
+              {graphSearchResults.length === 0 && <p>没有匹配的节点。试试更短的关键词。</p>}
+            </div>
+          </section>
+        ) : renderer === "space" ? (
           <Suspense
             fallback={(
               <div className="space-graph-loading space-graph-loading-shell" role="status">
@@ -199,12 +281,12 @@ function GraphView({
             <button key={group} onClick={() => onFilter(group)}>
               <i style={{ background: GROUPS[group].color }} />
               <span>{GROUPS[group].label}</span>
-              <strong>{scene.nodes.filter((node) => node.group === group).length}</strong>
+              <strong>{legendScene.nodes.filter((node) => node.group === group).length}</strong>
             </button>
           ))}
           <div className="graph-relation-summary">
             <span>{mode === "semantic" ? "强类型关系" : "全部关系"}</span>
-            <strong>{scene.links.length}</strong>
+            <strong>{legendScene.links.length}</strong>
           </div>
           <div className="legend-rule"><span>小</span><i /><i /><i /><span>被引用多</span></div>
         </aside>

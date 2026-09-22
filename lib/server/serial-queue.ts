@@ -8,6 +8,7 @@
 // tail 只在 finally 的 release() 里被 resolve，永远不会 reject：
 // 某次操作失败只抛回它自己的调用方，不会毒化后面排着的请求。
 export type SerialQueue = <T>(operation: () => Promise<T>) => Promise<T>;
+export type KeyedSerialQueue = <T>(key: string, operation: () => Promise<T>) => Promise<T>;
 
 // 可变状态留在调用方的模块变量里，这个共享模块自己不持有任何状态。
 // 现在的粒度是「一条路由一条队列，路由之间互不阻塞」；用工厂而不是模块级的
@@ -26,6 +27,50 @@ export function createSerialQueue(): SerialQueue {
       return await operation();
     } finally {
       release();
+    }
+  };
+}
+
+/**
+ * 按 key 分片串行：同 key 的操作保持顺序，不同 key 可并行。
+ * 这里的 key 建议直接用 note.path，避免不同资源互相阻塞。
+ */
+export function createKeyedSerialQueue(ttlMs = 120_000): KeyedSerialQueue {
+  const tails = new Map<string, Promise<void>>();
+  const cleanup = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function clearCleanup(key: string) {
+    const timer = cleanup.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      cleanup.delete(key);
+    }
+  }
+
+  return async function run<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    if (!key) {
+      throw new Error("并发串行队列需要 key。");
+    }
+
+    const previous = tails.get(key) ?? Promise.resolve();
+    let release = () => {};
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    tails.set(key, current);
+    clearCleanup(key);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      clearCleanup(key);
+      const timer = setTimeout(() => {
+        const latest = tails.get(key);
+        if (latest === current) tails.delete(key);
+        clearCleanup(key);
+      }, Math.max(1_000, ttlMs));
+      cleanup.set(key, timer);
     }
   };
 }

@@ -9,11 +9,11 @@ import { isReviewNotePath, reviewSiblingPath } from "@/lib/review-paths";
 import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
 import { upsertAppendNote } from "@/lib/server/note-append";
 import { readNote, readNoteOrNull } from "@/lib/server/obsidian";
-import { createSerialQueue } from "@/lib/server/serial-queue";
+import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
 
 type Body = { notePath?: string; blockId?: string };
 
-const inPracticeQueue = createSerialQueue();
+const inPracticeQueue = createKeyedSerialQueue();
 
 // 追記の暦日は東京で揃える。UTC の瞬間をそのまま書くと JST 00:00–09:00 の操作だけ
 // 前日の日付になり、同じ晩に押した「重练」と批注・フィードバックが別の日に記録される。
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     if (!block) throw new Error("深度复盘中找不到这个问题。");
     if (!block.improvedAnswerJa) throw new Error("这个问题还没有可练习的改善回答。");
 
-    const outcome = await inPracticeQueue(() =>
+    const outcome = await inPracticeQueue(practicePath, () =>
       upsertAppendNote({
         path: practicePath,
         plan: (existing) => {
@@ -79,6 +79,7 @@ export async function POST(request: Request) {
             questionTitle: block.questionTitle,
             improvedAnswerJa: block.improvedAnswerJa,
             evidenceSentenceIds: block.evidenceSentenceIds,
+            attempts: [],
           });
           if (existing) {
             return { nextContent: `${existing.content}${entry}`, value: {} };

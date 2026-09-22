@@ -17,6 +17,8 @@ import { Inlines } from "./prep-doc-render";
 import { copySelectionWithoutRuby } from "./ruby-copy";
 import { isTypingTarget, PrepSearchBox, useSlashFocus } from "./prep-search";
 import { useCopyFlash } from "./copy-flash";
+import ReadingMode from "./reading-mode";
+import { headingPlainText } from "@/lib/reading-document";
 
 function GuidanceBlock({
   title,
@@ -51,6 +53,11 @@ export default function InterviewPrep({
   const library = useMemo(() => findInterviewPrepLibrary(notes), [notes]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("全部");
+  const [readerOpen, setReaderOpen] = useState(false);
+  const readingHeadings = useMemo(() => (library?.items ?? []).map((item) => ({
+    id: `reader-answer-${item.id}`,
+    text: headingPlainText(item.title),
+  })), [library]);
   // 飛び込みで来たカードを最初の選択にする。以降は本人の選択が優先される
   const [selectedId, setSelectedId] = useState<string | null>(initialCardId ?? null);
   const { copiedId, flash } = useCopyFlash();
@@ -141,6 +148,9 @@ export default function InterviewPrep({
         <button className="prep-source" type="button" onClick={() => onOpen(library.note)}>
           打开 Obsidian 原笔记 ↗
         </button>
+        <button type="button" className="reader-entry" onClick={() => setReaderOpen(true)}>
+          全文阅读
+        </button>
       </section>
 
       {filteredItems.length === 0 ? (
@@ -230,6 +240,44 @@ export default function InterviewPrep({
             </article>
           )}
         </div>
+      )}
+      {readerOpen && (
+        <ReadingMode
+          documentKey={`prep-library:${library.note.path}`}
+          title="面试标准回答库"
+          eyebrow="准备材料"
+          metadata={[`${library.items.length} 篇回答`, "全部分类 · 连续阅读"]}
+          headings={readingHeadings}
+          onClose={() => setReaderOpen(false)}
+          backLabel="返回回答库"
+        >
+          {library.items.map((item, index) => (
+            <section className="reader-section reader-prose" id={`reader-answer-${item.id}`} key={item.id}>
+              <header data-reading-anchor={`reader-answer-${item.id}`}>
+                <span className="nr-chapter-number">{String(index + 1).padStart(2, "0")}</span>
+                <h2>{headingPlainText(item.title)}</h2>
+              </header>
+              <p className="reader-section-meta">
+                {item.category} · {item.priority === "S" ? "优先必练" : `${item.priority}级`}
+                {item.tags.length > 0 ? ` · ${item.tags.join(" / ")}` : ""}
+              </p>
+              {[
+                ["问题", item.question, "ja"],
+                ["回答目的", item.purpose, undefined],
+                ["标准参考答案", item.standardAnswer, "ja"],
+                ["30秒版", item.shortAnswer, "ja"],
+                ["回答结构", item.structure, undefined],
+                ["使用边界", item.boundary, undefined],
+                ["事实与证据", item.evidence, undefined],
+              ].map(([label, content, lang], fieldIndex) => content ? (
+                <section className="reader-answer-field" data-reading-anchor={`reader-answer-${item.id}-${fieldIndex}`} key={label}>
+                  <h3>{label}</h3>
+                  <p lang={lang}><Inlines nodes={parseInline(content)} /></p>
+                </section>
+              ) : null)}
+            </section>
+          ))}
+        </ReadingMode>
       )}
     </div>
   );

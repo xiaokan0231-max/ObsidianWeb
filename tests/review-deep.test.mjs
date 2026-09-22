@@ -83,6 +83,8 @@ test("answer-quality review round-trips through its durable vault note", () => {
   assert.match(note, /问题理解 72/);
   assert.match(note, /compound-question-miss/);
   assert.equal(hasDeductionLedger(review.dimensions), false);
+  assert.equal(Object.hasOwn(review, "overviewZh"), false);
+  assert.doesNotMatch(note, /## 综合导读/);
 });
 
 function ledgerReview(deductionsByKey) {
@@ -127,6 +129,42 @@ function ledgerReview(deductionsByKey) {
     new Map([["q10", new Set(["s091", "s092"])]]),
   );
 }
+
+test("the holistic introduction survives normalization and replaces only its previous generated version", () => {
+  const original = ledgerReview({});
+  const overview = "这轮主要确认工作方向。对方继续追问了实际分工。\n\n对方约定下一轮，说明愿意继续了解；具体岗位仍未确定。";
+  const review = normalizeInterviewAnswerReview(
+    { ...original, overviewZh: `  ${overview}\n` },
+    { generatedAt: original.generatedAt, model: original.model },
+    new Map([["q10", new Set(["s091", "s092"])]]),
+  );
+  assert.equal(review.overviewZh, overview);
+  assert.equal(review.summaryZh, original.summaryZh);
+  assert.equal(review.overallScore, original.overallScore);
+  assert.deepEqual(review.dimensions, original.dimensions);
+
+  const meta = {
+    company: "テスト社",
+    date: "2026-08-04",
+    round: "一次",
+    sourceName: "整理稿",
+    annotationName: null,
+  };
+  const previous = renderInterviewAnswerReview(
+    { ...original, overviewZh: "旧导读。" },
+    { ...meta, carriedSections: "## 本人补充\n\n下次确认项目分工。" },
+  );
+  const regenerated = renderInterviewAnswerReview(review, {
+    ...meta,
+    carriedSections: carryOverSections(previous),
+  });
+  assert.deepEqual(parseInterviewAnswerReview(regenerated), review);
+  const body = regenerated.split("<!-- interview-answer-review-data -->")[0];
+  assert.ok(body.indexOf(overview) < body.indexOf("## 全体評価"));
+  assert.match(body, /本人补充\n+下次确认项目分工/);
+  assert.doesNotMatch(body, /旧导读/);
+  assert.equal(body.split("## 综合导读").length - 1, 1);
+});
 
 // 這份契約の要：分数は 100 − Σ から導出される。
 // 説明できない減点は「存在できない」ことをここで固定する。

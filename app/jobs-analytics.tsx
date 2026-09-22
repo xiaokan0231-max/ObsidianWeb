@@ -70,14 +70,13 @@ const ACTIVE_SELECTION: string[] = [...IN_FLIGHT, "内定"];
 const GLANCE_CARDS: readonly {
   key: "active" | "interview" | "waiting" | "ready";
   label: string;
-  sub: string;
   tone: string;
   filters: JobsInitialFilters & { statuses: readonly string[] };
 }[] = [
-  { key: "active", label: "进行中", sub: "ACTIVE PIPELINE", tone: "active", filters: { statuses: IN_FLIGHT } },
-  { key: "interview", label: "面试阶段", sub: "INTERVIEW", tone: "interview", filters: { statuses: ["面接中"] } },
-  { key: "waiting", label: "结果等待", sub: "WAITING", tone: "waiting", filters: { statuses: ["応募済", "書類通過"] } },
-  { key: "ready", label: "可応募", sub: "READY TO APPLY", tone: "ready", filters: { statuses: ["未応募"], ratings: ["7plus"] } },
+  { key: "active", label: "进行中", tone: "active", filters: { statuses: IN_FLIGHT } },
+  { key: "interview", label: "面试阶段", tone: "interview", filters: { statuses: ["面接中"] } },
+  { key: "waiting", label: "结果等待", tone: "waiting", filters: { statuses: ["応募済", "書類通過"] } },
+  { key: "ready", label: "可応募", tone: "ready", filters: { statuses: ["未応募"], ratings: ["7plus"] } },
 ];
 
 function scheduledDate(job: JobCard) {
@@ -126,7 +125,7 @@ function ProgressPriority({
       <strong>{job.company}</strong>
       <small>{job.position}</small>
       <div className="analytics-priority-action">
-        <span>NEXT ACTION</span>
+        <span>下一步</span>
         <p>{focusAction(job)}</p>
       </div>
       <dl>
@@ -135,7 +134,7 @@ function ProgressPriority({
           <dd>{scheduledDate(job) ? `${shortDate(scheduledDate(job))}${scheduledTime(job) ? ` ${scheduledTime(job)}` : ""}` : "未定"}</dd>
         </div>
         <div>
-          <dt>相性</dt>
+          <dt>応募优先度</dt>
           <dd>{job.rating > 0 ? `${job.rating} / 10` : "未採点"}</dd>
         </div>
       </dl>
@@ -508,48 +507,14 @@ function JobsAnalytics({
 
   return (
     <div className="analytics">
-      <section className="analytics-command">
-        <header>
-          <div>
-            <span>NOW</span>
-            <h2>当前推进</h2>
-            <p>1 件优先处理，{watchJobs.length} 件持续观察</p>
-          </div>
-          <button type="button" onClick={() => onViewJobs({ statuses: IN_FLIGHT })}>
-            全部进行中 <b>{inFlight}</b> <i aria-hidden="true">→</i>
-          </button>
-        </header>
-        {priorityJob ? (
-          <div className="analytics-command-grid">
-            <ProgressPriority job={priorityJob} onOpen={onOpen} />
-            <div className="analytics-watch-list">
-              <header>
-                <strong>观察名单</strong>
-                <small>高相性・选考中</small>
-              </header>
-              {watchJobs.length > 0 ? (
-                watchJobs.map((job) => <ProgressWatchRow key={job.path} job={job} onOpen={onOpen} />)
-              ) : (
-                <p className="chart-empty">暂时没有其他需要持续观察的高相性案件。</p>
-              )}
-            </div>
-          </div>
-        ) : (
-          <p className="chart-empty">当前没有处于选考中的案件。</p>
-        )}
-      </section>
-
+      <h1 className="sr-only">选考与分析</h1>
       <dl className="analytics-head-glance module-stat-strip" aria-label="当前求职进展摘要">
-        {GLANCE_CARDS.map((card, index) => {
+        {GLANCE_CARDS.map((card) => {
           const count = glanceCounts[card.key];
           return (
             <div key={card.key} data-tone={card.tone} data-zero={count === 0}>
-              <dt>
-                {card.label}
-                <small>{card.sub}</small>
-              </dt>
+              <dt>{card.label}</dt>
               <dd><strong>{count}</strong><small>件</small></dd>
-              <span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
               {/* カード全体を覆う透明ボタン。dt/dd の入れ子（定義リストの意味）を壊さずに
                   押せるようにする。0 件は背景情報なので操作対象にしない。 */}
               <button
@@ -564,10 +529,40 @@ function JobsAnalytics({
         })}
       </dl>
 
+      <details className="analytics-command analytics-command-disclosure">
+        <summary>
+          <strong>当前推进</strong>
+          <span>{inFlight} 件进行中 · {priorityJob ? 1 : 0} 件优先处理 · {watchJobs.length} 件观察</span>
+          <i aria-hidden="true" />
+        </summary>
+        <header>
+          <button type="button" onClick={() => onViewJobs({ statuses: IN_FLIGHT })}>
+            全部进行中 <b>{inFlight}</b> <i aria-hidden="true">→</i>
+          </button>
+        </header>
+        {priorityJob ? (
+          <div className="analytics-command-grid">
+            <ProgressPriority job={priorityJob} onOpen={onOpen} />
+            <div className="analytics-watch-list">
+              <header>
+                <strong>观察名单</strong>
+                <small>高优先・选考中</small>
+              </header>
+              {watchJobs.length > 0 ? (
+                watchJobs.map((job) => <ProgressWatchRow key={job.path} job={job} onOpen={onOpen} />)
+              ) : (
+                <p className="chart-empty">暂时没有其他需要持续观察的高优先案件。</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="chart-empty">当前没有处于选考中的案件。</p>
+        )}
+      </details>
+
       <details className="analytics-hand">
         <summary>
           <span>
-            <b>DEEPER VIEW</b>
             <strong>当前手札分析</strong>
             <small>评分、状态与技术需求；只有需要比较下一批岗位时再看</small>
           </span>
@@ -660,7 +655,7 @@ function JobsAnalytics({
           <div className="chart-grid-2">
         <Card
           title="現役案件の評点"
-          caption={`不採用を除いた現在の手札${condActive > 0 ? `・条件通過後の ${condJobs.length} 件` : "・全件"}。7 点以上が「応募すべき」帯。しきい値を決める図なので、上の集計対象（評点）は掛けない。`}
+            caption={`不採用を除いた現在の手札${condActive > 0 ? `・条件通過後の ${condJobs.length} 件` : "・全件"}。评分表示応募价值与时间优先级，不是录用概率；7 点以上为优先判断带。`}
         >
           <div className="chart-bars">
             {bands.map((band, index) => (

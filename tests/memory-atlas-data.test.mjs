@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildCalendarEvents,
+  buildCommitments,
   buildDerivedData,
   calendarCompanyIdentity,
   extractLinks,
@@ -157,6 +158,51 @@ test("日历：法人格・空白・下線だけが違う会社名は同じ予�
   assert.equal(events.length, 1);
   assert.equal(events[0].company, "株式会社Nova Systems");
   assert.equal(events[0].time, "13:30");
+});
+
+test("日历：同じ会社の複数职位は case_id で分け、各准备稿へ結ぶ", () => {
+  const notes = [
+    note("20_求職/株式会社テスト/backend.md", "job-case", {
+      case_id: "test-backend",
+      company: "株式会社テスト",
+      next_event_at: "2026-08-13 10:00",
+      next_action: "一次面接",
+    }),
+    note("20_求職/株式会社テスト/platform.md", "job-case", {
+      case_id: "test-platform",
+      company: "株式会社テスト",
+      next_event_at: "2026-08-13 15:00",
+      next_action: "二次面接",
+    }),
+    note("20_求職/株式会社テスト/backend_prep.md", "interview-prep", { case_id: "test-backend" }),
+    note("20_求職/株式会社テスト/platform_prep.md", "interview-prep", { case_id: "test-platform" }),
+  ];
+  const events = buildCalendarEvents(notes, NOW);
+  assert.equal(events.length, 2);
+  assert.deepEqual(events.map((event) => event.caseId), ["test-backend", "test-platform"]);
+  assert.deepEqual(events.map((event) => event.prepPath), [
+    "20_求職/株式会社テスト/backend_prep.md",
+    "20_求職/株式会社テスト/platform_prep.md",
+  ]);
+});
+
+test("承诺：事件、本人期限、外部跟进使用同一排序投影", () => {
+  const commitments = buildCommitments([
+    note("20_求職/_TODO/返信.md", "todo", { status: "未着手", due: "2026-08-04", action: "返信する" }),
+    note("20_求職/株式会社テスト/case.md", "job-case", {
+      case_id: "test-case",
+      company: "株式会社テスト",
+      waiting_for: "company",
+      follow_up_at: "2026-08-05",
+      next_event_at: "2026-08-06 10:00",
+      next_action: "一次面接",
+    }),
+  ], NOW);
+  assert.deepEqual(commitments.map((item) => `${item.kind}:${item.date}`), [
+    "action:2026-08-04",
+    "follow-up:2026-08-05",
+    "event:2026-08-06",
+  ]);
 });
 
 test("首页の派生数字：孤立・案件順・証拠の完全度", () => {

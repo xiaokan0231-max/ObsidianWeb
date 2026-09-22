@@ -13,7 +13,7 @@ import {
 import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
 import { upsertAppendNote } from "@/lib/server/note-append";
 import { readAllNotes } from "@/lib/server/obsidian";
-import { createSerialQueue } from "@/lib/server/serial-queue";
+import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
 
 type Body = {
   eventId?: string;
@@ -33,7 +33,7 @@ const EXERCISES = new Set<LanguageExpressionExercise>([
 const ACTIONS = new Set<LanguageExpressionProgressAction>(["completed", "reopened"]);
 
 // 「同じ eventId が既にあるか読む→追記する」を一本化し、連打時にも二重計上させない。
-const inProgressQueue = createSerialQueue();
+const inProgressQueue = createKeyedSerialQueue();
 
 function supportsExercise(itemId: string, exercise: LanguageExpressionExercise) {
   const kind = itemId[0];
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
     const path = languageExpressionProgressPath(course);
     // 存在判定と本文読みは同じ1往復で足りる（feedback route の教訓）。このコピーだけ
     // noteExists + readNote + appendNote 内の再判定で同じノートに 3 回 GET を打っていた。
-    const outcome = await inProgressQueue(() =>
+    const outcome = await inProgressQueue(path, () =>
       upsertAppendNote({
         path,
         plan: (existing) => {

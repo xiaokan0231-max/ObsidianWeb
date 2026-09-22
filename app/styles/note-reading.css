@@ -1172,9 +1172,10 @@
   .calendar-agenda { grid-template-columns: minmax(0, 1fr); }
   .group-filters { justify-content: flex-start; }
   .graph-canvas-wrap, .graph-canvas-wrap canvas { min-height: 520px; height: 520px; }
-  .graph-view .module-control-row { align-items: flex-start; flex-direction: column; }
+  .stage-toolbar { align-items: stretch; flex-direction: column; }
+  .graph-control-cluster { justify-content: flex-start; }
   .graph-renderer-toggle { align-self: stretch; }
-  .graph-renderer-toggle button { flex: 1; }
+  .graph-renderer-toggle button { flex: 1; padding-inline: 6px; }
   .space-graph-stage, .space-graph-loading-shell, .space-graph-empty { min-height: 540px; }
   .space-graph-brand strong { display: none; }
   .space-graph-controls { top: 14px; right: 14px; }

@@ -61,7 +61,7 @@ type MarkdownSection = {
 export function companyMotivationAssetTarget(
   doc: InterviewPrepDoc,
 ): SharedAssetTarget | null {
-  const section = findCompanyMotivationHeading(doc.note.content);
+  const section = findCompanyMotivationHeading(doc.note.content, doc.prepVersion);
   if (!section) return null;
   return {
     note: doc.note.path,

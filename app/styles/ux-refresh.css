@@ -1,0 +1,406 @@
+/* 桌面端 UX 收敛层：只放跨页面原语与本轮新增组件，不再用页面私有 catch-all。 */
+
+/* 顶部 sticky 区的高度只在这里写一次。之前横幅的 top、沉浸舞台的 min-height
+   各自写死了一份，横幅一出现舞台就溢出 43px，移动端横幅还滑到顶栏底下。
+   --chrome-top = 顶栏 + 二级导航之上的 sticky 高度；--stage-offset = 舞台
+   之外所有固定占位（sticky 区 + 容器上内边距 + 底部留白）。 */
+:root {
+  --chrome-top: 76px;
+  --stage-offset: 168px;
+}
+@media (max-width: 820px) {
+  :root { --chrome-top: 68px; }
+}
+
+@media (min-width: 821px) {
+  :root { --chrome-top: 64px; }
+  .topbar { height: 64px; padding-inline: 32px; }
+  .section-nav { top: 64px; min-height: 56px; padding-inline: 32px; }
+  .section-nav-tabs > a { height: 48px; }
+  .view-container { width: min(1600px, 100%); padding: 28px 32px 72px; }
+  .overview-view,
+  .todo-view,
+  .practice-view,
+  .jobs-view,
+  .calendar-view,
+  .prep-view,
+  .analytics { max-width: 1440px; margin-inline: auto; }
+}
+
+.brand,
+.side-nav a,
+.section-nav-tabs > a {
+  text-decoration: none;
+}
+
+.side-nav a {
+  position: relative;
+  min-height: 45px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 13px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+.side-nav a:hover { color: var(--ink); background: rgba(255,255,255,.58); transform: translateX(2px); }
+.side-nav a.active { color: #fff; background: var(--ink); }
+.side-nav a > span:last-child { font-size: 13px; font-weight: 650; letter-spacing: .04em; }
+.nav-glyph svg { width: 19px; height: 19px; display: block; }
+.topbar-where > span svg { width: 16px; height: 16px; display: block; }
+.mobile-nav svg { width: 18px; height: 18px; display: block; }
+.side-subnav a { min-height: 34px; gap: 9px; }
+:root[data-rail="collapsed"] .side-nav a { justify-content: center; padding: 0; }
+:root[data-rail="collapsed"] .side-nav a > span:last-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.section-nav-tabs > a {
+  position: relative;
+  bottom: -1px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 17px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 11px 11px 0 0;
+  color: var(--muted);
+}
+.section-nav-tabs > a > i { width: 27px; height: 27px; display: grid; place-items: center; font-style: normal; }
+.section-nav-tabs > a span { display: flex; flex-direction: column; }
+.section-nav-tabs > a strong { font-size: 12.5px; }
+.section-nav-tabs > a small { font-size: 10px; color: var(--text-tertiary); letter-spacing: .1em; }
+.section-nav-tabs > a.active { border-color: var(--line-strong); background: var(--paper); color: var(--ink); box-shadow: 0 -6px 18px rgba(28,37,32,.05); }
+.section-nav-tabs > a.active::before { content: ""; position: absolute; inset: -1px -1px auto; height: 3px; background: var(--brand); border-radius: 11px 11px 0 0; }
+.section-nav-tabs > a.active i { background: var(--interactive); color: #fff; border-radius: var(--radius-control); }
+
+.topbar-next small,
+.topbar-next em,
+.topbar-next strong,
+.topbar-source-copy strong,
+.topbar-source-copy small,
+.topbar-keys span,
+.topbar-keys button { font-size: var(--font-support); }
+.topbar-source-copy small,
+.topbar-keys span { color: var(--text-tertiary); }
+.topbar-keys button { display: flex; align-items: center; gap: 5px; padding: 4px 6px; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; }
+
+.stale-data-banner,
+.global-write-banner,
+.job-stats-stale {
+  position: sticky;
+  top: var(--chrome-top);
+  /* 压在二级导航（24）之下：横幅盖住「时间线／关系图」标签会让人切不了页。 */
+  z-index: 23;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 42px;
+  padding: 8px 24px;
+  border-bottom: 1px solid #d3b77c;
+  background: #fff4d9;
+  color: #64420d;
+  font-size: 12.5px;
+}
+.global-write-banner { position: fixed; inset: auto 24px 24px auto; max-width: 520px; border: 1px solid #d6968e; background: #fff1ef; color: var(--danger); box-shadow: var(--shadow-soft); }
+.job-stats-stale { position: fixed; inset: auto 24px 24px auto; top: auto; max-width: 560px; border: 1px solid #d3b77c; box-shadow: var(--shadow-soft); }
+.stale-data-banner button,
+.global-write-banner button,
+.job-stats-stale button { border: 0; background: transparent; color: inherit; font-weight: 700; cursor: pointer; }
+.inline-write-error { padding: 10px 12px; border-left: 3px solid var(--danger); background: #fff0ee; color: var(--danger); font-size: 12.5px; }
+
+.todo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.todo-actions button { min-height: 36px; padding: 0 13px; border: 1px solid var(--line-strong); background: transparent; cursor: pointer; }
+.todo-actions .todo-primary-action { border-color: var(--interactive); background: var(--interactive); color: #fff; }
+.todo-actions button:disabled { opacity: .55; cursor: wait; }
+
+.practice-workspace { display: grid; grid-template-columns: minmax(250px, 340px) minmax(0, 1fr); min-height: 620px; border: 1px solid var(--line); background: var(--surface); }
+.practice-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.practice-tabs button { min-height: 38px; padding: 0 16px; border: 1px solid var(--line); background: transparent; cursor: pointer; }
+.practice-tabs button.active { background: var(--ink); color: var(--paper); }
+.practice-queue { max-height: 720px; overflow: auto; border-right: 1px solid var(--line); background: var(--paper-deep); }
+.practice-queue > button { width: 100%; display: flex; flex-direction: column; gap: 5px; padding: 16px 18px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; cursor: pointer; }
+.practice-queue > button.active { background: var(--surface); box-shadow: inset 3px 0 var(--interactive); }
+.practice-queue small { color: var(--text-tertiary); font-size: 11px; text-transform: uppercase; }
+.practice-queue strong { font-size: 14px; line-height: 1.45; }
+.practice-queue span { color: var(--text-secondary); font-size: 12px; }
+.practice-card { display: flex; flex-direction: column; padding: clamp(26px, 4vw, 56px); }
+.practice-card > header { display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 12px; }
+.practice-question { margin: 64px 0 28px; }
+.practice-question small,
+.practice-answer small { color: var(--interactive); font-size: 11px; font-weight: 750; letter-spacing: .13em; }
+.practice-question h2 { max-width: 820px; margin: 12px 0; font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif CJK JP", serif; font-size: clamp(27px, 3vw, 42px); line-height: 1.45; }
+.practice-question p { color: var(--text-secondary); }
+.practice-reveal { align-self: flex-start; min-height: 46px; padding: 0 20px; border: 0; background: var(--interactive); color: #fff; cursor: pointer; }
+.practice-answer { padding: 22px 24px; border-left: 3px solid var(--brand); background: var(--paper); }
+.practice-answer p { font-size: 17px; line-height: 1.95; }
+.practice-answer > span { color: var(--text-tertiary); font-size: 11.5px; }
+.practice-actions { display: flex; justify-content: space-between; gap: 18px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.practice-actions > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.practice-actions button { min-height: 38px; padding: 0 14px; border: 1px solid var(--line-strong); background: transparent; cursor: pointer; }
+.practice-actions .practice-complete { border-color: var(--success); background: var(--success); color: #fff; }
+.practice-message { margin-top: 14px; color: var(--success); font-size: 12.5px; }
+.practice-empty { padding: 70px; border: 1px dashed var(--line-strong); text-align: center; }
+
+.jobs-decision-workspace { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); min-height: 680px; border: 1px solid var(--line); background: var(--surface); }
+.jobs-decision-queue { max-height: 760px; overflow: auto; border-right: 1px solid var(--line); background: var(--paper-deep); }
+.jobs-decision-queue > header { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; padding: 14px 16px; background: rgba(233,229,218,.96); border-bottom: 1px solid var(--line); }
+.jobs-decision-queue > button { width: 100%; display: grid; grid-template-columns: 36px minmax(0,1fr); gap: 11px; padding: 14px 15px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; cursor: pointer; }
+.jobs-decision-queue > button.active { background: var(--surface); box-shadow: inset 3px 0 var(--interactive); }
+.jobs-decision-queue > button > span:last-child { min-width: 0; display: flex; flex-direction: column; }
+.jobs-decision-queue small { color: var(--text-tertiary); font-size: 11px; }
+.jobs-decision-queue strong { overflow: hidden; font-size: 13.5px; text-overflow: ellipsis; white-space: nowrap; }
+.jobs-decision-queue em { overflow: hidden; color: var(--text-secondary); font-size: 12px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.jobs-decision-detail { padding: clamp(24px, 3vw, 44px); }
+.jobs-decision-detail > header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
+.jobs-decision-detail > header span { color: var(--interactive); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+.jobs-decision-detail h2 { margin: 10px 0 4px; font-size: clamp(28px, 3vw, 42px); }
+.jobs-decision-detail > dl { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 1px; margin: 28px 0; background: var(--line); border: 1px solid var(--line); }
+.jobs-decision-detail > dl div { padding: 13px; background: var(--surface); }
+.jobs-decision-detail dt { color: var(--text-tertiary); font-size: 11px; }
+.jobs-decision-detail dd { margin: 5px 0 0; font-size: 13px; font-weight: 650; }
+.jobs-decision-detail > section { margin-top: 20px; padding: 18px 20px; background: var(--paper); }
+.jobs-decision-detail > section.is-caution { border-left: 3px solid var(--warning); }
+.jobs-decision-detail > section h3 { margin: 0 0 8px; font-size: 12px; }
+.jobs-decision-detail > section p,
+.jobs-decision-detail > section li { font-size: 13px; line-height: 1.65; }
+.jobs-decision-detail > footer { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 24px; }
+.jobs-decision-detail > footer a,
+.jobs-decision-detail > footer button { min-height: 40px; display: inline-flex; align-items: center; padding: 0 15px; border: 1px solid var(--line-strong); background: transparent; text-decoration: none; cursor: pointer; }
+
+.job-case-workspace { margin-top: 22px; padding: 18px; border: 1px solid var(--line); background: var(--paper); }
+.job-case-workspace-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.job-case-workspace-head span { color: var(--interactive); font-size: 10px; font-weight: 750; letter-spacing: .13em; }
+.job-case-workspace-head h2 { margin: 4px 0 0; font-size: 18px; }
+.job-case-workspace-head small { max-width: 55%; color: var(--text-secondary); font-size: 12px; }
+.job-follow-up-form { display: grid; grid-template-columns: 1fr 1fr 1.4fr auto; gap: 9px; margin-top: 16px; }
+.job-follow-up-form label { display: flex; flex-direction: column; gap: 5px; }
+.job-follow-up-form label > span { color: var(--text-tertiary); font-size: 11px; }
+.job-follow-up-form input,
+.job-follow-up-form select { min-height: 38px; min-width: 0; border: 1px solid var(--line-strong); background: var(--surface); padding: 0 9px; font-size: 12.5px; }
+.job-follow-up-form > button { align-self: end; min-height: 38px; border: 0; background: var(--interactive); color: #fff; padding: 0 14px; }
+.job-follow-up-success { color: var(--success); font-size: 12px; }
+.job-case-related { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.job-case-related > span { width: 100%; color: var(--text-tertiary); font-size: 11px; }
+.job-case-related button { padding: 7px 10px; border: 1px solid var(--line); background: var(--surface); font-size: 12px; cursor: pointer; }
+.job-case-related small { color: var(--text-tertiary); }
+
+.agenda-item { border-bottom: 1px solid #e5e1d8; }
+.agenda-main { width: 100%; display: grid; grid-template-columns: 42px minmax(0,1fr) 7px; align-items: center; gap: 10px; border: 0; background: transparent; padding: 12px 0; text-align: left; cursor: pointer; }
+.agenda-main:hover .agenda-copy > strong { color: var(--interactive); }
+.agenda-main time { display: flex; flex-direction: column; }
+.agenda-main time strong { font-family: "Songti SC", serif; font-size: 20px; }
+.agenda-main time span,
+.agenda-copy small { color: var(--text-tertiary); font-size: 11px; }
+.agenda-copy > strong { font-size: 12.5px; }
+.agenda-copy em { color: var(--text-secondary); font-size: 11px; font-style: normal; }
+.agenda-prepare { margin: 0 0 10px 52px; padding: 6px 10px; border: 1px solid var(--interactive); background: transparent; color: var(--interactive); font-size: 11.5px; cursor: pointer; }
+.calendar-more { border: 0; background: transparent; color: var(--interactive); font-size: 11px; cursor: pointer; }
+
+.command-shortcuts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; padding: 8px; }
+.command-shortcuts button { display: flex; flex-direction: column; gap: 3px; padding: 11px; border: 1px solid var(--line); background: var(--paper); text-align: left; cursor: pointer; }
+.command-shortcuts button.active { border-color: var(--interactive); background: #f8e6df; box-shadow: inset 0 0 0 1px var(--interactive); }
+.command-shortcuts strong { font-size: 12.5px; }
+.command-shortcuts small { color: var(--text-secondary); font-size: 11px; }
+
+/* 旧ページに残る 7–10px は、英字 kicker 以外では情報を読めなくしていた。 */
+.hero-primary-topline > small,
+.hero-primary-reason span,
+.hero-primary-reason i,
+.hero-primary p,
+.hero-secondary-action,
+.hero-stale-note,
+.hero-watch-head small,
+.hero-watch > button small,
+.hero-watch footer { font-size: 11.5px; }
+.hero-primary-topline > span,
+.hero-watch-head > span,
+.hero-watch > button > span,
+.hero-stats span { font-size: 11px; }
+.memory-hero .hero-watch strong { font-size: 13px; }
+.overview-view small,
+.overview-view time,
+.pipeline-aside-heading .panel-kicker,
+.pipeline-recent > .panel-kicker,
+.pipeline-aside-heading button { font-size: 11px; }
+.pipeline-status,
+.pipeline-list time,
+.todo-pri { font-size: 11px; }
+
+.calendar-actions button { min-width: 38px; height: 36px; font-size: 11.5px; }
+.calendar-weekday { font-size: 11px; color: var(--text-secondary); }
+.calendar-day-number time { font-size: 11px; }
+.calendar-day-number span { font-size: 10px; }
+.calendar-event { min-height: 39px; padding: 6px 7px; }
+.calendar-event span { font-size: 11px; color: var(--text-secondary); }
+.calendar-event strong { font-size: 11.5px; }
+.calendar-day-events > small { font-size: 10.5px; }
+.agenda-heading span { font-size: 11px; }
+.agenda-main time span,
+.agenda-copy small,
+.agenda-copy em,
+.agenda-empty { font-size: 11px; }
+.agenda-copy > strong { font-size: 12.5px; }
+
+.timeline-date span,
+.timeline-type,
+.timeline-link { font-size: 11px; }
+.timeline-items p { color: var(--text-secondary); font-size: 13px; line-height: 1.65; }
+.timeline-items button { min-height: 180px; }
+
+.library-facet-title > span,
+.library-query-help > span,
+.library-facet-title small,
+.library-group-list button strong,
+.library-scope-list button strong { font-size: 11px; }
+.library-group-list button,
+.library-scope-list button { min-height: 38px; color: var(--text-secondary); font-size: 12px; }
+.library-query-help p,
+.library-result-head small,
+.library-result-actions label > span,
+.library-result-actions select,
+.clear-filter { font-size: 11px; }
+.note-group,
+.trust-badge,
+.note-card-source,
+.note-card-foot { font-size: 11px; }
+.note-card p { color: var(--text-secondary); font-size: 13px; line-height: 1.65; }
+.note-semantic,
+.note-card-what,
+.note-card-decision > span { font-size: 11px; }
+.note-card-decision > p { font-size: 13px; }
+.note-card-decision dt { font-size: 11px; }
+.note-card-decision dd { font-size: 12px; }
+.library-load-more { font-size: 12px; }
+.library-load-more span,
+.library-empty p,
+.library-empty button { font-size: 11px; }
+
+/* ===== 3D 舞台沉浸（关系图星图・时间线航道共用） =====
+   导航已负责页面定位；内容区直接从工具栏开始，剩余高度全部留给舞台。 */
+
+/* 数据横幅在文档流里、在二级导航之前，出现时舞台之外多占一行；
+   不告诉舞台的话它会溢出一个横幅的高度，页面长出滚动条。 */
+body:has(.stale-data-banner) {
+  --stage-offset: 210px;
+}
+
+@media (min-width: 821px) {
+  /* 168 = 顶栏 64 + 二级导航 56（两条都 sticky，永远压在上面）
+     + .view-container 上内边距 28 + 舞台下方留白 20。
+     工具栏高度不写死：它换行时舞台自己缩，剩余空间用 flex 全给舞台。 */
+  .stage-immersive {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100dvh - var(--stage-offset));
+  }
+
+  .stage-immersive .graph-layout,
+  .stage-immersive .time-corridor-layout {
+    flex: 1 1 auto;
+    min-height: 460px;
+  }
+
+  /* 舞台本体的 min-height 是给非沉浸场景兜底的，这里必须解开，
+     否则它会顶着壳把页面撑出滚动条。高度交给 grid 的拉伸。 */
+  .stage-immersive .space-graph-stage,
+  .stage-immersive .space-graph-loading-shell,
+  .stage-immersive .space-graph-empty {
+    min-height: 0;
+  }
+
+  .view-container:has(.stage-immersive) {
+    padding-bottom: 20px;
+  }
+}
+
+@media (max-width: 820px) {
+  /* 移动端同样让舞台吃满：顶栏 68 + 二级导航 58 + 容器上内边距 22 + 留白 20 = 168。 */
+  .stage-immersive {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100dvh - var(--stage-offset));
+  }
+
+  .stage-immersive .graph-layout,
+  .stage-immersive .time-corridor-layout {
+    flex: 1 1 auto;
+    min-height: 420px;
+  }
+
+  .stage-immersive .space-graph-stage,
+  .stage-immersive .space-graph-loading-shell,
+  .stage-immersive .space-graph-empty {
+    min-height: 0;
+  }
+}
+
+.graph-focus-bar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 14px; }
+.graph-focus-bar > label { min-width: min(560px, 60%); height: 42px; display: flex; align-items: center; gap: 9px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--text-tertiary); transition: border-color 140ms ease, box-shadow 140ms ease; }
+.graph-focus-bar > label:focus-within { border-color: var(--interactive); box-shadow: 0 0 0 3px rgba(168, 67, 37, .12); }
+.graph-focus-bar input { width: 100%; border: 0; outline: 0; background: transparent; font-size: 13px; }
+.graph-focus-bar > div { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.graph-focus-bar small { color: var(--text-tertiary); font-size: 11px; }
+.graph-focus-bar strong { max-width: 320px; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.graph-focus-bar > div > span { color: var(--text-secondary); font-size: 11px; }
+.graph-focus-bar button { border: 0; background: transparent; color: var(--interactive); font-size: 11.5px; cursor: pointer; }
+.graph-start { min-height: 620px; padding: clamp(28px, 4vw, 58px); background: var(--ink); color: #fff; }
+.graph-start header { max-width: 700px; }
+.graph-start header > span { color: #f1b39d; font-size: 11px; font-weight: 750; letter-spacing: .14em; }
+.graph-start h2 { margin: 10px 0; font-family: "Songti SC", serif; font-size: clamp(30px, 4vw, 48px); font-weight: 520; }
+.graph-start header p { color: rgba(255,255,255,.68); font-size: 13px; line-height: 1.7; }
+.graph-start-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr)); gap: 9px; margin-top: 26px; }
+.graph-start-results button { min-width: 0; display: grid; grid-template-columns: 44px minmax(0,1fr) auto; align-items: center; gap: 12px; min-height: 62px; border: 1px solid rgba(255,255,255,.14); border-radius: 9px; background: rgba(255,255,255,.055); padding: 11px 15px; color: #fff; font-family: inherit; text-align: left; cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
+.graph-start-results button:hover { border-color: #ef9a78; background: rgba(230,109,69,.12); }
+.graph-start-results button > span { color: #f1b39d; font-size: 11px; }
+.graph-start-results button > strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.graph-start-results button > small { color: rgba(255,255,255,.55); font-size: 11px; }
+.search-results > button.active { outline: 2px solid var(--interactive); outline-offset: -2px; background: var(--paper); }
+
+.note-card-summary { min-height: 118px; padding: 14px 0; border-top: 1px solid var(--line); }
+.note-card-summary p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.65; }
+.note-card-summary small { display: block; margin-top: 10px; color: var(--warning); font-size: 11px; }
+.note-card-summary.is-analysis { border-top-color: rgba(116,102,169,.35); }
+
+.overview-grid > .learning-panel,
+.overview-grid > .graph-preview-panel,
+.overview-grid > .review-preview-panel[data-has-action="false"] { display: none; }
+
+@media (max-width: 1100px) and (min-width: 821px) {
+  .practice-workspace,
+  .jobs-decision-workspace { grid-template-columns: 280px minmax(0,1fr); }
+  .job-follow-up-form { grid-template-columns: 1fr 1fr; }
+  .jobs-decision-detail > dl { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+
+/* 窄屏先选条目再读正文，避免固定宽度的队列把正文挤出屏幕。 */
+@media (max-width: 820px) {
+  .practice-workspace,
+  .jobs-decision-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .practice-queue,
+  .jobs-decision-queue {
+    max-height: 200px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .practice-card,
+  .jobs-decision-detail {
+    min-width: 0;
+    padding: 20px 16px;
+    overflow-wrap: anywhere;
+  }
+
+  .practice-card > header,
+  .jobs-decision-detail > header { flex-wrap: wrap; gap: 8px; }
+  .practice-question { margin: 28px 0 20px; }
+  .practice-answer { padding: 16px; }
+  .practice-actions { flex-direction: column; }
+  .practice-empty { padding: 32px 20px; }
+  .jobs-decision-detail > dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

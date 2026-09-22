@@ -1,0 +1,284 @@
+/* 与面试实录共用书页视觉；正文不继承业务页的警戒色和卡片背景。 */
+/* 高于详情层的 100，且不能被后加载的 .novel-reader 基础样式覆盖。 */
+.novel-reader.reading-mode { z-index: 200; }
+.reading-mode .nr-paper { overflow-wrap: anywhere; }
+.reading-mode .nr-toolbar { padding-top: max(12px, env(safe-area-inset-top)); }
+.reading-mode .reader-menu {
+  top: calc(var(--reader-toolbar-height, 72px) + 10px);
+  max-height: calc(100dvh - var(--reader-toolbar-height, 72px) - 65px);
+  overscroll-behavior: contain;
+}
+.reading-mode .nr-toc > button[data-level="3"] { padding-left: 30px; }
+.reading-mode .nr-toolbar .reader-info-toggle {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+}
+.reading-mode .reader-information { font-size: 12px; line-height: 1.8; }
+.reading-mode .reader-information h3 {
+  margin: 22px 0 10px;
+  font-family: var(--nr-serif);
+  font-size: 16px;
+  font-weight: 500;
+}
+.reading-mode .reader-information p { overflow-wrap: anywhere; color: #707070; }
+.reading-mode .reader-information dl { margin: 0; }
+.reading-mode .reader-information dl > div {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) minmax(0, 2fr);
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--nr-line);
+}
+.reading-mode .reader-information dt { color: #888; overflow-wrap: anywhere; }
+.reading-mode .reader-information dd { margin: 0; overflow-wrap: anywhere; }
+.reading-mode .reader-information > button,
+.reading-mode .reader-information section > button {
+  display: block;
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid var(--nr-line);
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.reading-mode .reader-information button:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+.reader-entry,
+.drawer-header > .reader-entry,
+.prep-command > .reader-entry,
+.prep-doc-bar > .reader-entry,
+.shared-asset-tools > .reader-entry {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 15px;
+  border: 1px solid #292929;
+  border-radius: 4px;
+  color: #fff;
+  background: #292929;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.reader-entry:hover { background: #454545; }
+.reader-entry:focus-visible { outline: 2px solid #777; outline-offset: 3px; }
+.shared-asset-tools > p { flex: 1; min-width: 0; }
+.drawer-header > div { min-width: 0; }
+.drawer-header > div small { overflow: hidden; text-overflow: ellipsis; }
+
+.reading-mode .reader-prose {
+  min-width: 0;
+  color: var(--nr-ink);
+  font-family: var(--nr-serif), var(--nr-serif-ja);
+  font-size: var(--nr-font-size, 18px);
+  font-weight: 400;
+  letter-spacing: .02em;
+  line-height: 2.05;
+  overflow-wrap: anywhere;
+}
+.reading-mode .reader-prose [lang="ja"] { font-family: var(--nr-serif-ja); }
+.reading-mode .reader-prose p {
+  margin: 0 0 1.15em;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  white-space: pre-line;
+}
+.reading-mode .reader-prose :is(h2, h3, h4, h5, h6) {
+  color: var(--nr-ink);
+  font-family: var(--nr-serif);
+  font-weight: 600;
+  letter-spacing: .025em;
+  line-height: 1.65;
+  scroll-margin-top: 28px;
+}
+.reading-mode .reader-prose h2 { margin: 2.3em 0 1em; font-size: 1.24em; }
+.reading-mode .reader-prose h3 { margin: 1.9em 0 .8em; font-size: 1.08em; }
+.reading-mode .reader-prose :is(h4, h5, h6) { margin: 1.5em 0 .7em; font-size: 1em; }
+.reading-mode .reader-prose strong { color: inherit; font-weight: 600; }
+.reading-mode .reader-prose a,
+.reading-mode .reader-prose .wiki-link,
+.reading-mode .reader-prose .prep-doc-ref {
+  display: inline;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+  text-decoration: underline;
+  text-decoration-color: #a5a5a0;
+  text-underline-offset: .22em;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.reading-mode .reader-prose a:hover,
+.reading-mode .reader-prose button:hover { text-decoration-color: #222; }
+.reading-mode .reader-prose ruby { ruby-align: center; }
+.reading-mode .reader-prose rt { color: #777; font-size: .5em; }
+.reading-mode .reader-prose :is(blockquote, .md-callout, .prep-doc-note) {
+  margin: 1.5em 0;
+  padding: .25em 0 .25em 1.15em;
+  border: 0;
+  border-left: 2px solid #bdbdb7;
+  border-radius: 0;
+  color: #555;
+  background: transparent;
+  font: inherit;
+  box-shadow: none;
+}
+.reading-mode .reader-prose blockquote p:last-child { margin-bottom: 0; }
+.reading-mode .reader-prose .prep-doc-say {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--nr-ink);
+  background: transparent;
+}
+.reading-mode .reader-prose .prep-doc-say > span:first-child {
+  display: block;
+  margin-bottom: 5px;
+  color: #777;
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .12em;
+}
+.reading-mode .reader-prose :is(ul, ol) { margin: 1em 0 1.4em; padding-left: 1.5em; }
+.reading-mode .reader-prose li { margin: .45em 0; padding-left: .3em; color: inherit; font: inherit; }
+.reading-mode .reader-prose .md-list-item {
+  display: flex;
+  align-items: baseline;
+  gap: .6em;
+  margin-block: .45em;
+  color: inherit;
+  font: inherit;
+}
+.reading-mode .reader-prose .md-list-item > i {
+  position: static;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 1em;
+  height: auto;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  color: #888;
+  background: transparent;
+  font: inherit;
+  text-align: right;
+}
+.reading-mode .reader-prose .md-list-item > span { min-width: 0; }
+.reading-mode .reader-prose pre {
+  max-width: 100%;
+  margin: 1.5em 0;
+  padding: 20px;
+  overflow-x: auto;
+  border: 1px solid #e3e3dd;
+  border-radius: 3px;
+  color: #333;
+  background: #f3f3ef;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: .76em;
+  line-height: 1.8;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.reading-mode .reader-prose code {
+  padding: .1em .3em;
+  border-radius: 2px;
+  color: #444;
+  background: #efefeb;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: .8em;
+}
+.reading-mode .reader-prose pre code { padding: 0; background: transparent; font-size: inherit; }
+.reading-mode .reader-prose :is(.md-table, .prep-doc-tablewrap) {
+  display: block;
+  max-width: 100%;
+  margin: 1.5em 0;
+  overflow-x: auto;
+  border: 1px solid #deded8;
+  border-radius: 2px;
+  background: transparent;
+}
+.reading-mode .reader-prose table { width: 100%; border-collapse: collapse; font-size: .82em; }
+.reading-mode .reader-prose :is(th, td) {
+  min-width: 100px;
+  padding: 12px 15px;
+  border: 1px solid #e3e3dd;
+  color: inherit;
+  background: transparent;
+  font-weight: 400;
+  line-height: 1.8;
+  text-align: left;
+  vertical-align: top;
+}
+.reading-mode .reader-prose th { background: #f1f1ed; font-weight: 600; }
+.reading-mode .reader-prose .reader-markdown-table {
+  width: 100%;
+  margin: 0;
+  table-layout: fixed;
+}
+.reading-mode .reader-prose .reader-markdown-table :is(th, td) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.reading-mode .reader-prose .md-table:focus-visible { outline: 2px solid #777; outline-offset: 3px; }
+.reading-mode .reader-prose hr { margin: 2.3em 0; border: 0; border-top: 1px solid var(--nr-line); }
+.reading-mode .reader-section { padding-top: 30px; border-top: 1px solid #d8d8d5; scroll-margin-top: 26px; }
+.reading-mode .reader-section + .reader-section { margin-top: 48px; }
+.reading-mode .reader-section > header { display: flex; align-items: baseline; gap: 17px; margin-bottom: 24px; }
+.reading-mode .reader-section > header h2 { margin: 0; font-weight: 500; }
+.reading-mode .reader-prose .reader-section-meta {
+  margin: -10px 0 28px;
+  color: #888;
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.reading-mode .reader-answer-field + .reader-answer-field { margin-top: 26px; }
+.reading-mode .reader-answer-field > h3 {
+  margin: 0 0 10px;
+  color: #777;
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .08em;
+}
+
+@media (max-width: 700px) {
+  .reading-mode .nr-controls { gap: 10px; }
+  .reading-mode .nr-toolbar { padding-top: max(10px, env(safe-area-inset-top)); }
+  .reading-mode .reader-prose { letter-spacing: .015em; line-height: 2; }
+  .reading-mode .reader-prose pre { padding: 15px; }
+  .reading-mode .reader-information { font-size: 13px; }
+  .shared-asset-tools { flex-wrap: wrap; }
+  .shared-asset-tools > .reader-entry { margin-left: auto; }
+  .drawer-header > .reader-entry { min-height: 34px; padding: 7px 10px; font-size: 11px; }
+}
+@media (max-width: 480px) {
+  .reading-mode:not(.has-language-switch) .nr-toolbar { flex-wrap: nowrap; justify-content: space-between; gap: 6px; }
+  .reading-mode:not(.has-language-switch) .nr-toolbar-start { width: auto; flex: 0 0 auto; }
+  .reading-mode:not(.has-language-switch) .nr-toolbar-title { display: none; }
+  .reading-mode:not(.has-language-switch) .nr-controls { width: auto; justify-content: flex-end; gap: 7px; }
+  .reading-mode .nr-font-controls button { width: 30px; }
+  .reading-mode .nr-toolbar .nr-toc-toggle { gap: 5px; padding-left: 9px; }
+  .reading-mode .reader-section + .reader-section { margin-top: 38px; }
+  .reading-mode .reader-section > header { gap: 12px; }
+  .reading-mode .reader-information dl > div { grid-template-columns: minmax(60px, 1fr) minmax(0, 2fr); gap: 10px; }
+}

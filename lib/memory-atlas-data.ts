@@ -24,11 +24,28 @@ export type LibraryScope = "all" | "evidence" | "action" | "interview" | "langua
 export type CalendarEvent = {
   id: string;
   note: Note;
+  kind: "event";
   date: string;
   time: string;
   company: string;
   label: string;
   phase: "upcoming" | "past";
+  caseId: string;
+  prepPath: string;
+};
+
+export type Commitment = CalendarEvent | {
+  id: string;
+  note: Note;
+  kind: "action" | "follow-up";
+  date: string;
+  time: string;
+  company: string;
+  label: string;
+  phase: "upcoming" | "past";
+  caseId: string;
+  prepPath: string;
+  waitingFor?: string;
 };
 
 export type ReviewPreviewDoc = {
@@ -57,6 +74,7 @@ export type DerivedData = {
   reviews: Note[];
   timeline: { note: Note; date: string }[];
   calendarEvents: CalendarEvent[];
+  commitments: Commitment[];
   totalErrors: number;
   highPriorityErrors: number;
   promoted: number;
@@ -458,6 +476,12 @@ function calendarCompanyDisplayScore(company: string) {
 export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEvent[] {
   const today = localDateKey(now);
   const events = new Map<string, CalendarEvent>();
+  const prepByCaseId = new Map(
+    notes
+      .filter((note) => getType(note) === "interview-prep")
+      .map((note) => [getString(note.frontmatter.case_id), note.path] as const)
+      .filter(([caseId]) => Boolean(caseId)),
+  );
 
   const addEvent = (note: Note, date: string, source: string, priority: number) => {
     const company = getString(note.frontmatter.company) || getTitle(note);
@@ -473,15 +497,19 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
       calendarEventLabel(getTitle(note));
     const time = source.match(/(?:^|\D)((?:[01]?\d|2[0-3]):[0-5]\d)(?:\D|$)/)?.[1] ?? "";
     const identity = calendarCompanyIdentity(company) || company.toLocaleLowerCase("ja-JP");
-    const key = `${identity}|${date}`;
+    const caseId = getString(note.frontmatter.case_id);
+    const key = `${caseId || identity}|${date}`;
     const candidate: CalendarEvent & { priority: number } = {
       id: `${key}|${note.path}`,
       note,
+      kind: "event",
       date,
       time,
       company,
       label,
       phase: date >= today ? "upcoming" : "past",
+      caseId,
+      prepPath: caseId ? prepByCaseId.get(caseId) ?? "" : "",
       priority,
     };
     const current = events.get(key) as (CalendarEvent & { priority?: number }) | undefined;
@@ -571,6 +599,66 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
   });
 }
 
+const WAITING_LABEL: Record<string, string> = {
+  self: "本人行动",
+  company: "等待企业",
+  agent: "等待中介",
+  platform: "等待平台",
+};
+
+/** 首页、顶栏、日历共用的唯一承诺投影。 */
+export function buildCommitments(
+  notes: Note[],
+  now = new Date(),
+  events = buildCalendarEvents(notes, now),
+): Commitment[] {
+  const today = localDateKey(now);
+  const commitments: Commitment[] = [...events];
+  for (const note of notes) {
+    const type = getType(note);
+    if (type === "todo" && todoStatus(note) !== "完了") {
+      const due = getString(note.frontmatter.due);
+      if (/^20\d{2}-\d{2}-\d{2}$/.test(due)) {
+        commitments.push({
+          id: `action|${note.path}|${due}`,
+          note,
+          kind: "action",
+          date: due,
+          time: "",
+          company: todoAction(note),
+          label: "行动期限",
+          phase: due >= today ? "upcoming" : "past",
+          caseId: getString(note.frontmatter.case_id),
+          prepPath: "",
+        });
+      }
+      continue;
+    }
+    if (type !== JOB_CASE_TYPE) continue;
+    const followUpAt = getString(note.frontmatter.follow_up_at);
+    const waitingFor = getString(note.frontmatter.waiting_for);
+    if (!/^20\d{2}-\d{2}-\d{2}$/.test(followUpAt) || !waitingFor) continue;
+    commitments.push({
+      id: `follow-up|${note.path}|${followUpAt}`,
+      note,
+      kind: "follow-up",
+      date: followUpAt,
+      time: "",
+      company: getString(note.frontmatter.company) || getTitle(note),
+      label: `${WAITING_LABEL[waitingFor] ?? "外部等待"} · 跟进`,
+      phase: followUpAt >= today ? "upcoming" : "past",
+      caseId: getString(note.frontmatter.case_id),
+      prepPath: "",
+      waitingFor,
+    });
+  }
+  return commitments.sort((left, right) =>
+    left.date.localeCompare(right.date) ||
+    left.time.localeCompare(right.time) ||
+    left.kind.localeCompare(right.kind),
+  );
+}
+
 /**
  * 全量スナップショットへ「サーバがまだ追いついていない書き込み」を被せ直す。
  *
@@ -648,6 +736,7 @@ export function buildDerivedData(notes: Note[], now = new Date()): DerivedData {
     .filter((item) => item.date)
     .sort((left, right) => right.date.localeCompare(left.date));
   const calendarEvents = buildCalendarEvents(notes, now);
+  const commitments = buildCommitments(notes, now, calendarEvents);
   const errorDictionary = notes.find((note) => noteBasename(note.path) === "誤用辞典");
   const promotedCorrections = notes.find(
     (note) => noteBasename(note.path) === "日本語矯正_精選",
@@ -688,6 +777,7 @@ export function buildDerivedData(notes: Note[], now = new Date()): DerivedData {
     reviews,
     timeline,
     calendarEvents,
+    commitments,
     totalErrors,
     highPriorityErrors,
     promoted,

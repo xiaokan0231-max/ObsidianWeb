@@ -20,9 +20,10 @@ test("时之航道接入时间线视图：lazy 加载、纯数据映射、双渲
   assert.ok(timelineView.includes('lazy(() => import("./timeline-three"))'), "航道必须走 lazy 边界");
   assert.ok(timelineView.includes("buildTimelineScene("), "场景数据在视图侧映射为纯数据");
   assert.ok(timelineView.includes('from "@/lib/timeline-scene"'));
-  assert.ok(timelineView.includes("3D 航道"));
-  assert.ok(timelineView.includes("简洁模式"));
-  assert.ok(timelineView.includes('useState<"corridor" | "list">("corridor")'), "默认 3D，与关系图一致");
+  assert.ok(timelineView.includes("探索模式 · 3D"));
+  assert.ok(timelineView.includes("时间列表"));
+  assert.match(timelineView, /localStorage\.getItem\("echo\.timeline\.renderer"\).*"corridor"/s, "记住本人选择");
+  assert.match(timelineView, /:\s*"list"/, "默认列表，3D 只承担探索");
   assert.ok(timelineView.includes("<TimelineListView"), "2D 列表作为简洁模式保留");
   assert.ok(timelineView.includes("onFallback={fallBackToList}"), "WebGL 失败退回列表");
   assert.ok(atlas.includes('events={derived.calendarEvents}'), "日程事件要传进时间线");

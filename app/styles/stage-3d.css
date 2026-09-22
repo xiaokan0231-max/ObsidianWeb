@@ -10,9 +10,10 @@
   min-height: 640px;
   overflow: hidden;
   background:
-    radial-gradient(circle at 22% 22%, rgba(55, 102, 80, .24), transparent 28%),
-    radial-gradient(circle at 78% 72%, rgba(181, 132, 47, .14), transparent 26%),
-    #101b17;
+    radial-gradient(ellipse at 50% 48%, rgba(107, 139, 126, .12), transparent 34%),
+    radial-gradient(circle at 73% 28%, rgba(133, 158, 194, .065), transparent 24%),
+    radial-gradient(circle at 31% 70%, rgba(198, 129, 92, .05), transparent 22%),
+    #030807;
 }
 
 .space-graph-stage:fullscreen {
@@ -58,6 +59,227 @@
 
 .space-graph-webgl canvas:focus-visible {
   box-shadow: inset 0 0 0 2px rgba(230, 109, 69, .88);
+}
+
+/* 细指针设备才把光标变成空间探针；触摸屏继续使用浏览器原生反馈。 */
+@media (pointer: fine) {
+  .space-graph-webgl[data-pointer-active="true"] canvas {
+    cursor: none !important;
+  }
+}
+
+.space-graph-pointer-fx {
+  --pointer-accent: #dff7ec;
+  --pointer-energy: 0;
+  --pointer-speed: 0;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 7;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+  will-change: transform;
+}
+
+.space-graph-pointer-core,
+.space-graph-pointer-aura,
+.space-graph-pointer-core::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.space-graph-pointer-core {
+  width: calc(16px + var(--pointer-energy) * 7px);
+  height: calc(16px + var(--pointer-energy) * 7px);
+  border: 1px solid rgba(255, 255, 255, .9);
+  background: radial-gradient(circle, white 0 1.5px, transparent 2px);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--pointer-accent) 22%, transparent),
+    0 0 calc(10px + var(--pointer-energy) * 16px) color-mix(in srgb, var(--pointer-accent) 70%, transparent),
+    inset 0 0 8px rgba(255, 255, 255, .16);
+  transition: width 90ms ease, height 90ms ease, border-radius 90ms ease;
+}
+
+.space-graph-pointer-core::before {
+  position: absolute;
+  inset: -5px;
+  border-top: 1px solid var(--pointer-accent);
+  border-right: 1px solid transparent;
+  border-bottom: 1px solid var(--pointer-accent);
+  border-left: 1px solid transparent;
+  border-radius: 50%;
+  content: "";
+  opacity: calc(.28 + var(--pointer-energy) * .62);
+  animation: stage-pointer-orbit 3.2s linear infinite;
+}
+
+.space-graph-pointer-core::after {
+  width: 4px;
+  height: 4px;
+  background: #fff;
+  box-shadow: 0 0 8px 2px var(--pointer-accent);
+}
+
+.space-graph-pointer-aura {
+  width: calc(86px + var(--pointer-energy) * 100px);
+  height: calc(86px + var(--pointer-energy) * 100px);
+  background:
+    conic-gradient(from 20deg, transparent, color-mix(in srgb, var(--pointer-accent) 12%, transparent), transparent 22% 52%, color-mix(in srgb, var(--pointer-accent) 9%, transparent), transparent 72%),
+    radial-gradient(circle, color-mix(in srgb, var(--pointer-accent) 13%, transparent), transparent 64%);
+  filter: blur(calc(4px + var(--pointer-speed) * 5px));
+  opacity: calc(.2 + var(--pointer-energy) * .58);
+  animation: stage-pointer-aura 7s linear infinite;
+  mix-blend-mode: screen;
+}
+
+.space-graph-pointer-fx[data-source="hand"] .space-graph-pointer-aura {
+  width: calc(118px + var(--pointer-energy) * 138px);
+  height: calc(118px + var(--pointer-energy) * 138px);
+  background:
+    conic-gradient(from 45deg, transparent 0 12%, color-mix(in srgb, var(--pointer-accent) 26%, transparent), transparent 35% 58%, color-mix(in srgb, #b897ff 22%, transparent), transparent 82%),
+    radial-gradient(circle, color-mix(in srgb, var(--pointer-accent) 20%, transparent), transparent 66%);
+}
+
+.space-graph-pointer-fx[data-source="hand"] .space-graph-pointer-core {
+  width: calc(22px + var(--pointer-energy) * 12px);
+  height: calc(22px + var(--pointer-energy) * 12px);
+  border-style: double;
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, var(--pointer-accent) 10%, transparent),
+    0 0 calc(18px + var(--pointer-energy) * 24px) color-mix(in srgb, var(--pointer-accent) 78%, transparent),
+    inset 0 0 11px color-mix(in srgb, var(--pointer-accent) 30%, transparent);
+}
+
+.space-graph-pointer-fx[data-source="hand"][data-charging="true"] .space-graph-pointer-core::before {
+  inset: -11px;
+  border: 0;
+  background: conic-gradient(
+    var(--pointer-accent) var(--gesture-progress),
+    rgba(255, 255, 255, .09) 0
+  );
+  opacity: 1;
+  animation: none;
+  -webkit-mask: radial-gradient(circle, transparent 62%, #000 64%);
+  mask: radial-gradient(circle, transparent 62%, #000 64%);
+}
+
+.space-graph-pointer-fx[data-source="hand"] .space-graph-pointer-trail i {
+  border-radius: 1px;
+  transform-origin: center;
+}
+
+.space-graph-pointer-fx[data-dragging="true"] .space-graph-pointer-core {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.space-graph-pointer-fx[data-dragging="true"] .space-graph-pointer-core::before {
+  inset: -11px;
+  animation-duration: 480ms;
+}
+
+.space-graph-pointer-trail {
+  position: absolute;
+  inset: 0;
+}
+
+.space-graph-pointer-trail i {
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  width: calc(3px + var(--pointer-speed) * 3px);
+  height: calc(3px + var(--pointer-speed) * 3px);
+  background: color-mix(in oklab, var(--pointer-accent) 66%, #b8a8ff);
+  border-radius: 50%;
+  box-shadow: 0 0 7px var(--pointer-accent);
+  filter: hue-rotate(var(--trail-hue));
+  opacity: calc((.18 + var(--pointer-speed) * .82) * var(--trail-opacity));
+  will-change: transform;
+}
+
+/* 涟漪的大小跟着实际释放强度走：轻轻一点和甩一把不该长得一样。 */
+.space-graph-pointer-burst {
+  --burst-x: 0px;
+  --burst-y: 0px;
+  --pointer-release: 0.4;
+  --pointer-accent: #dff7ec;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 6;
+  width: 24px;
+  height: 24px;
+  border: 1px solid color-mix(in srgb, var(--pointer-accent) 72%, white);
+  border-radius: 50%;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--pointer-accent) 52%, transparent);
+  pointer-events: none;
+  animation: stage-pointer-burst 720ms cubic-bezier(.16, .76, .24, 1) forwards;
+}
+
+@keyframes stage-pointer-orbit {
+  to { transform: rotate(1turn); }
+}
+
+@keyframes stage-pointer-aura {
+  from { transform: translate(-50%, -50%) rotate(0); }
+  to { transform: translate(-50%, -50%) rotate(1turn); }
+}
+
+@keyframes stage-pointer-burst {
+  from {
+    opacity: .9;
+    transform: translate3d(
+      calc(var(--burst-x) - 50%),
+      calc(var(--burst-y) - 50%),
+      0
+    ) scale(.45);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(
+      calc(var(--burst-x) - 50%),
+      calc(var(--burst-y) - 50%),
+      0
+    ) scale(calc(2.4 + 6 * var(--pointer-release)));
+  }
+}
+
+/* 探针的常驻自转和光晕在减弱动态下必须停：它们是 CSS 动画，
+   不受 uMotion 那条闸门管，之前会一直转下去。 */
+@media (prefers-reduced-motion: reduce) {
+  /* 逐条列而不是 `* { animation: none !important }`：进出场那些有限时长的
+     过渡是有意为之，一刀切会把它们也杀掉。载入转圈（graph-orbit）保留，
+     那是进度反馈不是装饰。 */
+  .space-graph-pointer-core::before,
+  .space-graph-pointer-aura,
+  .space-graph-dossier-scan,
+  .space-graph-dossier-orbit i,
+  .space-graph-dossier-orbit b,
+  .space-graph-portal::before,
+  .space-graph-portal-rings::before,
+  .space-graph-portal-rings::after,
+  .space-graph-portal-rings i,
+  .graph-hand-cursor > i:first-child,
+  .graph-hand-actions b {
+    animation: none;
+  }
+
+  .space-graph-pointer-burst {
+    animation-duration: 1ms;
+  }
+
+  .space-graph-pointer-trail {
+    display: none;
+  }
 }
 
 .space-graph-label-layer {
@@ -233,7 +455,7 @@
   position: absolute;
   inset: 0;
   z-index: 8;
-  background: #101b17;
+  background: #030807;
   transition: opacity 260ms ease;
 }
 
@@ -1572,6 +1794,25 @@
   box-shadow: 0 0 22px rgba(74, 185, 236, .2), inset 0 0 18px rgba(74, 185, 236, .09);
 }
 
+/* 单手时主手由共享能量探针承担，旧准星只保留文字，避免两套圆环重叠。
+   双手变换时恢复两个端点准星，中点另有粒子力场，三者共同表达变换轴。 */
+.graph-hand-cursor[data-role="primary"]:not([data-interaction="dual-transform"]):not([data-interaction="dual-ready"]) {
+  width: 0;
+  height: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.graph-hand-cursor[data-role="primary"]:not([data-interaction="dual-transform"]):not([data-interaction="dual-ready"])::before,
+.graph-hand-cursor[data-role="primary"]:not([data-interaction="dual-transform"]):not([data-interaction="dual-ready"])::after,
+.graph-hand-cursor[data-role="primary"]:not([data-interaction="dual-transform"]):not([data-interaction="dual-ready"]) > i {
+  display: none;
+}
+
+.graph-hand-cursor[data-role="primary"]:not([data-interaction="dual-transform"]):not([data-interaction="dual-ready"]) > b {
+  top: 14px;
+}
+
 .graph-hand-cursor::before,
 .graph-hand-cursor::after {
   position: absolute;
@@ -1976,6 +2217,31 @@
 
 .graph-hand-status strong { font-size: 9px; font-weight: 620; line-height: 1.45; }
 .graph-hand-status small { color: rgba(239, 249, 244, .44); font-size: 7px; line-height: 1.55; }
+
+/* 捏合读数。捏合判定纯靠数值，界面上看不见就只能靠猜；
+   捏下去时整条变绿，是「系统确实收到了」的即时回执。 */
+.graph-hand-pinch-readout {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  color: rgba(226, 240, 233, .5);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9.5px;
+  font-style: normal;
+  letter-spacing: .06em;
+}
+
+.graph-hand-pinch-readout i {
+  width: 14px;
+  height: 1px;
+  background: currentColor;
+  opacity: .45;
+}
+
+.graph-hand-pinch-readout[data-pinching="true"] {
+  color: #83f2c5;
+}
 
 .graph-hand-guide {
   border-top: 1px solid rgba(255, 255, 255, .07);

@@ -4,6 +4,7 @@ import {
   buildPrepKillQuestions,
   cardIdFromRef,
   collectPrepExternalLinks,
+  extractPrepBriefing,
   extractPrepKillMap,
   extractPrepTalentMap,
   findInterviewPrepDocs,
@@ -417,6 +418,42 @@ test("人材育成の小節が無い準備稿では第8主模块を出さない"
   assert.equal(extractPrepTalentMap(doc.sections), null);
 });
 
+// 見出し名は Web の準備モード「导读」と vault の契約。改名すると本文が
+// 静かに空になり、モード自体が消える——机械で気づけるようにしておく。
+test("本轮导读の小節は §2 から導読モードの本文として切り出せる", () => {
+  const doc = parseInterviewPrepDoc(
+    prepNote(`# テスト社
+
+## ２．勝ち筋と地雷
+
+### 本轮导读
+
+#### 这场面谈是什么局面
+
+面談確約のスカウトが2通、同じ日に別々の担当から届いている。
+
+### 叙事三問
+
+1. 相手はどう稼いでいるか
+`),
+    [],
+  );
+  const brief = extractPrepBriefing(doc.sections);
+  assert.match(brief.title, /^本轮导读/);
+  const text = brief.blocks.map(prepBlockText).join("\n");
+  assert.match(text, /面談確約のスカウトが2通/);
+  // 次の ### で必ず止まる（叙事三問まで飲み込むと読み物ではなくなる）
+  assert.doesNotMatch(text, /相手はどう稼いでいるか/);
+});
+
+test("本轮导读の小節が無い準備稿では導読モードを出さない", () => {
+  const doc = parseInterviewPrepDoc(
+    prepNote(`# テスト社\n\n## ２．勝ち筋と地雷\n\n### 叙事三問\n\n1. どう稼いでいるか\n`),
+    [],
+  );
+  assert.equal(extractPrepBriefing(doc.sections), null);
+});
+
 test("表のセル内の [[ノート#節\\|別名]] は途中で切れずリンクとして残る", () => {
   // Obsidian は表内の別名指定に `\|` を要求する。素の split("|") で切ると
   // カード参照が壊れて「回答库へ飛べない表」になる（実際に踏んだ）
@@ -610,9 +647,26 @@ test("frontmatter から会社・日付・面接官を取り、interview-prep �
   assert.equal(doc.round, "最終面接");
   assert.equal(doc.interviewers, "佐藤様・本部長");
   assert.equal(doc.caseLink, "テスト社_データエンジニア");
+  assert.equal(doc.meetingLink, "");
   assert.equal(doc.sessionOrder, 3);
   assert.equal(doc.sessionStatus, "scheduled");
   assert.equal(parseInterviewPrepDoc(PHRASES, []), null);
+});
+
+test("独立面談の正本を meeting として読み、job-case の参照は作らない", () => {
+  const doc = parseInterviewPrepDoc(
+    prepNote("# テスト紹介社\n\n## １．速査\n\n本文\n", {
+      company: "テスト紹介社",
+      round: "エージェント面談",
+      meeting: "[[テスト紹介社_面談#日程|面談記録]]",
+      session_order: 1,
+      session_status: "scheduled",
+    }),
+    [],
+  );
+  assert.equal(doc.meetingLink, "テスト紹介社_面談");
+  assert.equal(doc.caseLink, "");
+  assert.equal(doc.round, "エージェント面談");
 });
 
 test("準備ドキュメントは日付の新しい順に並ぶ", () => {

@@ -16,6 +16,7 @@ import {
 import { findDayNote, findRoundNote, joinReviewNotes } from "@/lib/review-join";
 import { reviewSiblingPath } from "@/lib/review-paths";
 import { getString, type Note } from "@/lib/notes";
+import InterviewNovelReader from "./interview-novel-reader";
 import {
   allDeductions,
   DEDUCTION_SEVERITY_META,
@@ -67,7 +68,8 @@ type ReviewDoc = {
  */
 type WriteAlert = { subject: string; detail: string };
 
-type Mode = "study" | "compare";
+type Mode = "study" | "compare" | "novel";
+type NovelLanguage = "ja" | "zh";
 type Filter =
   | "all"
   | "pending"
@@ -83,6 +85,7 @@ type Filter =
 // 避免「effect 里 setState」的水合抖动。
 const MODE_KEY = "review:mode";
 const MODE_EVENT = "review:modechange";
+const NOVEL_LANG_KEY = "review:novel-language";
 
 function subscribeMode(onChange: () => void) {
   window.addEventListener(MODE_EVENT, onChange);
@@ -94,7 +97,13 @@ function subscribeMode(onChange: () => void) {
 }
 
 function readMode(): Mode {
-  return window.localStorage.getItem(MODE_KEY) === "compare" ? "compare" : "study";
+  const value = window.localStorage.getItem(MODE_KEY);
+  return value === "compare" || value === "novel" ? value : "study";
+}
+
+function readNovelLanguage(): NovelLanguage {
+  if (typeof window === "undefined") return "ja";
+  return window.localStorage.getItem(NOVEL_LANG_KEY) === "zh" ? "zh" : "ja";
 }
 
 const FILTER_LABELS: { id: Filter; label: string; shortcut: string }[] = [
@@ -201,17 +210,21 @@ function InterviewReview({
   onVaultChanged,
   onNoteWritten,
   initialSelectedKey = null,
+  onSelectionChange,
 }: {
   notes: Note[];
   onVaultChanged: () => void | Promise<void>;
   /** 追記系の書込は応答の note を1件差し替えるだけでよい。復盤の再生成だけ全量再取得に残す。 */
   onNoteWritten?: (note: Note) => void;
   initialSelectedKey?: string | null;
+  onSelectionChange?: (key: string | null) => void;
 }) {
   const docs = useMemo(() => buildDocs(notes), [notes]);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(initialSelectedKey);
   const mode = useSyncExternalStore(subscribeMode, readMode, () => "study" as Mode);
+  const novelLang = useSyncExternalStore(subscribeMode, readNovelLanguage, () => "ja" as NovelLanguage);
+  const previousMode = useRef<"study" | "compare">("study");
   const [filter, setFilter] = useState<Filter>("all");
   const [patternFilter, setPatternFilter] = useState<string | null>(null);
   const [openBlocks, setOpenBlocks] = useState<Set<string>>(new Set());
@@ -251,7 +264,13 @@ function InterviewReview({
   const inFlightAnnotations = useRef(new Set<string>());
 
   const switchMode = (next: Mode) => {
+    if (next === "novel" && mode !== "novel") previousMode.current = mode;
     window.localStorage.setItem(MODE_KEY, next);
+    window.dispatchEvent(new Event(MODE_EVENT));
+  };
+
+  const switchNovelLang = (next: NovelLanguage) => {
+    window.localStorage.setItem(NOVEL_LANG_KEY, next);
     window.dispatchEvent(new Event(MODE_EVENT));
   };
 
@@ -281,7 +300,7 @@ function InterviewReview({
   const doc = docs.find((item) => item.key === selectedKey) ?? null;
 
   useEffect(() => {
-    if (!doc) return;
+    if (!doc || mode === "novel") return;
     const byKey: Record<string, Filter> = {
       "1": "all",
       "2": "pending",
@@ -305,7 +324,7 @@ function InterviewReview({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [doc]);
+  }, [doc, mode]);
 
   /** 同一个 key 也用于「重试前先清掉上一次的失败」：成功了就不会再被写回去。 */
   const dismissWriteAlert = useCallback((key: string) => {
@@ -469,6 +488,7 @@ function InterviewReview({
           docs={docs}
           onSelect={(key, reviewBlockId) => {
             setSelectedKey(key);
+            onSelectionChange?.(key);
             setFilter("all");
             setPatternFilter(null);
             // 先把整场面接还原成摘要目录，让读者自己选择进入哪一问。
@@ -477,6 +497,34 @@ function InterviewReview({
             setErrOpen(new Set());
             setRawOpen(new Set());
             focusDeepReview(reviewBlockId ?? null);
+            if (reviewBlockId) switchMode("study");
+            resetAnnotationDraft();
+            window.scrollTo({ top: 0 });
+          }}
+        />
+        <ReviewWriteAlerts alerts={writeAlerts} onDismiss={dismissWriteAlert} />
+      </>
+    );
+  }
+
+  // 连读直接使用整份整理稿，不能继承学习页的筛选或句卡展开状态。
+  if (mode === "novel") {
+    return (
+      <>
+        <InterviewNovelReader
+          key={doc.key}
+          company={doc.company}
+          date={doc.date}
+          round={doc.round}
+          parsed={doc.parsed}
+          decisionTasks={doc.decisionTasks}
+          language={novelLang}
+          onLanguageChange={switchNovelLang}
+          onExit={() => switchMode(previousMode.current)}
+          onBack={() => {
+            setSelectedKey(null);
+            onSelectionChange?.(null);
+            focusDeepReview(null);
             resetAnnotationDraft();
             window.scrollTo({ top: 0 });
           }}
@@ -597,6 +645,7 @@ function InterviewReview({
           className="rv-back"
           onClick={() => {
             setSelectedKey(null);
+            onSelectionChange?.(null);
             focusDeepReview(null);
             resetAnnotationDraft();
             window.scrollTo({ top: 0 });
@@ -606,19 +655,27 @@ function InterviewReview({
           <h1>{doc.company}</h1>
           <span>{doc.round} · {doc.date}{doc.result ? ` · ${doc.result}` : ""}</span>
         </div>
-        <div className="rv-mode" role="tablist" aria-label="阅读模式">
-          <button
-            role="tab"
-            aria-selected={mode === "study"}
-            className={mode === "study" ? "active" : ""}
-            onClick={() => switchMode("study")}
-          >学習<small>先猜后看</small></button>
-          <button
-            role="tab"
-            aria-selected={mode === "compare"}
-            className={mode === "compare" ? "active" : ""}
-            onClick={() => switchMode("compare")}
-          >対照<small>日中并排</small></button>
+        <div className="rv-mode-wrap">
+          <div className="rv-mode" role="tablist" aria-label="阅读模式">
+            <button
+              role="tab"
+              aria-selected={mode === "study"}
+              className={mode === "study" ? "active" : ""}
+              onClick={() => switchMode("study")}
+            >学習<small>先猜后看</small></button>
+            <button
+              role="tab"
+              aria-selected={mode === "compare"}
+              className={mode === "compare" ? "active" : ""}
+              onClick={() => switchMode("compare")}
+            >対照<small>日中并排</small></button>
+            <button
+              role="tab"
+              aria-selected={false}
+              data-novel-entry
+              onClick={() => switchMode("novel")}
+            >全文阅读<small>中文 / 日本語</small></button>
+          </div>
         </div>
       </header>
 
@@ -695,6 +752,15 @@ function InterviewReview({
           {unresolvedDecisionTasks.length === 0 ? "第一阶段已完成" : "继续裁定 →"}
         </button>
       </section>
+
+      {doc.deepReview?.overviewZh && (
+        <section className="rv-review-introduction" aria-label="综合导读">
+          <h2>综合导读</h2>
+          {doc.deepReview.overviewZh.split(/\n\s*\n/).filter(Boolean).map((paragraph, index) => (
+            <p key={index}>{paragraph}</p>
+          ))}
+        </section>
+      )}
 
       <section className={`rv-deep-stage ${unresolvedDecisionTasks.length > 0 ? "locked" : "ready"}`}>
         <div className="rv-deep-stage-copy">
@@ -822,8 +888,9 @@ function InterviewReview({
         </p>
         {!focused && visibleBlocks.length > 0 && (
           <div>
-            <button onClick={() => setOpenBlocks(new Set(visibleBlockIds))}>展开全部</button>
-            <button onClick={() => setOpenBlocks(new Set())}>收起全部</button>
+                <button className="rv-enter-novel" onClick={() => switchMode("novel")}>全文阅读 · 中文 / 日本語</button>
+                <button onClick={() => setOpenBlocks(new Set(visibleBlockIds))}>展开全部</button>
+                <button onClick={() => setOpenBlocks(new Set())}>收起全部</button>
           </div>
         )}
       </div>
@@ -865,7 +932,11 @@ function InterviewReview({
             0,
           );
           return (
-          <section key={block.id} className={`rv-block ${isOpen ? "open" : "collapsed"}`} id={`rvb-${block.id}`}>
+          <section
+            key={block.id}
+            className={`rv-block ${isOpen ? "open" : "collapsed"}`}
+            id={`rvb-${block.id}`}
+          >
             <header>
               <button
                 className="rv-block-toggle"
@@ -1698,7 +1769,7 @@ function SentenceCard({
 }: {
   doc: ReviewDoc;
   sentence: ReviewSentence;
-  mode: Mode;
+  mode: "study" | "compare";
   revealed: boolean;
   errored: boolean;
   rawShown: boolean;
@@ -1780,18 +1851,18 @@ function SentenceCard({
         title={mode === "study" && !revealed ? "点击显示译文和注释" : undefined}
       >
         {segments.map((segment, index) =>
-          segment.error ? (
-            <button
-              key={index}
-              className={`rv-err ${segment.error.kind === "学習者" ? "learner" : segment.error.kind === "疑" ? "doubt" : "trans"}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggleErrors();
-              }}
-            >{segment.text}</button>
-          ) : (
-            <span key={index}>{segment.text}</span>
-          ),
+            segment.error ? (
+              <button
+                key={index}
+                className={`rv-err ${segment.error.kind === "学習者" ? "learner" : segment.error.kind === "疑" ? "doubt" : "trans"}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleErrors();
+                }}
+              >{segment.text}</button>
+            ) : (
+              <span key={index}>{segment.text}</span>
+            ),
         )}
       </p>
 

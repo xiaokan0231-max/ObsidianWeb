@@ -18,14 +18,26 @@ function TodoView({
   notes,
   today,
   onOpen,
+  onStatus,
 }: {
   notes: Note[];
   /** 「今日」は殻が持つ。memo 越しなので中で求めると日付を跨いでも凍る（H5 と同型）。 */
   today: string;
   onOpen: (note: Note) => void;
+  onStatus: (note: Note, status: string, expectedMtime?: number) => Promise<string | null>;
 }) {
   const [tab, setTab] = useState<string>("all");
   const [audience, setAudience] = useState<"user" | "system">("user");
+  const [busyPath, setBusyPath] = useState("");
+  const [writeError, setWriteError] = useState("");
+
+  const changeStatus = async (note: Note, status: string) => {
+    setBusyPath(note.path);
+    setWriteError("");
+    const error = await onStatus(note, status, note.stat.mtime);
+    if (error) setWriteError(error);
+    setBusyPath("");
+  };
   const todos = notes
     .filter((note) => getType(note) === "todo")
     .sort((a, b) => {
@@ -45,21 +57,7 @@ function TodoView({
 
   return (
     <section className="todo-view">
-      <div className="section-intro page-head page-head-simple">
-        <div>
-          <span className="eyebrow"><i /> {audience === "user" ? "ACTION LIST" : "INTERNAL MAINTENANCE"}</span>
-          <h1>{audience === "user" ? "行动清单" : "系统维护"}</h1>
-          <p>
-            {audience === "user"
-              ? "这里保留全部可执行行动，日常决策仍从总览的“现在先完成这一件事”开始。"
-              : "数据补账、同步修复等内部工作只供维护和追溯，不参与首页重点排序。"}
-          </p>
-        </div>
-        <div className="jobs-stat">
-          <div><strong>{open.length}</strong><span>未完了</span></div>
-          <div><strong>{audience === "user" ? highPriorityOpen : scopedTodos.length}</strong><span>{audience === "user" ? "高优先" : "内部记录"}</span></div>
-        </div>
-      </div>
+      <h1 className="sr-only">{audience === "user" ? "行动清单" : "系统维护"}</h1>
 
       {audience === "system" && (
         <button
@@ -73,16 +71,23 @@ function TodoView({
         </button>
       )}
 
-      <div className="jobs-controls">
-        <button className={tab === "all" ? "active" : ""} onClick={() => setTab("all")}>全部 <small>{scopedTodos.length}</small></button>
-        {statuses.map((st) => (
-          <button key={st} className={tab === st ? "active" : ""} onClick={() => setTab(st)}>
-            {st} <small>{scopedTodos.filter((n) => todoStatus(n) === st).length}</small>
-          </button>
-        ))}
+      <div className="todo-toolbar">
+        <div className="jobs-controls" role="group" aria-label="行动状态筛选">
+          <button className={tab === "all" ? "active" : ""} onClick={() => setTab("all")}>全部 <small>{scopedTodos.length}</small></button>
+          {statuses.map((st) => (
+            <button key={st} className={tab === st ? "active" : ""} onClick={() => setTab(st)}>
+              {st} <small>{scopedTodos.filter((n) => todoStatus(n) === st).length}</small>
+            </button>
+          ))}
+        </div>
+        <div className="todo-summary" aria-label="行动摘要">
+          <span>未完成 <strong>{open.length}</strong></span>
+          <span>{audience === "user" ? "高优先" : "内部记录"} <strong>{audience === "user" ? highPriorityOpen : scopedTodos.length}</strong></span>
+        </div>
       </div>
 
       <div className="todo-list">
+        {writeError && <div className="inline-write-error" role="alert">{writeError}</div>}
         {visible.map((note) => {
           const pri = todoPriority(note);
           const st = todoStatus(note);
@@ -122,7 +127,35 @@ function TodoView({
                 </div>
               )}
               <footer className="job-card-foot">
-                <button className="job-detail" onClick={() => onOpen(note)}>詳細を開く</button>
+                <div className="todo-actions">
+                  {st === "未着手" && (
+                    <button
+                      className="todo-primary-action"
+                      disabled={busyPath === note.path}
+                      onClick={() => void changeStatus(note, "進行中")}
+                    >
+                      {busyPath === note.path ? "写入中…" : "开始行动"}
+                    </button>
+                  )}
+                  {(st === "進行中" || st === "保留") && (
+                    <button
+                      className="todo-primary-action"
+                      disabled={busyPath === note.path}
+                      onClick={() => void changeStatus(note, st === "保留" ? "進行中" : "完了")}
+                    >
+                      {busyPath === note.path ? "写入中…" : st === "保留" ? "重新开始" : stale ? "完成收尾" : "标记完成"}
+                    </button>
+                  )}
+                  {st === "進行中" && !stale && (
+                    <button
+                      disabled={busyPath === note.path}
+                      onClick={() => void changeStatus(note, "保留")}
+                    >
+                      暂时保留
+                    </button>
+                  )}
+                  <button className="job-detail" onClick={() => onOpen(note)}>查看背景</button>
+                </div>
               </footer>
             </article>
           );

@@ -11,6 +11,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import InterviewReview from "./interview-review";
+import InterviewPractice from "./interview-practice";
 import InterviewPrep from "./interview-prep";
 import InterviewSession from "./interview-session";
 import InterviewSharedAsset from "./interview-shared-asset";
@@ -20,9 +21,11 @@ import LanguageExpressionCourses from "./language-expression-courses";
 import JobsAnalytics from "./jobs-analytics";
 import JobsView, { type JobsInitialFilters } from "./jobs-view";
 import CalendarView from "./calendar-view";
+import CalendarInterviewState from "./calendar-interview-state";
 import GraphView from "./graph-view";
 import LibraryView from "./library-view";
 import NoteDrawer from "./note-drawer";
+import SceneNoteReader from "./scene-note-reader";
 import Overview from "./overview-view";
 import SearchPalette from "./search-palette";
 import TimelineView from "./timeline-view";
@@ -30,6 +33,9 @@ import TodoView from "./todo-view";
 import {
   appViewFromPathname,
   appViewHref,
+  calendarInterviewFromSearch,
+  calendarInterviewSearch,
+  companyOverviewSearch,
   type AppView,
 } from "./app-route";
 import type {
@@ -43,7 +49,6 @@ import {
   type SharedAssetTarget,
 } from "@/lib/interview-shared-assets";
 import {
-  formatDate,
   noteBasename,
   type Note,
 } from "@/lib/notes";
@@ -56,8 +61,12 @@ import {
   localDateKey,
   mergePendingWrites,
   type PendingWrite,
+  type Commitment,
   type GroupKey,
 } from "@/lib/memory-atlas-data";
+import { vaultScopeForView, type VaultScope } from "@/lib/vault-scope";
+import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
+import { resolveNoteLink } from "@/lib/wiki-target";
 
 
 export type { Note };
@@ -67,23 +76,24 @@ type VaultResponse = {
   fetchedAt?: number;
   error?: string;
   notes: Note[];
+  scope?: VaultScope;
 };
 
 type View = AppView;
 type PrimaryNavId =
   | "overview"
-  | "progress"
-  | "opportunities"
-  | "calendar"
+  | "actions"
+  | "career"
   | "interview"
   | "training"
   | "resources";
+type NavIconName = "home" | "actions" | "career" | "interview" | "training" | "resources";
 
 type PrimaryNavigationItem = {
   id: PrimaryNavId;
   label: string;
   mobileLabel: string;
-  glyph: string;
+  glyph: NavIconName;
   target: View;
   views: View[];
 };
@@ -103,47 +113,39 @@ const NAVIGATION: PrimaryNavigationItem[] = [
     id: "overview",
     label: "总览",
     mobileLabel: "总览",
-    glyph: "⌂",
+    glyph: "home",
     target: "overview",
-    views: ["overview", "todo"],
+    views: ["overview"],
   },
   {
-    id: "progress",
-    label: "求职进展",
-    mobileLabel: "进展",
-    glyph: "◑",
-    target: "analytics",
-    views: ["analytics"],
-  },
-  {
-    id: "opportunities",
-    label: "岗位机会",
-    mobileLabel: "岗位",
-    glyph: "★",
-    target: "jobs",
-    views: ["jobs"],
-  },
-  {
-    id: "calendar",
-    label: "日历",
-    mobileLabel: "日历",
-    glyph: "▦",
+    id: "actions",
+    label: "行动",
+    mobileLabel: "行动",
+    glyph: "actions",
     target: "calendar",
-    views: ["calendar"],
+    views: ["calendar", "todo"],
+  },
+  {
+    id: "career",
+    label: "求职",
+    mobileLabel: "求职",
+    glyph: "career",
+    target: "jobs",
+    views: ["jobs", "analytics"],
   },
   {
     id: "interview",
     label: "面试作战",
     mobileLabel: "面试",
-    glyph: "戦",
+    glyph: "interview",
     target: "session",
-    views: ["session", "prep", "review"],
+    views: ["session", "prep", "review", "practice"],
   },
   {
     id: "training",
     label: "训练中心",
     mobileLabel: "训练",
-    glyph: "語",
+    glyph: "training",
     target: "language",
     views: ["language", "topics"],
   },
@@ -151,17 +153,26 @@ const NAVIGATION: PrimaryNavigationItem[] = [
     id: "resources",
     label: "资料库",
     mobileLabel: "资料",
-    glyph: "▤",
+    glyph: "resources",
     target: "library",
     views: ["library", "timeline", "graph"],
   },
 ];
 
 const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigationItem[]>> = {
+  actions: [
+    { id: "calendar", label: "日历", glyph: "暦", caption: "COMMITMENTS" },
+    { id: "todo", label: "行动清单", glyph: "行", caption: "ACTIONS" },
+  ],
+  career: [
+    { id: "jobs", label: "岗位机会", glyph: "機", caption: "OPPORTUNITIES" },
+    { id: "analytics", label: "选考与分析", glyph: "選", caption: "PIPELINE" },
+  ],
   interview: [
-    { id: "session", label: "当前面试", glyph: "場", caption: "LIVE" },
+    { id: "session", label: "本场面试", glyph: "場", caption: "SESSION" },
     { id: "prep", label: "通用准备", glyph: "備", caption: "PLAYBOOK" },
     { id: "review", label: "面试复盘", glyph: "復", caption: "REVIEW" },
+    { id: "practice", label: "回答重练", glyph: "練", caption: "PRACTICE" },
   ],
   training: [
     { id: "language", label: "日语训练", glyph: "話", caption: "NIHONGO" },
@@ -184,15 +195,28 @@ const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigationItem
  *
  * 移动端没有左栏，所以那两个分区的带子在 820px 以下会回来（CSS 按 data-placement 切）。
  */
-const TOP_BAR_SECTION_IDS = new Set<PrimaryNavId>(["resources"]);
+const TOP_BAR_SECTION_IDS = new Set<PrimaryNavId>(["actions", "career", "resources"]);
+
+function NavigationIcon({ name }: { name: NavIconName }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" focusable="false">
+      {name === "home" && <><path d="M3.5 11.3 12 4l8.5 7.3" /><path d="M5.7 10.4V20h12.6v-9.6M9.4 20v-5.8h5.2V20" /></>}
+      {name === "actions" && <><path d="m4 7 2 2 3.5-4" /><path d="M12 7h8M4 14l2 2 3.5-4M12 14h8M4 21l2 2 3.5-4M12 21h8" /></>}
+      {name === "career" && <><path d="M4 8.5h16v10.8H4z" /><path d="M8.5 8.5V5.7h7v2.8M4 12.5c4.8 2 11.2 2 16 0M10.5 13.3h3" /></>}
+      {name === "interview" && <><path d="M4 5.5h16v11H9l-5 3.2z" /><path d="M8 9.5h8M8 12.5h5" /></>}
+      {name === "training" && <><path d="m3.5 7 8.5-3 8.5 3-8.5 3z" /><path d="M6.2 8.2v5.6c3.6 2.8 8 2.8 11.6 0V8.2M20.5 7v7" /></>}
+      {name === "resources" && <><path d="M5 4.5h12a2 2 0 0 1 2 2V20H7a2 2 0 0 1-2-2z" /><path d="M7 4.5v15.5M10 8h6M10 11.5h6M10 15h4" /></>}
+    </svg>
+  );
+}
 
 /** 单键快捷键（R）在输入场景必须让路，否则在搜索框里打 r 就会触发重读。 */
 
 
 const MOBILE_PRIMARY_NAV_IDS = new Set<PrimaryNavId>([
   "overview",
-  "progress",
-  "opportunities",
+  "actions",
+  "career",
   "interview",
 ]);
 
@@ -386,10 +410,21 @@ function SharedAssetOverlay({
   );
 }
 
+function interviewNavigationKey(view: AppView, search: string) {
+  const params = new URLSearchParams(search);
+  params.delete("note");
+  params.delete("section");
+  return appViewHref(view, params);
+}
+
 function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [view, setView] = useState<View>(initialView);
-  const [reviewInitialKey, setReviewInitialKey] = useState<string | null>(null);
+  const [interviewRouteSearch, setInterviewRouteSearch] = useState(() =>
+    typeof window === "undefined" ? "" : window.location.search,
+  );
+  const [interviewRouteVersion, setInterviewRouteVersion] = useState(0);
+  const interviewNavigation = useRef("");
   // 本场面试を残したまま、その上に全幅で開く回答库カード
   const [prepOverlayCard, setPrepOverlayCard] = useState<string | null>(null);
   const [prepOverlayOrigin, setPrepOverlayOrigin] = useState({ x: 0, y: 0 });
@@ -397,8 +432,12 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const [sharedAssetOrigin, setSharedAssetOrigin] = useState({ x: 0, y: 0 });
   // 求職分析から「進行中 N 件をすべて見る」で飛んできた時だけ、求人一覧に状態フィルタを引き継ぐ。
   const [jobsInitialFilters, setJobsInitialFilters] = useState<JobsInitialFilters | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [selectedSection, setSelectedSection] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("note"),
+  );
+  const [selectedSection, setSelectedSection] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("section"),
+  );
   /*
    * 资料库那一页的筛选词。以前它和顶栏那个全局搜索框共用同一个 state，
    * 于是「页面状态住在全局 chrome 里」：在顶栏打字，底下的卡片列表跟着变，
@@ -423,7 +462,9 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const [today, setToday] = useState(() => localDateKey());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [writeError, setWriteError] = useState("");
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [interviewScopeReady, setInterviewScopeReady] = useState(false);
 
   // 模块间切换不继承上一页的滚动位置，否则新页面会从标题或工具栏中段开始。
   useEffect(() => {
@@ -471,6 +512,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
    * 着地したスナップショットへ被せ直す。内容が一致した時点で台帳から落とす。
    */
   const pendingWrites = useRef(new Map<string, PendingWrite>());
+  const loadedScopes = useRef(new Set<VaultScope>());
+  const loadingScopes = useRef(new Set<VaultScope>());
 
   const applyPendingWrites = useCallback((incoming: Note[]) => {
     const { notes: merged, settled } = mergePendingWrites(incoming, pendingWrites.current);
@@ -479,7 +522,10 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     return merged;
   }, []);
 
-  const loadVault = useCallback(async (options?: { fresh?: boolean }) => {
+  const loadVault = useCallback(async (options?: { fresh?: boolean; scope?: VaultScope }) => {
+    const scope = options?.fresh ? "all" : options?.scope ?? "all";
+    if (!options?.fresh && loadingScopes.current.has(scope)) return;
+    loadingScopes.current.add(scope);
     setLoading(true);
     setError("");
     // R キーは「ローカルの状態も含めて信じ直す」操作。台帳ごと捨てて、
@@ -487,20 +533,47 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     if (options?.fresh) pendingWrites.current.clear();
     try {
       // fresh は R キー専用の「サーバのキャッシュも信じない」通路。通常は増分キャッシュで足りる。
-      const url = options?.fresh ? "/api/vault?refresh=1" : "/api/vault";
+      const params = new URLSearchParams({ scope });
+      if (options?.fresh) params.set("refresh", "1");
+      const url = `/api/vault?${params.toString()}`;
       const response = await fetch(url, { cache: "no-store" });
       const payload = (await response.json()) as VaultResponse;
       if (!response.ok || !payload.connected) {
         throw new Error(payload.error || "无法连接 Obsidian");
       }
-      setNotes(applyPendingWrites(payload.notes));
+      const incoming = applyPendingWrites(payload.notes);
+      setNotes((current) => {
+        if (scope === "all" || current.length === 0) return incoming;
+        const merged = new Map(current.map((note) => [note.path, note]));
+        incoming.forEach((note) => merged.set(note.path, note));
+        return [...merged.values()].sort((left, right) => right.stat.mtime - left.stat.mtime);
+      });
+      loadedScopes.current.add(scope);
+      if (scope === "all" || scope === "interview") setInterviewScopeReady(true);
       setFetchedAt(payload.fetchedAt ?? Date.now());
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "无法连接 Obsidian");
     } finally {
+      loadingScopes.current.delete(scope);
       setLoading(false);
     }
   }, [applyPendingWrites]);
+
+  // Obsidian で編集して戻ってきた時だけ軽量キャッシュ照合を行う。常時 poll はせず、
+  // 直前の取得から60秒未満なら何もしないので、Cmd+Tab のたびに画面を揺らさない。
+  useEffect(() => {
+    const refreshOnFocus = () => {
+      if (document.visibilityState !== "visible" || loading) return;
+      if (fetchedAt && Date.now() - fetchedAt < 60_000) return;
+      void loadVault({ scope: vaultScopeForView(view) });
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+    return () => {
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+    };
+  }, [fetchedAt, loadVault, loading, view]);
 
   /**
    * 写路由已经把更新后的那条 note 放在响应里，这里只做单条替换。
@@ -519,6 +592,34 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       return next;
     });
   }, []);
+
+  const updateTodoStatus = useCallback(async (note: Note, status: string, expectedMtime?: number) => {
+    try {
+      const response = await fetch("/api/todos/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: note.path,
+          status,
+          ...(expectedMtime !== undefined ? { expectedMtime } : {}),
+        }),
+      });
+      const payload = (await response.json()) as { error?: string; note?: Note };
+      if (!response.ok || !payload.note) {
+        if (response.status === 409) {
+          await loadVault();
+        }
+        throw new Error(payload.error || "更新行动状态失败");
+      }
+      patchNote(payload.note);
+      setWriteError("");
+      return null;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "更新行动状态失败";
+      setWriteError(message);
+      return message;
+    }
+  }, [loadVault, patchNote]);
 
   const openPrepCard = useCallback((cardId: string) => {
     // setState→overlay の effect を待つと、focus と overflow の変更後の座標を
@@ -668,6 +769,14 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
             : "all",
         );
       }
+      const params = new URLSearchParams(window.location.search);
+      setInterviewRouteSearch(window.location.search);
+      const interviewKey = interviewNavigationKey(routedView, window.location.search);
+      // 只在场次入口改变时重置阅读状态；关闭原始笔记不能丢掉当前的批注草稿。
+      if (interviewNavigation.current !== interviewKey) setInterviewRouteVersion((version) => version + 1);
+      interviewNavigation.current = interviewKey;
+      setSelectedPath(params.get("note"));
+      setSelectedSection(params.get("section"));
     };
     const onPopState = (event: PopStateEvent) => {
       syncOverlays(event.state);
@@ -681,9 +790,15 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
 
   useEffect(() => {
     // rAF は非アクティブなタブでは発火しないため timer で初回ロードする。
-    const timer = window.setTimeout(() => void loadVault(), 0);
+    const timer = window.setTimeout(() => void loadVault({ scope: vaultScopeForView(initialView) }), 0);
     return () => window.clearTimeout(timer);
-  }, [loadVault]);
+  }, [initialView, loadVault]);
+
+  useEffect(() => {
+    const scope = vaultScopeForView(view);
+    if (loadedScopes.current.has("all") || loadedScopes.current.has(scope)) return;
+    void loadVault({ scope });
+  }, [loadVault, view]);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -706,8 +821,16 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       if (event.key === "Escape") {
         // 回答库の上に原笔记 drawer を開いている時は、一段ずつ閉じる。
         if (selectedPath) {
-          setSelectedPath(null);
-          setSelectedSection(null);
+          if (window.history.state?.__echoNote) window.history.back();
+          else {
+            const params = new URLSearchParams(window.location.search);
+            params.delete("note");
+            params.delete("section");
+            const query = params.toString();
+            window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+            setSelectedPath(null);
+            setSelectedSection(null);
+          }
           return;
         }
         if (prepOverlayCard) {
@@ -751,22 +874,68 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     : null;
 
   const openNote = useCallback((note: Note) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("note", note.path);
+    params.delete("section");
+    window.history.pushState(
+      { ...(window.history.state ?? {}), __echoNote: note.path },
+      "",
+      `${window.location.pathname}?${params.toString()}`,
+    );
     setSelectedPath(note.path);
     setSelectedSection(null);
     setSearchOpen(false);
   }, []);
 
+  const closeNote = useCallback(() => {
+    if (window.history.state?.__echoNote) {
+      window.history.back();
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    params.delete("note");
+    params.delete("section");
+    const query = params.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    setSelectedPath(null);
+    setSelectedSection(null);
+  }, []);
+
   const openWikiLink = useCallback(
     (target: string, section?: string) => {
-      const note = notesByBasename.get(target) ?? notes.find((item) => item.path.endsWith(`/${target}.md`));
-      if (note) {
+      const resolved = resolveNoteLink(notes, target, section);
+      if (resolved) {
+        const { note, section: heading } = resolved;
+        const params = new URLSearchParams(window.location.search);
+        params.set("note", note.path);
+        if (heading) params.set("section", heading);
+        else params.delete("section");
+        window.history.pushState(
+          { ...(window.history.state ?? {}), __echoNote: note.path },
+          "",
+          `${window.location.pathname}?${params.toString()}`,
+        );
         setSelectedPath(note.path);
-        setSelectedSection(section || null);
+        setSelectedSection(heading);
         setSearchOpen(false);
       }
     },
-    [notes, notesByBasename],
+    [notes],
   );
+
+  const closeSceneNote = useCallback(() => {
+    // 关联笔记可能已经翻了多篇，关闭全文必须直接回到场景，而不是逐篇退出。
+    const params = new URLSearchParams(window.location.search);
+    params.delete("note");
+    params.delete("section");
+    const query = params.toString();
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoNote: null }, "",
+      `${window.location.pathname}${query ? `?${query}` : ""}`,
+    );
+    setSelectedPath(null);
+    setSelectedSection(null);
+  }, []);
 
   // today を依存に入れるのは、日历事件の upcoming/past が「今日」で決まるため。
   // 入れないと、日付を跨いだ時に見出しの日付だけ進んで、昨日の面接が「未来の予定」の
@@ -776,28 +945,74 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     [notes, today],
   );
 
-  // 顶栏「下一件」：只取已确定日程里最近的一场，没有就不占位。
+  const interviewTargets = useMemo(() => {
+    const targets = new Map<string, CalendarInterviewTarget>();
+    for (const event of derived.commitments) {
+      const target = resolveCalendarInterview(event, notes);
+      if (target) targets.set(event.id, target);
+    }
+    return targets;
+  }, [derived.commitments, notes]);
+  const calendarInterview = useMemo(() => {
+    const requested = calendarInterviewFromSearch(view, interviewRouteSearch);
+    if (!requested) return null;
+    const source = notes.find((note) => note.path === requested.sourcePath);
+    if (!source) return { ...requested, path: null };
+    const event = derived.calendarEvents.find((item) =>
+      item.date === requested.date && item.note.path === requested.sourcePath,
+    );
+    // 日历只加载行动资料；到面试页加载完整资料后重新匹配，不能把先前的空结果冻结。
+    const resolved = resolveCalendarInterview({
+      id: event?.id ?? requested.sourcePath,
+      note: source,
+      kind: "event",
+      company: requested.company,
+      date: requested.date,
+      time: requested.time || event?.time || "",
+      label: requested.label,
+      phase: requested.date < today ? "past" : "upcoming",
+      caseId: requested.caseId,
+      prepPath: "",
+    }, notes);
+    return resolved ?? { ...requested, path: null };
+  }, [view, interviewRouteSearch, notes, derived.calendarEvents, today]);
+  const interviewParams = new URLSearchParams(interviewRouteSearch);
+  const reviewInitialKey = calendarInterview?.path ?? interviewParams.get("review");
+  const prepInitialPath = calendarInterview ? calendarInterview.path ?? "" : interviewParams.get("prep") ?? "";
+  const companyContextPath = calendarInterview?.sourcePath ?? interviewParams.get("context") ?? "";
+  const calendarCompanyContext = calendarInterview?.view === "session" && notes.some((note) =>
+    note.path === calendarInterview.sourcePath &&
+    ["job-case", "todo"].includes(String(note.frontmatter.type)) && Boolean(note.frontmatter.company),
+  );
+
+  // 顶栏「下一件」与首页、日历共用同一承诺投影，避免 TODO 截止与外部跟进消失。
   const nextEvent = useMemo(
     () =>
-      derived.calendarEvents
+      derived.commitments
         .filter((event) => event.phase === "upcoming")
         .toSorted((left, right) =>
           `${left.date} ${left.time}`.localeCompare(`${right.date} ${right.time}`),
         )[0] ?? null,
-    [derived.calendarEvents],
+    [derived.commitments],
   );
 
   const sourceLabel = error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接";
-  const sourceDetail = fetchedAt ? `${formatDate(fetchedAt)} 同步` : "本地数据源";
+  const sourceDetail = fetchedAt
+    ? `${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(fetchedAt)} 同步`
+    : "本地数据源";
 
   const navigateToView = useCallback((
     nextView: View,
     search?: URLSearchParams | string,
     preserveJobsInitialFilters = false,
   ) => {
-    if (nextView === "review") setReviewInitialKey(null);
+    setInterviewRouteSearch(typeof search === "string" ? search : search?.toString() ?? "");
+    interviewNavigation.current = interviewNavigationKey(nextView, search?.toString() ?? "");
+    setInterviewRouteVersion((version) => version + 1);
     // ナビから直接来た時は分析画面由来のフィルタを持ち越さない。
     if (nextView === "jobs" && !preserveJobsInitialFilters) setJobsInitialFilters(null);
+    setSelectedPath(null);
+    setSelectedSection(null);
     setMobileMoreOpen(false);
     window.history.pushState({ __echoAppView: nextView }, "", appViewHref(nextView, search));
     setView(nextView);
@@ -814,8 +1029,9 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   }, [navigateToView]);
 
   const openReview = useCallback((key?: string) => {
-    setReviewInitialKey(key ?? null);
-    navigateToView("review");
+    const params = new URLSearchParams();
+    if (key) params.set("review", key);
+    navigateToView("review", params);
   }, [navigateToView]);
 
   const viewJobsWithFilters = useCallback((filters?: JobsInitialFilters) => {
@@ -826,11 +1042,11 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     navigateToView("jobs", params, true);
   }, [navigateToView]);
 
-  const prepareInterview = useCallback((company: string) => {
-    const params = new URLSearchParams();
-    params.set("company", company);
-    navigateToView("session", params);
-  }, [navigateToView]);
+  const openCalendarInterview = useCallback((commitment: Commitment) => {
+    const target = interviewTargets.get(commitment.id);
+    if (target) navigateToView(target.view, calendarInterviewSearch(target));
+    else openNote(commitment.note);
+  }, [interviewTargets, navigateToView, openNote]);
 
   const syncInterviewSelection = useCallback((company: string, prepPath: string) => {
     const params = new URLSearchParams();
@@ -841,7 +1057,39 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       "",
       appViewHref("session", params),
     );
+    setInterviewRouteSearch(params.toString());
+    interviewNavigation.current = interviewNavigationKey("session", params.toString());
   }, []);
+
+  const syncCompanyContext = useCallback((company: string, contextPath: string, prepPath: string) => {
+    const params = companyOverviewSearch(company, contextPath, prepPath);
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoAppView: "session" }, "", appViewHref("session", params),
+    );
+    setInterviewRouteSearch(params.toString());
+    interviewNavigation.current = interviewNavigationKey("session", params.toString());
+  }, []);
+
+  const syncReviewSelection = useCallback((key: string | null) => {
+    const params = new URLSearchParams();
+    if (key) params.set("review", key);
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoAppView: "review" }, "", appViewHref("review", params),
+    );
+    setInterviewRouteSearch(params.toString());
+    interviewNavigation.current = interviewNavigationKey("review", params.toString());
+  }, []);
+
+  useEffect(() => {
+    if (!calendarInterview || !interviewScopeReady || calendarInterview.view === view) return;
+    // 当天的新整理稿可能只在进入面试页后才加载；补齐完成证据后更新同一个历史入口。
+    const params = calendarInterviewSearch(calendarInterview);
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoAppView: calendarInterview.view }, "",
+      appViewHref(calendarInterview.view, params),
+    );
+    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+  }, [calendarInterview, interviewScopeReady, view]);
 
   useEffect(() => {
     if (view !== "library" && view !== "graph") return;
@@ -870,6 +1118,9 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     : "rail";
   const activeSecondaryLabel =
     secondaryNavigation.find((item) => item.id === view)?.label ?? "";
+  useEffect(() => {
+    document.title = `${activeSecondaryLabel || activeNavigation.label} · 回声`;
+  }, [activeNavigation.label, activeSecondaryLabel]);
   // 左栏只展开当前分区的子项，顶层始终只有 7 个目标。
   const railSecondary = secondaryPlacement === "rail" ? secondaryNavigation : [];
   const mobilePrimaryNavigation = NAVIGATION.filter((item) =>
@@ -885,13 +1136,18 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="主导航">
-        <button className="brand" onClick={() => navigateToView("overview")} aria-label="返回总览">
+        <a
+          className="brand"
+          href={appViewHref("overview")}
+          onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView("overview"); } }}
+          aria-label="返回总览"
+        >
           <span className="brand-mark">回</span>
           <span className="brand-copy">
             <strong>回声</strong>
             <small>CAREER WAR ROOM</small>
           </span>
-        </button>
+        </a>
 
         <nav className="side-nav">
           {NAVIGATION.map((item) => {
@@ -899,9 +1155,10 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
             const subItems = isActiveSection ? railSecondary : [];
             return (
               <Fragment key={item.id}>
-                <button
+                <a
                   className={isActiveSection ? "active" : ""}
-                  onClick={() => navigateToView(item.target)}
+                  href={appViewHref(item.target)}
+                  onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(item.target); } }}
                   // 有二级项时当前页是子项（左栏或顶部带子里那个），父项不该也自称 page。
                   aria-current={
                     isActiveSection && secondaryNavigation.length === 0 ? "page" : undefined
@@ -909,9 +1166,9 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   // 折叠态把文字视觉隐藏，靠这个属性画出 hover 提示气泡。
                   data-label={item.label}
                 >
-                  <span className="nav-glyph" aria-hidden="true">{item.glyph}</span>
+                  <span className="nav-glyph" aria-hidden="true"><NavigationIcon name={item.glyph} /></span>
                   <span>{item.label}</span>
-                </button>
+                </a>
                 {subItems.length > 0 && (
                   <div
                     className="side-subnav"
@@ -919,16 +1176,17 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                     aria-label={`${item.label}二级导航`}
                   >
                     {subItems.map((sub) => (
-                      <button
+                      <a
                         key={sub.id}
                         className={view === sub.id ? "active" : ""}
-                        onClick={() => navigateToView(sub.id)}
+                        href={appViewHref(sub.id)}
+                        onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(sub.id); } }}
                         aria-current={view === sub.id ? "page" : undefined}
                         data-label={sub.label}
                       >
                         <span className="nav-glyph" aria-hidden="true">{sub.glyph}</span>
                         <span>{sub.label}</span>
-                      </button>
+                      </a>
                     ))}
                   </div>
                 )}
@@ -953,7 +1211,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
           </div>
 
           <div className="topbar-where">
-            <span aria-hidden="true">{activeNavigation.glyph}</span>
+            <span aria-hidden="true"><NavigationIcon name={activeNavigation.glyph} /></span>
             <strong>{activeNavigation.label}</strong>
             {activeSecondaryLabel && <small>{activeSecondaryLabel}</small>}
           </div>
@@ -965,7 +1223,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               onClick={() => navigateToView(nextEvent.phase === "upcoming" ? "calendar" : "calendar")}
               title={`${nextEvent.date}${nextEvent.time ? ` ${nextEvent.time}` : ""} ${nextEvent.label}`}
             >
-              <small>下一件</small>
+              <small>最近安排</small>
               <em>{countdownLabel(nextEvent.date)}{nextEvent.time ? ` ${nextEvent.time}` : ""}</em>
               <strong>{nextEvent.company}</strong>
               <i aria-hidden="true">→</i>
@@ -985,18 +1243,30 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
             </span>
           </button>
 
-          <div className="topbar-keys" aria-hidden="true">
-            <span><kbd>⌘K</kbd>搜索</span>
+          <div className="topbar-keys">
+            <button onClick={() => setSearchOpen(true)} aria-label="搜索与命令"><kbd>⌘K</kbd>搜索</button>
             <span><kbd>R</kbd>重读</span>
           </div>
         </header>
 
-        {error ? (
+        {error && notes.length === 0 ? (
           <ConnectionError error={error} onRetry={() => void loadVault()} />
         ) : loading && notes.length === 0 ? (
           <LoadingState />
         ) : (
           <>
+            {error && notes.length > 0 && (
+              <div className="stale-data-banner" role="status">
+                <span>同步中断，正在显示 {sourceDetail} 的可用快照。</span>
+                <button onClick={() => void loadVault()}>重试</button>
+              </div>
+            )}
+            {writeError && (
+              <div className="global-write-banner" role="alert">
+                <span>{writeError}</span>
+                <button onClick={() => setWriteError("")} aria-label="关闭提示">×</button>
+              </div>
+            )}
             {secondaryNavigation.length > 0 && (
               <nav
                 className="section-nav"
@@ -1006,10 +1276,11 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                 {/* 分区名现在由顶栏的位置指示器说，这条带子只负责章节标签本身。 */}
                 <div className="section-nav-tabs">
                   {secondaryNavigation.map((item) => (
-                    <button
+                    <a
                       key={item.id}
                       className={view === item.id ? "active" : ""}
-                      onClick={() => navigateToView(item.id)}
+                      href={appViewHref(item.id)}
+                      onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(item.id); } }}
                       aria-current={view === item.id ? "page" : undefined}
                     >
                       <i aria-hidden="true">{item.glyph}</i>
@@ -1017,7 +1288,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                         <strong>{item.label}</strong>
                         <small>{item.caption}</small>
                       </span>
-                    </button>
+                    </a>
                   ))}
                 </div>
               </nav>
@@ -1032,27 +1303,51 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   onView={navigateToView}
                   onQuery={runSavedQuery}
                   onOpenReview={openReview}
+                  onTodoStatus={updateTodoStatus}
                 />
               )}
-              {view === "review" && (
+              {calendarInterview && (!interviewScopeReady || calendarInterview.view !== view || (!calendarInterview.path && !calendarCompanyContext)) && (
+                <CalendarInterviewState
+                  target={calendarInterview}
+                  loading={(!interviewScopeReady && !error) || calendarInterview.view !== view}
+                  onOpenSource={notes.some((note) => note.path === calendarInterview.sourcePath)
+                    ? () => openNote(notes.find((note) => note.path === calendarInterview.sourcePath)!)
+                    : undefined}
+                  onShowAll={() => navigateToView(calendarInterview.view)}
+                />
+              )}
+              {view === "review" && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && calendarInterview.path)) && (
                 <InterviewReview
+                  key={interviewRouteVersion}
                   notes={notes}
                   onVaultChanged={loadVault}
                   onNoteWritten={patchNote}
                   initialSelectedKey={reviewInitialKey}
+                  onSelectionChange={syncReviewSelection}
                 />
               )}
-              {view === "session" && (
+              {view === "practice" && (
+                <InterviewPractice
+                  notes={notes}
+                  today={today}
+                  onNoteWritten={patchNote}
+                />
+              )}
+              {view === "session" && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && (calendarInterview.path || calendarCompanyContext))) && (
                 <InterviewSession
+                  key={`${interviewRouteVersion}:${interviewScopeReady}`}
                   notes={notes}
                   today={today}
                   onOpen={openNote}
                   onOpenWiki={openWikiLink}
                   onOpenCard={openPrepCard}
                   onOpenAsset={openSharedAsset}
-                  initialCompany={typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("company") ?? ""}
-                  initialPath={typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("prep") ?? ""}
+                  initialCompany={interviewParams.get("company") ?? ""}
+                  initialPath={prepInitialPath}
+                  initialContextPath={companyContextPath}
+                  forceOverviewOnly={Boolean(calendarInterview && !calendarInterview.path && calendarCompanyContext)}
                   onSelectionChange={syncInterviewSelection}
+                  onContextChange={syncCompanyContext}
                 />
               )}
               {view === "prep" && (
@@ -1088,7 +1383,12 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                 />
               )}
               {view === "todo" && (
-                <TodoView notes={notes} today={today} onOpen={openNote} />
+                <TodoView
+                  notes={notes}
+                  today={today}
+                  onOpen={openNote}
+                  onStatus={updateTodoStatus}
+                />
               )}
               {view === "graph" && (
                 <GraphView
@@ -1100,15 +1400,16 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "calendar" && (
                 <CalendarView
-                  events={derived.calendarEvents}
-                  notes={notes}
+                  events={derived.commitments}
                   today={today}
                   onOpen={openNote}
-                  onPrepare={prepareInterview}
+                  interviewTargets={interviewTargets}
+                  onInterview={openCalendarInterview}
                 />
               )}
               {view === "timeline" && (
                 <TimelineView
+                  today={today}
                   items={derived.timeline}
                   events={derived.calendarEvents}
                   onOpen={openNote}
@@ -1137,7 +1438,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
             onClick={() => navigateToView(item.target)}
             aria-current={item.views.includes(view) ? "page" : undefined}
           >
-            <span aria-hidden="true">{item.glyph}</span>
+            <span aria-hidden="true"><NavigationIcon name={item.glyph} /></span>
             {item.mobileLabel}
           </button>
         ))}
@@ -1174,6 +1475,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
           onOpen={openNote}
           onQuery={runSavedQuery}
           onClose={() => setSearchOpen(false)}
+          onNavigate={(target) => navigateToView(target)}
         />
       )}
 
@@ -1198,19 +1500,26 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
         />
       )}
 
-      {selectedNote && (
+      {selectedNote && (view === "graph" || view === "timeline" ? (
+        <SceneNoteReader
+          note={selectedNote}
+          section={selectedSection}
+          allNotes={notes}
+          scene={view}
+          onClose={closeSceneNote}
+          onOpenWiki={openWikiLink}
+          onOpen={openNote}
+        />
+      ) : (
         <NoteDrawer
           note={selectedNote}
           section={selectedSection}
           allNotes={notes}
-          onClose={() => {
-            setSelectedPath(null);
-            setSelectedSection(null);
-          }}
+          onClose={closeNote}
           onOpenWiki={openWikiLink}
           onOpen={openNote}
         />
-      )}
+      ))}
     </div>
   );
 }

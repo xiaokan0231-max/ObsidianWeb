@@ -5,9 +5,18 @@
   --paper-deep: #e9e5da;
   --surface: #fbfaf6;
   --ink: #18231e;
-  --muted: #6f7772;
+  --muted: #56615b;
   --line: #d8d5ca;
   --orange: #e66d45;
+  --brand: #e66d45;
+  --interactive: #a84325;
+  --text-primary: #18231e;
+  --text-secondary: #46524c;
+  --text-tertiary: #5f6a64;
+  --success: #23624f;
+  --warning: #8a5b10;
+  --danger: #a33d32;
+  --info: #3f5f8f;
   --green: #2f6b59;
   --violet: #7466a9;
   --gold: #b5842f;
@@ -21,6 +30,10 @@
   --shadow-soft: 0 12px 34px rgba(28, 37, 32, 0.07);
   --page-title-size: clamp(38px, 3.4vw, 50px);
   --page-copy-size: 13px;
+  --font-body: 14px;
+  --font-compact: 12.5px;
+  --font-support: 11.5px;
+  --control-height: 40px;
 
   /*
    * チャート専用トークン。UI の --orange/--green とは別に持つ理由：
@@ -56,7 +69,15 @@ body {
   color: var(--ink);
   font-family: var(--font-geist-sans), "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  font-size: var(--font-body);
+  line-height: 1.55;
 }
+
+[lang="ja"] {
+  font-family: var(--font-geist-sans), "Hiragino Sans", "Yu Gothic", "Noto Sans CJK JP", sans-serif;
+}
+
+a { color: inherit; }
 
 button,
 input,
@@ -69,12 +90,8 @@ button {
   color: inherit;
 }
 
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible,
-canvas:focus-visible {
-  outline: 2px solid var(--orange);
+:where(a, button, input, textarea, select, canvas, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--interactive);
   outline-offset: 3px;
 }
 

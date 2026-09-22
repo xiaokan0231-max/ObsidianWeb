@@ -1,3 +1,4 @@
+import { PREP_V2_SECTIONS, interviewPrepVersion } from "./interview-prep-validation.mjs";
 import { getString, getType, noteBasename, stripFrontmatter, type Note } from "./notes.ts";
 import {
   EMBED_RE,
@@ -52,6 +53,15 @@ export type PrepSection = {
   navLabel: string;
   blocks: PrepBlock[];
 };
+
+export { PREP_V2_SECTIONS };
+export type PrepVersion = 1 | 2;
+export type PrepV2SectionId = "overview" | "motivation" | "questions" | "resources" | "backup";
+
+export function getPrepV2Section(sections: PrepSection[], id: PrepV2SectionId): PrepSection | null {
+  const spec = PREP_V2_SECTIONS.find((item) => item.id === id);
+  return sections.find((section) => section.title === spec?.title) ?? null;
+}
 
 export type PrepSectionGroup = {
   id: string;
@@ -109,21 +119,23 @@ const PREP_KILL_MAP_HEADING = "殺傷質問7題";
 export const PREP_KILL_MAP_LABEL = "杀伤7题";
 const PREP_TALENT_HEADING = "人材育成";
 export const PREP_TALENT_LABEL = "人才育成";
+const PREP_BRIEFING_HEADING = "本轮导读";
 
 /**
- * §6 の小節を、独立した主模块用の仮想節として切り出す共通処理。
+ * 節の小節を、独立した主模块／モード用の仮想節として切り出す共通処理。
  *
- * 正本はあくまで §6 の中の一小節（vault は12節契約のまま・13個目の ## は作らない）。
- * ただ当日その一枚だけを開きたい需要があるので、Web の表示層だけで独立モジュールに
- * 昇格させる。小節が無い回（他社の準備稿）では null ＝チップ自体が出ない。
+ * 正本はあくまで親節の中の一小節（vault は12節契約のまま・13個目の ## は作らない）。
+ * ただ当日その一枚だけを開きたい需要があるので、Web の表示層だけで独立させる。
+ * 小節が無い回（他社の準備稿）では null ＝チップ自体が出ない。
  */
 function extractPrepSubModule(
   sections: PrepSection[],
   headingPrefix: string,
   id: string,
   label: string,
+  parentNumber = 6,
 ): PrepSection | null {
-  const parent = sections.find((section) => prepSectionNumber(section.title) === 6);
+  const parent = sections.find((section) => prepSectionNumber(section.title) === parentNumber);
   if (!parent) return null;
   const start = parent.blocks.findIndex(
     (block) =>
@@ -152,6 +164,17 @@ export function extractPrepKillMap(sections: PrepSection[]): PrepSection | null 
 /** §6 の小節「人材育成」→ 第8主模块。責任者面接の中心題なので当日ワンタップで開く。 */
 export function extractPrepTalentMap(sections: PrepSection[]): PrepSection | null {
   return extractPrepSubModule(sections, PREP_TALENT_HEADING, "prep-sec-talent", PREP_TALENT_LABEL);
+}
+
+/**
+ * §2 の小節「本轮导读」→ 準備モード「导读」の本文。
+ *
+ * 速査・想定問答は当日その場で引く道具であって、「この面接がどういう局面なのか」を
+ * 通して理解する読み物はどこにも無かった。箇条書きに崩さず散文のまま持ち、
+ * 面談の数日前に一度通読する前提でこのモードに出す。
+ */
+export function extractPrepBriefing(sections: PrepSection[]): PrepSection | null {
+  return extractPrepSubModule(sections, PREP_BRIEFING_HEADING, "prep-sec-brief", "导读", 2);
 }
 
 export type PrepKillQuestion = {
@@ -307,6 +330,7 @@ export type PrepExternalLink = {
 
 export type InterviewPrepDoc = {
   note: Note;
+  prepVersion: PrepVersion;
   title: string;
   company: string;
   date: string;
@@ -316,6 +340,7 @@ export type InterviewPrepDoc = {
   format: string;
   interviewers: string;
   caseLink: string;
+  meetingLink: string;
   sections: PrepSection[];
   embeds: PrepEmbed[];
   externalLinks: PrepExternalLink[];
@@ -717,17 +742,25 @@ function linksInInline(nodes: PrepInline[]) {
  * 本文中の Teams URL や補助リンクまで混ぜると「外部調査資料」の意味が薄れるため、
  * skill が正本としている会社研究リンク集を唯一の抽出元にする。
  */
-export function collectPrepExternalLinks(sections: PrepSection[]): PrepExternalLink[] {
-  const source = sections.find((section) => section.title.includes("会社研究リンク集"));
+export function collectPrepExternalLinks(
+  sections: PrepSection[],
+  prepVersion: PrepVersion = 1,
+): PrepExternalLink[] {
+  const source = prepVersion === 2
+    ? getPrepV2Section(sections, "resources")
+    : sections.find((section) => section.title.includes("会社研究リンク集"));
   if (!source) return [];
 
   const links: PrepExternalLink[] = [];
   const seen = new Set<string>();
   let group = "その他";
+  let groupStarred = false;
   for (const block of source.blocks) {
     if (block.kind === "heading") {
       group = prepInlineText(block.inline).replace(/^[①-⑳0-9０-９.\s]+/, "").trim() || "その他";
-      continue;
+      if (prepVersion === 1) continue;
+      // 新版资料可用链接标题作小节；星号在标题时也属于这条资料。
+      groupStarred = /[⭐★]/.test(group);
     }
     const inlineGroups =
       block.kind === "table"
@@ -740,7 +773,7 @@ export function collectPrepExternalLinks(sections: PrepSection[]): PrepExternalL
     for (const inline of inlineGroups) {
       // リストは複数項目が1ブロックになるため、★はブロック単位ではなくリンクのある行単位で判定する。
       const inlineText = prepInlineText(inline);
-      const starred = inlineText.includes("⭐") || inlineText.includes("★");
+      const starred = groupStarred || inlineText.includes("⭐") || inlineText.includes("★");
       for (const link of linksInInline(inline)) {
         if (!/^https?:\/\//.test(link.href) || seen.has(link.href)) continue;
         seen.add(link.href);
@@ -753,6 +786,9 @@ export function collectPrepExternalLinks(sections: PrepSection[]): PrepExternalL
 
 export function parseInterviewPrepDoc(note: Note, notes: Note[]): InterviewPrepDoc | null {
   if (getType(note) !== INTERVIEW_PREP_TYPE) return null;
+  const prepVersion = interviewPrepVersion(note.frontmatter.prep_version);
+  // 未知版本不能静默渲染成历史稿；vault:check 会给出明确错误。
+  if (prepVersion === null) return null;
 
   const byName = new Map<string, Note>();
   for (const candidate of notes) {
@@ -774,16 +810,18 @@ export function parseInterviewPrepDoc(note: Note, notes: Note[]): InterviewPrepD
     const start = (match.index ?? 0) + match[0].length;
     const end = matches[index + 1]?.index ?? expanded.length;
     const heading = match[1].trim();
+    const spec = prepVersion === 2 ? PREP_V2_SECTIONS.find((item) => item.title === heading) : null;
     sections.push({
-      id: `prep-sec-${index}`,
+      id: spec ? `prep-v2-${spec.id}` : `prep-sec-${index}`,
       title: heading,
-      navLabel: navLabel(heading),
+      navLabel: spec?.navLabel ?? navLabel(heading),
       blocks: parseBlocks(expanded.slice(start, end)),
     });
   });
 
   return {
     note,
+    prepVersion,
     title,
     company: getString(note.frontmatter.company),
     date: getString(note.frontmatter.date),
@@ -808,9 +846,10 @@ export function parseInterviewPrepDoc(note: Note, notes: Note[]): InterviewPrepD
     format: getString(note.frontmatter.format),
     interviewers: getString(note.frontmatter.interviewers),
     caseLink: prepWikiTarget(getString(note.frontmatter.case)),
+    meetingLink: prepWikiTarget(getString(note.frontmatter.meeting)),
     sections,
     embeds,
-    externalLinks: collectPrepExternalLinks(sections),
+    externalLinks: collectPrepExternalLinks(sections, prepVersion),
   };
 }
 

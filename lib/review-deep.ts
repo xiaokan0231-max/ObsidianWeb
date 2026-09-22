@@ -93,6 +93,8 @@ export type InterviewAnswerReview = {
   overallScore: number;
   /** schema v1 の旧レポートには無い。新規生成では必須。 */
   dimensions?: InterviewAnswerDimensions;
+  /** 整场面试的自然语言导读，与回答质量评分分开；旧报告可缺省。 */
+  overviewZh?: string;
   summaryZh: string;
   strengths: string[];
   weaknesses: string[];
@@ -252,6 +254,7 @@ export function normalizeInterviewAnswerReview(
     model: meta.model,
     overallScore: dimensions ? scoreFromDimensions(dimensions) : boundedScore(value.overallScore),
     dimensions,
+    ...(text(value.overviewZh) ? { overviewZh: text(value.overviewZh) } : {}),
     summaryZh: text(value.summaryZh),
     strengths: texts(value.strengths),
     weaknesses: texts(value.weaknesses),
@@ -292,6 +295,7 @@ function list(items: string[]) {
 
 /** レンダラが必ず書き直す見出し。ここに無い節は「機械が作れないもの」として扱う。 */
 const RENDERED_HEADINGS = new Set([
+  "综合导读",
   "全体評価",
   "採点内訳（各20%）",
   "強み",
@@ -406,7 +410,7 @@ layer: ai-derived
 
 > 文法の採点ではなく、質問理解・論点網羅・回答の直接性・日本面接での戦略リスクを評価する AI 派生レポート。
 > 元の整理稿と本人の裁定・批注が更新された場合は Web から再生成する。
-
+${review.overviewZh ? `\n## 综合导读\n\n${review.overviewZh}\n` : ""}
 ## 全体評価
 
 **${review.overallScore} / 100** — ${review.summaryZh}

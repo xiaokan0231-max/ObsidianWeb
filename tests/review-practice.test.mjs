@@ -14,9 +14,32 @@ test("interview practice entries round-trip the selected AI draft and evidence",
     questionTitle: "AI、MCP与DDD的跟进情况",
     improvedAnswerJa: "はい、三つともキャッチアップしています。",
     evidenceSentenceIds: ["s091", "s092", "s094"],
+    attempts: [],
   };
   const note = `---\ntype: interview-answer-practice\n---\n# 回答練習\n${renderInterviewPracticeEntry(entry)}`;
   assert.deepEqual(parseInterviewPractice(note), [entry]);
+});
+
+test("interview practice keeps legacy queue entries and folds append-only actions", () => {
+  const note = `---\ntype: interview-answer-practice\n---\n# 回答練習\n
+- **q2｜queued｜2026-08-20T10:00:00+09:00**
+    - 質問:: 転職理由を教えてください
+    - 改善回答:: より大きな責任を担いたいです。
+    - 証拠:: s010
+
+- **q2｜attempt｜2026-08-20T10:05:00+09:00**
+    - 自評:: stuck
+
+- **q2｜snooze｜2026-08-20T10:06:00+09:00**
+    - 次回:: 2026-08-21
+`;
+  const [entry] = parseInterviewPractice(note);
+  assert.equal(entry.status, "snoozed");
+  assert.equal(entry.dueAt, "2026-08-21");
+  assert.deepEqual(entry.attempts, [
+    { action: "attempt", at: "2026-08-20T10:05:00+09:00", rating: "stuck" },
+    { action: "snooze", at: "2026-08-20T10:06:00+09:00", dueAt: "2026-08-21" },
+  ]);
 });
 
 test("review UI connects evidence jumps and the durable practice API", async () => {

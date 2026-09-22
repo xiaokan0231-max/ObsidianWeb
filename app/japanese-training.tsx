@@ -197,15 +197,6 @@ function JapaneseTraining({
         </section>
       ) : curriculum ? (
         <>
-          <TrainingNow
-            state={state}
-            size={size}
-            busy={Boolean(busy)}
-            onSize={setSize}
-            onStart={() => void start()}
-            onResume={() => setShowBatch(true)}
-          />
-
           {state.stale && (
             <section className="focus-language-stale">
               <div><strong>面试或岗位资料已经更新</strong><span>当前批次仍可继续；重建后，新证据才会进入下一批。</span></div>
@@ -224,8 +215,30 @@ function JapaneseTraining({
             ))}
           </nav>
 
-          {tab === "today" && (
-            <TodayDashboard state={state} />
+          {tab === "today" ? (
+            <>
+              <TrainingNow
+                state={state}
+                size={size}
+                busy={Boolean(busy)}
+                onSize={setSize}
+                onStart={() => void start()}
+                onResume={() => setShowBatch(true)}
+              />
+              <TodayDashboard state={state} />
+            </>
+          ) : (
+            <section className="focus-language-resume" aria-label="训练入口">
+              <span>{state.currentBatch ? `本批 ${state.currentBatch.targetSize} 项 · 进度已保存` : "今日训练尚未开始"}</span>
+              <button
+                type="button"
+                disabled={Boolean(busy)}
+                onClick={() => state.currentBatch ? setShowBatch(true) : setTab("today")}
+              >
+                {state.currentBatch ? `继续${BATCH_PHASE_LABELS[state.currentBatch.phase]}` : "设置今日训练"}
+                <span aria-hidden="true"> →</span>
+              </button>
+            </section>
           )}
           {tab === "profile" && <AbilityProfile state={state} />}
           {tab === "issues" && <IssueMap state={state} />}
@@ -259,7 +272,6 @@ function TrainingNow({
     <section className="focus-language-now">
       <span className="focus-language-now-mark" aria-hidden="true">語</span>
       <div className="focus-language-now-copy">
-        <small>{batch ? "CURRENT BATCH · AUTO SAVED" : "TODAY'S TRAINING"}</small>
         <h2>{batch ? `继续${BATCH_PHASE_LABELS[batch.phase]}` : "开始今天的集中训练"}</h2>
         <p>
           {batch
@@ -310,7 +322,7 @@ function TodayDashboard({
     <div className="focus-language-dashboard">
       <section className="focus-language-two-column">
         <div>
-          <header><small>HOT PATH</small><h2>现在最值得修</h2></header>
+          <header><h2>现在最值得修</h2></header>
           {state.curriculum?.profile.topIssues.slice(0, 8).map((issue, index) => (
             <article className="focus-issue-compact" key={issue.key}>
               <b>{String(index + 1).padStart(2, "0")}</b>
@@ -322,7 +334,7 @@ function TodayDashboard({
           ))}
         </div>
         <div>
-          <header><small>BUILD HISTORY</small><h2>最近批次</h2></header>
+          <header><h2>最近批次</h2></header>
           {recent.length ? recent.map((entry) => (
             <article className="focus-history-row" key={entry.id}>
               <time>{entry.date}</time><strong>{entry.completedCount} / {entry.targetSize}</strong>
@@ -340,7 +352,7 @@ function AbilityProfile({ state }: { state: LanguageV2State }) {
   const stages = Object.keys(STAGE_LABELS) as LanguageTrainingStage[];
   return (
     <div className="focus-language-panel-page">
-      <header><small>ABILITY PROFILE</small><h2>能力画像来自事实，不来自泛化判断</h2></header>
+      <header><h2>能力画像</h2></header>
       <section className="focus-profile-summary">
         <div><strong>{profile.interviewCount}</strong><span>结构化面试</span></div>
         <div><strong>{profile.learnerErrorCount}</strong><span>已确认本人错误</span></div>
@@ -370,7 +382,7 @@ function IssueMap({ state }: { state: LanguageV2State }) {
   const items = new Map(state.curriculum!.items.map((value) => [value.id, value]));
   return (
     <div className="focus-language-panel-page">
-      <header><small>ISSUE MAP</small><h2>跨面试复发模式</h2><p>父模式用于排序；展开后仍能回到具体 sNN/qNN 证据。</p></header>
+      <header><h2>跨面试复发模式</h2></header>
       <div className="focus-issue-map">
         {state.curriculum!.profile.topIssues.map((issue) => (
           <details key={issue.key}>
@@ -408,7 +420,7 @@ function LanguageLibrary({
   const visible = items.filter((value) => kind === "all" || value.kind === kind);
   return (
     <div className="focus-language-panel-page">
-      <header><small>TRAINING CORPUS</small><h2>个人词汇、语法和面试表达</h2></header>
+      <header><h2>个人词汇、语法和面试表达</h2></header>
       <div className="focus-library-filters">
         <button className={kind === "all" ? "active" : ""} onClick={() => setKind("all")}>全部 {items.length}</button>
         {(Object.keys(KIND_LABELS) as LanguageLearningItemKind[]).map((key) => (
@@ -657,7 +669,7 @@ function LanguageBatchWorkspace({
       {batch.phase === "scan" && (
         <main className="language-scan-stage">
           <header>
-            <div><small>PHASE 1 · INDEX</small><h1>快速判断，不要停下来研究</h1><p>当前项固定在视线中央。按 1–4 后自动切换，无需滚动页面。</p></div>
+            <div><h1>快速扫描</h1><details className="language-operation-help"><summary>操作说明</summary><p>按 1–4 判断后自动切换，也可使用 ← → 回看。</p></details></div>
             <div className="language-scan-count"><strong>{scanJudgments.size}</strong><span>/ {batch.scanItemIds.length}</span></div>
           </header>
           <div className="language-scan-meter" aria-label={`已判断 ${scanJudgments.size} / ${batch.scanItemIds.length}`}>
@@ -780,8 +792,10 @@ function LanguageInputStage({
   const resultFor = (id: string) => actions.filter((action) => action.itemId === id && action.phase === phase).at(-1);
   return (
     <main className="language-input-stage">
-      <header><div><small>{phase === "compile" ? "PHASE 2 · COMPILE" : "PHASE 3 · STRESS"}</small><h1>{title}</h1><p>{description}</p></div><div><strong>{answered}</strong><span>/ {itemIds.length}</span></div></header>
-      <section className="language-input-guide">
+      <header><div><small>{phase === "compile" ? "PHASE 2 · COMPILE" : "PHASE 3 · STRESS"}</small><h1>{title}</h1></div><div><strong>{answered}</strong><span>/ {itemIds.length}</span></div></header>
+      <details className="language-input-guide language-operation-help">
+        <summary>操作与评分说明</summary>
+        <p>{description}</p>
         {phase === "compile" ? (
           <>
             <strong>本阶段只做短项主动提取</strong>
@@ -794,7 +808,7 @@ function LanguageInputStage({
             <p>普通题只输入目标词块，由本地匹配；“回答结构”题才用日语写2–3句，并由 Codex 检查题意覆盖、结论先行、自然度和事实安全。</p>
           </>
         )}
-      </section>
+      </details>
       {!itemIds.length ? (
         <section className="language-no-input"><strong>这一阶段没有待处理项目</strong><p>扫描中没有标记“犹豫/不会”，系统会从“已会”中抽样进入压力测试。</p></section>
       ) : (

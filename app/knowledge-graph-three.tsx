@@ -19,20 +19,25 @@ import {
 } from "./graph-hand-controls";
 import { relationExploration } from "@/lib/graph-relation-exploration.mjs";
 import {
+  NODE_FRAGMENT_SHADER,
+  NODE_VERTEX_SHADER,
   createCometTexture,
   createFlightController,
   createFocusArtifact,
   createLabelLayer,
   createNebulaTexture,
+  createStageBloom,
+  createStageInteractionUniforms,
+  createStagePointerEffects,
   createStageRenderer,
   createStarfield,
   disposeStage,
   fitDistance,
-  NODE_FRAGMENT_SHADER,
-  NODE_VERTEX_SHADER,
   projectLabelItems,
   seeded,
   type StageLabelItem,
+  writeStageFogUniforms,
+  writeStageInteractionUniforms,
 } from "./three-stage";
 import {
   isEditableTarget,
@@ -76,50 +81,54 @@ type Props = {
   onFallback: () => void;
 };
 
-// 分区中心刻意在 z 轴上错层（关于我最近、系统最深），配合更大的节点纵深抖动，
-// 让星图进场即有前后景——早期版本五个分区几乎同深，正对镜头时是一张平面散点图。
+// 分区中心落在四条旋臂的中段，系统节点沉入核心；标签、灯光和点击热区都以这些锚点对齐。
+// 旋臂本身由节点布局函数继续向内外延伸，所以首屏读成一座星系，而不是五个互不相干的气泡。
 const GROUP_CENTERS: Record<string, [number, number, number]> = {
-  self: [-3.8, 2.15, 1.9],
-  career: [3.8, 2.05, -0.9],
-  study: [-3.65, -2.45, 0.7],
-  analysis: [3.7, -2.35, -2.1],
-  system: [0, 0, -3.4],
+  self: [3.65, -0.05, 0.9],
+  career: [-0.05, 2.78, -0.5],
+  study: [-3.62, 0.12, 0.3],
+  analysis: [0.12, -2.76, -1.2],
+  system: [0, 0, -2.45],
 };
 
+// 四个业务分区不是四座互不相干的泡泡，而是同一枚记忆星系的四条旋臂。
+// system 留在核心，既保留分区语义，也让全景拥有官网那种一眼可读的整体轮廓。
+const GROUP_ARM_PHASE: Record<string, number> = {
+  self: -2.1,
+  career: -2.1 + Math.PI / 2,
+  study: -2.1 + Math.PI,
+  analysis: -2.1 + Math.PI * 1.5,
+};
+const GROUP_HIT_ROTATION: Record<string, number> = {
+  self: 0.02,
+  career: Math.PI / 2,
+  study: -0.02,
+  analysis: Math.PI / 2,
+  system: 0,
+};
+
+const SPECTRAL_PALETTE = [
+  // 重复冷白不是笔误：Astra 的丰富感来自“色温差”，不是平均分配彩虹色。
+  // 绝大多数星体保持冰白／蓝白，少量琥珀与桃色作为视觉节拍。
+  "#f7fbff",
+  "#e7f4ff",
+  "#cbe9ff",
+  "#f4fbff",
+  "#d8efff",
+  "#fff5ea",
+  "#ffd0b6",
+  "#ffad86",
+  "#8edfff",
+];
+
 // 常驻机位带一点右上方的 3/4 侧角：正对 z 轴的机位没有视差，纵深读不出来。
+// 手横穿整个摄像头画面时，相当于鼠标横拖整个画布。1 就是 1:1 的空间映射；
+// 调大转得更快、调小更稳，是唯一需要凭手感调的那个旋钮。
+const HAND_ORBIT_GAIN = 1;
+
 const HOME_DIRECTION = new THREE.Vector3(0.17, 0.14, 1).normalize();
 // 首次进场的出发机位方向（另一侧高处），俯冲到常驻机位的运镜由飞行控制器完成。
 const ENTRY_DIRECTION = new THREE.Vector3(-0.85, 0.55, 1).normalize();
-
-// 分区不是装饰线，而是承载节点的扁椭球“星域”。菲涅尔外壳与经纬笼格让它
-// 只在侧转时显出纵深；不再叠加固定中截面描边，否则椭球会被读成带赤道的蛋壳。
-const GROUP_FIELD_VERTEX_SHADER = /* glsl */ `
-  varying vec3 vViewNormal;
-  varying vec3 vViewPosition;
-
-  void main() {
-    vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
-    vViewNormal = normalize(normalMatrix * normal);
-    vViewPosition = viewPosition.xyz;
-    gl_Position = projectionMatrix * viewPosition;
-  }
-`;
-
-const GROUP_FIELD_FRAGMENT_SHADER = /* glsl */ `
-  uniform vec3 uColor;
-  uniform float uStrength;
-  varying vec3 vViewNormal;
-  varying vec3 vViewPosition;
-
-  void main() {
-    vec3 viewDirection = normalize(-vViewPosition);
-    float facing = abs(dot(normalize(vViewNormal), viewDirection));
-    float fresnel = pow(1.0 - facing, 2.35);
-    float alpha = (0.008 + fresnel * 0.105) * uStrength;
-    vec3 color = mix(uColor, vec3(1.0), fresnel * 0.16);
-    gl_FragColor = vec4(color, alpha);
-  }
-`;
 
 // 搜索命中很少时，用只有边缘光的薄壳标记空间位置。实体玻璃球在结果多时
 // 会叠成肥皂泡墙，因此数量超过阈值后不渲染此壳，只加强原本的星点。
@@ -162,12 +171,21 @@ const GRAPH_LINK_VERTEX_SHADER = /* glsl */ `
   varying vec3 vColor;
   varying float vFocus;
   varying float vBase;
+  varying float vFog;
+  uniform float uFogDensity;
+  uniform float uFogStrength;
 
   void main() {
     vColor = color;
     vFocus = aFocus;
     vBase = aBase;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+    // 星点吃雾、连线不吃，远端的臂淡下去了线却还是满亮——整张图会读成
+    // 「一张线框盖在星云上」而不是一个体积。这里和节点着色器用同一条雾。
+    float fogDistance = length(viewPosition.xyz);
+    float fogExponent = uFogDensity * fogDistance;
+    vFog = mix(1.0, exp(-fogExponent * fogExponent), uFogStrength);
+    gl_Position = projectionMatrix * viewPosition;
   }
 `;
 
@@ -175,12 +193,15 @@ const GRAPH_LINK_FRAGMENT_SHADER = /* glsl */ `
   varying vec3 vColor;
   varying float vFocus;
   varying float vBase;
+  varying float vFog;
   uniform float uSearchActive;
 
   void main() {
     float baseAlpha = mix(0.022, 0.145, vBase);
     float searchVisibility = mix(1.0, mix(0.16, 1.0, vFocus), uSearchActive);
-    float alpha = mix(baseAlpha, 0.88, vFocus) * searchVisibility;
+    // 聚焦时的上限压到 bloom 阈值之下：单根线不辉光，只有几十根在 hub 处
+    // 叠起来才溢出——线读成光，而不是烧成一团白。
+    float alpha = mix(baseAlpha, 0.62, vFocus) * searchVisibility * vFog;
     gl_FragColor = vec4(vColor + vFocus * vec3(0.2), alpha);
   }
 `;
@@ -195,6 +216,7 @@ export default function ThreeKnowledgeGraph({
   const hostRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const resetViewRef = useRef<() => void>(() => undefined);
+  const overviewRef = useRef<(fullscreen: boolean) => void>(() => undefined);
   const selectNodeRef = useRef<(id: string) => void>(() => undefined);
   const gestureFrameRef = useRef<(frame: GraphHandNavigationFrame | null) => void>(
     () => undefined,
@@ -221,6 +243,19 @@ export default function ThreeKnowledgeGraph({
   const [handTargets, setHandTargets] = useState<GraphHandTargetFeedback[]>([]);
   const [handRelation, setHandRelation] = useState<GraphHandRelationFeedback>(null);
   const { fullscreen, toggleFullscreen } = useStageFullscreen(stageRef);
+
+  // 等一帧再飞：切全屏会先触发一次画布尺寸变化，aspect 更新之后算出来的
+  // 全景距离才是对的，否则会按旧比例取景，飞完还得再纠一次。
+  // 首帧不动：那时进场运镜正在播，插一脚会把它拦腰截断。
+  const fullscreenSeenRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (fullscreenSeenRef.current === fullscreen) return undefined;
+    const first = fullscreenSeenRef.current === null;
+    fullscreenSeenRef.current = fullscreen;
+    if (first) return undefined;
+    const frame = window.requestAnimationFrame(() => overviewRef.current(fullscreen));
+    return () => window.cancelAnimationFrame(frame);
+  }, [fullscreen]);
 
   useEffect(() => {
     onFallbackRef.current = onFallback;
@@ -372,7 +407,7 @@ export default function ThreeKnowledgeGraph({
       host,
       antialias: nodes.length < 1200,
       pixelRatioCap: nodes.length > 1200 ? 1.25 : 1.75,
-      ariaLabel: `Obsidian 2.5D 记忆星图，共 ${nodes.length} 个节点；单击聚焦，双击打开完整笔记，方向键选择`,
+      ariaLabel: `Obsidian 3D 记忆星图，共 ${nodes.length} 个节点；单击聚焦，双击打开完整笔记，拖拽旋转，方向键选择`,
     });
     if (!stage) {
       onFallbackRef.current();
@@ -381,7 +416,9 @@ export default function ThreeKnowledgeGraph({
     const { renderer, canvas } = stage;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x101b17, 0.042);
+    // 旋臂随节点数拉长以后整体尺度变大了，雾的密度要跟着降，
+    // 否则同一个系数会把外圈整条臂吃掉。
+    scene.fog = new THREE.FogExp2(0x030807, 0.024);
 
     const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 80);
     const root = new THREE.Group();
@@ -406,24 +443,69 @@ export default function ThreeKnowledgeGraph({
     const nodeFocus = new Float32Array(nodes.length);
     const nodeSearch = new Float32Array(nodes.length);
     const positionById = new Map<string, THREE.Vector3>();
+    const visualColorById = new Map<string, string>();
     const indexById = new Map<string, number>();
 
+    // 旋臂长度随该分区的节点数走。以前每条臂都用同一段半径，
+    // 结果 365 个求职节点和 4 个系统节点挤在一样长的槽里，线密度差了近百倍——
+    // 叠加混合下密的那条必然糊成一团死白。铺开它，星点才各自看得见。
+    const groupCounts = nodes.reduce<Record<string, number>>((counts, node) => {
+      counts[node.group] = (counts[node.group] ?? 0) + 1;
+      return counts;
+    }, {});
+    const armSpanFor = (group: string) => 5.55 * THREE.MathUtils.clamp(
+      Math.pow((groupCounts[group] ?? 1) / 110, 0.42),
+      0.58,
+      1.7,
+    );
+    const armSpreadFor = (group: string) => THREE.MathUtils.clamp(
+      Math.pow((groupCounts[group] ?? 1) / 110, 0.22),
+      0.72,
+      1.34,
+    );
+
     nodes.forEach((node, index) => {
-      const [centerX, centerY, centerZ] = GROUP_CENTERS[node.group] ?? GROUP_CENTERS.system;
-      const angle = seeded(node.id) * Math.PI * 2;
-      const radius = 0.65 + seeded(`${node.id}:radius`) * 2.25;
+      const isCore = node.group === "system" || GROUP_ARM_PHASE[node.group] === undefined;
+      const armSpan = armSpanFor(node.group);
+      const armSpread = armSpreadFor(node.group);
+      // 指数必须大于 1：u^k (k>1) 把点压向内圈，星系才有一个亮核心、
+      // 臂梢自然稀疏。之前用的 0.72 是反的——粒子被推到外圈，
+      // 结果中心是空的、外面挤成一圈，既没有重心也容易糊。
+      const radialProgress = Math.pow(seeded(`${node.id}:radius`), 1.45);
+      const radius = isCore ? 0.22 + radialProgress * 1.12 : 1.12 + radialProgress * armSpan;
+      const angle = isCore
+        ? seeded(node.id) * Math.PI * 2
+        : GROUP_ARM_PHASE[node.group]
+          // 缠绕总量固定：臂再长也只转这么多，否则长臂会绕回去压到邻居身上。
+          + radius * (2.6 / armSpan)
+          + (seeded(`${node.id}:angle`) - 0.5) * (0.11 + radialProgress * 0.17) * armSpread;
       const position = new THREE.Vector3(
-        centerX + Math.cos(angle) * radius,
-        centerY + Math.sin(angle) * radius * 0.66,
-        centerZ + (seeded(`${node.id}:depth`) - 0.5) * 4.2,
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius * 0.76,
+        (isCore ? -2.15 : -0.25)
+          + (seeded(`${node.id}:depth`) - 0.5)
+            * (isCore ? 1.9 : (1.5 + radialProgress * 3.3) * armSpread),
       );
-      const color = new THREE.Color(node.color);
+      const spectrumSeed = seeded(`${node.id}:spectrum`);
+      const spectralAccent = new THREE.Color(
+        SPECTRAL_PALETTE[Math.floor(spectrumSeed * SPECTRAL_PALETTE.length)],
+      );
+      // 分区色仍提供语义底色，但每颗记忆拥有自己的光谱偏移；否则 365 个求职节点
+      // 会合并成一整片相同的绿色，旋臂有形状却没有能量层次。
+      const color = new THREE.Color(node.color)
+        .lerp(spectralAccent, (isCore ? 0.48 : 0.3) + spectrumSeed * 0.3)
+        .lerp(new THREE.Color("#ffffff"), seeded(`${node.id}:white`) * 0.18)
+        .offsetHSL((spectrumSeed - 0.5) * 0.018, 0.035, 0.045);
       positions.set(position.toArray(), index * 3);
       colors.set(color.toArray(), index * 3);
-      baseSizes[index] = 0.82 + Math.min(1.08, Math.sqrt(node.degree + 1) * 0.17);
+      // 明暗跨度是这类星野的骨架：绝大多数点要小到几乎只是一粒微光，
+      // 被引用最多的那几个才亮成主角。旧曲线的下限是 0.82、上限 1.9，
+      // 只有 2.3 倍差距，所以满屏都是同一号亮点，看不出主次。
+      baseSizes[index] = 0.34 + Math.min(2.06, Math.pow(node.degree + 1, 0.62) * 0.3);
       sizes[index] = baseSizes[index];
       phases[index] = seeded(`${node.id}:phase`) * Math.PI * 2;
       positionById.set(node.id, position);
+      visualColorById.set(node.id, `#${color.getHexString()}`);
       indexById.set(node.id, index);
     });
 
@@ -443,6 +525,7 @@ export default function ThreeKnowledgeGraph({
         uTime: { value: 0 },
         uMotion: { value: reducedMotion ? 0 : 1 },
         uSearchActive: { value: 0 },
+        ...createStageInteractionUniforms(0),
       },
       vertexColors: true,
       transparent: true,
@@ -452,6 +535,8 @@ export default function ThreeKnowledgeGraph({
     const nodePoints = new THREE.Points(nodeGeometry, nodeMaterial);
     nodePoints.renderOrder = 4;
     root.add(nodePoints);
+    const pointerEffects = createStagePointerEffects(host, canvas);
+    const bloom = createStageBloom(renderer);
 
     const searchSphereGeometry = new THREE.SphereGeometry(1, 28, 18);
     const searchSphereMaterial = new THREE.ShaderMaterial({
@@ -616,6 +701,8 @@ export default function ThreeKnowledgeGraph({
       fragmentShader: GRAPH_LINK_FRAGMENT_SHADER,
       uniforms: {
         uSearchActive: { value: 0 },
+        uFogDensity: { value: 0 },
+        uFogStrength: { value: 1 },
       },
       vertexColors: true,
       transparent: true,
@@ -718,58 +805,16 @@ export default function ThreeKnowledgeGraph({
     let pulseLinks: KnowledgeGraphSceneLink[] = ambientPulseLinks;
     pulseGeometry.setDrawRange(0, pulseLinks.length);
 
-    const groupFieldGeometry = new THREE.SphereGeometry(1, 56, 28);
-    const groupCageGeometry = new THREE.SphereGeometry(1, 18, 10);
-    const groupVisuals = new Map<string, {
-      fieldMaterial: THREE.ShaderMaterial;
-      cageMaterial: THREE.MeshBasicMaterial;
-      baseStrength: number;
-      baseCageOpacity: number;
-    }>();
+    // 分区仍保留不可见点击热区，但不再画椭圆外壳。旋臂自己承担空间边界，
+    // 避免星系被读成几个套着线框的气泡。
+    const groupHitGeometry = new THREE.SphereGeometry(1, 18, 10);
     const groupHitTargets: THREE.Mesh[] = [];
     Object.entries(GROUP_CENTERS).forEach(([group, center]) => {
       const groupNode = nodes.find((node) => node.group === group);
       if (!groupNode) return;
-      const baseStrength = group === "system" ? 0.72 : 1;
-      const baseCageOpacity = group === "system" ? 0.009 : 0.017;
-
-      const fieldMaterial = new THREE.ShaderMaterial({
-        vertexShader: GROUP_FIELD_VERTEX_SHADER,
-        fragmentShader: GROUP_FIELD_FRAGMENT_SHADER,
-        uniforms: {
-          uColor: { value: new THREE.Color(groupNode.color) },
-          uStrength: { value: baseStrength },
-        },
-        transparent: true,
-        side: THREE.BackSide,
-        depthTest: false,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const field = new THREE.Mesh(groupFieldGeometry, fieldMaterial);
-      field.position.set(...center);
-      field.scale.set(3.12, 1.94, 2.3);
-      field.renderOrder = -1;
-      root.add(field);
-
-      const cageMaterial = new THREE.MeshBasicMaterial({
-        color: groupNode.color,
-        transparent: true,
-        opacity: baseCageOpacity,
-        wireframe: true,
-        depthTest: false,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const cage = new THREE.Mesh(groupCageGeometry, cageMaterial);
-      cage.position.set(...center);
-      cage.scale.copy(field.scale);
-      cage.rotation.z = seeded(`${group}:cage`) * 0.16 - 0.08;
-      cage.renderOrder = 0;
-      root.add(cage);
 
       const hitTarget = new THREE.Mesh(
-        groupFieldGeometry,
+        groupHitGeometry,
         new THREE.MeshBasicMaterial({
           transparent: true,
           opacity: 0,
@@ -780,70 +825,97 @@ export default function ThreeKnowledgeGraph({
         }),
       );
       hitTarget.position.set(...center);
-      hitTarget.scale.copy(field.scale);
+      if (group === "system") hitTarget.scale.set(1.55, 1.08, 1.42);
+      else hitTarget.scale.set(armSpanFor(group) * 0.66, 1.08, 1.62);
+      hitTarget.rotation.z = GROUP_HIT_ROTATION[group] ?? 0;
       hitTarget.userData.group = group;
       root.add(hitTarget);
       groupHitTargets.push(hitTarget);
-      groupVisuals.set(group, {
-        fieldMaterial,
-        cageMaterial,
-        baseStrength,
-        baseCageOpacity,
-      });
     });
 
     const nebulaTexture = createNebulaTexture();
-    Object.entries(GROUP_CENTERS).forEach(([group, center], groupIndex) => {
-      const groupNode = nodes.find((node) => node.group === group);
-      if (!groupNode) return;
-      const nebulaMaterial = new THREE.SpriteMaterial({
-        map: nebulaTexture,
-        color: groupNode.color,
-        transparent: true,
-        opacity: group === "system" ? 0.12 : 0.18,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const nebula = new THREE.Sprite(nebulaMaterial);
-      nebula.position.set(center[0], center[1], center[2] - 1.6);
-      nebula.scale.set(7.2 + groupIndex * 0.16, 4.4, 1);
-      nebula.renderOrder = -1;
-      root.add(nebula);
+    // 星系中心必须先是一个“光源”，再是四个分类标签。两层不同纵横比的加法光晕
+    // 模拟 Astra 的高能核心，同时不引入昂贵的全屏 bloom 后处理。
+    const coreGlowMaterial = new THREE.SpriteMaterial({
+      map: nebulaTexture,
+      color: 0xfff4de,
+      transparent: true,
+      opacity: 0.34,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
     });
+    const coreGlow = new THREE.Sprite(coreGlowMaterial);
+    coreGlow.position.set(0, 0, -1.5);
+    coreGlow.scale.set(5.2, 3.9, 1);
+    coreGlow.renderOrder = 1;
+    root.add(coreGlow);
+    const coreSpark = new THREE.Sprite(coreGlowMaterial.clone());
+    (coreSpark.material as THREE.SpriteMaterial).opacity = 0.62;
+    (coreSpark.material as THREE.SpriteMaterial).color.set(0xffffff);
+    coreSpark.position.set(0, 0, -1.24);
+    coreSpark.scale.set(1.9, 1.42, 1);
+    coreSpark.renderOrder = 2;
+    root.add(coreSpark);
 
     const galaxyGroups = Object.entries(GROUP_CENTERS).filter(([group]) =>
       nodes.some((node) => node.group === group),
     );
-    const dustCount = Math.min(1300, Math.max(520, nodes.length * 4));
+    const dustCount = Math.min(1900, Math.max(900, nodes.length * 5));
     const dustPositions = new Float32Array(dustCount * 3);
     const dustColors = new Float32Array(dustCount * 3);
+    const dustSizes = new Float32Array(dustCount);
+    const dustPhases = new Float32Array(dustCount);
+    const dustFocus = new Float32Array(dustCount);
+    const dustSearch = new Float32Array(dustCount);
     for (let index = 0; index < dustCount; index += 1) {
-      const [group, center] = galaxyGroups[index % galaxyGroups.length];
-      const radius = Math.pow(seeded(`dust:${index}:radius`), 0.72) * 3.1;
-      const arm = index % 3;
-      const angle =
-        radius * 1.55 +
-        arm * (Math.PI * 2 / 3) +
-        (seeded(`dust:${index}:angle`) - 0.5) * 0.72;
+      const [group] = galaxyGroups[index % galaxyGroups.length];
+      const isCore = group === "system";
+      const dustSpan = armSpanFor(group) * 1.12;
+      const radialProgress = Math.pow(seeded(`dust:${index}:radius`), 1.3);
+      const radius = isCore ? radialProgress * 1.5 : 0.8 + radialProgress * dustSpan;
+      const angle = isCore
+        ? seeded(`dust:${index}:angle`) * Math.PI * 2
+        : (GROUP_ARM_PHASE[group] ?? 0)
+          + radius * (2.6 / dustSpan)
+          + (seeded(`dust:${index}:angle`) - 0.5) * 0.26 * armSpreadFor(group);
       dustPositions.set([
-        center[0] + Math.cos(angle) * radius,
-        center[1] + Math.sin(angle) * radius * 0.56,
-        center[2] - 0.45 + (seeded(`dust:${index}:depth`) - 0.5) * 2.8,
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius * 0.76,
+        (isCore ? -2.25 : -0.45)
+          + (seeded(`dust:${index}:depth`) - 0.5) * (isCore ? 2.1 : 1.8 + radialProgress * 2.6),
       ], index * 3);
+      const spectrumSeed = seeded(`dust:${index}:spectrum`);
+      const spectralAccent = new THREE.Color(
+        SPECTRAL_PALETTE[Math.floor(spectrumSeed * SPECTRAL_PALETTE.length)],
+      );
       const groupColor = new THREE.Color(
         nodes.find((node) => node.group === group)?.color ?? "#9fb5a8",
-      ).lerp(new THREE.Color("#ffffff"), 0.22);
+      )
+        .lerp(spectralAccent, 0.56 + spectrumSeed * 0.3)
+        .lerp(new THREE.Color("#ffffff"), 0.12 + seeded(`dust:${index}:white`) * 0.22);
       dustColors.set(groupColor.toArray(), index * 3);
+      dustSizes[index] = 0.1 + seeded(`dust:${index}:size`) * 0.16;
+      dustPhases[index] = seeded(`dust:${index}:phase`) * Math.PI * 2;
     }
     const dustGeometry = new THREE.BufferGeometry();
     dustGeometry.setAttribute("position", new THREE.BufferAttribute(dustPositions, 3));
     dustGeometry.setAttribute("color", new THREE.BufferAttribute(dustColors, 3));
-    const dustMaterial = new THREE.PointsMaterial({
-      size: 0.035,
-      sizeAttenuation: true,
+    dustGeometry.setAttribute("aSize", new THREE.BufferAttribute(dustSizes, 1));
+    dustGeometry.setAttribute("aPhase", new THREE.BufferAttribute(dustPhases, 1));
+    dustGeometry.setAttribute("aFocus", new THREE.BufferAttribute(dustFocus, 1));
+    dustGeometry.setAttribute("aSearch", new THREE.BufferAttribute(dustSearch, 1));
+    const dustMaterial = new THREE.ShaderMaterial({
+      vertexShader: NODE_VERTEX_SHADER,
+      fragmentShader: NODE_FRAGMENT_SHADER,
+      uniforms: {
+        uTime: { value: 0 },
+        uMotion: { value: reducedMotion ? 0 : 1 },
+        uSearchActive: { value: 0 },
+        ...createStageInteractionUniforms(1),
+      },
       vertexColors: true,
       transparent: true,
-      opacity: 0.58,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
@@ -862,6 +934,7 @@ export default function ThreeKnowledgeGraph({
       inner: THREE.Mesh;
       ray: THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>;
       grabbed: boolean;
+      pinchProgress: number;
     };
     const createGestureVisual = (color: number): GestureVisual => {
       const material = new THREE.MeshBasicMaterial({
@@ -911,7 +984,7 @@ export default function ThreeKnowledgeGraph({
       ray.visible = false;
       ray.renderOrder = 11;
       scene.add(ray);
-      return { anchor, outer, inner, ray, grabbed: false };
+      return { anchor, outer, inner, ray, grabbed: false, pinchProgress: 0 };
     };
     const gestureVisuals: Record<"primary" | "secondary", GestureVisual> = {
       primary: createGestureVisual(0x83f2c5),
@@ -928,10 +1001,17 @@ export default function ThreeKnowledgeGraph({
     );
     const homeTarget = bounds.getCenter(new THREE.Vector3());
     const boundsSize = bounds.getSize(new THREE.Vector3());
+    // margin 小于 1 等于往里裁：星点会铺满整个画框，读不出边界，
+    // 也就读不出「这是一座星系」。留一圈黑才有形。
+    // 全屏是「让我看全貌」这个动作本身，所以留白比窗口里更宽一档。
+    let viewMargin = 0.98;
     const fitHomeDistance = (aspect: number) => fitDistance({
       fovDeg: camera.fov,
       aspect,
       size: boundsSize,
+      minDistance: 7.2,
+      margin: viewMargin,
+      depthFactor: 0.16,
     });
     let homeCamera = homeTarget.clone().add(
       HOME_DIRECTION.clone().multiplyScalar(fitHomeDistance(camera.aspect)),
@@ -940,18 +1020,19 @@ export default function ThreeKnowledgeGraph({
 
     const controls = new OrbitControls(camera, canvas);
     controls.target.copy(homeTarget);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.065;
+    // 松手后的滑行来自这里的阻尼，减弱动态下也要停。
+    controls.enableDamping = !reducedMotion;
+    controls.dampingFactor = 0.038;
     controls.enablePan = true;
     controls.panSpeed = 0.55;
-    controls.rotateSpeed = 0.42;
+    controls.rotateSpeed = 0.62;
     controls.zoomSpeed = 0.72;
     controls.minDistance = 3.6;
     controls.maxDistance = 30;
-    controls.minPolarAngle = Math.PI * 0.31;
-    controls.maxPolarAngle = Math.PI * 0.69;
-    controls.minAzimuthAngle = -Math.PI * 0.28;
-    controls.maxAzimuthAngle = Math.PI * 0.28;
+    controls.minPolarAngle = Math.PI * 0.18;
+    controls.maxPolarAngle = Math.PI * 0.82;
+    controls.minAzimuthAngle = -Math.PI * 0.7;
+    controls.maxAzimuthAngle = Math.PI * 0.7;
     controls.update();
 
     const raycaster = new THREE.Raycaster();
@@ -986,8 +1067,8 @@ export default function ThreeKnowledgeGraph({
       target: controls.target,
       warp: {
         material: starfield.material,
-        baseSize: 0.027,
-        baseOpacity: 0.48,
+        baseSize: 0.042,
+        baseOpacity: 0.58,
       },
     });
 
@@ -1034,7 +1115,7 @@ export default function ThreeKnowledgeGraph({
     // 関係探索の飄帯も同じ容器を使うので、専用の印を入れて「無選択（空文字）」と区別する
     // ——同値だと、探索を抜けた後の focusAttributes(null) が「変化なし」と判断して
     // 掃除を飛ばし、探索の飄帯が画面に残り続ける。
-    const EXPLORATION_RIBBONS = " exploration";
+    const EXPLORATION_RIBBONS = "exploration";
     let ribbonsKey = "";
     const clearRelationRibbons = () => {
       ribbonsKey = "";
@@ -1048,16 +1129,6 @@ export default function ThreeKnowledgeGraph({
     };
 
     const emphasizeGroup = (group: string | null, locked: boolean) => {
-      groupVisuals.forEach((visual, candidate) => {
-        const active = candidate === group;
-        const dimmed = Boolean(group) && !active;
-        visual.fieldMaterial.uniforms.uStrength.value = visual.baseStrength * (
-          active ? locked ? 1.65 : 1.4 : dimmed ? 0.48 : 1
-        );
-        visual.cageMaterial.opacity = visual.baseCageOpacity * (
-          active ? locked ? 2.4 : 2 : dimmed ? 0.38 : 1
-        );
-      });
       groupLabelItems.forEach((item) => {
         item.label.dataset.active = item.group === group
           ? locked ? "selected" : "hovered"
@@ -1149,18 +1220,13 @@ export default function ThreeKnowledgeGraph({
             ).lerp(new THREE.Color("#ffffff"), 0.36);
             const ribbon = new THREE.Mesh(
               new THREE.TubeGeometry(relationCurve(link), 28, 0.0055, 7, false),
-              new THREE.MeshPhysicalMaterial({
+              // 不用 MeshPhysicalMaterial：只要 transmission > 0，three 就会为
+              // 折射再把整个场景渲染一遍（4×MSAA 半浮点靶）。加法混合下折射
+              // 本来就几乎看不见，辉光由 bloom 补。
+              new THREE.MeshBasicMaterial({
                 color: accent,
-                emissive: accent,
-                emissiveIntensity: 0.48,
-                roughness: 0.045,
-                metalness: 0.08,
-                transmission: 0.66,
-                thickness: 0.22,
-                clearcoat: 1,
-                clearcoatRoughness: 0.025,
                 transparent: true,
-                opacity: 0.38,
+                opacity: 0.5,
                 depthWrite: false,
                 blending: THREE.AdditiveBlending,
               }),
@@ -1314,6 +1380,21 @@ export default function ThreeKnowledgeGraph({
     };
     resetViewRef.current = resetView;
 
+    // 按 F 是「让我看全貌」，不是一次顺带的窗口尺寸变化。所以这里显式飞回全景，
+    // 而不是指望 resize 的副作用——那条路在有选中时会被跳过，于是你带着放大的
+    // 镜头切进全屏，看到的还是刚才那一小块。这里不清空选中：看全景和保留选中
+    // 并不冲突。
+    overviewRef.current = (isFullscreen: boolean) => {
+      viewMargin = isFullscreen ? 1.16 : 0.98;
+      camera.updateProjectionMatrix();
+      homeCamera = homeTarget.clone().add(
+        HOME_DIRECTION.clone().multiplyScalar(fitHomeDistance(camera.aspect)),
+      );
+      // 只有进全屏才把镜头拉回全景。退出时只更新取景基准，不动镜头——
+      // 退出不是「让我看全貌」，把人辛苦转到的角度收走反而是打扰。
+      if (isFullscreen) flightController.start(homeCamera.clone(), homeTarget.clone(), 760);
+    };
+
     const setRayFromNormalized = (x: number, y: number) => {
       pointer.set(x * 2 - 1, -(y * 2 - 1));
       raycaster.setFromCamera(pointer, camera);
@@ -1374,7 +1455,13 @@ export default function ThreeKnowledgeGraph({
         const id = hits.get(hand.id)?.id ?? null;
         const node = id ? nodeById.get(id) : null;
         return node
-          ? { handId: hand.id, id: node.id, label: node.title, color: node.color, kind: "node" as const }
+          ? {
+              handId: hand.id,
+              id: node.id,
+              label: node.title,
+              color: visualColorById.get(node.id) ?? node.color,
+              kind: "node" as const,
+            }
           : {
               handId: hand.id,
               id: null,
@@ -1412,12 +1499,13 @@ export default function ThreeKnowledgeGraph({
     ) => {
       const visual = gestureVisuals[hand.role];
       visual.grabbed = hand.grabbed;
+      visual.pinchProgress = hand.pinchProgress;
       visual.anchor.position.copy(root.worldToLocal(worldPosition.clone()));
       const accent = new THREE.Color(
         hand.grabbed
           ? "#ff9563"
           : id
-            ? nodeById.get(id)?.color ?? "#83f2c5"
+            ? visualColorById.get(id) ?? nodeById.get(id)?.color ?? "#83f2c5"
             : hand.role === "primary" ? "#83f2c5" : "#76d9ff",
       );
       visual.anchor.children.forEach((child) => {
@@ -1449,7 +1537,7 @@ export default function ThreeKnowledgeGraph({
       const color = hand.grabbed
         ? "#ff9563"
         : id
-          ? nodeById.get(id)?.color ?? "#83f2c5"
+          ? visualColorById.get(id) ?? nodeById.get(id)?.color ?? "#83f2c5"
           : hand.role === "primary" ? "#83f2c5" : "#76d9ff";
       visual.ray.material.color.set(color);
       visual.ray.material.opacity = hand.grabbed ? 0.9 : hand.pinching ? 0.72 : 0.42;
@@ -1462,7 +1550,80 @@ export default function ThreeKnowledgeGraph({
         visual.anchor.visible = false;
         visual.ray.visible = false;
         visual.grabbed = false;
+        visual.pinchProgress = 0;
       });
+    };
+
+    // 摄像头输入也驱动鼠标使用的同一套能量探针：掌心移动会吸引粒子，捏住会进入
+    // drag 状态，双手变换则把力场放在两手中点。这样射线、相机和粒子不再各说各话。
+    // 上一帧探针是否处于抓住状态，以及它最后的位置：手飞出画面时要在原地
+    // 补一次「松手」，涟漪才会出现；否则走的是取消路径，什么反馈都没有。
+    let probeGrabbedLastFrame = false;
+    let probeLastX = 0.5;
+    let probeLastY = 0.5;
+    const syncGestureEffects = (
+      frame: GraphHandNavigationFrame,
+      hits: Map<string, { id: string | null; worldPosition: THREE.Vector3 }>,
+    ) => {
+      const visibleHands = frame.hands.filter((hand) => hand.visible);
+      const primary = visibleHands.find((hand) => hand.id === frame.primaryHandId)
+        ?? visibleHands.find((hand) => hand.role === "primary")
+        ?? visibleHands[0];
+      if (!primary) {
+        if (probeGrabbedLastFrame) {
+          pointerEffects.setExternalInteraction({
+            x: probeLastX,
+            y: probeLastY,
+            energy: 0.4,
+            dragging: false,
+          });
+          probeGrabbedLastFrame = false;
+        }
+        pointerEffects.setExternalInteraction(null);
+        return;
+      }
+      // 只有真正进入双手变换才把探针放到两手中点；dual-ready 只是「第二只手在场」，
+      // 这时单手转视角很可能还在进行，探针不该跟着跳。
+      const dual = frame.mode === "dual-transform";
+      const centerX = dual
+        ? frame.transform?.centerX
+          ?? visibleHands.reduce((sum, hand) => sum + hand.pointerX, 0) / visibleHands.length
+        : primary.pointerX;
+      const centerY = dual
+        ? frame.transform?.centerY
+          ?? visibleHands.reduce((sum, hand) => sum + hand.pointerY, 0) / visibleHands.length
+        : primary.pointerY;
+      const aimedId = hits.get(primary.id)?.id ?? null;
+      const accent = frame.mode === "dual-transform"
+        ? "#c29bff"
+        : primary.grabbed
+          ? "#ff8f70"
+          : aimedId
+            ? visualColorById.get(aimedId) ?? nodeById.get(aimedId)?.color ?? "#83f2c5"
+            : primary.role === "primary" ? "#83f2c5" : "#76d9ff";
+      const energy = frame.mode === "calibration"
+        ? 0.28
+        : frame.mode === "palm-menu"
+          ? 0.38
+          : dual
+            ? frame.mode === "dual-transform" ? 1 : 0.78
+            : primary.grabbed
+              ? 1
+              : primary.pinching
+                ? 0.68 + primary.pinchProgress * 0.3
+                : 0.5;
+      pointerEffects.setExternalInteraction({
+        x: centerX,
+        y: centerY,
+        energy,
+        dragging: frame.mode === "dual-transform" || primary.grabbed,
+        charging: primary.pinching && !primary.grabbed && frame.mode !== "dual-transform",
+        progress: primary.pinchProgress,
+        accent,
+      });
+      probeGrabbedLastFrame = frame.mode === "dual-transform" || primary.grabbed;
+      probeLastX = centerX;
+      probeLastY = centerY;
     };
 
     const runGestureAction = (
@@ -1519,6 +1680,7 @@ export default function ThreeKnowledgeGraph({
     // 未提交的单手运动，并以选中节点或双手中点所在空间作为稳定锚点。
     gestureFrameRef.current = (frame) => {
       if (!frame) {
+        pointerEffects.setExternalInteraction(null);
         previousHands.clear();
         gestureGrabbed = false;
         gestureTargetId = null;
@@ -1557,6 +1719,7 @@ export default function ThreeKnowledgeGraph({
         }
       });
       publishHandTargets(frame.hands, hits);
+      syncGestureEffects(frame, hits);
       const actionHit = frame.action
         ? releasedPinchTargets.get(frame.action.handId)
           ?? pinchTargets.get(frame.action.handId)
@@ -1642,42 +1805,35 @@ export default function ThreeKnowledgeGraph({
           gestureInertia.set(0, 0, 0);
         }
         if (displayTarget) showGestureContact(primary, displayTarget.worldPosition, displayTarget.id);
-        if (previousPrimary?.grabbed) {
+        // 手滑出画面的那几帧不吃位移：识别器最后给出的坐标常常是一整段跳变，
+        // 灌进去镜头会猛甩一下才停。抓住状态保持，等它回来或宽限期到。
+        if (previousPrimary?.grabbed && primary.visible) {
           const deadZone = (value: number, threshold: number, limit: number) => (
             Math.abs(value) < threshold ? 0 : THREE.MathUtils.clamp(value, -limit, limit)
           );
-          const dx = deadZone(primary.x - previousPrimary.x, 0.0035, 0.055);
-          const dy = deadZone(primary.y - previousPrimary.y, 0.0035, 0.055);
-          const scaleDelta = deadZone(
-            Math.log(primary.scale / Math.max(0.001, previousPrimary.scale)),
-            0.007,
-            0.09,
-          );
+          const clamp01 = (value: number) => THREE.MathUtils.clamp(value, 0, 1);
+          const dx = deadZone(clamp01(primary.x) - clamp01(previousPrimary.x), 0.0035, 0.055);
+          const dy = deadZone(clamp01(primary.y) - clamp01(previousPrimary.y), 0.0035, 0.055);
           camera.updateMatrixWorld();
-          const offset = camera.position.clone().sub(controls.target);
-          const distance = offset.length();
-          const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-          const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
-          const translation = right.multiplyScalar(-dx * distance * 1.3)
-            .add(up.multiplyScalar(dy * distance * 1.3));
-          camera.position.add(translation);
-          controls.target.add(translation);
-          gestureInertia.copy(translation).multiplyScalar(0.16);
-          if (scaleDelta !== 0) {
-            const nextDistance = THREE.MathUtils.clamp(
-              distance * Math.exp(-scaleDelta * 3.4),
-              controls.minDistance,
-              controls.maxDistance,
-            );
-            const zoomFactor = nextDistance / distance;
-            const anchor = pinchTarget?.worldPosition ?? controls.target;
-            camera.position.copy(anchor).add(
-              camera.position.clone().sub(anchor).multiplyScalar(zoomFactor),
-            );
-            controls.target.copy(anchor).add(
-              controls.target.clone().sub(anchor).multiplyScalar(zoomFactor),
-            );
+          // 捏住拖动＝按住鼠标拖动＝转视角。角度换算沿用 OrbitControls 自己那条
+          // （_handleMouseMoveRotate 把像素除以画面高再乘 2π），于是阻尼、极角与
+          // 方位角上限全部与鼠标共用一套，不需要另写一份相机数学。
+          //
+          // 单位统一取「画面高的几分之几」：手的 x 是除以摄像头画面宽得来的，
+          // y 是除以画面高，直接拿去用会让横向比纵向快一个宽高比（16:9 上 1.78 倍）。
+          // 乘回 frameAspect 才是等距的——同样一段手部位移，横着和竖着转一样多。
+          const orbitUnitsX = dx * Math.max(0.0001, frame.frameAspect) * HAND_ORBIT_GAIN;
+          const orbitUnitsY = dy * HAND_ORBIT_GAIN;
+          if (orbitUnitsX !== 0) {
+            controls.rotateLeft(2 * Math.PI * orbitUnitsX * controls.rotateSpeed);
           }
+          if (orbitUnitsY !== 0) {
+            controls.rotateUp(2 * Math.PI * orbitUnitsY * controls.rotateSpeed);
+          }
+          // 角度惯性由 OrbitControls 的阻尼提供，这里不再另加平移余势。
+          // 单手不再推拉：掌心尺寸是 2D 投影，手腕一俯仰就变，站着不动也会缩放。
+          // 缩放交给双手张合，和触控板的心智模型一致。
+          gestureInertia.set(0, 0, 0);
           camera.updateMatrixWorld();
         }
       }
@@ -1730,6 +1886,13 @@ export default function ThreeKnowledgeGraph({
     const onPointerMove = (event: PointerEvent) => {
       const id = hitTest(event);
       const group = id ? nodeById.get(id)?.group ?? null : hitTestGroup(event);
+      pointerEffects.setAccent(
+        id
+          ? visualColorById.get(id) ?? nodeById.get(id)?.color ?? "#dff7ec"
+          : group
+            ? nodes.find((node) => node.group === group)?.color ?? "#dff7ec"
+            : "#dff7ec",
+      );
       canvas.style.cursor = id ? "pointer" : group ? "zoom-in" : "grab";
       if (id === hoveredRef.current && group === hoveredGroupRef.current) return;
       hoveredRef.current = id;
@@ -1814,7 +1977,9 @@ export default function ThreeKnowledgeGraph({
       if (!entry) return;
       const width = Math.max(1, entry.contentRect.width);
       const height = Math.max(1, entry.contentRect.height);
+      pointerEffects.resize();
       renderer.setSize(width, height, false);
+      bloom?.setSize(width, height);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       homeCamera = homeTarget.clone().add(
@@ -1836,11 +2001,25 @@ export default function ThreeKnowledgeGraph({
     );
     visibilityObserver.observe(host);
 
+    let lastFrameAt = performance.now();
+    let ambientWeight = 1;
+    let tiltWeight = 1;
     const animate = (now: number) => {
       if (!visible) return;
       const seconds = now / 1000;
+      const frameDelta = Math.min(0.05, Math.max(0.001, (now - lastFrameAt) / 1000));
+      lastFrameAt = now;
+      pointerEffects.tick(now, !pauseRef.current && !reducedMotion);
       nodeMaterial.uniforms.uTime.value = seconds;
       nodeMaterial.uniforms.uMotion.value = pauseRef.current || reducedMotion ? 0 : 1;
+      writeStageInteractionUniforms(nodeMaterial.uniforms, pointerEffects);
+      // 节点吃七成雾（还要能读），尘埃吃满——远处沉进背景，纵深才出来。
+      writeStageFogUniforms(nodeMaterial.uniforms, scene.fog as THREE.FogExp2, 0.55);
+      dustMaterial.uniforms.uTime.value = seconds;
+      dustMaterial.uniforms.uMotion.value = pauseRef.current || reducedMotion ? 0 : 1;
+      writeStageInteractionUniforms(dustMaterial.uniforms, pointerEffects);
+      writeStageFogUniforms(dustMaterial.uniforms, scene.fog as THREE.FogExp2, 1.35);
+      writeStageFogUniforms(linkMaterial.uniforms, scene.fog as THREE.FogExp2, 1.0);
 
       if (searchActive && searchSpheres.visible) {
         nodes.forEach((node, index) => {
@@ -1863,9 +2042,22 @@ export default function ThreeKnowledgeGraph({
 
       flightController.tick(now);
 
+      if (!pauseRef.current && !reducedMotion) {
+        const coreBreath = 1 + Math.sin(seconds * 0.72) * 0.055
+          + pointerEffects.energy * 0.035;
+        coreGlow.scale.set(5.2 * coreBreath, 3.9 * coreBreath, 1);
+        coreGlowMaterial.opacity = 0.31 + Math.sin(seconds * 0.72) * 0.035
+          + pointerEffects.energy * 0.06;
+        coreSpark.scale.set(
+          1.9 * (1 + pointerEffects.dragEnergy * 0.16 + pointerEffects.releaseImpulse * 0.42),
+          1.42 * (1 + pointerEffects.energy * 0.08 + pointerEffects.releaseImpulse * 0.22),
+          1,
+        );
+      }
+
       // 松手后只保留很轻的一段余势，并快速衰减；它让拖动不是“硬刹车”，
       // 又不会像持续惯性那样破坏精确定位。
-      if (!gestureGrabbed && gestureInertia.lengthSq() > 0.0000005) {
+      if (!gestureGrabbed && !reducedMotion && gestureInertia.lengthSq() > 0.0000005) {
         camera.position.add(gestureInertia);
         controls.target.add(gestureInertia);
         gestureInertia.multiplyScalar(0.78);
@@ -1873,18 +2065,25 @@ export default function ThreeKnowledgeGraph({
         gestureInertia.set(0, 0, 0);
       }
 
-      if (
-        !pauseRef.current &&
-        !reducedMotion &&
-        !selectedRef.current &&
-        !selectedGroupRef.current &&
-        !gestureGrabbed
-      ) {
-        root.rotation.y = Math.sin(seconds * 0.11) * 0.08;
-        root.rotation.x = Math.cos(seconds * 0.08) * 0.028;
-        starfield.points.rotation.y = seconds * 0.004;
-        galaxyDust.rotation.z = Math.sin(seconds * 0.07) * 0.032;
-      }
+      // 自转和指针视差都走同一个连续权重：以前是布尔闸门直接赋值，
+      // 选中一个节点的瞬间自转会「啪」地停在当前角度，再取消又跳回去。
+      const ambientWanted = !pauseRef.current
+        && !reducedMotion
+        && !selectedRef.current
+        && !selectedGroupRef.current
+        && !gestureGrabbed
+        ? 1
+        : 0;
+      ambientWeight += (ambientWanted - ambientWeight) * (1 - Math.exp(-frameDelta * 4.2));
+      // 抓取中不加视差：dualAnchorWorld 是一次性锁定的世界坐标，
+      // 舞台一歪，被抓住的节点就从锚点上滑走了。
+      const tiltWanted = pauseRef.current || reducedMotion || gestureGrabbed ? 0 : 1;
+      tiltWeight += (tiltWanted - tiltWeight) * (1 - Math.exp(-frameDelta * 5.5));
+      root.rotation.y = Math.sin(seconds * 0.11) * 0.08 * ambientWeight
+        + pointerEffects.tiltY * tiltWeight;
+      root.rotation.x = Math.cos(seconds * 0.08) * 0.028 * ambientWeight
+        + pointerEffects.tiltX * tiltWeight;
+      galaxyDust.rotation.z = Math.sin(seconds * 0.07) * 0.032 * ambientWeight;
 
       focusArtifact.tick(seconds, !pauseRef.current && !reducedMotion);
 
@@ -1892,10 +2091,16 @@ export default function ThreeKnowledgeGraph({
         if (!visual.anchor.visible) return;
         const cameraInRoot = root.worldToLocal(camera.position.clone());
         visual.anchor.lookAt(cameraInRoot);
-        visual.outer.rotation.z = seconds * (visual.grabbed ? 1.8 : 0.85);
-        visual.inner.rotation.z = -seconds * (visual.grabbed ? 2.4 : 1.15);
+        visual.outer.rotation.z = seconds * (
+          visual.grabbed ? 1.8 : 0.85 + visual.pinchProgress * 0.9
+        );
+        visual.inner.rotation.z = -seconds * (
+          visual.grabbed ? 2.4 : 1.15 + visual.pinchProgress * 1.2
+        );
         const pulse = 1 + Math.sin(seconds * (visual.grabbed ? 7 : 4)) * 0.075;
-        visual.anchor.scale.setScalar((visual.grabbed ? 1.18 : 0.86) * pulse);
+        visual.anchor.scale.setScalar((
+          visual.grabbed ? 1.2 : 0.82 + visual.pinchProgress * 0.3
+        ) * pulse);
       });
 
       if (!pauseRef.current && pulseLinks.length > 0) {
@@ -1912,10 +2117,19 @@ export default function ThreeKnowledgeGraph({
         (pulseGeometry.getAttribute("color") as THREE.BufferAttribute).needsUpdate = true;
       }
 
-      controls.update();
+      controls.update(frameDelta);
+      starfield.setInteraction(
+        pointerEffects.pointer.x,
+        pointerEffects.pointer.y,
+        pointerEffects.energy,
+        pointerEffects.dragEnergy > 0.12,
+        pointerEffects.energy < 0.08,
+      );
+      starfield.tick(seconds, !pauseRef.current && !reducedMotion);
       scene.updateMatrixWorld(true);
       projectLabelItems(stageLabelItems, nodePoints, camera, host);
-      renderer.render(scene, camera);
+      if (bloom) bloom.render(scene, camera);
+      else renderer.render(scene, camera);
     };
     renderer.setAnimationLoop(animate);
     const readyFrame = window.requestAnimationFrame(() => setReady(true));
@@ -1926,6 +2140,8 @@ export default function ThreeKnowledgeGraph({
       resizeObserver.disconnect();
       visibilityObserver.disconnect();
       controls.dispose();
+      bloom?.dispose();
+      pointerEffects.dispose();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerleave", onPointerLeave);
@@ -1936,12 +2152,12 @@ export default function ThreeKnowledgeGraph({
       disposeStage(scene);
       nebulaTexture.dispose();
       pulseTexture.dispose();
-      groupFieldGeometry.dispose();
-      groupCageGeometry.dispose();
+      groupHitGeometry.dispose();
       renderer.dispose();
       labelLayer.remove();
       canvas.remove();
       resetViewRef.current = () => undefined;
+      overviewRef.current = () => undefined;
       selectNodeRef.current = () => undefined;
       updateSearchRef.current = () => undefined;
       gestureFrameRef.current = () => undefined;

@@ -1,6 +1,6 @@
 import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
 import { upsertAppendNote } from "@/lib/server/note-append";
-import { createSerialQueue } from "@/lib/server/serial-queue";
+import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
 import { tokyoParts } from "@/lib/dojo/utils";
 import { isReviewNotePath } from "@/lib/review-paths";
 import { parseAnnotations } from "@/lib/review";
@@ -20,7 +20,7 @@ type AnnotateRequest = {
 
 // REST API の追記は原子的でも、「読む→採番→追記」は原子的ではない。
 // 連打や二重送信が同時に来ても a 番号と事実を重複させないため、短い直列区間にする。
-const inAnnotationQueue = createSerialQueue();
+const inAnnotationQueue = createKeyedSerialQueue();
 
 function todayInTokyo() {
   return tokyoParts().date;
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const outcome = await inAnnotationQueue(() =>
+    const outcome = await inAnnotationQueue(notePath, () =>
       upsertAppendNote({
         path: notePath,
         plan: (existing) => {

@@ -17,6 +17,7 @@ export {
   JOB_STATUS_NOTE_MAX,
   jobStatusNote,
   jobStatusNoteError,
+  KNOWN_CHANNELS,
   normalizeJobStatus,
   statusRequiresChannel,
   type JobStatus,
@@ -40,6 +41,19 @@ export { JOB_CASE_TYPE };
 export function jobRating(note: Note) {
   const raw = Number(getString(note.frontmatter.rating));
   return Number.isFinite(raw) ? Math.max(0, Math.min(10, raw)) : 0;
+}
+
+/**
+ * 採点済みかどうか。**「0点」と「未採点」は違う。**
+ *
+ * `jobRating()` は欠損を 0 に丸めるので、そのまま表示すると
+ * ra-batch（広撒網応募・採点は job-posting-review の工程）が起票した未採点の案件が
+ * 「0/10＝見込みなし」に見える。実際は「まだ誰も読んでいない」。
+ * 表示側はこの関数で分岐する。並び順は 0 のままで良い（未読を上に押し上げる根拠が無い）。
+ */
+export function jobRated(note: Note) {
+  const raw = getString(note.frontmatter.rating);
+  return raw !== "" && Number.isFinite(Number(raw));
 }
 
 /**
@@ -255,8 +269,12 @@ export type JobCard = {
   note: Note;
   path: string;
   company: string;
+  caseId: string;
+  origin: string;
   position: string;
   rating: number;
+  /** rating が実際に書かれているか。false＝未採点（0点ではない）。 */
+  rated: boolean;
   status: string;
   /**
    * status の括弧内注記。`status` は 7 枚举に正規化されるので、
@@ -267,7 +285,12 @@ export type JobCard = {
   statusUpdated: string;
   /** 応募日（jobAppliedOn 参照）。未応募なら空。 */
   appliedOn: string;
+  /** 実際の投递渠道（frontmatter `channel`）。応募済以降の状態はこれが必須（台帳が経路別に集計する）。 */
+  channel: string;
   nextAction: string;
+  waitingFor: string;
+  followUpAt: string;
+  nextEventAt: string;
   salaryText: string;
   salary: SalaryRange;
   location: string;
@@ -308,13 +331,20 @@ export function toJobCard(note: Note): JobCard {
     note,
     path: note.path,
     company,
+    caseId: getString(note.frontmatter.case_id),
+    origin: getString(note.frontmatter.origin),
     position,
     rating: jobRating(note),
+    rated: jobRated(note),
     status: jobStatus(note),
     statusNote: jobStatusNote(getString(note.frontmatter.status)),
     statusUpdated: getString(note.frontmatter.status_updated),
     appliedOn: jobAppliedOn(note, getString(note.frontmatter.status)),
+    channel: getString(note.frontmatter.channel),
     nextAction: getString(note.frontmatter.next_action),
+    waitingFor: getString(note.frontmatter.waiting_for),
+    followUpAt: getString(note.frontmatter.follow_up_at),
+    nextEventAt: getString(note.frontmatter.next_event_at),
     salaryText,
     salary: parseSalary(salaryText),
     location,
@@ -344,7 +374,7 @@ export function toJobCard(note: Note): JobCard {
 export type JobSort = "rating" | "salary" | "date" | "applied" | "updated" | "company";
 
 export const JOB_SORTS: { id: JobSort; label: string }[] = [
-  { id: "rating", label: "匹配度" },
+  { id: "rating", label: "応募优先度" },
   { id: "salary", label: "年収上限" },
   { id: "date", label: "入库时间" },
   { id: "applied", label: "応募日（古い順）" },

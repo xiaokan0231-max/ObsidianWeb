@@ -1,8 +1,8 @@
 "use client";
 
-import { memo, useMemo, useState, type CSSProperties } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { noteDecisionMeta } from "./note-decision";
-import { formatDate, getTitle, getType, type Note } from "@/lib/notes";
+import { formatDate, getString, getTitle, getType, stripMarkdown, type Note } from "@/lib/notes";
 import {
   getGroup,
   GROUPS,
@@ -11,7 +11,6 @@ import {
   noteLinks,
   noteMatches,
   trustLayer,
-  typeLabel,
   type GroupKey,
   type LibraryScope,
 } from "@/lib/memory-atlas-data";
@@ -29,6 +28,18 @@ const LIBRARY_SCOPES: { id: LibraryScope; label: string }[] = [
 
 const LIBRARY_PAGE_SIZE = 24;
 
+function libraryCardSummary(note: Note) {
+  const title = getTitle(note);
+  const structured = getString(note.frontmatter.summary) || getString(note.frontmatter.result);
+  const plain = stripMarkdown(
+    note.content
+      .replace(/<!--\s*\/?generated:[^>]*-->/giu, " ")
+      .replace(/<!--\s*\/generated\s*-->/giu, " "),
+  ).replace(new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`, "u"), "").trim();
+  const value = structured || plain || "打开原文查看内容。";
+  return value.length > 150 ? `${value.slice(0, 149)}…` : value;
+}
+
 function LibraryView({
   notes,
   filter,
@@ -44,9 +55,16 @@ function LibraryView({
   onQuery: (query: string) => void;
   onOpen: (note: Note) => void;
 }) {
-  const [scope, setScope] = useState<LibraryScope>("all");
-  const [sort, setSort] = useState<LibrarySort>("recent");
+  const [scope, setScope] = useState<LibraryScope>(() => {
+    const value = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("scope") ?? "";
+    return LIBRARY_SCOPES.some((item) => item.id === value) ? value as LibraryScope : "all";
+  });
+  const [sort, setSort] = useState<LibrarySort>(() => {
+    const value = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("sort") ?? "";
+    return value === "connections" || value === "title" ? value : "recent";
+  });
   const [visibleLimit, setVisibleLimit] = useState(LIBRARY_PAGE_SIZE);
+  const filterDetailsRef = useRef<HTMLDetailsElement>(null);
 
   const queryMatched = useMemo(
     () => notes.filter((note) => noteMatches(note, query)),
@@ -94,6 +112,27 @@ function LibraryView({
   const visibleNotes = orderedNotes.slice(0, visibleLimit);
   const activeScopeLabel = LIBRARY_SCOPES.find((item) => item.id === scope)?.label ?? "全部内容";
   const hasFilters = Boolean(query) || filter !== "all" || scope !== "all";
+  const activeFilterCount = Number(filter !== "all") + Number(scope !== "all");
+
+  useEffect(() => {
+    const mobile = window.matchMedia("(max-width: 820px)");
+    const syncDisclosure = () => {
+      if (filterDetailsRef.current) filterDetailsRef.current.open = !mobile.matches;
+    };
+    syncDisclosure();
+    mobile.addEventListener("change", syncDisclosure);
+    return () => mobile.removeEventListener("change", syncDisclosure);
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (scope === "all") params.delete("scope");
+    else params.set("scope", scope);
+    if (sort === "recent") params.delete("sort");
+    else params.set("sort", sort);
+    const next = params.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${next ? `?${next}` : ""}`);
+  }, [scope, sort]);
 
   const resetFilters = () => {
     onQuery("");
@@ -104,6 +143,7 @@ function LibraryView({
 
   return (
     <section className="library-view">
+      <h1 className="sr-only">资料库</h1>
       <div className="library-workspace">
         <aside className="library-facets" aria-label="记忆筛选">
           {/* 检索这一页的关键词属于这一页，和下面的分区・场景筛选是一组，别放回顶栏。 */}
@@ -120,47 +160,67 @@ function LibraryView({
             )}
           </div>
 
-          <div className="library-facet-block">
-            <div className="library-facet-title"><span>内容分区</span><small>按来源目录</small></div>
-            <div className="library-group-list">
-              <button
-                className={filter === "all" ? "active" : ""}
-                onClick={() => { onFilter("all"); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
-              >
-                <span><i className="all" />全部分区</span><strong>{groupCounts.all}</strong>
-              </button>
-              {(Object.keys(GROUPS) as GroupKey[]).map((group) => (
-                <button
-                  key={group}
-                  className={filter === group ? "active" : ""}
-                  onClick={() => { onFilter(group); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
-                >
-                  <span><i style={{ background: GROUPS[group].color }} />{GROUPS[group].label}</span>
-                  <strong>{groupCounts[group]}</strong>
+          {activeFilterCount > 0 && (
+            <div className="library-active-filters" aria-label="已选筛选">
+              {filter !== "all" && (
+                <button onClick={() => { onFilter("all"); setVisibleLimit(LIBRARY_PAGE_SIZE); }} aria-label={`移除分区筛选：${GROUPS[filter].label}`}>
+                  {GROUPS[filter].label}<span aria-hidden="true">×</span>
                 </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="library-facet-block">
-            <div className="library-facet-title"><span>使用场景</span><small>可交叉筛选</small></div>
-            <div className="library-scope-list">
-              {LIBRARY_SCOPES.map((item) => (
-                <button
-                  key={item.id}
-                  className={scope === item.id ? "active" : ""}
-                  onClick={() => { setScope(item.id); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
-                >
-                  <span>{item.label}</span><strong>{scopeCounts[item.id]}</strong>
+              )}
+              {scope !== "all" && (
+                <button onClick={() => { setScope("all"); setVisibleLimit(LIBRARY_PAGE_SIZE); }} aria-label={`移除场景筛选：${activeScopeLabel}`}>
+                  {activeScopeLabel}<span aria-hidden="true">×</span>
                 </button>
-              ))}
+              )}
             </div>
-          </div>
+          )}
 
-          <div className="library-query-help">
-            <span>精确搜索</span>
-            <p>上面的搜索框支持 <code>type:</code>、<code>status:</code> 和 <code>folder:</code>。跳转到任意笔记按 <code>⌘K</code>。</p>
-          </div>
+          <details className="library-filter-details" ref={filterDetailsRef}>
+            <summary><span>筛选{activeFilterCount > 0 ? ` · ${activeFilterCount} 项已选` : ""}</span></summary>
+            <div className="library-filter-options">
+              <div className="library-facet-block">
+                <div className="library-facet-title"><span>内容分区</span><small>按来源目录</small></div>
+                <div className="library-group-list">
+                  <button
+                    className={filter === "all" ? "active" : ""}
+                    onClick={() => { onFilter("all"); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
+                  >
+                    <span><i className="all" />全部分区</span><strong>{groupCounts.all}</strong>
+                  </button>
+                  {(Object.keys(GROUPS) as GroupKey[]).map((group) => (
+                    <button
+                      key={group}
+                      className={filter === group ? "active" : ""}
+                      onClick={() => { onFilter(group); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
+                    >
+                      <span><i style={{ background: GROUPS[group].color }} />{GROUPS[group].label}</span>
+                      <strong>{groupCounts[group]}</strong>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="library-facet-block">
+                <div className="library-facet-title"><span>使用场景</span><small>可交叉筛选</small></div>
+                <div className="library-scope-list">
+                  {LIBRARY_SCOPES.map((item) => (
+                    <button
+                      key={item.id}
+                      className={scope === item.id ? "active" : ""}
+                      onClick={() => { setScope(item.id); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
+                    >
+                      <span>{item.label}</span><strong>{scopeCounts[item.id]}</strong>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <details className="library-query-help">
+                <summary>搜索语法</summary>
+                <p>上面的搜索框支持 <code>type:</code>、<code>status:</code> 和 <code>folder:</code>。跳转到任意笔记按 <code>⌘K</code>。</p>
+              </details>
+            </div>
+          </details>
         </aside>
 
         <div className="library-results">
@@ -187,7 +247,9 @@ function LibraryView({
               const group = getGroup(note.path);
               const trust = trustLayer(note);
               const decision = noteDecisionMeta(note);
-              const links = noteLinks(note).length;
+              const type = getType(note);
+              const actionCard = type === "todo" || type === "job-case" || type === "interview-prep";
+              const analysisCard = trust.className === "trust-analysis";
               return (
                 <button
                   className="note-card"
@@ -200,23 +262,28 @@ function LibraryView({
                 >
                   <div className="note-card-top">
                     <span className="note-group"><i />{GROUPS[group].label}</span>
-                    <span className={`note-semantic semantic-${decision.semantic}`}>{decision.label}</span>
+                    {actionCard ? (
+                      <span className={`note-semantic semantic-${decision.semantic}`}>{decision.label}</span>
+                    ) : (
+                      <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
+                    )}
                   </div>
-                  <span className="note-card-what">发生了什么</span>
                   <h2>{getTitle(note)}</h2>
-                  <div className="note-card-decision">
-                    <span>为什么重要</span>
-                    <p>{decision.importance}</p>
-                    <dl>
-                      <div><dt>何时处理</dt><dd>{decision.when}</dd></div>
-                      <div><dt>下一步</dt><dd>{decision.next}</dd></div>
-                    </dl>
-                  </div>
-                  <div className="note-card-source">{noteFolder(note.path)}</div>
+                  {actionCard ? (
+                    <div className="note-card-decision">
+                      <p>{decision.importance}</p>
+                      <dl>
+                        <div><dt>时间</dt><dd>{decision.when}</dd></div>
+                        <div><dt>下一步</dt><dd>{decision.next}</dd></div>
+                      </dl>
+                    </div>
+                  ) : (
+                    <div className={`note-card-summary${analysisCard ? " is-analysis" : ""}`}>
+                      <p>{libraryCardSummary(note)}</p>
+                    </div>
+                  )}
                   <div className="note-card-foot">
-                    <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
-                    <span>{typeLabel(getType(note))}</span>
-                    <span>{links ? `${links} 条关联` : "暂无关联"}</span>
+                    <span className="note-card-source" title={noteFolder(note.path)}>{noteFolder(note.path)}</span>
                     <time dateTime={new Date(note.stat.mtime).toISOString()}>{formatDate(note.stat.mtime)}</time>
                   </div>
                 </button>

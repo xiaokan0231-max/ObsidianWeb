@@ -19,6 +19,7 @@ export function isEditableTarget(target: EventTarget | null) {
   return (
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
     (target instanceof HTMLElement && target.isContentEditable)
   );
 }
@@ -46,6 +47,8 @@ export function useStageFullscreen(stageRef: RefObject<HTMLDivElement | null>) {
     };
     const handleShortcut = (event: KeyboardEvent) => {
       if (
+        event.defaultPrevented ||
+        stageRef.current?.closest("[inert]") ||
         event.key.toLowerCase() !== "f" ||
         event.metaKey ||
         event.ctrlKey ||
@@ -68,8 +71,7 @@ export function useStageFullscreen(stageRef: RefObject<HTMLDivElement | null>) {
   return { fullscreen, toggleFullscreen };
 }
 
-// 「穿越」编排：portal 动画 → 若在全屏先退出（Fullscreen API 只渲染全屏子树，
-// 不退出的话应用根下的笔记抽屉永远不会出现在用户眼前）→ 下一帧再真正打开。
+// 全文阅读挂在当前舞台子树内，穿越动画之后直接展开，不能退出全屏或重建场景。
 // 请求令牌保证快速连点时只有最后一次生效。
 export function useStagePortal(options: {
   stageRef: RefObject<HTMLDivElement | null>;
@@ -102,14 +104,7 @@ export function useStagePortal(options: {
     openingTimerRef.current = window.setTimeout(() => {
       void (async () => {
         if (openingRequestRef.current !== request) return;
-        const stage = stageRef.current;
-        if (stage && document.fullscreenElement === stage) {
-          try {
-            await document.exitFullscreen();
-          } catch {
-            // 某些嵌入式浏览器会拒绝退出请求，仍然继续打开笔记。
-          }
-        }
+        if (!stageRef.current) return;
         await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
         if (openingRequestRef.current !== request) return;
         onOpenRef.current(id);
@@ -131,6 +126,7 @@ export function useStagePortal(options: {
 }
 
 export type StageSearchItem = {
+  searchText?: string;
   id: string;
   title: string;
   path: string;
@@ -174,15 +170,15 @@ export function useStageSearch<T extends StageSearchItem>(options: {
     setCursor(0);
   }, []);
 
-  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const normalizedQuery = query.normalize("NFKC").trim().toLocaleLowerCase();
   const results = useMemo(() => {
     if (!normalizedQuery) return [];
     const terms = normalizedQuery.split(/\s+/).filter(Boolean);
     return items
       .flatMap((item) => {
-        const title = item.title.toLocaleLowerCase();
-        const path = item.path.toLocaleLowerCase();
-        const content = item.excerpt.toLocaleLowerCase();
+        const title = item.title.normalize("NFKC").toLocaleLowerCase();
+        const path = item.path.normalize("NFKC").toLocaleLowerCase();
+        const content = (item.searchText ?? item.excerpt).normalize("NFKC").toLocaleLowerCase();
         const searchable = `${title}\n${path}\n${content}`;
         if (!terms.every((term) => searchable.includes(term))) return [];
         const score = terms.reduce((total, term) => (
@@ -209,6 +205,7 @@ export function useStageSearch<T extends StageSearchItem>(options: {
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || inputRef.current?.closest("[inert]")) return;
       if (
         event.key === "Escape"
         && normalizedQuery

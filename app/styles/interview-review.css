@@ -1,4 +1,5 @@
 /* 面接復盤（整理稿の閲読・批注）（globals.css から分割） */
+@import "./interview-novel-reader.css";
 
 /* ============================================================
    面试复盘（review）——逐字稿整理稿的阅读・批注界面
@@ -156,6 +157,7 @@
 .rv-title h1 { margin: 0; font-family: "Songti SC", serif; font-size: clamp(24px, 3vw, 34px); letter-spacing: -0.02em; }
 .rv-title span { color: var(--muted); font-size: 11.5px; }
 
+.rv-mode-wrap { display: flex; flex-direction: column; gap: 4px; }
 .rv-mode { display: flex; border: 1px solid var(--line); background: var(--surface); }
 .rv-mode button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 96px; padding: 8px 14px; border: 0; background: transparent; font-size: 13px; cursor: pointer; }
 .rv-mode button small { color: var(--muted); font-size: 9px; }
@@ -238,6 +240,10 @@
 .rv-dimension-track em.low { background: #df7d61; }
 
 .rv-deep-report { padding: 24px; color: #eef2ed; background: #19231f; box-shadow: var(--shadow); }
+.rv-review-introduction { padding: 24px; background: #19231f; box-shadow: var(--shadow); }
+.rv-review-introduction h2 { margin: 0 0 14px; color: #c5dbcf; font-family: "Songti SC", serif; font-size: 22px; }
+.rv-review-introduction p { max-width: 860px; margin: 0 0 14px; color: rgba(255, 255, 255, 0.82); font-size: 14px; line-height: 1.9; white-space: pre-line; }
+.rv-review-introduction p:last-child { margin-bottom: 0; }
 .rv-deep-report > header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 18px; padding-bottom: 22px; border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
 .rv-deep-score { display: flex; align-items: baseline; gap: 4px; padding-right: 18px; border-right: 1px solid rgba(255, 255, 255, 0.16); }
 .rv-deep-score strong { font-family: var(--font-geist-mono), monospace; font-size: 36px; font-weight: 500; }
@@ -440,6 +446,8 @@
 .rv-reading-bar > div { display: flex; flex: 0 0 auto; gap: 6px; }
 .rv-reading-bar button { padding: 5px 10px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
 .rv-reading-bar button:hover { border-color: var(--ink); color: var(--ink); }
+.rv-reading-bar .rv-enter-novel { border-color: #252525; background: #252525; color: #fff; }
+.rv-reading-bar .rv-enter-novel:hover { background: #454545; color: #fff; }
 
 .rv-toc {
   position: sticky;
@@ -595,6 +603,7 @@
 
 @media (max-width: 580px) {
   .rv-toolbar { gap: 10px; }
+  .rv-mode-wrap { width: 100%; }
   .rv-mode button { min-width: 72px; padding: 7px 10px; }
   .rv-b { padding: 5px 8px 6px; }
   .rv-text { font-size: 14px; }
@@ -618,7 +627,7 @@
   .rv-score-glance { grid-column: 1; width: 100%; }
   .rv-score-glance > header { align-items: flex-start; flex-direction: column; gap: 3px; }
   .rv-score-glance > div { grid-template-columns: 1fr; }
-  .rv-deep-report { padding: 18px 14px; }
+  .rv-deep-report, .rv-review-introduction { padding: 18px 14px; }
   .rv-deep-report > header { grid-template-columns: 1fr; }
   .rv-deep-score { padding: 0 0 10px; border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.16); }
   .rv-score-source > header, .rv-answer-trends > header, .rv-ai-feedback > header { align-items: flex-start; flex-direction: column; }

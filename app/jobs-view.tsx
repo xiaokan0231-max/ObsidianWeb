@@ -25,8 +25,10 @@ import {
   JOB_SORTS,
   JOB_STATUSES,
   JOB_STATUS_NOTE_MAX,
+  KNOWN_CHANNELS,
   normalizeDay,
   OFFICIAL_APPLY_LABEL,
+  statusRequiresChannel,
   toJobCard,
   VERIFICATION_LABEL,
   type JobCard,
@@ -48,6 +50,7 @@ import {
   stripFrontmatter,
   type Note,
 } from "@/lib/notes";
+import { useDialogFocus } from "./use-dialog-focus";
 
 const SALARY_STEPS = [0, 600, 700, 800, 900, 1000, 1200];
 
@@ -55,8 +58,26 @@ const VERIFICATIONS: JobVerification[] = ["verified", "warned", "unchecked"];
 
 const COMPARE_LIMIT = 3;
 
+const ORIGIN_LABEL: Record<string, string> = {
+  "ai-reco": "AI 发现",
+  manual: "本人录入",
+  agent: "中介推荐",
+  scout: "Scout",
+  legacy: "历史导入",
+  "ra-batch": "RA 批量投递",
+};
+
+const WAITING_FOR_OPTIONS = [
+  { value: "", label: "没有外部等待" },
+  { value: "self", label: "本人" },
+  { value: "company", label: "企业" },
+  { value: "agent", label: "中介" },
+  { value: "platform", label: "平台" },
+];
+
 /** 结果区的四种视图。卡片/列表/看板共享同一份筛选结果，周复盘看的是全量笔记。 */
 const VIEW_MODES = [
+  { id: "decision", label: "决策台" },
   { id: "card", label: "卡片" },
   { id: "list", label: "列表" },
   { id: "kanban", label: "看板" },
@@ -196,9 +217,9 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
           remoteOnly: params.get("remote") === "1",
         }
       : baseFilters,
-    viewMode: VIEW_MODES.some((mode) => mode.id === modeParam) ? modeParam as ViewMode : "card",
+    viewMode: VIEW_MODES.some((mode) => mode.id === modeParam) ? modeParam as ViewMode : "decision",
     weekOffset: Number.isInteger(week) && Math.abs(week) <= 52 ? week : 0,
-    detailPath: params.get("job") || null,
+    detailPath: params.get("case") || null,
   };
 }
 
@@ -226,12 +247,31 @@ function salaryLabel(job: JobCard) {
   return estimated ? `${range}（月給換算）` : range;
 }
 
-/** 匹配度色阶：9+ 橙 / 7+ 绿 / 5+ 琥珀 / 其余灰。CSS 里由 `.rate-*` 提供 `--rate`。 */
+/** 応募优先度色阶：9+ 橙 / 7+ 绿 / 5+ 琥珀 / 其余灰。 */
+/** バッジに出す文字。未採点は 0 ではなく「—」——「読んでいない」と「見込みなし」は別。 */
+function rateText(job: { rating: number; rated: boolean }) {
+  return job.rated ? String(job.rating) : "—";
+}
+
 function rateTone(rating: number) {
   if (rating >= 9) return "high";
   if (rating >= 7) return "good";
   if (rating >= 5) return "mid";
   return "low";
+}
+
+/**
+ * 「已经动过手，但还没形成応募」的机会。
+ *
+ * Findy 的「いいかも」、媒体上的スカウト回信这类动作，本人做完了但企业没回应，
+ * 求人票也没提交出去——按 7 枚举只能是 `未応募`。可是它和「还没看过的推荐」
+ * 完全不是一回事：前者球在对方手里，本人现在做不了任何事。
+ *
+ * 混在一起会同时坏两头：未応募 的数字虚高，首页还催你去「判断是否応募」
+ * 一个你三天前就点过的岗位。用 waiting_for 把两者分开。
+ */
+function awaitingCounterpart(job: JobCard) {
+  return job.status === "未応募" && Boolean(job.waitingFor) && job.waitingFor !== "self";
 }
 
 /** 状态配色分组。自定义状态（不在枚举里）走中性色。 */
@@ -334,7 +374,7 @@ function elapsedLabel(appliedOn: string, today: string) {
 /** 时间线上的事件文案由状态推导 —— 状态与日期是笔记里的证据，不是 AI 的假设。 */
 function eventLabel(job: JobCard) {
   switch (job.status) {
-    case "未応募": return `AI が新規推薦（匹配度 ${job.rating}）`;
+    case "未応募": return `机会入库（応募优先度 ${job.rating}）`;
     case "応募済": return "応募完了";
     case "書類通過": return "書類選考通過";
     case "面接中": return "面接を実施";
@@ -472,7 +512,25 @@ function JobsView({
    * どれでも閉じられ、どれも書込み中を待たない。
    */
   const [statusErrors, setStatusErrors] = useState<Record<string, string>>({});
+  const [statsStale, setStatsStale] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const openDetail = useCallback((path: string) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("case", path);
+    window.history.pushState(
+      { ...(window.history.state ?? {}), __echoJob: path },
+      "",
+      `${window.location.pathname}?${params.toString()}`,
+    );
+    setDetailPath(path);
+  }, []);
+  const closeDetail = useCallback(() => {
+    if (window.history.state?.__echoJob) {
+      window.history.back();
+      return;
+    }
+    setDetailPath(null);
+  }, []);
 
   /**
    * 応募日の**正本**は `20_求職/_応募日台帳.md`。status から拾えるのは `応募済` の間だけで、
@@ -713,7 +771,13 @@ function JobsView({
   }, []);
 
   const changeStatus = useCallback(
-    async (path: string, status: string, statusNote = ""): Promise<string | null> => {
+    async (
+      path: string,
+      status: string,
+      statusNote = "",
+      channel?: string,
+      expectedStatusUpdated = "",
+    ): Promise<string | null> => {
       setSavingPaths((current) => current.includes(path) ? current : [...current, path]);
       setStatusErrors((current) => {
         if (!(path in current)) return current;
@@ -725,20 +789,34 @@ function JobsView({
         const response = await fetch("/api/jobs/status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path, status, statusNote }),
+          body: JSON.stringify({
+            path,
+            status,
+            statusNote,
+            ...(channel ? { channel } : {}),
+            ...(expectedStatusUpdated !== undefined ? { expectedStatusUpdated } : {}),
+          }),
         });
         const payload = (await response.json()) as {
           ok?: boolean;
           error?: string;
           note?: Note;
+          derivedState?: "fresh" | "stale";
         };
-        if (!response.ok || !payload.ok) throw new Error(payload.error || "写入 Vault 失败");
+        if (!response.ok || !payload.ok) {
+          if (response.status === 409) {
+            await onVaultChanged?.();
+            throw new Error(payload.error || "状态已更新，已自动刷新到最新版本，请重新点击。");
+          }
+          throw new Error(payload.error || "写入 Vault 失败");
+        }
         // 画面へ反映してから savingPaths を落とす（finally は下の分岐の後）。
         // そうしないと一瞬だけ古い値に戻って、書けたのか失敗したのか読めなくなる。
         // 応答が更新後の note を持っているので単条差し替えで足りる。
         // 無い場合（unchanged 応答・旧サーバ）だけ全量再取得へ退く。
         if (payload.note && onNoteWritten) onNoteWritten(payload.note);
         else await onVaultChanged?.();
+        if (payload.derivedState === "stale") setStatsStale(true);
         return null;
       } catch (error) {
         const message = error instanceof Error ? error.message : "写入 Vault 失败";
@@ -751,11 +829,36 @@ function JobsView({
     [onNoteWritten, onVaultChanged],
   );
 
+  const changeFollowUp = useCallback(async (
+    path: string,
+    values: { waitingFor: string | null; followUpAt: string | null; nextEventAt: string | null },
+  ): Promise<string | null> => {
+    setSavingPaths((current) => current.includes(path) ? current : [...current, path]);
+    dismissStatusError(path);
+    try {
+      const response = await fetch("/api/jobs/follow-up", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, ...values }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string; note?: Note };
+      if (!response.ok || !payload.ok || !payload.note) throw new Error(payload.error || "写入 Vault 失败");
+      onNoteWritten?.(payload.note);
+      return null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "写入 Vault 失败";
+      setStatusErrors((current) => ({ ...current, [path]: message }));
+      return message;
+    } finally {
+      setSavingPaths((current) => current.filter((item) => item !== path));
+    }
+  }, [dismissStatusError, onNoteWritten]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (compareOpen) setCompareOpen(false);
-        else if (detailOpen) setDetailPath(null);
+        else if (detailOpen) closeDetail();
         return;
       }
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -766,7 +869,7 @@ function JobsView({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [compareOpen, detailOpen]);
+  }, [closeDetail, compareOpen, detailOpen]);
 
   useEffect(() => {
     const sync = () => setToday((current) => {
@@ -810,9 +913,9 @@ function JobsView({
       if (filters.remoteOnly) params.set("remote", "1");
     }
     if (sort !== "rating") params.set("sort", sort);
-    if (viewMode !== "card") params.set("mode", viewMode);
+    if (viewMode !== "decision") params.set("mode", viewMode);
     if (viewMode === "weekly" && weekOffset !== 0) params.set("week", String(weekOffset));
-    if (detailPath) params.set("job", detailPath);
+    if (detailPath) params.set("case", detailPath);
     const queryString = params.toString();
     window.history.replaceState(
       { ...(window.history.state ?? {}), __echoAppView: "jobs" },
@@ -822,12 +925,15 @@ function JobsView({
   }, [detailPath, filters, query, sort, viewMode, weekOffset]);
 
   const notAppliedJobs = jobs.filter((job) => job.status === "未応募");
-  const readyJobs = notAppliedJobs
+  // 已经动过手的不再算「待判断」——本人这边没有下一步，催也没用。
+  const awaitingJobs = notAppliedJobs.filter(awaitingCounterpart);
+  const untouchedJobs = notAppliedJobs.filter((job) => !awaitingCounterpart(job));
+  const readyJobs = untouchedJobs
     .filter((job) => job.rating >= 7)
     .sort((left, right) => compareJobs(left, right, "rating"));
   const nextPick =
     readyJobs[0] ??
-    [...notAppliedJobs].sort((left, right) => compareJobs(left, right, "rating"))[0] ??
+    [...untouchedJobs].sort((left, right) => compareJobs(left, right, "rating"))[0] ??
     null;
   const highlightedNextPick =
     viewMode === "card" &&
@@ -845,14 +951,16 @@ function JobsView({
   const verifiedNotApplied = notAppliedJobs.filter((job) => job.verification === "verified").length;
 
   const isJobList = viewMode !== "weekly";
+  const decisionDetail = viewMode === "decision" ? detail ?? visible[0] ?? null : null;
 
   return (
     <section className="jobs-view">
+      <h1 className="sr-only">岗位机会</h1>
       {highlightedNextPick && (
         <section className="jobs-next-pick" aria-label="下一项応募判断">
           <span className={`jobs-next-score rate-${rateTone(highlightedNextPick.rating)}`}>
-            <strong>{highlightedNextPick.rating}</strong>
-            <small>/ 10</small>
+            <strong>{rateText(highlightedNextPick)}</strong>
+            <small>{highlightedNextPick.rated ? "/ 10" : "未採点"}</small>
           </span>
           <div className="jobs-next-copy">
             <span>NEXT DECISION</span>
@@ -874,14 +982,15 @@ function JobsView({
               <dd>{VERIFICATION_LABEL[highlightedNextPick.verification]}</dd>
             </div>
           </dl>
-          <button type="button" onClick={() => setDetailPath(highlightedNextPick.path)}>
+          <button type="button" onClick={() => openDetail(highlightedNextPick.path)}>
             判断是否応募 <span aria-hidden="true">→</span>
           </button>
         </section>
       )}
 
       <div className="jobs-stat page-stat-strip module-stat-strip" aria-label="当前岗位机会摘要">
-        <div data-zero={notAppliedJobs.length === 0}><strong>{notAppliedJobs.length}</strong><span>未应募</span></div>
+        <div data-zero={untouchedJobs.length === 0}><strong>{untouchedJobs.length}</strong><span>未着手</span></div>
+        <div data-zero={awaitingJobs.length === 0}><strong>{awaitingJobs.length}</strong><span>已动手 · 等对方</span></div>
         <div data-zero={readyJobs.length === 0}><strong>{readyJobs.length}</strong><span>7 分以上待判断</span></div>
         <div data-zero={recentNotApplied === 0}><strong>{recentNotApplied}</strong><span>7 日内新增</span></div>
         <div data-zero={verifiedNotApplied === 0}><strong>{verifiedNotApplied}</strong><span>原文已核对</span></div>
@@ -935,7 +1044,7 @@ function JobsView({
               />
 
               <FilterChips
-                label="匹配度"
+                label="応募优先度"
                 options={JOB_RATING_BANDS.map((band) => ({
                   value: band.id,
                   label: band.label,
@@ -1102,20 +1211,44 @@ function JobsView({
                   compared={comparePaths.includes(job.path)}
                   compareFull={compareFull}
                   saving={savingPaths.includes(job.path)}
-                  onDetail={() => setDetailPath(job.path)}
+                  onDetail={() => openDetail(job.path)}
                   onCompare={() => toggleCompare(job.path)}
-                  onStatus={(status, note) => changeStatus(job.path, status, note)}
+                  onStatus={(status, note, channel) => changeStatus(
+                    job.path,
+                    status,
+                    note,
+                    channel,
+                    job.statusUpdated,
+                  )}
                 />
               ))}
             </div>
           )}
 
+          {jobs.length > 0 && viewMode === "decision" && visible.length > 0 && decisionDetail && (
+            <JobDecisionWorkspace
+              jobs={visible}
+              selected={decisionDetail}
+              today={today}
+              saving={savingPaths.includes(decisionDetail.path)}
+              onSelect={setDetailPath}
+              onStatus={(status, note, channel) => changeStatus(
+                decisionDetail.path,
+                status,
+                note,
+                channel,
+                decisionDetail.statusUpdated,
+              )}
+              onOpenNote={() => onOpen(decisionDetail.note)}
+            />
+          )}
+
           {jobs.length > 0 && viewMode === "list" && resultVisible.length > 0 && (
-            <JobListView jobs={resultVisible} query={query} today={today} onDetail={setDetailPath} />
+            <JobListView jobs={resultVisible} query={query} today={today} onDetail={openDetail} />
           )}
 
           {jobs.length > 0 && viewMode === "kanban" && visible.length > 0 && (
-            <JobKanbanView columns={kanbanColumns} query={query} onDetail={setDetailPath} />
+            <JobKanbanView columns={kanbanColumns} query={query} onDetail={openDetail} />
           )}
 
           {jobs.length > 0 && viewMode === "weekly" && (
@@ -1127,7 +1260,7 @@ function JobsView({
               focus={nextFocus}
               review={weekReview}
               onShift={(delta) => setWeekOffset((current) => current + delta)}
-              onDetail={setDetailPath}
+              onDetail={openDetail}
               onOpenReview={onOpen}
               onWiki={openWikiLink}
             />
@@ -1157,24 +1290,40 @@ function JobsView({
         </div>
       )}
 
-      {detail && (
+      {detail && viewMode !== "decision" && (
         <JobDrawer
+          key={detail.path}
           job={detail}
+          notes={notes}
           today={today}
           saving={savingPaths.includes(detail.path)}
           compared={comparePaths.includes(detail.path)}
           compareFull={compareFull}
-          onClose={() => setDetailPath(null)}
-          onStatus={(status, note) => changeStatus(detail.path, status, note)}
+          onClose={closeDetail}
+              onStatus={(status, note, channel) => changeStatus(
+                detail.path,
+                status,
+                note,
+                channel,
+                detail.statusUpdated,
+              )}
+          onFollowUp={(values) => changeFollowUp(detail.path, values)}
           onCompare={() => toggleCompare(detail.path)}
-          onOpenNote={() => onOpen(detail.note)}
+          onOpenNote={(note) => onOpen(note ?? detail.note)}
         />
+      )}
+
+      {statsStale && (
+        <div className="job-stats-stale" role="status">
+          <span>案件状态已写入；派生统计将在下次运行 vault:stats 后更新。</span>
+          <button onClick={() => setStatsStale(false)} aria-label="关闭提示">×</button>
+        </div>
       )}
 
       {compareOpen && compared.length >= 2 && (
         <JobCompare jobs={compared} onClose={() => setCompareOpen(false)} onDetail={(path) => {
           setCompareOpen(false);
-          setDetailPath(path);
+          openDetail(path);
         }} />
       )}
 
@@ -1209,30 +1358,71 @@ function JobsView({
 function StatusPicker({
   value,
   note,
+  channel,
+  sourceGuess,
   today,
   saving,
+  expectedStatusUpdated,
   onChange,
 }: {
   value: string;
   note: string;
+  /** ノートの frontmatter `channel`。空なら応募記録なし＝応募済系へ変える時に選ばせる。 */
+  channel: string;
+  /** 求人の source。既知の渠道と一致すればセレクトの初期値に使う（Findy 起点なら Findy が既定）。 */
+  sourceGuess: string;
   today: string;
   saving: boolean;
-  onChange: (status: string, note: string) => Promise<string | null>;
+  expectedStatusUpdated?: string;
+  onChange: (
+    status: string,
+    note: string,
+    channel?: string,
+    expectedStatusUpdated?: string,
+  ) => Promise<string | null>;
 }) {
   const customValue = value && !isJobStatus(value) ? value : null;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  // 応募済系を選んだが channel が無い：即座に拒否せず、ここに保留して渠道を選ばせる。
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [channelDraft, setChannelDraft] = useState("");
   const draftError = jobStatusNoteError(draft);
 
   const openEditor = () => {
     // 既存注記があれば編集、無ければ vault 表記（日付が先頭）の書き出しを置いておく。
+    // channel パネルとは排他：どちらの操作が進行中か読めなくなるので同時には開かない。
+    setPendingStatus(null);
     setDraft(note || `${today}・`);
     setEditing(true);
   };
 
   const submit = async () => {
     if (draftError) return;
-    if (!(await onChange(value, draft))) setEditing(false);
+    if (!(await onChange(value, draft, undefined, expectedStatusUpdated))) setEditing(false);
+  };
+
+  const pickStatus = (next: string) => {
+    // channel 必須の状態（応募済〜不採用）へ、応募記録の無い案件を動かす時だけ渠道を聞く。
+    // API はどのみち拒否するので、先に聞く方が「ボタンがあるのに使えない」を消せる。
+    if (statusRequiresChannel(next) && !channel) {
+      setEditing(false);
+      // source 表記は channel の語彙と少しずれる（RA だけ日英が逆）。一致した時だけ初期値にする。
+      const guess = (KNOWN_CHANNELS as readonly string[]).includes(sourceGuess)
+        ? sourceGuess
+        : sourceGuess === "リクルートエージェント" ? "Recruit Agent" : "";
+      setChannelDraft(guess);
+      setPendingStatus(next);
+      return;
+    }
+    setPendingStatus(null);
+    void onChange(next, "", undefined, expectedStatusUpdated);
+  };
+
+  const submitChannel = async () => {
+    // Enter 連打での同一ノートへの並行 POST を塞ぐ（保存ボタンは disabled で守られている）。
+    if (saving || !pendingStatus || !channelDraft) return;
+    if (!(await onChange(pendingStatus, "", channelDraft, expectedStatusUpdated))) setPendingStatus(null);
   };
 
   return (
@@ -1246,7 +1436,7 @@ function StatusPicker({
             value={value}
             disabled={saving}
             aria-label="应募状态"
-            onChange={(event) => void onChange(event.target.value, "")}
+            onChange={(event) => pickStatus(event.target.value)}
           >
             {customValue && <option value={customValue}>{customValue}</option>}
             {JOB_STATUSES.map((status) => (
@@ -1268,6 +1458,34 @@ function StatusPicker({
       </div>
 
       {note && !editing && <p className="job-status-note">{note}</p>}
+
+      {pendingStatus && (
+        <div className="job-status-note-edit job-status-channel-edit">
+          <select
+            value={channelDraft}
+            autoFocus
+            aria-label="投递渠道"
+            onChange={(event) => setChannelDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") { event.preventDefault(); void submitChannel(); }
+              // 途中破棄が抽屉ごと閉じる巻き添えにならないよう、Escape はここで止める。
+              if (event.key === "Escape") { event.stopPropagation(); setPendingStatus(null); }
+            }}
+          >
+            <option value="">投递渠道…</option>
+            {KNOWN_CHANNELS.map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+          <button type="button" disabled={saving || !channelDraft} onClick={() => void submitChannel()}>
+            保存
+          </button>
+          <button type="button" onClick={() => setPendingStatus(null)}>取消</button>
+          <small className="job-status-channel-hint">
+            「{pendingStatus}」需要记下实际投递渠道（写入 channel，台帳按渠道统计到达率）。没投过就选「保留」并写理由。
+          </small>
+        </div>
+      )}
 
       {editing && (
         <div className="job-status-note-edit">
@@ -1314,7 +1532,12 @@ function JobCardView({
   saving: boolean;
   onDetail: () => void;
   onCompare: () => void;
-  onStatus: (status: string, note: string) => Promise<string | null>;
+  onStatus: (
+    status: string,
+    note: string,
+    channel?: string,
+    expectedStatusUpdated?: string,
+  ) => Promise<string | null>;
 }) {
   return (
     <article className={`job-card${compared ? " compared" : ""}`} onClick={onDetail}>
@@ -1323,9 +1546,10 @@ function JobCardView({
           <span
             className={`job-rate-badge rate-${rateTone(job.rating)}`}
             role="img"
-            aria-label={`匹配度 ${job.rating}，满分 10`}
+            aria-label={job.rated ? `応募优先度 ${job.rating}，满分 10` : "未採点（求人原文を読んでいない）"}
+            title={job.rated ? undefined : "未採点（求人原文を読んでいない）"}
           >
-            {job.rating}
+            {rateText(job)}
           </span>
           <div className="job-card-titles">
             <h2><Highlight text={job.company} query={query} /></h2>
@@ -1338,7 +1562,7 @@ function JobCardView({
       <div className="job-salary-row">
         {/* 解析不出年収区间时退回笔记原文，字号跟着降下来，免得一行长文顶掉卡片的层级。 */}
         <span className={`job-salary-figure${job.salary.min === null ? " is-text" : ""}`}>{salaryLabel(job)}</span>
-        <span className="job-rate-meta">匹配度 {job.rating}/10</span>
+        <span className="job-rate-meta">応募优先度 {job.rating}/10</span>
       </div>
 
       {/* 入库日は常に出す：欠けている（＝「入库日不明」）ことも読み取れる情報なので黙って消さない。 */}
@@ -1380,8 +1604,11 @@ function JobCardView({
         <StatusPicker
               value={job.status}
               note={job.statusNote}
+              channel={job.channel}
+              sourceGuess={job.sourceGroup}
               today={today}
               saving={saving}
+              expectedStatusUpdated={job.statusUpdated}
               onChange={onStatus}
             />
         <button
@@ -1422,6 +1649,95 @@ function JobCardView({
   );
 }
 
+function JobDecisionWorkspace({
+  jobs,
+  selected,
+  today,
+  saving,
+  onSelect,
+  onStatus,
+  onOpenNote,
+}: {
+  jobs: JobCard[];
+  selected: JobCard;
+  today: string;
+  saving: boolean;
+  onSelect: (path: string) => void;
+  onStatus: (
+    status: string,
+    note: string,
+    channel?: string,
+    expectedStatusUpdated?: string,
+  ) => Promise<string | null>;
+  onOpenNote: () => void;
+}) {
+  return (
+    <div className="jobs-decision-workspace">
+      <aside className="jobs-decision-queue" aria-label="机会队列">
+        <header><strong>待判断机会</strong><span>{jobs.length}</span></header>
+        {jobs.map((job, index) => (
+          <button
+            key={job.path}
+            className={job.path === selected.path ? "active" : ""}
+            onClick={() => onSelect(job.path)}
+          >
+            <span className={`job-rate-badge rate-${rateTone(job.rating)}`} title={job.rated ? undefined : "未採点（求人原文を読んでいない）"}>{rateText(job)}</span>
+            <span>
+              <small>
+                {String(index + 1).padStart(2, "0")} ·{" "}
+                {awaitingCounterpart(job) ? `${job.status}（已动手·等对方）` : job.status}
+              </small>
+              <strong>{job.company}</strong>
+              <em>{job.position || "职位未记录"}</em>
+            </span>
+          </button>
+        ))}
+      </aside>
+
+      <article className="jobs-decision-detail">
+        <header>
+          <div>
+            <span>{ORIGIN_LABEL[selected.origin] ?? "岗位机会"} · 応募优先度 {selected.rating}/10</span>
+            <h2>{selected.company}</h2>
+            <p>{selected.position || "职位未记录"}</p>
+          </div>
+          <StatusPicker
+            key={selected.path}
+            value={selected.status}
+            note={selected.statusNote}
+            channel={selected.channel}
+            sourceGuess={selected.sourceGroup}
+            today={today}
+            saving={saving}
+            expectedStatusUpdated={selected.statusUpdated}
+            onChange={onStatus}
+          />
+        </header>
+        <dl>
+          <div><dt>年収</dt><dd>{salaryLabel(selected)}</dd></div>
+          <div><dt>勤務地</dt><dd>{selected.location || "—"}</dd></div>
+          <div><dt>原文</dt><dd>{VERIFICATION_LABEL[selected.verification]}</dd></div>
+          <div><dt>入库</dt><dd>{selected.date || "—"}</dd></div>
+        </dl>
+        {selected.reason && <section><h3>为什么值得判断</h3><p>{selected.reason}</p></section>}
+        {selected.caution && <section className="is-caution"><h3>应募前确认</h3><p>{selected.caution}</p></section>}
+        {selected.matches.length > 0 && (
+          <section><h3>岗位契合点</h3><ul>{selected.matches.slice(0, 5).map((item, index) => <li key={index}>{item}</li>)}</ul></section>
+        )}
+        <footer>
+          {selected.officialApplyUrl && (
+            <a href={selected.officialApplyUrl} target="_blank" rel="noopener noreferrer">官网应募 ↗</a>
+          )}
+          {selected.url && selected.url !== selected.officialApplyUrl && (
+            <a href={selected.url} target="_blank" rel="noopener noreferrer">查看求人原文 ↗</a>
+          )}
+          <button onClick={onOpenNote}>查看完整案件笔记</button>
+        </footer>
+      </article>
+    </div>
+  );
+}
+
 /** 列表视图：一行一个岗位，密度最高，用来快速扫全量结果。 */
 function JobListView({
   jobs,
@@ -1451,7 +1767,7 @@ function JobListView({
             <strong><Highlight text={job.company} query={query} /></strong>
             <small><Highlight text={job.position || "—"} query={query} /></small>
           </span>
-          <span className={`job-list-rate rate-${rateTone(job.rating)}`}>{job.rating}</span>
+          <span className={`job-list-rate rate-${rateTone(job.rating)}`} title={job.rated ? undefined : "未採点（求人原文を読んでいない）"}>{rateText(job)}</span>
           <span className="job-list-salary">{salaryLabel(job)}</span>
           <span className="job-list-stack">
             {job.stack.map((tag) => <i key={tag}>{tag}</i>)}
@@ -1499,7 +1815,7 @@ function JobKanbanView({
               >
                 <span className="job-kanban-title">
                   <strong><Highlight text={job.company} query={query} /></strong>
-                  <i>{job.rating}</i>
+                  <i title={job.rated ? undefined : "未採点"}>{rateText(job)}</i>
                 </span>
                 <small><Highlight text={job.position || "—"} query={query} /></small>
                 <span className="job-kanban-salary">{salaryLabel(job)}</span>
@@ -1759,7 +2075,7 @@ function JobWeeklyView({
 
           <section className="job-week-note">
             <span>复盘提醒</span>
-            <p>本周动态来自笔记的状态与日期字段，属于「证据层」；AI 匹配度只是假设，投递决定仍由本人做出。</p>
+            <p>本周动态来自笔记的状态与日期字段，属于「证据层」；応募优先度是时间分配判断，不代表录用概率。</p>
           </section>
         </div>
       </div>
@@ -1803,35 +2119,69 @@ function DetailList({ title, items }: { title: string; items: string[] }) {
 
 function JobDrawer({
   job,
+  notes,
   today,
   saving,
   compared,
   compareFull,
   onClose,
   onStatus,
+  onFollowUp,
   onCompare,
   onOpenNote,
 }: {
   job: JobCard;
+  notes: Note[];
   today: string;
   saving: boolean;
   compared: boolean;
   compareFull: boolean;
   onClose: () => void;
-  onStatus: (status: string, note: string) => Promise<string | null>;
+  onStatus: (
+    status: string,
+    note: string,
+    channel?: string,
+    expectedStatusUpdated?: string,
+  ) => Promise<string | null>;
+  onFollowUp: (values: {
+    waitingFor: string | null;
+    followUpAt: string | null;
+    nextEventAt: string | null;
+  }) => Promise<string | null>;
   onCompare: () => void;
-  onOpenNote: () => void;
+  onOpenNote: (note?: Note) => void;
 }) {
   const intakeAge = intakeRelative(job.date, today);
+  const dialogRef = useRef<HTMLElement>(null);
+  useDialogFocus(dialogRef);
+  const [waitingFor, setWaitingFor] = useState(job.waitingFor);
+  const [followUpAt, setFollowUpAt] = useState(job.followUpAt);
+  const [nextEventAt, setNextEventAt] = useState(job.nextEventAt);
+  const [followUpSaving, setFollowUpSaving] = useState(false);
+  const [followUpMessage, setFollowUpMessage] = useState("");
+  const related = job.caseId
+    ? notes.filter((note) => note.path !== job.path && getString(note.frontmatter.case_id) === job.caseId)
+    : [];
+  const saveFollowUp = async () => {
+    setFollowUpSaving(true);
+    setFollowUpMessage("");
+    const error = await onFollowUp({
+      waitingFor: waitingFor || null,
+      followUpAt: followUpAt || null,
+      nextEventAt: nextEventAt || null,
+    });
+    setFollowUpMessage(error || "跟进信息已写入 Vault。");
+    setFollowUpSaving(false);
+  };
   return (
     <div
       className="drawer-backdrop"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
-      <aside className="note-drawer job-drawer" aria-label="岗位详情" aria-modal="true" role="dialog">
+      <aside ref={dialogRef} tabIndex={-1} className="note-drawer job-drawer" aria-label="岗位详情" aria-modal="true" role="dialog">
         <header className="drawer-header">
           <div>
-            <span style={{ color: "var(--green)" }}>AI 推荐岗位</span>
+            <span style={{ color: "var(--green)" }}>{ORIGIN_LABEL[job.origin] ?? "岗位机会"}</span>
             <small>{job.path}</small>
           </div>
           <button onClick={onClose} aria-label="关闭详情">×</button>
@@ -1843,8 +2193,11 @@ function JobDrawer({
               {job.position && <p className="job-position">{job.position}</p>}
             </div>
             <div className={`job-rating job-rating-large rate-${rateTone(job.rating)}`}>
-              <span className="job-score"><b>{job.rating}</b><small>/10</small></span>
-              <span className="job-meter"><i style={{ width: `${job.rating * 10}%` }} /></span>
+              <span className="job-score">
+                <b>{rateText(job)}</b>
+                <small>{job.rated ? "/10" : "未採点"}</small>
+              </span>
+              <span className="job-meter"><i style={{ width: `${job.rated ? job.rating * 10 : 0}%` }} /></span>
             </div>
           </div>
 
@@ -1852,8 +2205,11 @@ function JobDrawer({
             <StatusPicker
               value={job.status}
               note={job.statusNote}
+              channel={job.channel}
+              sourceGuess={job.sourceGroup}
               today={today}
               saving={saving}
+              expectedStatusUpdated={job.statusUpdated}
               onChange={onStatus}
             />
             {/* 列表 / 看板 / 周复盘视图里没有对比按钮，都从详情这里加入。 */}
@@ -1875,7 +2231,7 @@ function JobDrawer({
             {job.url && job.url !== job.officialApplyUrl && (
               <a className="job-link" href={job.url} target="_blank" rel="noopener noreferrer">求人票 ↗</a>
             )}
-            <button type="button" className="job-detail" onClick={onOpenNote}>在记忆库中打开</button>
+            <button type="button" className="job-detail" onClick={() => onOpenNote()}>在记忆库中打开</button>
           </div>
 
           <dl className="job-detail-facts">
@@ -1883,11 +2239,62 @@ function JobDrawer({
             <div><dt>勤務地</dt><dd>{job.location || "—"}</dd></div>
             <div><dt>雇用形態</dt><dd>{job.employment || "—"}</dd></div>
             <div><dt>来源</dt><dd>{job.source || "—"}</dd></div>
+            <div><dt>录入方式</dt><dd>{ORIGIN_LABEL[job.origin] ?? (job.origin || "—")}</dd></div>
+            <div><dt>案件 ID</dt><dd>{job.caseId || "—"}</dd></div>
             <div><dt>官方渠道</dt><dd>{OFFICIAL_APPLY_LABEL[job.officialApplyStatus]}{job.officialApplyNote ? ` · ${job.officialApplyNote}` : ""}</dd></div>
             {/* 「推荐日期」だと応募日と紛らわしい。frontmatter `date` は AI 推薦が入库した日。 */}
             <div><dt>入库日</dt><dd>{job.date ? `${job.date}${intakeAge && ` · ${intakeAge}`}` : "—"}</dd></div>
             <div><dt>笔记更新</dt><dd>{formatDate(job.updatedAt, true)}</dd></div>
           </dl>
+
+          <section className="job-case-workspace" aria-label="案件推进">
+            <div className="job-case-workspace-head">
+              <div>
+                <span>CASE WORKSPACE</span>
+                <h2>下一步与承诺</h2>
+              </div>
+              <small>{job.nextAction || "尚未记录下一动作"}</small>
+            </div>
+            <div className="job-follow-up-form">
+              <label>
+                <span>等待对象</span>
+                <select value={waitingFor} onChange={(event) => setWaitingFor(event.target.value)}>
+                  {WAITING_FOR_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>跟进日期</span>
+                <input type="date" value={followUpAt} disabled={!waitingFor} onChange={(event) => setFollowUpAt(event.target.value)} />
+              </label>
+              <label>
+                <span>下一场日程</span>
+                <input
+                  type="text"
+                  value={nextEventAt}
+                  placeholder="YYYY-MM-DD HH:MM"
+                  onChange={(event) => setNextEventAt(event.target.value)}
+                />
+              </label>
+              <button type="button" disabled={followUpSaving} onClick={() => void saveFollowUp()}>
+                {followUpSaving ? "写入中…" : "保存跟进"}
+              </button>
+            </div>
+            {followUpMessage && (
+              <p className={followUpMessage.includes("已写入") ? "job-follow-up-success" : "job-status-note-error"} role="status">
+                {followUpMessage}
+              </p>
+            )}
+            {related.length > 0 && (
+              <div className="job-case-related">
+                <span>同一案件</span>
+                {related.map((note) => (
+                  <button key={note.path} type="button" onClick={() => onOpenNote(note)}>
+                    {getTitle(note)} <small>{getType(note)}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
 
           {job.verification !== "verified" && (
             <p className="job-detail-warning">
@@ -1922,7 +2329,7 @@ function JobDrawer({
 }
 
 const COMPARE_ROWS: { label: string; render: (job: JobCard) => ReactNode }[] = [
-  { label: "匹配度", render: (job) => <strong className="job-compare-rating">{job.rating} / 10</strong> },
+  { label: "応募优先度", render: (job) => <strong className="job-compare-rating">{job.rating} / 10</strong> },
   { label: "年収", render: (job) => job.salaryText || "—" },
   { label: "勤務地", render: (job) => job.location || "—" },
   { label: "雇用形態", render: (job) => job.employment || "—" },
@@ -1949,12 +2356,14 @@ function JobCompare({
   onClose: () => void;
   onDetail: (path: string) => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef);
   return (
     <div
       className="job-compare-backdrop"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
-      <div className="job-compare-panel" role="dialog" aria-modal="true" aria-label="岗位并排对比">
+      <div ref={dialogRef} tabIndex={-1} className="job-compare-panel" role="dialog" aria-modal="true" aria-label="岗位并排对比">
         <header>
           <h2>并排对比</h2>
           <button onClick={onClose} aria-label="关闭对比">×</button>

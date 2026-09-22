@@ -1347,6 +1347,28 @@
 
 .todo-view { display: flex; flex-direction: column; gap: 22px; }
 
+.todo-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+}
+
+.todo-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.todo-summary strong {
+  margin-left: 4px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
 .todo-back-to-actions {
   align-self: flex-start;
   border: 1px solid var(--line);
@@ -1855,6 +1877,31 @@
 .job-status-note-edit button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* 渠道选择：応募済系に変える時だけ現れる。input と同じ見た目のセレクトにする。 */
+.job-status-channel-edit select {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 2px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.job-status-channel-edit select:focus {
+  outline: none;
+  border-color: var(--orange);
+}
+
+.job-status-channel-hint {
+  flex: 1 0 100%;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
 }
 
 .job-status-note-error {

@@ -16,6 +16,49 @@ const valid = {
   channel: "Green",
 };
 
+const validV2 = {
+  case_id: "Acme_Data_v2",
+  company: "Acme",
+  origin: "ai-reco",
+  status: "未応募",
+  rating: 7.9,
+  rating_version: "v2",
+  fit_score_100: 82,
+  fit_rating_raw: 8.2,
+  fit_band_raw: "A",
+  fit_band_final: "B",
+  fit_band: "B",
+  cap_reasons: "[org_legibility_unknown]",
+  document_gap_waived: "no",
+  application_decision: "verify",
+  hard_gate: "hold",
+  salary_feasibility: "pass",
+  gate_employment_visa: "hold",
+  gate_salary: "pass",
+  gate_english: "pass",
+  gate_role_center: "pass",
+  gate_japanese_client: "pass",
+  gate_original: "pass",
+  score_technical_value: 25,
+  score_document_match: 8,
+  score_transferability: 13,
+  score_org_legibility: 8,
+  score_client_deployability: 20,
+  score_role_coherence: 8,
+  primary_cohort: "modern_data_platform",
+  problem_families: "[dwh, data_quality]",
+  exact_evidence: "absent",
+  role_family: "data_platform_lead",
+  client_frontload_current: "low",
+  salary_min: 800,
+  salary_max: 1200,
+  salary_range_class: "high_possible",
+  access_level: 0,
+  access_state: "not_sent",
+  fit_score_current: 82,
+  fit_revision_on: "2026-08-20",
+};
+
 const complete = [
   "## 推荐理由",
   "8分。",
@@ -31,6 +74,55 @@ const complete = [
 
 test("schema：形の正しい job-case は問題なし", () => {
   assert.deepEqual(validateJobCaseFrontmatter(valid), []);
+});
+
+test("schema：v2の六軸・cap・Gate・監査labelが整合していれば問題なし", () => {
+  assert.deepEqual(validateJobCaseFrontmatter(validV2), []);
+});
+
+test("schema：v2の未知label・六軸不一致・Gate集約不一致を止める", () => {
+  const problems = validateJobCaseFrontmatter({
+    ...validV2,
+    primary_cohort: "modern_cloud_anything",
+    fit_score_100: 81,
+    hard_gate: "pass",
+  });
+  assert.ok(problems.some((p) => /primary_cohort .*未知/u.test(p)));
+  assert.ok(problems.some((p) => /6軸合計 82 と fit_score_100 81/u.test(p)));
+  assert.ok(problems.some((p) => /hard_gate は各Gateの最悪値 hold/u.test(p)));
+});
+
+test("schema：REJECTを高ratingのままWebへ出せない", () => {
+  const problems = validateJobCaseFrontmatter({
+    ...validV2,
+    gate_english: "reject",
+    hard_gate: "reject",
+  });
+  assert.ok(problems.some((p) => /hard_gate reject なら fit_band_final は D/u.test(p)));
+});
+
+test("schema：低いdocument matchをBのまま表示できない", () => {
+  const problems = validateJobCaseFrontmatter({
+    ...validV2,
+    fit_score_100: 77,
+    fit_rating_raw: 7.7,
+    fit_band_raw: "B",
+    rating: 7.7,
+    score_document_match: 3,
+  });
+  assert.ok(problems.some((p) => /fit_band_final は最大C/u.test(p)));
+});
+
+test("schema：年収非公開はmin/maxなしで表現できる", () => {
+  const problems = validateJobCaseFrontmatter({
+    ...validV2,
+    salary_min: undefined,
+    salary_max: undefined,
+    salary_range_class: "undisclosed",
+    salary_feasibility: "hold",
+    gate_salary: "hold",
+  });
+  assert.deepEqual(problems, []);
 });
 
 test("schema：status の列挙外は列挙を添えて落とす", () => {

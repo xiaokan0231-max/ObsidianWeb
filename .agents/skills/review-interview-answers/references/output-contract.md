@@ -13,6 +13,7 @@ Bridge 模式返回一个 JSON 对象，不输出代码围栏或说明文字。�
     "evidenceCredibility": { "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] },
     "riskControl": { "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] }
   },
+  "overviewZh": "",
   "summaryZh": "",
   "strengths": [],
   "weaknesses": [],
@@ -23,6 +24,13 @@ Bridge 模式返回一个 JSON 对象，不输出代码围栏或说明文字。�
 
 **不要返回任何分数。** 不返回 `overallScore`，也不返回 `dimensions[*].score`：
 维度分＝`100 − Σdeductions.points`，总分＝五维各 20%，都由服务器计算。
+
+## 综合导读与评分摘要
+
+- `overviewZh`：新生成报告必填的非空中文字符串，以空行（`\n\n`）分隔自然段。解释整场面试的重心与互动、本人表现、对方可能的判断及推进意愿、已确认结果与待定事项。所有判断要能回到输入证据；在行文中区分观察、推断和未知。后来收到的结果须说明时间关系。不要输出 Markdown 标题、列表或录用概率。
+- `summaryZh`：回答质量及评分理由的摘要，保留诊断用途，不重复导读。
+
+Markdown 和 Web 都在评分前展示 `overviewZh`。旧报告允许缺少该字段；缺失只代表尚未补导读，不用旧评分摘要冒充。只为旧报告补导读时同步更新可读 Markdown 与 JSON 正本，保留旧评分和逐题分析，并记录本次增补的作者与日期。
 
 ## 扣分明细
 

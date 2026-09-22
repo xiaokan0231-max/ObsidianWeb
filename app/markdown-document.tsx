@@ -1,13 +1,11 @@
 "use client";
 
 import { memo, type ReactNode } from "react";
-import { stripFrontmatter } from "@/lib/notes";
+import { headingAnchor, readingDocumentLines } from "@/lib/reading-document";
 import { normalizeHeading } from "@/lib/memory-atlas-data";
 
 /** 見出しに付ける id。行番号ベースなので、目次側と本文側で必ず一致する。 */
-export function headingAnchor(lineIndex: number) {
-  return `doc-h-${lineIndex}`;
-}
+export { headingAnchor } from "@/lib/reading-document";
 
 function renderInline(text: string, onWikiLink: (target: string, section?: string) => void): ReactNode[] {
   // 埋め込み記法 ![[…]] も同じリンクとして扱う。`!` を先に食わないと裸で残る。
@@ -74,14 +72,23 @@ function calloutTone(firstLine: string) {
 function MarkdownDocument({
   content,
   onWikiLink,
+  reading = false,
 }: {
   content: string;
   onWikiLink: (target: string, section?: string) => void;
+  reading?: boolean;
 }) {
-  const lines = stripFrontmatter(content).split("\n");
+  const lines = readingDocumentLines(content);
   const blocks: ReactNode[] = [];
   let codeLines: string[] = [];
-  let inCode = false;
+  let codeFence = "";
+  let paragraphLines: string[] = [];
+  let paragraphStart = 0;
+  const flushParagraph = () => {
+    if (!paragraphLines.length) return;
+    blocks.push(<p key={`paragraph-${paragraphStart}`} data-reading-anchor={`md-${paragraphStart}`}>{renderInline(paragraphLines.join("\n"), onWikiLink)}</p>);
+    paragraphLines = [];
+  };
   // 連続する > 行は1つの引用にまとめる。1行ごとに箱を作ると、
   // 数行の注意書きが分断されて読めなくなる。
   let quoteLines: string[] = [];
@@ -97,7 +104,7 @@ function MarkdownDocument({
     quoteLines = [];
     const tone = calloutTone(buffered[0] ?? "");
     blocks.push(
-      <blockquote key={`quote-${quoteStart}`} data-callout={tone ?? undefined}>
+      <blockquote key={`quote-${quoteStart}`} data-reading-anchor={`md-${quoteStart}`} data-callout={tone ?? undefined}>
         {buffered.map((quoted, offset) => (
           <span key={offset}>{renderInline(quoted, onWikiLink)}</span>
         ))}
@@ -108,8 +115,34 @@ function MarkdownDocument({
     if (!tableLines.length) return;
     const buffered = tableLines;
     tableLines = [];
+    if (reading) {
+      const rows = buffered.map((row) => row.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|"));
+      const columnCount = Math.max(...rows.map((row) => row.length));
+      // 独立的行网格会被各行的长文本撑成不同宽度；原生表格让所有行共用列宽。
+      // 空单元格仍然占位，宽表仅在容器内滚动，不拉宽整张书页。
+      blocks.push(
+        <div className="md-table" key={`table-${tableStart}`} data-reading-anchor={`md-${tableStart}`}
+          role="region" aria-label="正文表格，可横向滚动" tabIndex={0}>
+          <table className="reader-markdown-table" style={{ minWidth: `${columnCount * 8}em` }}>
+            <thead>
+              <tr>{Array.from({ length: columnCount }, (_, cellIndex) => (
+                <th key={cellIndex} scope="col">{renderInline((rows[0][cellIndex] ?? "").trim(), onWikiLink)}</th>
+              ))}</tr>
+            </thead>
+            <tbody>
+              {rows.slice(1).map((row, rowIndex) => (
+                <tr key={rowIndex}>{Array.from({ length: columnCount }, (_, cellIndex) => (
+                  <td key={cellIndex}>{renderInline((row[cellIndex] ?? "").trim(), onWikiLink)}</td>
+                ))}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      return;
+    }
     blocks.push(
-      <div className="md-table" key={`table-${tableStart}`}>
+      <div className="md-table" key={`table-${tableStart}`} data-reading-anchor={`md-${tableStart}`}>
         {buffered.map((row, rowIndex) => (
           <div className={`md-table-row${rowIndex === 0 ? " md-table-head" : ""}`} key={rowIndex}>
             {/* 前後のパイプだけ落として分割する。filter(Boolean) だと空セルが消えて列がずれる */}
@@ -122,24 +155,28 @@ function MarkdownDocument({
     );
   };
   lines.forEach((line, index) => {
-    if (line.startsWith("```")) {
+    const marker = line.trimStart().match(/^(`{3,}|~{3,})/)?.[1];
+    if (marker && (!codeFence || (marker[0] === codeFence[0] && marker.length >= codeFence.length))) {
+      flushParagraph();
       flushQuote();
       flushTable();
-      if (inCode) {
-        blocks.push(<pre key={`code-${index}`}><code>{codeLines.join("\n")}</code></pre>);
+      if (codeFence) {
+        blocks.push(<pre key={`code-${index}`} data-reading-anchor={`md-${index}`}><code>{codeLines.join("\n")}</code></pre>);
         codeLines = [];
       }
-      inCode = !inCode;
+      codeFence = codeFence ? "" : marker;
       return;
     }
-    if (inCode) { codeLines.push(line); return; }
+    if (codeFence) { codeLines.push(line); return; }
     if (line.startsWith(">")) {
+      flushParagraph();
       flushTable();
       if (!quoteLines.length) quoteStart = index;
       quoteLines.push(line.replace(/^>\s?/, ""));
       return;
     }
     if (line.startsWith("|")) {
+      flushParagraph();
       flushQuote();
       if (!tableLines.length) tableStart = index;
       // |---|---| の区切り行は表示しない
@@ -148,13 +185,15 @@ function MarkdownDocument({
     }
     flushQuote();
     flushTable();
-    if (!line.trim()) return;
+    if (!line.trim()) { flushParagraph(); return; }
     if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      flushParagraph();
       blocks.push(<hr key={index} />);
       return;
     }
-    const heading = line.match(/^(#{1,4})\s+(.+)/);
+    const heading = line.match(/^(#{1,6})\s+(.+)/);
     if (heading) {
+      flushParagraph();
       const level = heading[1].length;
       const data = { "data-md-heading": normalizeHeading(heading[2]), id: headingAnchor(index) };
       // 冒頭の H1 は Obsidian 慣例でノート題名＝drawer が既に大きく出しているので捨てる。
@@ -168,15 +207,21 @@ function MarkdownDocument({
       else blocks.push(<h4 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h4>);
       return;
     }
-    const listItem = line.match(/^\s*(?:[-*]|\d+\.)\s+(.+)/);
+    const listItem = line.match(/^(\s*)([-*+] |\d+[.)] )\s*(.+)/);
     if (listItem) {
-      blocks.push(<div className="md-list-item" key={index}><i /> <span>{renderInline(listItem[1], onWikiLink)}</span></div>);
+      flushParagraph();
+      blocks.push(<div className="md-list-item" key={index} data-reading-anchor={`md-${index}`} style={reading ? { marginLeft: `${Math.min(listItem[1].replace(/\t/g, "    ").length / 2, 6)}em` } : undefined}><i>{reading ? (/^\d/.test(listItem[2]) ? listItem[2].trim() : "·") : null}</i><span>{renderInline(listItem[3], onWikiLink)}</span></div>);
       return;
     }
-    blocks.push(<p key={index}>{renderInline(line, onWikiLink)}</p>);
+    if (reading) {
+      if (!paragraphLines.length) paragraphStart = index;
+      paragraphLines.push(line);
+    } else blocks.push(<p key={index} data-reading-anchor={`md-${index}`}>{renderInline(line, onWikiLink)}</p>);
   });
   flushQuote();
   flushTable();
+  flushParagraph();
+  if (codeFence && codeLines.length) blocks.push(<pre key="unclosed-code" data-reading-anchor="md-unclosed-code"><code>{codeLines.join("\n")}</code></pre>);
   return <article className="markdown-document">{blocks}</article>;
 }
 

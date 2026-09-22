@@ -226,10 +226,10 @@ export function parseAnnotations(content: string): ReviewAnnotation[] {
   return entries;
 }
 
-/** 連打事故で同じ追記が複数できても、読み側では一つの事実として扱う。 */
+/** 连点产生的重复项保留最后一次；A→B→A 的撤回与恢复不能被去重倒回 B。 */
 export function uniqueAnnotations(annotations: ReviewAnnotation[]): ReviewAnnotation[] {
   const seen = new Set<string>();
-  return annotations.filter((annotation) => {
+  return [...annotations].reverse().filter((annotation) => {
     const key = [
       annotation.sentenceId,
       annotation.kind,
@@ -241,7 +241,7 @@ export function uniqueAnnotations(annotations: ReviewAnnotation[]): ReviewAnnota
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  });
+  }).reverse();
 }
 
 /**
@@ -273,7 +273,8 @@ export function reviewDecisionTasks(
     }
   }
 
-  const decisions = uniqueAnnotations(annotations).filter((item) => item.kind === "裁定");
+  // 追记包含撤回：最新一条即使尚不确定，也不能回退到旧的确认。
+  const decisions = annotations.filter((item) => item.kind === "裁定").reverse();
   for (const task of tasks) {
     const sentenceTasks = tasks.filter((candidate) => candidate.sentenceId === task.sentenceId);
     const sentence = sentences.find((candidate) => candidate.id === task.sentenceId);
@@ -290,6 +291,16 @@ export function reviewDecisionTasks(
       return sentenceTasks.length === 1;
     });
     if (decision) {
+      if (task.target === "speaker") {
+        // 仅认明确的肯定句，不能把「自分の発言か覚えていない」当成本人确认。
+        const speaker = decision.mine.trim().match(
+          /^(?:話者裁定[：:]\s*)?(?:この文は)?(面接官|自分)の発言(?:です|で確定)?[。.!！]?$/,
+        )?.[1];
+        task.resolution = speaker === "面接官" ? "speaker-interviewer"
+          : speaker === "自分" ? "speaker-self" : "unknown";
+        if (speaker) task.resolvedBy = decision.id;
+        continue;
+      }
       task.resolvedBy = decision.id;
       task.resolution = decision.mine.includes("転写誤りで確定")
         ? "transcript"
