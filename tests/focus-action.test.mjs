@@ -142,6 +142,7 @@ test("イベントが過ぎた準備 todo は primary にならず、収尾（st
         status: "進行中",
         priority: "high",
         category: "面接対策",
+        case_id: "Nova_Systems_データAI責任者候補",
         action: "8月13日13:30の最終面接（対面）の準備を完成する",
         due: "2026-08-12",
         focus: true,
@@ -165,6 +166,7 @@ test("イベントが過ぎた準備 todo は primary にならず、収尾（st
   // 失効した準備 todo は ranked から消え、stale に入る
   assert.equal(brief.ranked.some((item) => item.note.path === "prep.md"), false);
   assert.deepEqual(brief.stale.map((item) => item.note.path), ["prep.md"]);
+  assert.equal(brief.stale[0].staleReason, "event-passed");
 });
 
 test("expires_at はイベント当日まで primary の資格を奪わない", () => {
@@ -267,6 +269,7 @@ test("案件が不採用になった待办は日付に関係なく収尾へ（�
   );
   assert.equal(brief.primary, null);
   assert.deepEqual(brief.stale.map((item) => item.note.path), ["prep.md"]);
+  assert.equal(brief.stale[0].staleReason, "case-closed");
 });
 
 test("常青タスク（due 無し）は focus 窗口が過ぎても失効しない", () => {
@@ -277,6 +280,8 @@ test("常青タスク（due 無し）は focus 窗口が過ぎても失効しな
         status: "未着手",
         priority: "medium",
         category: "面接対策",
+        case_id: "Some_Case",
+        blocks_next_stage: true,
         action: "日本語応答訓練を続ける",
         focus: true,
         focus_until: "2026-08-10",
@@ -308,4 +313,103 @@ test("推断は 面接対策 限定：返信系待办は pin の残骸だけで�
   assert.equal(brief.primary?.note.path, "reply.md");
   assert.match(brief.primary?.reason ?? "", /已逾期/);
   assert.deepEqual(brief.stale, []);
+});
+
+// 🔴 Codex レビューの指摘：category が 面接対策 でも「使い回しの効くタスク」は実在する
+// （vault 実データの 転職回数の説明・面接復盤）。それに due と一時的な集中窗口を付けただけで
+// 失効扱いすると、窗口が切れた瞬間に生きたタスクが黙って沈む。
+// イベント拘束の推断には case_id ＋ blocks_next_stage（この案件のこの回の関門）を要求する。
+test("使い回せる面接対策タスクは、集中窗口が切れても失効しない", () => {
+  const brief = buildFocusBrief(
+    [
+      note("reusable.md", {
+        type: "todo",
+        status: "進行中",
+        priority: "high",
+        category: "面接対策",
+        action: "転職回数の説明を作り直す",
+        due: "2026-08-10",
+        focus: true,
+        focus_until: "2026-08-10",
+        // case_id も blocks_next_stage も無い＝特定の回の関門ではない
+      }),
+    ],
+    "2026-08-16",
+  );
+  assert.equal(brief.primary?.note.path, "reusable.md");
+  assert.match(brief.primary?.reason ?? "", /已逾期/);
+  assert.deepEqual(brief.stale, []);
+});
+
+test("案件に紐づいていても、関門でなければ失効推断しない", () => {
+  const brief = buildFocusBrief(
+    [
+      note("polish.md", {
+        type: "todo",
+        status: "進行中",
+        priority: "medium",
+        category: "面接対策",
+        case_id: "Acme_エンジニア",
+        action: "Acme 向けの回答カードを磨く",
+        due: "2026-08-10",
+        focus: true,
+        focus_until: "2026-08-10",
+        // blocks_next_stage が無い＝次の選考を止める関門ではない
+      }),
+    ],
+    "2026-08-16",
+  );
+  assert.equal(brief.primary?.note.path, "polish.md");
+  assert.deepEqual(brief.stale, []);
+});
+
+// 🔴 Codex レビューの指摘：today を渡さないと、日付を跨いでも判定が凍る。
+test("buildFocusBrief は渡された today で判定する（呼ぶ側の memo 凍結を防ぐ前提）", () => {
+  const prep = note("prep.md", {
+    type: "todo",
+    status: "進行中",
+    priority: "high",
+    action: "面接の準備",
+    due: "2026-08-12",
+    expires_at: "2026-08-13",
+  });
+  // 同じ notes でも today だけで結果が変わる＝呼ぶ側が today を依存に入れれば追随できる
+  assert.equal(buildFocusBrief([prep], "2026-08-13").primary?.note.path, "prep.md");
+  assert.equal(buildFocusBrief([prep], "2026-08-14").primary, null);
+  assert.equal(buildFocusBrief([prep], "2026-08-14").stale.length, 1);
+});
+
+// 🔴 画面の言い方が変わるので、失効の理由を持って回る。
+// 「事件已过去」の一語で本人が「案件が終わったのか？」と誤読した事故への対応。
+test("失効の理由を区別する：日付が過ぎた のか 案件が終わった のか", () => {
+  const brief = buildFocusBrief(
+    [
+      note("closed-case.md", {
+        type: "job-case",
+        case_id: "Acme_エンジニア",
+        company: "Acme",
+        status: "不採用（2026-08-15）",
+      }),
+      note("by-case.md", {
+        type: "todo",
+        status: "未着手",
+        priority: "high",
+        case_id: "Acme_エンジニア",
+        action: "Acme の一次面接準備",
+        due: "2026-08-25",
+      }),
+      note("by-date.md", {
+        type: "todo",
+        status: "進行中",
+        priority: "high",
+        action: "面接の準備",
+        due: "2026-08-12",
+        expires_at: "2026-08-13",
+      }),
+    ],
+    "2026-08-16",
+  );
+  const byPath = new Map(brief.stale.map((item) => [item.note.path, item.staleReason]));
+  assert.equal(byPath.get("by-case.md"), "case-closed");
+  assert.equal(byPath.get("by-date.md"), "event-passed");
 });

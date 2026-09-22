@@ -23,6 +23,11 @@ export type FocusAction = {
   blocksNextStage: boolean;
 };
 
+/** 失効の理由。画面での言い方が変わるので、判定した側が持って回る。 */
+export type StaleReason = "event-passed" | "case-closed";
+
+export type StaleAction = FocusAction & { staleReason: StaleReason };
+
 export type FocusWaitingItem = {
   note: Note;
   company: string;
@@ -42,7 +47,7 @@ export type FocusBrief = {
    * 実例：最終面接（8/13）が終わって結果待ちに入ったのに、準備 todo が
    * 進行中のまま「已逾期」として hero を占領し続けた。
    */
-  stale: FocusAction[];
+  stale: StaleAction[];
 };
 
 const TODO_STATUSES = new Set(["未着手", "進行中"]);
@@ -122,20 +127,28 @@ function focusReason(action: Omit<FocusAction, "reason">, today: string) {
 
 /**
  * 「この日を過ぎたらタスク自体が意味を失う」日付。due（期限：過ぎたらもっと急ぐ）とは
- * 反対向きの概念で、面接準備のようなイベント拘束の待办だけが持つ。
+ * 反対向きの概念で、特定のイベントに縛られた待办だけが持つ。
  *
- * 正書きは frontmatter の expires_at。無い旧ノートには保守的な推断だけを掛ける：
- * category が 面接対策 かつ focus: true かつ focus_until が過去 かつ
- * due が有効で ≦ focus_until——つまり本人が宣言した集中窗口が丸ごと過去にある場合のみ。
- * category を見るのは、返信・日程調整のような「窗口を逃しても義務が残る」待办を
- * 巻き込まないため（対抗審査の指摘：pin の残骸だけで失効と断じてはいけない）。
+ * 正書きは frontmatter の expires_at。これから起票するものは skill が必ず書く。
+ *
+ * 無い旧ノート向けの推断は**イベント拘束の明示的な印がある場合だけ**に絞る：
+ *   case_id（どの案件か）＋ blocks_next_stage（その案件の次の選考を止める関門か）
+ *   ＋ 本人が宣言した集中窗口が丸ごと過去（focus_until < today かつ due ≦ focus_until）。
+ *
+ * category だけでは足りない——面接対策 には「転職回数の説明」「面接復盤」のような
+ * 使い回しの効くタスクが実在し、それらに due と一時的な集中窗口を付けただけで
+ * 失効扱いされると、窗口が切れた瞬間に生きたタスクが黙って沈む（Codex レビューの指摘）。
+ * case_id ＋ blocks_next_stage は「この案件のこの回の関門」という意味を持つので、
+ * 使い回しタスクには原理的に付かない。
+ *
  * due しか無い待办（再認証のような「過ぎても今日やれば有効」な真の期限超過）は
- * 絶対に巻き込まない。
+ * どのみち巻き込まない。
  */
 function expiresAt(note: Note): string {
   const explicit = validDate(getString(note.frontmatter.expires_at));
   if (explicit) return explicit;
-  if (getString(note.frontmatter.category) !== "面接対策") return "";
+  if (!getString(note.frontmatter.case_id)) return "";
+  if (!booleanValue(note.frontmatter.blocks_next_stage)) return "";
   if (!booleanValue(note.frontmatter.focus)) return "";
   const focusUntil = validDate(getString(note.frontmatter.focus_until));
   if (!focusUntil) return "";
@@ -150,20 +163,24 @@ function expiresAt(note: Note): string {
  * 2. case_id の先の job-case が 不採用 なら日付に関係なく死亡。この vault で
  *    最も維持品質が高い機械管理フィールドで、最も確実な死亡信号。
  * 3. expires_at（明示 or 推断）が過去。
+ *
+ * **なぜ理由を返すのか**：2 と 3 は画面での言い方が違う。案件が終わったのに
+ * 「日子已经过了」と出すと、案件の話なのか待办の話なのか読めない——実際に
+ * 「事件已过去」の一語で本人が「案件が終わったのか？」と誤読した事故がある。
  */
-function isExpired(
+function staleReasonFor(
   note: Note,
   today: string,
   terminalCaseIds: ReadonlySet<string>,
-): boolean {
+): StaleReason | null {
   const focusUntil = validDate(getString(note.frontmatter.focus_until));
   if (booleanValue(note.frontmatter.focus) && focusUntil && focusUntil >= today) {
-    return false;
+    return null;
   }
   const caseId = getString(note.frontmatter.case_id);
-  if (caseId && terminalCaseIds.has(caseId)) return true;
+  if (caseId && terminalCaseIds.has(caseId)) return "case-closed";
   const expiry = expiresAt(note);
-  return Boolean(expiry) && expiry < today;
+  return expiry && expiry < today ? "event-passed" : null;
 }
 
 /** 待办を巻き込んで死亡させる案件終態。内定は残す（条件確認などの待办が生きている）。 */
@@ -298,7 +315,11 @@ export function buildFocusBrief(
   // 過去のイベントの準備が hero を永久に占領する。催促ではなく収尾の対象として分ける。
   const terminalCases = terminalCaseIdSet(notes);
   const stale = actions
-    .filter((action) => isExpired(action.note, today, terminalCases))
+    .map((action) => {
+      const reason = staleReasonFor(action.note, today, terminalCases);
+      return reason ? { ...action, staleReason: reason } : null;
+    })
+    .filter((action): action is StaleAction => action !== null)
     .sort((left, right) => left.note.path.localeCompare(right.note.path));
   const stalePaths = new Set(stale.map((action) => action.note.path));
   const ranked = actions
@@ -322,15 +343,15 @@ export function buildFocusBrief(
  * notes を渡すと case_id 経由の死亡判定（案件が 不採用）も効く。
  * 保留 は対象外＝本人が意図して棚上げしたものは急かしも収尾催促もしない（数据字典に明記）。
  */
-export function isStaleTodo(
+export function todoStaleReason(
   note: Note,
   today = dateKey(),
   notes: Note[] = [],
-): boolean {
-  if (getType(note) !== "todo") return false;
+): StaleReason | null {
+  if (getType(note) !== "todo") return null;
   const status = getString(note.frontmatter.status) || "未着手";
-  if (!TODO_STATUSES.has(status)) return false;
-  return isExpired(note, today, terminalCaseIdSet(notes));
+  if (!TODO_STATUSES.has(status)) return null;
+  return staleReasonFor(note, today, terminalCaseIdSet(notes));
 }
 
 export function focusDateLabel(value: string) {

@@ -5,7 +5,7 @@ import { type AppView } from "./app-route";
 import { buildFocusBrief, focusDateLabel } from "@/lib/focus-action";
 import { compareJobs, toJobCard } from "@/lib/jobs";
 import { parseInterviewPractice } from "@/lib/review-practice";
-import { formatDate, getString, getType, type Note } from "@/lib/notes";
+import { formatDate, getString, getTitle, getType, type Note } from "@/lib/notes";
 import {
   ACTIVE_JOB_STATUSES,
   buildReviewPreview,
@@ -21,6 +21,17 @@ import {
 } from "@/lib/memory-atlas-data";
 
 type View = AppView;
+
+/**
+ * 収尾入口に出す待办の名前。action の長文（88字）を切ると案件名に見えてしまうので H1 を使う。
+ * 会社名の接頭辞は落とさない——H1 は「◯◯ 最終面接準備」、frontmatter は
+ * 「株式会社◯◯」と表記が揺れており、前綴照合は当てにならない。
+ * 「最終面接準備」まで見えないと、どの待办の話か分からないので、切らずに収まる長さを取る。
+ */
+function staleTitle(note: Note) {
+  const title = getTitle(note).replace(/^\d{4}-\d{2}-\d{2}[_\s]*/, "").trim();
+  return title.length > 30 ? `${title.slice(0, 29)}…` : title;
+}
 
 // 進行中案件の並び順：面接に近いほど上。定数なのでコンポーネントの外に置く。
 // 改变实际 DOM 顺序，确保窄屏阅读和键盘顺序一致。
@@ -71,6 +82,9 @@ function Overview({
   const recentChanges = useMemo(() => jobs
     .filter((job) => !ACTIVE_JOB_STATUSES.has(job.status) && job.status !== "未応募")
     .slice(0, 3), [jobs]);
+  // today を渡し、依存にも入れる。入れないと日付を跨いでも focusBrief が昨日の判定のまま
+  // 凍り、expires_at をまたいだ待办が hero に居座り続ける——H5 で直したのと同型の穴を
+  // stale 机制で作り直すところだった。
   const focusBrief = useMemo(() => buildFocusBrief(notes, today), [notes, today]);
   const primaryFocus = focusBrief.primary;
 
@@ -289,9 +303,26 @@ function Overview({
           </div>
         </div>
         {focusError && <div className="inline-write-error" role="alert">{focusError}</div>}
-        {focusBrief.stale.length > 0 && <button type="button" className="overview-stale-note" onClick={() => onOpen(focusBrief.stale[0].note)}>
-          {focusBrief.stale.length} 件待办的事件已过去，打开收尾 <span aria-hidden="true">→</span>
-        </button>}
+        {focusBrief.stale.length > 0 && (
+          // 失効した待办は催促しない。静かな一行で「収尾」を促すだけ。
+          // 🔴 文言は必ず「待办を閉じる話」と読めること——最初は「事件已过去」と
+          // だけ書いて、本人に「案件が終わったのか？」と誤読された。案件は
+          // 「等待对方」側で生きている。理由（日付が過ぎた／案件が終わった）も
+          // 言い分けないと、同じ一行が両方の意味に読める。
+          <button type="button" className="overview-stale-note" onClick={() => onOpen(focusBrief.stale[0].note)}>
+            {focusBrief.stale.length === 1 ? (
+              <>
+                待办「{staleTitle(focusBrief.stale[0].note)}」
+                {focusBrief.stale[0].staleReason === "case-closed"
+                  ? "所属的案件已结束，可以关掉"
+                  : "的日子已经过了，可以关掉"}
+              </>
+            ) : (
+              `${focusBrief.stale.length} 件待办已经不用做了，逐一关掉`
+            )}
+            <span aria-hidden="true">→</span>
+          </button>
+        )}
         <div className="overview-current-stats">
           <Stat value={openTodos.length} label="件待办" />
           <Stat value={currentCases.length} label="个进行中案件" />
