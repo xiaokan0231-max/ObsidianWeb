@@ -1077,10 +1077,19 @@ export default function ThreeKnowledgeGraph({
     // 鼠标甩动的阻尼残余存在 OrbitControls 内部，enabled=false 拦不住
     // update() 继续释放它（残余约一秒的漂移会叠在手势拖动上）。关掉阻尼跑
     // 一次 update 让残余一次性结清并归零，再交给手势接管。
+    //
+    // 只结清鼠标留下的残余。单手转视角走的也是 OrbitControls 的旋转入口，
+    // 它留下的残余是手势自己的滑行；松手后一秒内再捏住、释放宽限期里重新捏拢、
+    // 第二只手入镜——每一次都会把这段残余瞬间跳完（实测 10–20°），拖动就抖一下。
+    let orbitResidualFromPointer = false;
+    controls.addEventListener("end", () => { orbitResidualFromPointer = true; });
     const flushOrbitInertia = () => {
+      if (!orbitResidualFromPointer) return;
+      orbitResidualFromPointer = false;
+      const damping = controls.enableDamping;
       controls.enableDamping = false;
       controls.update();
-      controls.enableDamping = true;
+      controls.enableDamping = damping;
     };
 
     const flightController = createFlightController({

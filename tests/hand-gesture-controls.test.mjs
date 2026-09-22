@@ -538,6 +538,10 @@ test("相机手势接入：单手捏住拖动＝转视角，双手才平移，�
     "copy(anchor) 链式写法有别名陷阱：clone 克隆到的已是 anchor，相机会坍缩到锚点",
   );
   assert.ok(graph.includes("flushOrbitInertia"), "手势接管前要结清 OrbitControls 的阻尼残余");
+  // 单手转视角自己也走 OrbitControls，它的残余是手势的滑行；结清只针对鼠标留下的那份，
+  // 否则宽限期里重新捏拢、松手后再捏住都会把残余瞬间跳完。阻尼开关也要恢复原值（减弱动态下是关的）。
+  assert.ok(graph.includes("if (!orbitResidualFromPointer) return;"), "只结清鼠标残余");
+  assert.ok(graph.includes("controls.enableDamping = damping;"), "结清后恢复原来的阻尼设置");
   assert.ok(graph.includes("controls.minDistance"));
   assert.ok(graph.includes("controls.maxDistance"));
   assert.ok(graph.includes("frame.mode === \"dual-transform\""));
@@ -593,6 +597,18 @@ test("主交互收敛成掌心瞄准和捏合，复杂功能放进可见的 V �
   // 阈值优先级：这只手的包络 ＞ 存档校准 ＞ 默认值。包络没学会时不能把存档校准架空。
   assert.ok(controls.includes("pinchThresholdsFor(hand.envelope, thresholdsRef.current)"));
   assert.ok(controls.includes("isPinchPose(detection.landmarks, { aspect: videoAspect })"), "几何闸门要和 pinchRatio 同一量纲");
+  // 拳帧不能进包络，否则区间下沿被压到拳的位置、拳在第一帧就被捏合语法抢走，
+  // 握拳接管从此失效；pinchPose 的滞回也只能延续几何上确认过的捏合。
+  assert.ok(
+    controls.includes('if (geometricPinch || detection.gesture !== "Closed_Fist")'),
+    "握拳帧的指尖距不能当包络样本",
+  );
+  assert.ok(
+    controls.includes("((hand.pinch?.pinching ?? false) && hand.pinchPose)"),
+    "pinchPose 滞回不能由状态机凭空点亮",
+  );
+  // 读数里的「暂用」值必须是真正生效的回退（存档校准），不能写死默认值。
+  assert.ok(controls.includes("学习中 · 暂用 ${primary.pinchCloseAt.toFixed(2)}"));
   assert.ok(!controls.includes("STATIC_ACTIONS"), "点赞、倒赞和 ILY 不应再直接抢占镜头");
   assert.ok(css.includes(".graph-hand-radial"));
   assert.ok(

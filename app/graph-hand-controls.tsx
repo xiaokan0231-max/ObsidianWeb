@@ -127,8 +127,8 @@ export type GraphTrackedHandFrame = HandPose & {
   pinching: boolean;
   grabbed: boolean;
   pinchProgress: number;
-  /** 当前这只手实际生效的捏合阈值。摊在界面上，捏了没反应时能直接看出差多少。 */
-  pinchCloseAt: number | null;
+  /** 当前这只手实际生效的捏合阈值（包络＞存档校准＞默认）。摊在界面上，捏了没反应时能直接看出差多少。 */
+  pinchCloseAt: number;
   /** 判定用的裸读数。pose 里那份经过低通，比判定慢约 200ms，拿它当读数会「看着已过线却没反应」。 */
   rawPinchRatio: number;
   /** 包络是否已张开到可信跨度；否则触发线只是默认值，不是这只手学到的。 */
@@ -778,12 +778,17 @@ export function GraphHandControls({
             hand.pose = smoothHandPose(hand.pose, detection.pose);
             const heldFistBefore = fistMaintained(hand);
             hand.rawGesture = detection.gesture;
-            // 捏合姿势带滞回：几何闸门（指尖距 0.62 掌尺度）比松手阈值
-            // (0.68) 先一步失效，松手那一帧 pinchPose 必然翻假——而 select
+            // 捏合姿势带滞回：几何闸门（指尖距 0.62 掌尺度；包络阈值可能比它还宽）
+            // 比松手阈值先一步失效，松手那一帧 pinchPose 必然翻假——而 select
             // 正好在那一帧发出，拳会当场接管并把它作废。只要这轮捏合还没
             // 结束，就一直按捏合对待。
-            hand.pinchPose = isPinchPose(detection.landmarks, { aspect: videoAspect })
-              || (hand.pinch?.pinching ?? false);
+            //
+            // 但滞回只延续「几何上确认过」的捏合，不由状态机凭空创造：包络把拳的
+            // 指尖距也当区间下沿吸收后，拳会被判成 press；若 pinching 就能点亮
+            // pinchPose，握拳接管从此永远被一票否决，原地短促握拳松开还会发出 select。
+            const geometricPinch = isPinchPose(detection.landmarks, { aspect: videoAspect });
+            hand.pinchPose = geometricPinch
+              || ((hand.pinch?.pinching ?? false) && hand.pinchPose);
             hand.rawPinchRatio = detection.pose.pinchRatio;
             hand.gestureHold = updateGestureHold(hand.gestureHold, detection.gesture, now);
             // 拳→其他明确手势连续两帧＝真的松拳，立刻结束保持轨道。
@@ -804,8 +809,12 @@ export function GraphHandControls({
             }
             hand.gesture = KNOWN_GESTURES.has(hand.gestureHold.gesture as GraphHandGesture)
               ? hand.gestureHold.gesture as GraphHandGesture : "None";
-            hand.envelope = updatePinchEnvelope(hand.envelope, detection.pose.pinchRatio, now);
-            rememberEnvelope(hand.envelope, now);
+            // 拳帧不进包络：握拳时拇指食指本来就贴着，读数会把区间下沿压到拳的位置，
+            // 之后 closeThreshold 永远高于拳，拳在第一帧就被捏合语法抢走。
+            if (geometricPinch || detection.gesture !== "Closed_Fist") {
+              hand.envelope = updatePinchEnvelope(hand.envelope, detection.pose.pinchRatio, now);
+              rememberEnvelope(hand.envelope, now);
+            }
             // 抓取由位移触发，不再按“瞄的是节点还是空间”分流 holdMs——
             // 那套分流依赖 targetsRef 的一帧回灌延迟，按下当帧读到旧值就会
             // 把 360ms 悄悄换成 120ms，本想选节点的捏合被吞成拖动。
@@ -865,7 +874,11 @@ export function GraphHandControls({
             const id = `hand-${nextHandNumber}`;
             nextHandNumber += 1;
             const gestureHold = updateGestureHold(null, detection.gesture, now);
-            const envelope = seededEnvelope(envelopeSeedRef.current, detection.pose.pinchRatio, now);
+            const firstFrameIsFist = detection.gesture === "Closed_Fist"
+              && !isPinchPose(detection.landmarks, { aspect: videoAspect });
+            // 首帧是拳就只回放种子，不让拳的读数当这只手的第一个样本。
+            const firstRatio = firstFrameIsFist ? Number.NaN : detection.pose.pinchRatio;
+            const envelope = seededEnvelope(envelopeSeedRef.current, firstRatio, now);
             // 首帧就走和后续帧同一套阈值，不再拿存档里的旧数字单独裁一次。
             const pinch = updatePinchInteraction(
               null,
@@ -1187,6 +1200,9 @@ export function GraphHandControls({
             lastPinchEvent = primary.pinch.event;
             lastPinchEventAt = now;
           }
+          const primaryThresholds = primary
+            ? pinchThresholdsFor(primary.envelope, thresholdsRef.current)
+            : null;
           const frame: GraphHandNavigationFrame = {
             hands: frameHands,
             mode,
@@ -1194,12 +1210,12 @@ export function GraphHandControls({
             transform,
             action: publishedAction,
             frameAspect: videoAspect,
-            diagnostics: primary
+            diagnostics: primary && primaryThresholds
               ? {
                   pinchRatio: primary.rawPinchRatio,
-                  closeThreshold: pinchThresholdsFor(primary.envelope, thresholdsRef.current).closeThreshold,
-                  releaseThreshold: pinchThresholdsFor(primary.envelope, thresholdsRef.current).releaseThreshold,
-                  calibrated: pinchThresholdsFor(primary.envelope, thresholdsRef.current).calibrated === true,
+                  closeThreshold: primaryThresholds.closeThreshold,
+                  releaseThreshold: primaryThresholds.releaseThreshold,
+                  calibrated: primaryThresholds.calibrated === true,
                   gesture: primary.rawGesture,
                   pinchPose: primary.pinchPose,
                   suppressed: primary.pinchSuppressed,
@@ -1449,8 +1465,8 @@ export function GraphHandControls({
               捏合 {primary.rawPinchRatio.toFixed(2)}
               <i />
               {primary.pinchConfident
-                ? `触发 ${(primary.pinchCloseAt ?? DEFAULT_THRESHOLDS.closeThreshold).toFixed(2)}`
-                : `学习中 · 暂用 ${DEFAULT_THRESHOLDS.closeThreshold.toFixed(2)}`}
+                ? `触发 ${primary.pinchCloseAt.toFixed(2)}`
+                : `学习中 · 暂用 ${primary.pinchCloseAt.toFixed(2)}`}
             </em>
           )}
         </div>

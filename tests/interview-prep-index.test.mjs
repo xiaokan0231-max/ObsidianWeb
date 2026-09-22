@@ -196,8 +196,8 @@ test("案件共用リンクは選択回までだけ累積し、未来回の資�
 
 test("case の wiki 別名と節を除いて安定した参照先を得る", () => {
   assert.equal(
-    prepWikiTarget("[[Nova_Systems_データAI責任者候補#概要|表示名]]"),
-    "Nova_Systems_データAI責任者候補",
+    prepWikiTarget("[[Nova_Systems_エンジニア#概要|表示名]]"),
+    "Nova_Systems_エンジニア",
   );
 });
 
