@@ -816,8 +816,21 @@ function historyOf(batch: LanguageBatch): LanguageBatchHistory {
   };
 }
 
+// 訓練ページを開くたびに study／review ノートを全部解析し直していた（数秒）。vault のスナップショットが
+// 同じなら結果も同じなので、件数＋最新 mtime を鍵に 1 世代だけ持つ。書込ルートは vault-cache を
+// invalidate するので、次の読み取りで鍵が変わり自然に作り直される。
+let stateMemo: { key: string; value: Promise<LanguageV2State> } | null = null;
+
 export async function loadLanguageV2State(notes?: ObsidianNote[]): Promise<LanguageV2State> {
   const allNotes = notes ?? await (await import("./obsidian")).readAllNotes();
+  const key = `${allNotes.length}:${allNotes.reduce((latest, note) => Math.max(latest, note.stat?.mtime ?? 0), 0)}`;
+  if (stateMemo?.key === key) return stateMemo.value;
+  const value = computeLanguageV2State(allNotes);
+  stateMemo = { key, value };
+  return value;
+}
+
+async function computeLanguageV2State(allNotes: ObsidianNote[]): Promise<LanguageV2State> {
   const curriculum = latestCurriculum(allNotes);
   const batches = allBatches(allNotes);
   if (!curriculum) return { ready: false, stale: false, progress: [], history: batches.map(historyOf).reverse() };

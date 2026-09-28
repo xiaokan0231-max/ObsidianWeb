@@ -428,6 +428,13 @@ export function auditJobCaseCompleteness(
     warnings.push(`status が「${base}」なのに rating が無い（Web で 0/10 と表示される）`);
   }
 
+  // 応募日は applied_on か、応募済の括弧内の日付にしか残らない。どちらも無いと台帳の追記分にも
+  // 月別応募数にも載らず、「N日経過」も出ない——status_updated は後で拒否日に上書きされる。
+  const appliedOn = String(fm.applied_on ?? "").trim();
+  if (!DATE.test(appliedOn) && !/\b20\d{2}-\d{2}-\d{2}\b/.test(String(fm.status ?? ""))) {
+    warnings.push("応募日が無い（applied_on: YYYY-MM-DD を書く。Web で応募済にすると自動で入る）");
+  }
+
   const found = headings(content);
   const missing = JOB_CASE_WEB_SECTIONS.filter(
     (section) => !found.some((h) => h === section.heading || section.aliases.includes(h)),

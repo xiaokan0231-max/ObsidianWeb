@@ -4,9 +4,11 @@ import { memo, useMemo, useState, useSyncExternalStore } from "react";
 import { type AppView } from "./app-route";
 import { buildFocusBrief, focusDateLabel } from "@/lib/focus-action";
 import { awaitingCounterpart, compareJobs, toJobCard } from "@/lib/jobs";
+import { joinReviewNotes } from "@/lib/review-join";
 import { parseInterviewPractice } from "@/lib/review-practice";
 import { formatDate, getString, getTitle, getType, type Note } from "@/lib/notes";
 import {
+  calendarCompanyIdentity,
   ACTIVE_JOB_STATUSES,
   buildReviewPreview,
   calendarEventTime,
@@ -133,6 +135,22 @@ function Overview({
   const [year, month, day] = today.split("-").map(Number);
   const horizon = localDateKey(new Date(year, month - 1, day + 6));
   const upcoming = derived.calendarEvents.filter((event) => event.phase === "upcoming" && event.date <= horizon);
+  // 已过的面试如果没有整理稿，复盘链路从起点就断了、而且没人提醒（整理稿是 joinReviewNotes 的起点）。
+  // 只看最近 14 天：更早的要么已经复盘，要么本人决定不复盘了。
+  const missingTranscripts = useMemo(() => {
+    const floor = localDateKey(new Date(year, month - 1, day - 14));
+    const joined = joinReviewNotes(notes);
+    const covered = (event: { company: string; date: string }) => joined.some((doc) =>
+      doc.date === event.date && calendarCompanyIdentity(doc.company) === calendarCompanyIdentity(event.company));
+    return derived.calendarEvents
+      .filter((event) => event.phase === "past" && event.date >= floor && event.date < today && !covered(event))
+      .slice(0, 5);
+  }, [derived.calendarEvents, notes, today, year, month, day]);
+  const [copiedTranscript, setCopiedTranscript] = useState("");
+  const copyTranscriptRequest = async (event: { id: string; company: string; date: string; label: string }) => {
+    const text = `${event.company} ${event.date} ${event.label}：请生成面试整理稿，然后用 /review-interview-answers 复盘`;
+    try { await navigator.clipboard.writeText(text); setCopiedTranscript(event.id); } catch { setCopiedTranscript(""); }
+  };
   const actionReviewDoc = reviewPreview.actionDoc;
   const primaryTodoStatus = primaryFocus?.source === "todo" ? todoStatus(primaryFocus.note) : "";
   const runPrimaryAction = async () => {
@@ -260,16 +278,31 @@ function Overview({
       </div>
     </article>
   ) : null;
-  const reviewPanel = reviewPreview.pendingDecisions > 0 || reviewPreview.readyCount > 0 ? (
+  const reviewPanel = reviewPreview.pendingDecisions > 0 || reviewPreview.readyCount > 0 || missingTranscripts.length > 0 ? (
     <article className="panel overview-review" key="review" data-overview-panel="review">
       <PanelHeading title="复盘提醒" action="全部复盘" onAction={() => onOpenReview()} />
-      <p className="overview-review-counts">
-        {reviewPreview.pendingDecisions > 0 && <span><strong>{reviewPreview.pendingDecisions}</strong> 个待裁定</span>}
-        {reviewPreview.readyCount > 0 && <span><strong>{reviewPreview.readyCount}</strong> 场可生成复盘</span>}
-      </p>
-      <button className="overview-review-action" onClick={() => onOpenReview(actionReviewDoc?.key)}>
-        {actionReviewDoc?.pendingDecisions ? "继续裁定" : "打开复盘"}<span aria-hidden="true">→</span>
-      </button>
+      {(reviewPreview.pendingDecisions > 0 || reviewPreview.readyCount > 0) && (
+        <p className="overview-review-counts">
+          {reviewPreview.pendingDecisions > 0 && <span><strong>{reviewPreview.pendingDecisions}</strong> 个待裁定</span>}
+          {reviewPreview.readyCount > 0 && <span><strong>{reviewPreview.readyCount}</strong> 场可生成复盘</span>}
+        </p>
+      )}
+      {missingTranscripts.length > 0 && (
+        <ul className="overview-review-missing" aria-label="已过但还没有整理稿的面试">
+          {missingTranscripts.map((event) => (
+            <li key={event.id}>
+              <span><strong>{event.company}</strong> · {focusDateLabel(event.date)} {event.label}</span>
+              <small>还没有整理稿</small>
+              <button type="button" onClick={() => void copyTranscriptRequest(event)}>{copiedTranscript === event.id ? "已复制" : "复制指令"}</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {(reviewPreview.pendingDecisions > 0 || reviewPreview.readyCount > 0) && (
+        <button className="overview-review-action" onClick={() => onOpenReview(actionReviewDoc?.key)}>
+          {actionReviewDoc?.pendingDecisions ? "继续裁定" : "打开复盘"}<span aria-hidden="true">→</span>
+        </button>
+      )}
     </article>
   ) : null;
   const practicePanel = drillTarget ? (

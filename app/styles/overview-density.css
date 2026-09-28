@@ -9,6 +9,12 @@
 .overview-view .panel-heading button { flex: 0 0 auto; font-size: 12px; }
 .overview-view small,
 .overview-view time,
+/* 首页复盘提醒里的「已过但没有整理稿」清单：一行一场，右侧一键复制给 Claude 的指令。 */
+.overview-review-missing { list-style: none; margin: 4px 0 10px; padding: 0; display: grid; gap: 6px; }
+.overview-review-missing li { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.overview-review-missing li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overview-review-missing li > small { flex-shrink: 0; color: var(--orange); font-size: 11px; }
+.overview-review-missing li > button { flex-shrink: 0; margin-left: auto; border: 1px solid var(--line); border-radius: 4px; background: transparent; padding: 2px 8px; font-size: 11px; color: var(--muted); cursor: pointer; }
 .overview-view .pipeline-status,
 .overview-view .todo-pri,
 .overview-view .todo-status,

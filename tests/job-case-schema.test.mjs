@@ -214,16 +214,23 @@ test("核対判定：⚠️ と「未検証」はリスク側なので逐語ブ�
 
 test("完成度：過ぎた next_event_at は進行中の案件でだけ指摘する", () => {
   const stale = auditJobCaseCompleteness(
-    { ...valid, status: "面接中", rating: 8, next_event_at: "2026-08-01 10:00" },
+    { ...valid, status: "面接中", rating: 8, applied_on: "2026-07-20", next_event_at: "2026-08-01 10:00" },
     complete,
     { today: "2026-08-04" },
   );
   assert.ok(stale.some((w) => /2026-08-01 が過ぎている/u.test(w)));
 
   const future = auditJobCaseCompleteness(
-    { ...valid, status: "面接中", rating: 8, next_event_at: "2026-08-10 10:00" },
+    { ...valid, status: "面接中", rating: 8, applied_on: "2026-07-20", next_event_at: "2026-08-10 10:00" },
     complete,
     { today: "2026-08-04" },
   );
   assert.deepEqual(future, []);
+});
+
+test("完成度：応募済以降で応募日がどこにも無ければ警告、applied_on か括弧内の日付があれば黙る", () => {
+  const missing = auditJobCaseCompleteness({ ...valid, status: "面接中", rating: 8 }, complete, { today: "2026-08-04" });
+  assert.ok(missing.some((w) => /applied_on/u.test(w)), "status_updated は拒否日に上書きされるので応募日は別枠に要る");
+  assert.deepEqual(auditJobCaseCompleteness({ ...valid, status: "面接中", rating: 8, applied_on: "2026-07-20" }, complete, { today: "2026-08-04" }), []);
+  assert.deepEqual(auditJobCaseCompleteness({ ...valid, status: "応募済（2026-07-20・Green経由）", rating: 8 }, complete, { today: "2026-08-04" }), []);
 });

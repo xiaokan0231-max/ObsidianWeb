@@ -3,7 +3,8 @@ import { getType, type Note } from "./notes.ts";
 export type VaultScope = "all" | "overview" | "actions" | "jobs" | "interview" | "training";
 
 const COMMITMENT_TYPES = new Set(["job-case", "todo", "interview-prep"]);
-const OVERVIEW_REVIEW_TYPES = new Set(["interview-answer-practice"]);
+// 首页の「复盘提醒」は整理稿を起点に数える（lib/review-join.ts）。整理稿を落とすと冷启动で「待裁定 0」が出続けた。
+const OVERVIEW_REVIEW_TYPES = new Set(["interview-answer-practice", "transcript-study", "study-annotation", "interview-answer-review"]);
 const INTERVIEW_TYPES = new Set([
   "interview-prep", "interview-prep-library", "transcript", "transcript-study", "study-annotation",
   "review", "interview-answer-review", "interview-answer-practice", "interview-answer-feedback",

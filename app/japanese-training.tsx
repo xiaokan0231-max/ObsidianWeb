@@ -73,6 +73,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     cache: "no-store",
+    // 状態の読み取りが黙り込むと「正在读取…」が永遠に出る。読み取りは 20 秒で諦めて理由を出す。
+    signal: init?.signal ?? AbortSignal.timeout(20_000),
   });
   const body = await response.json() as T & ApiError;
   if (!response.ok) throw new Error(body.error || `请求失败 (${response.status})`);
@@ -93,16 +95,30 @@ function JapaneseTraining({
   const [size, setSize] = useState<100 | 150 | 200>(200);
   const [showBatch, setShowBatch] = useState(false);
 
+  // 等了多久要说出来：首次读取会在服务端重算全部课程状态，几秒是正常的，但没有反馈就像卡死。
+  // tick 每秒加一、每次开始读取归零，读取中就是已等待秒数。
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!loading) return;
+    const timer = window.setInterval(() => setTick((value) => value + 1), 1_000);
+    return () => window.clearInterval(timer);
+  }, [loading]);
+  const elapsed = loading ? tick : 0;
+
   const load = useCallback(async () => {
     setLoading(true);
+    setTick(0);
     try {
-      setState(await api<LanguageV2State>("/api/language/v2/state"));
+      setState(await api<LanguageV2State>("/api/language/v2/state", { method: "GET" }));
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "无法读取集中训练状态");
+      setError(loadError instanceof Error && loadError.name === "TimeoutError"
+        ? "读取集中训练状态超过 20 秒。首次会重算全部课程状态，稍后再试或按 R 重读。"
+        : loadError instanceof Error ? loadError.message : "无法读取集中训练状态");
     } finally {
       setLoading(false);
     }
   }, []);
+
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => void load());
@@ -242,7 +258,7 @@ function JapaneseTraining({
           {tab === "issues" && <IssueMap state={state} />}
           {tab === "library" && <LanguageLibrary items={curriculum.items} progress={progress} />}
         </>
-      ) : loading ? <div className="focus-language-loading">正在读取训练课程…</div> : null}
+      ) : loading ? <div className="focus-language-loading" role="status">正在读取训练课程…{elapsed >= 3 && `（已等待 ${elapsed} 秒；首次会重算课程状态，较慢）`}</div> : null}
     </div>
   );
 }
