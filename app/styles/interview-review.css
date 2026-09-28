@@ -907,8 +907,8 @@
   font-size: 9px;
   font-style: normal;
 }
-.analytics-priority-topline i[data-status="面接中"],
-.analytics-watch-row i[data-status="面接中"] {
+.analytics-priority-topline i.tone-interview,
+.analytics-watch-row i.tone-interview {
   color: #a44931;
   border-color: rgba(230,109,69,.42);
   background: rgba(230,109,69,.09);

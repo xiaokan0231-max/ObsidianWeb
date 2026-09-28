@@ -20,6 +20,7 @@ import {
   validateJobCaseFrontmatter,
 } from "../lib/job-case-schema.ts";
 import { listEmbeds, listHeadings, sliceSection, stripFrontmatter } from "../lib/interview-prep-embed.mjs";
+import { TODO_PRIORITIES, TODO_STATUSES } from "../lib/todo-status.mjs";
 import {
   companyMotivationIssues,
   interviewPrepStructureIssues,
@@ -40,8 +41,6 @@ import { validateCompanyOverviewNotes } from "../lib/company-overview.ts";
 
 const PREP_REQUIRED = ["company", "round", "format", "interviewers"];
 const PREP_SESSION_STATUSES = ["preparing", "scheduled", "completed", "cancelled"];
-const TODO_STATUSES = ["未着手", "進行中", "保留", "完了"];
-const TODO_PRIORITIES = ["high", "medium", "low"];
 const TODO_AUDIENCES = ["user", "system"];
 const SYSTEM_TODO_CATEGORIES = ["台帳整合", "観測基盤"];
 const VERSIONED_ARTIFACT_TYPES = new Set(["language-bank", "language-curriculum"]);

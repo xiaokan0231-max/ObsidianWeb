@@ -1,4 +1,6 @@
 import { normalizeJobStatus } from "./job-status.ts";
+import { IN_FLIGHT_STATUSES, WAITING_FOR_LABEL, daysUntil, monthDay } from "./jobs.ts";
+import { OPEN_TODO_STATUSES } from "./todo-status.mjs";
 import {
   getString,
   getTitle,
@@ -50,14 +52,9 @@ export type FocusBrief = {
   stale: StaleAction[];
 };
 
-const TODO_STATUSES = new Set(["未着手", "進行中"]);
-const ACTIVE_JOB_STATUSES = new Set(["応募済", "書類通過", "面接中"]);
+const TODO_STATUSES = new Set(OPEN_TODO_STATUSES);
+const ACTIVE_JOB_STATUSES = new Set(IN_FLIGHT_STATUSES);
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
-const WAITING_FOR_LABEL: Record<string, string> = {
-  company: "企业",
-  agent: "中介",
-  platform: "平台",
-};
 
 function dateKey(date = new Date()) {
   const year = date.getFullYear();
@@ -74,10 +71,9 @@ function validDate(value: string) {
     : value;
 }
 
+/** 目標日まであと何日。読めない日付は NaN（比較が全部 false になり、期限なし扱いへ落ちる）。 */
 function daysFrom(today: string, target: string) {
-  const start = Date.parse(`${today}T00:00:00Z`);
-  const end = Date.parse(`${target}T00:00:00Z`);
-  return Math.round((end - start) / 86_400_000);
+  return daysUntil(target, today) ?? Number.NaN;
 }
 
 function booleanValue(value: unknown) {
@@ -90,11 +86,6 @@ function compactText(value: string, limit = 88) {
   return characters.length > limit
     ? `${characters.slice(0, limit - 1).join("")}…`
     : plain;
-}
-
-function monthDay(value: string) {
-  const [, month, day] = value.split("-").map(Number);
-  return `${month}月${day}日`;
 }
 
 function dueRank(due: string, today: string) {

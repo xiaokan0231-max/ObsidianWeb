@@ -447,8 +447,10 @@ test("信頼層と応募状態のラベル付け", () => {
   assert.equal(trustLayer(note("80_AI分析/観点.md", "ai-report")).className, "trust-analysis");
   assert.equal(trustLayer(note("99_系统/索引.md", "moc")).className, "trust-reference");
 
-  assert.equal(careerStatus("面接中").tone, "active");
-  assert.equal(careerStatus("不採用（2026-07-21・書類選考）").tone, "rejected");
+  assert.equal(careerStatus("面接中").tone, "interview");
+  assert.equal(careerStatus("内定").tone, "offer", "内定不再和未応募一样落灰");
+  assert.equal(careerStatus("不採用（2026-07-21・書類選考）").tone, "reject");
+  assert.equal(careerStatus("不採用（2026-07-21・書類選考）").label, "不採用");
   assert.equal(careerStatus("").label, "未分類");
   assert.equal(typeLabel("job-case"), "应募案件");
   assert.equal(typeLabel("未知の型"), "未知の型");

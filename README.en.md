@@ -6,7 +6,7 @@ A directory of Markdown notes (frontmatter, wikilinks, headings) *is* the domain
 From it the app builds a case board, calendar, interview prep, timeline, a 3D knowledge graph and a
 study loop in real time. Next.js (vinext) / React 19 / TypeScript, deployed to Cloudflare Workers.
 
-![ObsidianWeb](public/og.png)
+![ObsidianWeb](public/og.jpg)
 
 - 🇯🇵 [日本語](README.md) ・ 🇨🇳 [中文](README.zh.md)
 

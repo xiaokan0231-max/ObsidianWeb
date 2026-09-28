@@ -8,6 +8,11 @@ import {
   JOB_STATUSES,
   toJobCard,
   type JobCard,
+  IN_FLIGHT_STATUSES,
+  IN_PROGRESS_STATUSES,
+  SELECTION_STATUSES,
+  shortDay,
+  statusTone,
 } from "@/lib/jobs";
 import type { JobsInitialFilters } from "./jobs-view";
 import { JOB_CASE_TYPE } from "@/lib/vault-boundary.mjs";
@@ -57,9 +62,10 @@ function monthFloor(months: number): string | null {
 const pct1 = (value: number) => `${(value * 100).toFixed(1)}%`;
 
 /** 台帳は不採用しか記録していない。「応募済」系はノート側からしか数えられない。 */
-const IN_FLIGHT: string[] = ["応募済", "書類通過", "面接中"];
-const PASSED_SCREENING: string[] = ["書類通過", "面接中", "内定"];
-const ACTIVE_SELECTION: string[] = [...IN_FLIGHT, "内定"];
+// 状態の部分集合は lib/job-status.mjs が正本（首页・看板・切換面板と同じ配列）。
+const IN_FLIGHT = IN_FLIGHT_STATUSES;
+const PASSED_SCREENING = SELECTION_STATUSES;
+const ACTIVE_SELECTION = IN_PROGRESS_STATUSES;
 
 /**
  * 冒頭の4つの数字カード。**件数の計算とリンク先のフィルタを同じ定義から作る**——
@@ -83,10 +89,7 @@ function scheduledDate(job: JobCard) {
   return explicitNextEventDate(job.note);
 }
 
-function shortDate(value: string) {
-  const match = value.match(/\b20\d{2}-(\d{2})-(\d{2})\b/);
-  return match ? `${Number(match[1])}/${Number(match[2])}` : "—";
-}
+const shortDate = (value: string) => shortDay(value, "—");
 
 function scheduledTime(job: JobCard) {
   return explicitNextEventTime(job.note);
@@ -120,7 +123,7 @@ function ProgressPriority({
     >
       <span className="analytics-priority-topline">
         <b>{job.status === "面接中" ? "面接を最優先" : "現在の最優先案件"}</b>
-        <i data-status={job.status}>{job.status}</i>
+        <i className={`tone-${statusTone(job.status)}`}>{job.status}</i>
       </span>
       <strong>{job.company}</strong>
       <small>{job.position}</small>
@@ -162,7 +165,7 @@ function ProgressWatchRow({
         <small>{job.position}</small>
       </span>
       <span>
-        <i data-status={job.status}>{job.status}</i>
+        <i className={`tone-${statusTone(job.status)}`}>{job.status}</i>
         <small>{focusAction(job)}</small>
       </span>
       <b aria-hidden="true">↗</b>

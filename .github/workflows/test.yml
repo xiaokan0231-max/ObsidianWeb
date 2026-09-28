@@ -1,0 +1,23 @@
+# 代码层的门禁：类型、lint、单测。故意不含 build 与 vault 检查——
+# vault 是别的机器上不存在的外部数据（见 CLAUDE.md「自动检查装在哪」），
+# build 需要下载 MediaPipe 模型，留给本机 `npm run test:build`。
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run test:unit

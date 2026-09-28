@@ -1244,32 +1244,19 @@
   color: var(--orange);
 }
 
+/* 首页の状態胶囊。色は看板と同じ .tone-*（jobs.css）の変数を読む——以前は独自の active/rejected/idle 三色で内定が灰だった。 */
 .pipeline-status {
   width: 58px;
   overflow: hidden;
   padding: 4px 6px;
-  background: #e7e5df;
-  color: #737a76;
+  border: 1px solid var(--tone-line, transparent);
+  background: var(--tone-bg, #e7e5df);
+  color: var(--tone, #737a76);
   font-size: 10px;
   font-weight: 700;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.status-active {
-  background: #d8eadf;
-  color: #29624f;
-}
-
-.status-rejected {
-  background: #ece9e2;
-  color: #8a8c88;
-}
-
-.status-idle {
-  background: #eee8d9;
-  color: #786e55;
 }
 
 .pipeline-company {

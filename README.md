@@ -6,7 +6,7 @@ Markdown ノート群（frontmatter・wikilink・見出し）をそのままド�
 案件ボード・カレンダー・面接準備・タイムライン・3D ナレッジグラフ・学習ループをリアルタイムに構築する。
 Next.js (vinext) / React 19 / TypeScript、デプロイ先は Cloudflare Workers。
 
-![ObsidianWeb](public/og.png)
+![ObsidianWeb](public/og.jpg)
 
 - 🇬🇧 [English](README.en.md) ・ 🇨🇳 [中文](README.zh.md)
 

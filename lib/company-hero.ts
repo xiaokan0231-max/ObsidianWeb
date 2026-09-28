@@ -1,13 +1,13 @@
 import { getString } from "./notes.ts";
 import type { CompanyOverview } from "./company-overview.ts";
-import { formatContextPickerEvent, statusTone, type ContextPickerTone } from "./context-picker.ts";
+import { formatContextPickerEvent } from "./context-picker.ts";
 import { interviewPrepTemporalStatus } from "./interview-prep-index.ts";
 import type { InterviewPrepDoc } from "./interview-prep-doc.ts";
 import { IN_PROGRESS_STATUSES } from "./job-case-schema.ts";
 import {
-  JOB_ORIGIN_LABEL, OFFICIAL_APPLY_LABEL, VERIFICATION_LABEL, WAITING_FOR_LABEL,
-  daysBetween, elapsedLabel, normalizeDay, normalizeJobStatus, rateTone, salaryLabel, shortDay, statusRequiresChannel, toJobCard,
-  type JobCard,
+  JOB_ORIGIN_LABEL, OFFICIAL_APPLY_LABEL, TERMINAL_STATUSES, VERIFICATION_LABEL, WAITING_FOR_LABEL,
+  daysBetween, elapsedLabel, normalizeDay, normalizeJobStatus, rateTone, salaryLabel, shortDay, statusRequiresChannel, statusTone, toJobCard,
+  type JobCard, type JobStatusTone,
 } from "./jobs.ts";
 
 /**
@@ -52,7 +52,7 @@ export type CompanyHeroLink = {
 
 export type CompanyHeroStatus = {
   label: string;
-  tone: ContextPickerTone;
+  tone: JobStatusTone;
   /** status 括号里的补充（日期・经路・备注）；面谈则是 todo 的 status 原文。 */
   note: string;
 };
@@ -90,7 +90,7 @@ export type CompanyHero = {
   title: string;
   status: CompanyHeroStatus;
   /** 整页色调（顶部色条），与胶囊同源。 */
-  tone: ContextPickerTone;
+  tone: JobStatusTone;
   /** 进度行：経路・応募・更新・入库兜底・状态注记。缺的不占位。 */
   progress: CompanyHeroFact[];
   /** 条件行四个固定格；面谈天生没有这些，为空数组。 */
@@ -109,8 +109,6 @@ const OFFICIAL_LINK_LABEL: Record<JobCard["officialApplyStatus"], string> = {
   unavailable: "採用ページ",
 };
 
-/** 已终结的案件：残留的 waiting_for / follow_up_at / 准备稿日期不再是待办，只保留明确写下的下一步。 */
-const TERMINAL_STATUSES = ["不採用", "保留"];
 
 /** todo 的状态已说「结束了」：完了・中止，或本人搁置（保留）。 */
 const MEETING_DONE = /完了|完成|done|cancel|中止|取消|保留/i;
@@ -128,7 +126,7 @@ function meetingEnded(note: CompanyOverview["note"], today: string) {
 }
 
 /** 头部胶囊与公司画像页顶部色条共用：案件按七态取色（没写 status 就是中性），面谈用青绿、结束后转中性。 */
-export function companyHeroTone(context: CompanyOverview, today: string): ContextPickerTone {
+export function companyHeroTone(context: CompanyOverview, today: string): JobStatusTone {
   if (context.kind === "meeting") return meetingEnded(context.note, today) ? "neutral" : "meeting";
   const raw = getString(context.note.frontmatter.status).trim();
   return statusTone(normalizeJobStatus(raw) ?? raw);

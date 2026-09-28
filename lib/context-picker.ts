@@ -1,5 +1,6 @@
 import { getString, noteBasename, type Note } from "./notes.ts";
 import { normalizeJobStatus } from "./job-status.ts";
+import { statusTone, type JobStatusTone } from "./jobs.ts";
 import type { CompanyOverview } from "./company-overview.ts";
 import { interviewPrepTemporalStatus, type InterviewPrepSeries } from "./interview-prep-index.ts";
 import type { InterviewPrepDoc } from "./interview-prep-doc.ts";
@@ -15,7 +16,7 @@ import type { InterviewPrepDoc } from "./interview-prep-doc.ts";
 
 export type ContextPickerKind = "case" | "meeting" | "series";
 /** 与看板 .tone-* 同一套色，外加面谈专用的 meeting（面谈没有应募状态）。 */
-export type ContextPickerTone = "interview" | "progress" | "offer" | "pending" | "reject" | "neutral" | "meeting";
+export type ContextPickerTone = JobStatusTone;
 export type ContextPickerItem = {
   /** 与旧 select 的 option value 同形：context:<path> / series:<key>，切换逻辑不用改。 */
   id: string;
@@ -62,14 +63,8 @@ const ACTIVE_RANK: Record<string, number> = { "面接中": 0, "内定": 1, "書�
 const UNDECIDED_RANK: Record<string, number> = { "未応募": 0 };
 const DATE = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}:\d{2}))?/;
 
-export function statusTone(status: string): ContextPickerTone {
-  if (status === "面接中") return "interview";
-  if (status === "応募済" || status === "書類通過") return "progress";
-  if (status === "内定") return "offer";
-  if (status === "未応募") return "pending";
-  if (status === "不採用") return "reject";
-  return "neutral";
-}
+// 配色は lib/jobs.ts の statusTone が正本（看板・首页・画像ヘッダーと同じ表）。再輸出は既存 import 先のため。
+export { statusTone };
 
 function normalize(value: string) {
   return value.normalize("NFKC").toLocaleLowerCase().trim();

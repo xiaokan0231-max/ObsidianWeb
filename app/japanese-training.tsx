@@ -83,8 +83,6 @@ function JapaneseTraining({
   onVaultChanged,
 }: {
   onVaultChanged: () => Promise<void>;
-  focusDojoItemId?: string | null;
-  onClearFocus?: () => void;
 }) {
   const [state, setState] = useState<LanguageV2State>(EMPTY_STATE);
   const [loading, setLoading] = useState(true);

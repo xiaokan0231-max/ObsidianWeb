@@ -3,6 +3,8 @@
 // tsx の中に居る限り単体テストが書けず、間違っても誰も気づけない。
 
 import { graphGroup, type GraphGroup } from "./knowledge-graph.ts";
+import { IN_FLIGHT_STATUSES, WAITING_FOR_LABEL, normalizeJobStatus, statusTone } from "./jobs.ts";
+import { TODO_PRIORITY_META, TODO_STATUSES } from "./todo-status.mjs";
 import {
   companyIdentity,
   getString,
@@ -101,14 +103,11 @@ export const GROUPS: Record<GroupKey, {
   system: { label: "系统", short: "规", color: "#66706c", tint: "#e5e7e4" },
 };
 
-export const ACTIVE_JOB_STATUSES = new Set(["応募済", "書類通過", "面接中"]);
+export const ACTIVE_JOB_STATUSES = new Set(IN_FLIGHT_STATUSES);
 
-export const TODO_STATUS = ["未着手", "進行中", "保留", "完了"];
-export const TODO_PRIORITY: Record<string, { label: string; rank: number }> = {
-  high: { label: "高", rank: 0 },
-  medium: { label: "中", rank: 1 },
-  low: { label: "低", rank: 2 },
-};
+// TODO の状態・優先度契約は lib/todo-status.mjs が正本（vault-check と同じ配列）。
+export const TODO_STATUS: readonly string[] = TODO_STATUSES;
+export const TODO_PRIORITY: Record<string, { label: string; rank: number }> = TODO_PRIORITY_META;
 
 export const getGroup = graphGroup;
 
@@ -223,14 +222,10 @@ export function libraryScopeMatches(note: Note, scope: LibraryScope) {
   ].includes(type);
 }
 
+/** 首页の状態胶囊。文字は七態に正規化、色は看板と同じ statusTone——以前は独自の active/rejected/idle で内定が灰になっていた。 */
 export function careerStatus(status: string) {
-  if (["応募済", "書類通過", "面接中"].includes(status)) {
-    return { label: status, tone: "active" };
-  }
-  if (status.includes("不採用")) return { label: "不採用", tone: "rejected" };
-  if (status.includes("未応募")) return { label: "未応募", tone: "idle" };
-  if (status.includes("辞退")) return { label: "辞退", tone: "idle" };
-  return { label: status || "未分類", tone: "idle" };
+  const base = normalizeJobStatus(status) ?? status.trim();
+  return { label: base || "未分類", tone: statusTone(base) };
 }
 
 export function notePreview(note: Note) {
@@ -650,12 +645,11 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
   });
 }
 
-const WAITING_LABEL: Record<string, string> = {
-  self: "本人行动",
-  company: "等待企业",
-  agent: "等待中介",
-  platform: "等待平台",
-};
+/** 待ち相手の文言は lib/jobs.ts の WAITING_FOR_LABEL から組む（首页・画像ヘッダーと同じ語）。 */
+function waitingLabel(waitingFor: string) {
+  if (waitingFor === "self") return "本人行动";
+  return WAITING_FOR_LABEL[waitingFor] ? `等待${WAITING_FOR_LABEL[waitingFor]}` : "外部等待";
+}
 
 /** 首页、顶栏、日历共用的唯一承诺投影。 */
 export function buildCommitments(
@@ -696,7 +690,7 @@ export function buildCommitments(
       date: followUpAt,
       time: "",
       company: getString(note.frontmatter.company) || getTitle(note),
-      label: `${WAITING_LABEL[waitingFor] ?? "外部等待"} · 跟进`,
+      label: `${waitingLabel(waitingFor)} · 跟进`,
       phase: followUpAt >= today ? "upcoming" : "past",
       caseId: getString(note.frontmatter.case_id),
       prepPath: "",

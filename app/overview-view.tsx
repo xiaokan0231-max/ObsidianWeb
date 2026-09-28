@@ -3,7 +3,7 @@
 import { memo, useMemo, useState, useSyncExternalStore } from "react";
 import { type AppView } from "./app-route";
 import { buildFocusBrief, focusDateLabel } from "@/lib/focus-action";
-import { compareJobs, toJobCard } from "@/lib/jobs";
+import { awaitingCounterpart, compareJobs, toJobCard } from "@/lib/jobs";
 import { parseInterviewPractice } from "@/lib/review-practice";
 import { formatDate, getString, getTitle, getType, type Note } from "@/lib/notes";
 import {
@@ -89,8 +89,9 @@ function Overview({
   const focusBrief = useMemo(() => buildFocusBrief(notes, today), [notes, today]);
   const primaryFocus = focusBrief.primary;
 
+  // 「已经动过手、等对方回应」的未応募不算待判断——看板同一条规则（awaitingCounterpart），否则首页数字虚高。
   const openJobs = useMemo(() => jobs
-    .filter((job) => job.status === "未応募")
+    .filter((job) => job.status === "未応募" && !awaitingCounterpart(job))
     .sort((left, right) => compareJobs(left, right, "rating")), [jobs]);
   const topSalary = openJobs
     .map((job) => job.salary.max ?? 0)
@@ -185,7 +186,7 @@ function Overview({
           const date = job.statusUpdated || job.date || getLatestNoteDate(job.note);
           return (
             <button key={job.path} onClick={() => onOpen(job.note)}>
-              <span className={`pipeline-status status-${status.tone}`}>{status.label}</span>
+              <span className={`pipeline-status tone-${status.tone}`}>{status.label}</span>
               <span className="pipeline-company">
                 <span className="pipeline-company-head"><strong>{job.company}</strong><time dateTime={date}>{formatDate(date)}</time></span>
                 <small>{job.nextAction || job.position || "案件详情"}</small>
@@ -203,7 +204,7 @@ function Overview({
               const status = careerStatus(job.status);
               const date = job.statusUpdated || job.date || getLatestNoteDate(job.note);
               return <button key={job.path} onClick={() => onOpen(job.note)}>
-                <span className={`pipeline-status status-${status.tone}`}>{status.label}</span>
+                <span className={`pipeline-status tone-${status.tone}`}>{status.label}</span>
                 <strong>{job.company}</strong><time dateTime={date}>{formatDate(date)}</time>
               </button>;
             })}

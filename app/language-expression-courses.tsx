@@ -21,6 +21,7 @@ import {
   type SafeRewriteCard,
 } from "@/lib/language-expression-course";
 import { parseInline } from "@/lib/interview-prep-doc";
+import { isTypingTarget as isEditableTarget } from "@/lib/keyboard";
 import type { Note } from "@/lib/notes";
 import { Inlines } from "./prep-doc-render";
 
@@ -225,14 +226,6 @@ function updateStudyState(
     // 保存領域が使えない環境でも、当日の練習操作そのものは止めない。
   }
   for (const listener of studyStateListeners) listener();
-}
-
-function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.isContentEditable ||
-    ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
-  );
 }
 
 function allowsRevealShortcut(target: EventTarget | null) {

@@ -1,5 +1,5 @@
 /* 公司画像属于当前案件／面谈，独立于每轮准备正文。 */
-.company-overview, .co-shell, .co-compare-panel { --co-ink: #203a33; --co-muted: #626f68; --co-line: #d7ded5; --co-green: #2f6958; color: var(--co-ink); }
+.company-overview, .co-shell, .co-compare-panel { --co-ink: #203a33; --co-muted: #626f68; --co-line: #d7ded5; --co-green: var(--green); color: var(--co-ink); }
 .company-overview { padding: 22px 0 12px; font-size: 14px; line-height: 1.75; }
 .company-overview :is(h2,h3,h4,p,ul,dl), .co-compare-panel :is(h2,h3,h4,p,ul,dl) { margin-top: 0; }
 .company-overview button, .co-compare-panel button { cursor: pointer; }
@@ -45,7 +45,7 @@
 .co-radar-axis { stroke: #d8ded6; stroke-width: .8; }
 .co-radar-fill { fill: #609b7c; fill-opacity: .2; stroke: none; }
 .co-radar-value { stroke: #34715c; stroke-width: 2; stroke-linecap: round; }
-.co-radar-dot { fill: #2f6958; stroke: #fffefa; stroke-width: 2; }
+.co-radar-dot { fill: var(--green); stroke: #fffefa; stroke-width: 2; }
 .co-radar-label { font-family: inherit; font-size: 11px; fill: #2e4c3d; }
 .co-radar-label tspan { font-size: 10px; fill: #567361; }
 .co-radar-label.unknown tspan { fill: #7e877f; }
@@ -94,21 +94,21 @@
 .co-muted { color: var(--co-muted); }
 .co-notice { margin-bottom: 18px; border-left: 2px solid #b39a61; background: #f6f1e6; padding: 12px 16px; font-size: 13px; }
 .co-notice ul { margin: 8px 0 0; }
-.co-compare-toggle { cursor: pointer; padding: 9px 15px; color: #2f6958; background: transparent; border: 1px solid #adc2b5; border-radius: 5px; font-size: 13px; white-space: nowrap; }
+.co-compare-toggle { cursor: pointer; padding: 9px 15px; color: var(--green); background: transparent; border: 1px solid #adc2b5; border-radius: 5px; font-size: 13px; white-space: nowrap; }
 .co-compare-toggle.active { background: #edf3eb; }
 .co-compare-toggle:disabled { opacity: .6; cursor: not-allowed; }
 .co-header-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
-.co-header-actions .co-compare-entry { cursor: pointer; padding: 9px 15px; color: #fffefa; background: #2f6958; border: 1px solid #2f6958; border-radius: 5px; font-size: 13px; white-space: nowrap; }
+.co-header-actions .co-compare-entry { cursor: pointer; padding: 9px 15px; color: #fffefa; background: var(--green); border: 1px solid var(--green); border-radius: 5px; font-size: 13px; white-space: nowrap; }
 .co-compare-entry span { font-size: 11px; opacity: .8; margin-left: 3px; }
 .co-compare-entry:hover { background: #245444; }
-.co-header-actions button:focus-visible { outline: 2px solid #2f6958; outline-offset: 3px; }
+.co-header-actions button:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
 .session-v2 .v2-company-layout { display: block; padding-top: 0; }
 .session-v2 .v2-nav > div { gap: 18px; }
 .session-v2 .v2-company-panel { min-width: 0; }
 .session-v2 .v2-logistics .co-compare-toggle { margin-left: auto; }
 .session-v2 .v2-logistics .co-compare-toggle + .v2-meeting { margin-left: 0; }
 /* 顶部色条跟随案件状态（.tone-* 来自 jobs.css 的全局色表；不採用变灰是刻意的）。 */
-.co-shell { background: #fffefa; border-top: 3px solid var(--tone-bar, #2f6958); padding: 28px 36px 80px; }
+.co-shell { background: #fffefa; border-top: 3px solid var(--tone-bar, var(--green)); padding: 28px 36px 80px; }
 /* 头部：左列身份块（kicker → 社名＋状态胶囊 → 岗位 → 进度行 → 条件行＋链接 → 此刻行），右列切换器与对比按钮。
    右列 stretch 后按钮贴底，两列共享上下边——原来左下那片空白就是「右列比左列高」造成的。 */
 .co-shell-head { display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 0 40px; align-items: stretch; padding-bottom: 24px; }
@@ -118,7 +118,7 @@
 .co-shell-controls .co-header-actions button { height: 36px; padding: 0 14px; }
 /* 触发器里的社名是「当前选中值」，不是第二个标题；h1 44px 衬线 ≫ 13px 无衬线，主从一眼分明。 */
 .co-shell-head .co-context-trigger .co-context-main strong { font-size: 13px; font-weight: 550; }
-.co-shell-head .co-kicker { margin: 0 0 10px; color: #2f6958; font-size: 12px; font-weight: 650; letter-spacing: .04em; }
+.co-shell-head .co-kicker { margin: 0 0 10px; color: var(--green); font-size: 12px; font-weight: 650; letter-spacing: .04em; }
 .co-hero-title-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
 /* 社名用衬线大字：与 .jobs-intro h1 / .session-hero h1 同一衬线族，是三处 hero 里唯一还用无衬线的。
    法人格前后缀降为 16px 无衬线灰字，textContent 仍是完整社名。
@@ -150,21 +150,21 @@
 .co-hero-facts dt { margin-bottom: 3px; font-size: 11px; color: #626f68; letter-spacing: .04em; }
 .co-hero-facts dd { margin: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 550; line-height: 1.4; color: #203a33; font-variant-numeric: tabular-nums; }
 .co-hero-facts .muted dd { color: #7e877f; font-weight: 450; }
-.co-hero-facts .salary dd { font-family: "Songti SC", "Noto Serif CJK SC", "Noto Serif JP", serif; font-size: 16px; font-weight: 600; color: #2f6958; }
+.co-hero-facts .salary dd { font-family: "Songti SC", "Noto Serif CJK SC", "Noto Serif JP", serif; font-size: 16px; font-weight: 600; color: var(--green); }
 .co-hero-facts .is-text dd { font-size: 13px; font-weight: 450; }
 .co-hero-facts :is(.rate-high,.rate-good,.rate-mid,.rate-low) dd { color: var(--rate); }
 .co-hero-links { list-style: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 2px auto; padding: 0; }
 .co-hero-links li { display: inline-flex; align-items: center; gap: 6px; }
-.co-hero-progress .co-hero-progress-link button, .co-hero-links :is(a,button) { font: inherit; font-size: 12.5px; color: #2f6958; background: none; border: 0; padding: 0; text-decoration: underline; text-decoration-color: #b3c7ba; text-underline-offset: 3px; cursor: pointer; white-space: nowrap; }
+.co-hero-progress .co-hero-progress-link button, .co-hero-links :is(a,button) { font: inherit; font-size: 12.5px; color: var(--green); background: none; border: 0; padding: 0; text-decoration: underline; text-decoration-color: #b3c7ba; text-underline-offset: 3px; cursor: pointer; white-space: nowrap; }
 .co-hero-link-missing { font-size: 12.5px; color: #7e877f; }
 .co-hero-badge { font-style: normal; font-size: 10.5px; padding: 1px 6px; border: 1px solid #d7ded5; border-radius: 2px; color: #626f68; white-space: nowrap; }
-.co-hero-badge.ok { color: #2f6958; border-color: rgba(47, 107, 89, 0.4); background: rgba(47, 107, 89, 0.07); }
+.co-hero-badge.ok { color: var(--green); border-color: rgba(47, 107, 89, 0.4); background: rgba(47, 107, 89, 0.07); }
 .co-hero-badge.warn { color: #e66d45; border-color: rgba(230, 109, 69, 0.4); background: rgba(230, 109, 69, 0.08); }
 /* 此刻行：下一步 → 等待 → 跟进 → 面談 一行拼接。跟进日过了左缘条转橙——该催了；面談永远在最后一段并染橙，一眼分出「约定」与「待办」。 */
-.co-hero-now { margin: 14px 0 0; padding-left: 12px; box-shadow: inset 3px 0 0 #2f6958; font-size: 13px; line-height: 1.6; color: #626f68; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.co-hero-now { margin: 14px 0 0; padding-left: 12px; box-shadow: inset 3px 0 0 var(--green); font-size: 13px; line-height: 1.6; color: #626f68; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .co-hero-now.overdue { box-shadow: inset 3px 0 0 #e66d45; }
 .co-hero-now.muted { box-shadow: none; padding-left: 0; }
-.co-hero-now-label { margin-right: 10px; font-size: 11px; font-weight: 650; color: #2f6958; letter-spacing: .06em; }
+.co-hero-now-label { margin-right: 10px; font-size: 11px; font-weight: 650; color: var(--green); letter-spacing: .06em; }
 .co-hero-now-seg + .co-hero-now-seg::before { content: " · "; color: #b3bdb6; }
 .co-hero-now .action { color: #203a33; font-weight: 550; }
 .co-hero-now .overdue-seg, .co-hero-now .event { color: #e66d45; font-weight: 600; }
@@ -173,9 +173,9 @@
 .co-context-trigger { display: grid; gap: 6px; width: 100%; min-width: 0; padding: 10px 12px 9px; border: 1px solid #d7ded5; border-radius: 5px; background: #fffefa; color: #203a33; text-align: left; font: inherit; cursor: pointer; }
 .co-context-trigger:hover { border-color: #9bb7a5; }
 .co-context-trigger .co-context-trigger-label { font-size: 11px; color: #626f68; }
-.co-context-trigger.empty .co-context-main strong { color: #2f6958; }
+.co-context-trigger.empty .co-context-main strong { color: var(--green); }
 .co-context-trigger-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.co-context-trigger-foot > b { margin-left: auto; flex-shrink: 0; font-size: 11px; font-weight: 600; color: #2f6958; white-space: nowrap; }
+.co-context-trigger-foot > b { margin-left: auto; flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--green); white-space: nowrap; }
 .co-context-main { display: grid; gap: 2px; min-width: 0; }
 .co-context-main strong { font-size: 14px; font-weight: 600; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .co-context-main > span { font-size: 12px; color: #626f68; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -189,7 +189,7 @@
 .co-context-panel .co-picker-search input[role="combobox"] { width: 100%; }
 .co-context-list { padding-bottom: 20px; }
 .co-context-group + .co-context-group { margin-top: 18px; }
-.co-context-group h3 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 4px; padding: 6px 0 4px; position: sticky; top: 0; background: #fffefa; z-index: 1; font-size: 12px; font-weight: 650; color: #2f6958; border-bottom: 1px solid var(--co-line); }
+.co-context-group h3 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 4px; padding: 6px 0 4px; position: sticky; top: 0; background: #fffefa; z-index: 1; font-size: 12px; font-weight: 650; color: var(--green); border-bottom: 1px solid var(--co-line); }
 .co-context-group h3 b { margin-left: 6px; font-weight: 500; color: var(--co-muted); font-variant-numeric: tabular-nums; }
 .co-context-group h3 small { font-size: 11px; font-weight: 400; color: var(--co-muted); }
 .co-context-group h3 button { margin-left: auto; padding: 2px 8px; border: 1px solid var(--co-line); border-radius: 4px; background: transparent; font-size: 11px; color: var(--co-green); white-space: nowrap; }
@@ -204,13 +204,13 @@
 .co-shell-controls .co-compare-toggle { justify-self: end; }
 .co-legacy-tabs { display: flex; gap: 26px; border-top: 1px solid #d7ded5; border-bottom: 1px solid #d7ded5; margin: 0; background: #fffefa; }
 .co-legacy-tabs button { padding: 16px 2px 14px; border: 0; border-bottom: 3px solid transparent; color: #626f68; background: none; font-size: 15px; cursor: pointer; }
-.co-legacy-tabs button[aria-pressed="true"] { color: #2f6958; border-bottom-color: #2f6958; font-weight: 650; }
+.co-legacy-tabs button[aria-pressed="true"] { color: var(--green); border-bottom-color: var(--green); font-weight: 650; }
 .co-legacy-tabs button:disabled { opacity: .5; cursor: default; }
 .co-legacy-tabs .co-prep-unavailable { margin: auto 0 auto auto; font-size: 12px; color: #626f68; }
 .co-legacy-return { margin-bottom: 16px; padding: 0 20px; }
 .co-legacy-return .co-header-actions { margin-left: auto; }
 .co-legacy-return .co-header-actions button { padding: 9px 15px; border: 1px solid #adc2b5; border-radius: 5px; font-size: 13px; }
-.co-legacy-return .co-header-actions .co-compare-entry { background: #2f6958; border-color: #2f6958; color: #fffefa; }
+.co-legacy-return .co-header-actions .co-compare-entry { background: var(--green); border-color: var(--green); color: #fffefa; }
 .co-compare-tray { font-size: 13px; }
 .co-compare-tray .job-compare-items button { display: flex; gap: 12px; align-items: center; padding: 7px 10px; }
 .co-compare-tray .job-compare-items button span { display: grid; gap: 1px; text-align: left; }

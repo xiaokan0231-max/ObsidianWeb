@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { isTypingTarget } from "@/lib/keyboard";
 import {
   computeStats,
   latestListeningMarks,
@@ -314,8 +315,7 @@ function InterviewReview({
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      if (isTypingTarget(event.target)) return;
       const next = byKey[event.key];
       if (!next) return;
       event.preventDefault();

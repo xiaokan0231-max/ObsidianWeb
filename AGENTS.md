@@ -120,7 +120,7 @@ npm run lint
 | `npm run dev` 启动 | 你要看页面时 | 所有人 | 只 warning，不阻塞 |
 | vault 仓库 pre-commit | `git commit` 时 | 所有人（含 Codex／手改） | 不一致则**拒绝提交** |
 
-- Stop hook：`scripts/stop-hook-vault-verify.sh`，配置在 `.claude/settings.local.json`。
+- Stop hook：`scripts/stop-hook-vault-verify.sh`，配置在仓库跟踪的 `.claude/settings.json`（别再往 `settings.local.json` 复制一份，否则每轮跑两次）。
   必须检查 stdin 的 `stop_hook_active`，否则「拦住→再应答→又拦」会无限循环。
 - pre-commit：`<vault>/.git/hooks/pre-commit`（不在本仓库，git 不跟踪）。
   应急放行 `git commit --no-verify`。

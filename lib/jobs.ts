@@ -12,8 +12,12 @@ import { JOB_CASE_SECTION, detectVerification } from "./job-case-schema.ts";
 export {
   composeJobStatus,
   DEFAULT_JOB_STATUS,
+  IN_FLIGHT_STATUSES,
+  IN_PROGRESS_STATUSES,
   isJobStatus,
   JOB_STATUSES,
+  SELECTION_STATUSES,
+  TERMINAL_STATUSES,
   JOB_STATUS_NOTE_MAX,
   jobStatusNote,
   jobStatusNoteError,
@@ -445,10 +449,50 @@ export function rateTone(rating: number) {
   return "low";
 }
 
-/** `2026-07-20` → `7/20`。年は今の運用（数か月単位）では邪魔なだけなので落とす。 */
-export function shortDay(day: string) {
-  const match = day.match(/^\d{4}-(\d{2})-(\d{2})$/);
-  return match ? `${Number(match[1])}/${Number(match[2])}` : day;
+/**
+ * `2026-07-20` → `7/20`。年は今の運用（数か月単位）では邪魔なだけなので落とす。
+ * 先頭が日付なら後ろに時刻が付いていてもよい（`2026-07-20 10:00` → `7/20`）。
+ * 読めない時は `fallback`（既定＝原文）を返す——表では「—」、本文では原文をそのまま出したい。
+ */
+export function shortDay(day: string, fallback?: string) {
+  const match = day.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\b|$)/);
+  return match ? `${Number(match[2])}/${Number(match[3])}` : fallback ?? day;
+}
+
+/** 文中用の月日：`2026-08-02` → `8月2日`。表は shortDay、文は monthDay——書式は二つでも実装は一つずつ。 */
+export function monthDay(day: string, fallback?: string) {
+  const match = day.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\b|$)/);
+  return match ? `${Number(match[2])}月${Number(match[3])}日` : fallback ?? day;
+}
+
+/** `target` まであと何日（未来が正、過去が負）。daysBetween の向きを逆にしただけ。 */
+export function daysUntil(target: string, today: string): number | null {
+  const days = daysBetween(target, today);
+  return days === null ? null : -days;
+}
+
+/** 応募案件の状態→配色。7 状態と自定义値をこの 1 箇所で色に落とし、看板・首页・切換面板・画像ヘッダーが同じ表を読む。 */
+export type JobStatusTone = "interview" | "progress" | "offer" | "pending" | "reject" | "neutral" | "meeting";
+
+export function statusTone(status: string): JobStatusTone {
+  if (status === "面接中") return "interview";
+  if (status === "応募済" || status === "書類通過") return "progress";
+  if (status === "内定") return "offer";
+  if (status === "未応募") return "pending";
+  if (status === "不採用") return "reject";
+  return "neutral";
+}
+
+/**
+ * 「已经动过手，但还没形成応募」的机会。
+ *
+ * Findy 的「いいかも」、媒体上的スカウト回信这类动作，本人做完了但企业没回应，
+ * 求人票也没提交出去——按 7 枚举只能是 `未応募`。可是它和「还没看过的推荐」
+ * 完全不是一回事：前者球在对方手里，本人现在做不了任何事。
+ * 看板和首页都要用同一条规则把两者分开，否则「待判断」的数字两处对不上。
+ */
+export function awaitingCounterpart(job: Pick<JobCard, "status" | "waitingFor">) {
+  return job.status === "未応募" && Boolean(job.waitingFor) && job.waitingFor !== "self";
 }
 
 /**

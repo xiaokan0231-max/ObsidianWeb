@@ -38,12 +38,7 @@ import {
   companyOverviewSearch,
   type AppView,
 } from "./app-route";
-import type {
-} from "./knowledge-graph-three";
-import {
-} from "@/lib/timeline-scene";
-import {
-} from "@/lib/review-deep";
+import { describeConnectionError } from "@/lib/connection-error";
 import {
   isRoundSpecificAsset,
   type SharedAssetTarget,
@@ -52,8 +47,6 @@ import {
   noteBasename,
   type Note,
 } from "@/lib/notes";
-import {
-} from "@/lib/knowledge-graph";
 import {
   buildDerivedData,
   calendarEventTime,
@@ -814,6 +807,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
         !event.metaKey &&
         !event.ctrlKey &&
         !event.altKey &&
+        // 3D 舞台の R（視点リセット）が先に preventDefault している時は全庫再読込を重ねない。
+        !event.defaultPrevented &&
         !isTypingTarget(event.target)
       ) {
         event.preventDefault();
@@ -1221,7 +1216,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
           {nextEvent && view !== "session" && (
             <button
               className="topbar-next"
-              onClick={() => navigateToView(nextEvent.phase === "upcoming" ? "calendar" : "calendar")}
+              onClick={() => navigateToView("calendar")}
               title={`${nextEvent.date}${nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST ${nextEvent.label}`}
             >
               <small>最近安排</small>
@@ -1370,6 +1365,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               {view === "jobs" && (
                 <JobsView
                   notes={notes}
+                  today={today}
                   onOpen={openNote}
                   onVaultChanged={loadVault}
                   onNoteWritten={patchNote}
@@ -1537,11 +1533,12 @@ function LoadingState() {
 }
 
 function ConnectionError({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const detail = describeConnectionError(error);
   return (
     <div className="connection-error">
       <span className="error-code">LOCAL / OFFLINE</span>
-      <h1>还差一步，才能读到记忆库。</h1>
-      <p>网页本身已经就绪，但本地服务没有拿到 Obsidian 的访问凭证。确认 Obsidian 正在运行后，使用项目提供的本地启动脚本即可。</p>
+      <h1>{detail.title}</h1>
+      <p>{detail.hint}</p>
       <code>{error}</code>
       <button onClick={onRetry}>重新连接 <span>↻</span></button>
     </div>

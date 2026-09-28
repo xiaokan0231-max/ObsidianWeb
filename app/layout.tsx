@@ -32,13 +32,13 @@ export async function generateMetadata(): Promise<Metadata> {
       title,
       description,
       type: "website",
-      images: [{ url: `${origin}/og.png`, width: 1672, height: 941, alt: "回声 求职作战室" }],
+      images: [{ url: `${origin}/og.jpg`, width: 1200, height: 675, alt: "回声 求职作战室" }],
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
-      images: [`${origin}/og.png`],
+      images: [`${origin}/og.jpg`],
     },
   };
 }

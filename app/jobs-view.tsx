@@ -43,7 +43,12 @@ import {
   type JobSort,
   type JobStatus,
   type JobVerification,
+  awaitingCounterpart,
+  SELECTION_STATUSES,
+  statusTone,
+  IN_PROGRESS_STATUSES,
 } from "@/lib/jobs";
+import { isTypingTarget } from "@/lib/keyboard";
 import { parseAppliedLedger } from "@/lib/job-stats.mjs";
 import { opportunityAppliedOn } from "@/lib/job-opportunity";
 import { JOB_CASE_TYPE } from "@/lib/vault-boundary.mjs";
@@ -83,10 +88,8 @@ const VIEW_MODES = [
 type ViewMode = (typeof VIEW_MODES)[number]["id"];
 
 /** 看板里始终显示的核心列，其余状态列只有有数据时才占位。 */
-const KANBAN_CORE_STATUSES: JobStatus[] = ["未応募", "応募済", "書類通過", "面接中", "内定"];
+const KANBAN_CORE_STATUSES: string[] = ["未応募", ...IN_PROGRESS_STATUSES];
 
-/** 选考推进中 KPI 的口径：书类通过之后的阶段。 */
-const SELECTION_STATUSES: string[] = ["書類通過", "面接中", "内定"];
 
 /** 一个筛选维度。算联动 facet 计数时用它指出「这一组先不算」。 */
 type FilterKey =
@@ -246,18 +249,6 @@ function toggle<T>(list: T[], value: T): T[] {
  * 混在一起会同时坏两头：未応募 的数字虚高，首页还催你去「判断是否応募」
  * 一个你三天前就点过的岗位。用 waiting_for 把两者分开。
  */
-function awaitingCounterpart(job: JobCard) {
-  return job.status === "未応募" && Boolean(job.waitingFor) && job.waitingFor !== "self";
-}
-
-/** 状态配色分组。自定义状态（不在枚举里）走中性色。 */
-function statusTone(status: string) {
-  if (status === "未応募") return "pending";
-  if (status === "応募済" || status === "書類通過" || status === "面接中") return "progress";
-  if (status === "内定") return "offer";
-  if (status === "不採用") return "reject";
-  return "neutral";
-}
 
 /**
  * 入库时期的强调档。今天进的必须一眼跳出来 —— 卡片按匹配度排时，
@@ -267,12 +258,6 @@ function intakeTone(intake: JobIntake) {
   if (intake === "today") return "new";
   if (intake === "d3" || intake === "d7") return "recent";
   return "old";
-}
-
-/** 周复盘时间线上的小圆点：面接中要比其它「进行中」更显眼，所以单独给橙色。 */
-function eventTone(status: string) {
-  if (status === "面接中") return "interview";
-  return statusTone(status);
 }
 
 function clip(text: string, limit: number) {
@@ -316,10 +301,7 @@ function dayInRange(raw: string, from: string, to: string) {
   return day !== null && day >= from && day <= to;
 }
 
-function dayLabel(raw: string) {
-  const day = normalizeDay(raw);
-  return day ? `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}` : "—";
-}
+const dayLabel = (raw: string) => shortDay(raw, "—");
 
 /**
  * 周复盘事件锚定在最近一次状态变化日（status_updated）。
@@ -431,12 +413,15 @@ function FilterChips({
 
 function JobsView({
   notes,
+  today,
   onOpen,
   onVaultChanged,
   onNoteWritten,
   initialFilters,
 }: {
   notes: Note[];
+  /** 「今日」は殻が持つ（零時の切替も殻が面倒を見る）。ここで new Date() すると跨日後の「今日入库」が前日のまま凍る。 */
+  today: string;
   onOpen: (note: Note) => void;
   onVaultChanged?: () => void | Promise<void>;
   /** 写路由が返した更新後の note を1件だけ差し替える。全量再取得（onVaultChanged）の代替。 */
@@ -459,7 +444,6 @@ function JobsView({
   const [viewMode, setViewMode] = useState<ViewMode>(initialUrlState.viewMode);
   const [weekOffset, setWeekOffset] = useState(initialUrlState.weekOffset);
   // 这个面板常挂着不关，「今天」要在跨天后重新取，否则周复盘会一直停在打开那天的那一周。
-  const [today, setToday] = useState(() => isoDate(new Date()));
   const [detailPath, setDetailPath] = useState<string | null>(initialUrlState.detailPath);
   const [comparePaths, setComparePaths] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -821,27 +805,13 @@ function JobsView({
         return;
       }
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (isTypingTarget(event.target)) return;
       event.preventDefault();
       searchRef.current?.focus();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [closeDetail, compareOpen, detailOpen]);
-
-  useEffect(() => {
-    const sync = () => setToday((current) => {
-      const now = isoDate(new Date());
-      return now === current ? current : now;
-    });
-    document.addEventListener("visibilitychange", sync);
-    window.addEventListener("focus", sync);
-    return () => {
-      document.removeEventListener("visibilitychange", sync);
-      window.removeEventListener("focus", sync);
-    };
-  }, []);
 
   useEffect(() => {
     const syncFromUrl = () => {
@@ -2005,7 +1975,7 @@ function JobWeeklyView({
                 <button key={job.path} type="button" className="job-week-event" onClick={() => onDetail(job.path)}>
                   <time>{dayLabel(eventDay(job))}</time>
                   <span>
-                    <i className={`tone-${eventTone(job.status)}`} aria-hidden="true" />
+                    <i className={`tone-${statusTone(job.status)}`} aria-hidden="true" />
                     <strong>{job.company}</strong>
                     <small>{eventLabel(job)}</small>
                   </span>
