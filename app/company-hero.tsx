@@ -32,17 +32,19 @@ function Link({ link, onOpen }: { link: CompanyHeroLink; onOpen: () => void }) {
   </li>;
 }
 
-export default function CompanyHeroCard({ context, rounds, today, fallbackCompany, fallbackTitle = "", onOpen }: {
+export default function CompanyHeroCard({ context, rounds, today, linkedCase = null, fallbackCompany, fallbackTitle = "", onOpen }: {
   context: CompanyOverview | null;
   /** 该案件／面谈已关联的准备稿（借用面接日用）。 */
   rounds: InterviewPrepDoc[];
   today: string;
+  /** 面谈 todo 通过 case_id 挂着的案件；日時写在案件上时从这里借。 */
+  linkedCase?: Note | null;
   /** 没有正本时（旧准备稿、或什么都没选）退回显示的公司名与轮次。 */
   fallbackCompany: string;
   fallbackTitle?: string;
   onOpen: (note: Note) => void;
 }) {
-  const hero = useMemo(() => (context ? buildCompanyHero(context, { rounds, today }) : null), [context, rounds, today]);
+  const hero = useMemo(() => (context ? buildCompanyHero(context, { rounds, today, linkedCase }) : null), [context, rounds, today, linkedCase]);
   if (!context || !hero) {
     return <div className="co-hero co-hero-empty"><p className="co-kicker">公司画像</p><CompanyName name={splitCompanyName(fallbackCompany || "公司总览")} japanese={!!fallbackCompany && isJapaneseName(fallbackCompany)} /><p className="co-context-title">{fallbackTitle || "选择一个真实案件或面谈，查看公司与岗位的最新资料。"}</p></div>;
   }

@@ -6,8 +6,12 @@ import {
   JOB_CASE_TYPE,
   jobStatusNoteError,
   KNOWN_CHANNELS,
+  normalizeJobStatus,
   statusRequiresChannel,
 } from "@/lib/jobs";
+
+/** 終結（不採用）時に消す残骸。待ち・跟進・面談予定は死んだ案件の待办ではない（inbox-sync skill と同じ規則）。 */
+const TERMINAL_CLEANUP_KEYS = ["waiting_for", "follow_up_at", "follow_up_action", "next_event_at"] as const;
 import { errorResponse, parseOptionalText, parseRequiredText, readJson } from "@/lib/server/api";
 import { patchFrontmatterScalars } from "@/lib/server/frontmatter-patch";
 import { readNote, writeNote } from "@/lib/server/obsidian";
@@ -113,24 +117,38 @@ export async function POST(request: Request) {
       const { date: today } = tokyoParts();
       const date = preserveHistory && existingUpdated ? existingUpdated : today;
       const valueToWrite = preserveHistory ? String(note.frontmatter.status) : value;
+      const previousBase = normalizeJobStatus(String(note.frontmatter.status ?? "")) ?? "";
+      const extra: Record<string, string | null> = {};
+      // 応募日は応募済に入った瞬間の日付が唯一の記録。以後 status_updated は拒否日・面接日で上書きされて
+      // 応募日が永久に消えるので、別枠 applied_on に残す（既に書いてあれば触らない）。
+      if (status === "応募済" && !preserveHistory && !String(note.frontmatter.applied_on ?? "").trim()) extra.applied_on = today;
+      if (status === "不採用" && previousBase !== "不採用") {
+        for (const key of TERMINAL_CLEANUP_KEYS) if (note.frontmatter[key] !== undefined) extra[key] = null;
+      }
       const content = patchFrontmatterScalars(note.content, {
         status: valueToWrite,
         status_updated: date,
         ...(channelToWrite ? { channel: channelToWrite } : {}),
+        ...extra,
       });
       await writeNote(path, content);
       // 更新後のノートを応答へ載せる。サーバは全文を手元に持っているのに、
       // クライアントが1件の差し替えのために全庫を再取得する理由はない。
+      const frontmatter: Record<string, unknown> = {
+        ...note.frontmatter,
+        status: valueToWrite,
+        status_updated: date,
+        ...(channelToWrite ? { channel: channelToWrite } : {}),
+      };
+      for (const [key, extraValue] of Object.entries(extra)) {
+        if (extraValue === null) delete frontmatter[key];
+        else frontmatter[key] = extraValue;
+      }
       const updated = {
         ...note,
         content,
         stat: { ...note.stat, mtime: Date.now(), size: content.length },
-        frontmatter: {
-          ...note.frontmatter,
-          status: valueToWrite,
-          status_updated: date,
-          ...(channelToWrite ? { channel: channelToWrite } : {}),
-        },
+        frontmatter,
       };
       return Response.json({
         ok: true,

@@ -1,4 +1,4 @@
-import { getString } from "./notes.ts";
+import { getString, type Note } from "./notes.ts";
 import type { CompanyOverview } from "./company-overview.ts";
 import { formatContextPickerEvent } from "./context-picker.ts";
 import { interviewPrepTemporalStatus } from "./interview-prep-index.ts";
@@ -309,19 +309,24 @@ function caseHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today: s
 }
 
 /** 面谈是 todo 笔记，不走 toJobCard——jobStatus() 对没有 status 的笔记会回退成「未応募」，那是伪造的选考状态。 */
-function meetingHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today: string): CompanyHero {
+function meetingHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today: string, linkedCase: Note | null): CompanyHero {
   const fm = context.note.frontmatter;
   const ended = meetingEnded(context.note, today);
   const rawStatus = getString(fm.status).trim();
   const tone = companyHeroTone(context, today);
 
   const progress: CompanyHeroFact[] = [];
-  const eventAt = getString(fm.next_event_at).trim();
+  // 挂在案件上的面接，日時写在 job-case 的 next_event_at（skill 规定不两处都写）。日历就是这么合并的，
+  // 头部也借同 case_id 案件的日時，否则日历有日期、这里却「未定」。
+  const own = getString(fm.next_event_at).trim();
+  const fromCase = !own && linkedCase ? getString(linkedCase.frontmatter.next_event_at).trim() : "";
+  const eventAt = own || fromCase;
+  const eventTitle = own ? own : `借自案件 ${linkedCase?.path ?? ""}`;
   const eventDate = DATE.exec(eventAt)?.[0] ?? "";
-  // 正本没写面谈时刻、但已关联的准备稿有将来日期：与切换面板同口径借来，title 写明借自谁。
+  // 案件也没写、但已关联的准备稿有将来日期：与切换面板同口径借来，title 写明借自谁。
   const borrowed = !eventAt && !ended ? upcomingPrepDoc(rounds, today) : null;
-  if (eventDate && eventDate < today) progress.push({ id: "next", label: "日時", value: `${formatContextPickerEvent(eventAt, today) || eventAt} · 已过`, title: eventAt, muted: true });
-  else if (eventAt) progress.push({ id: "next", label: "日時", value: formatContextPickerEvent(eventAt, today) || eventAt, title: eventAt });
+  if (eventDate && eventDate < today) progress.push({ id: "next", label: "日時", value: `${formatContextPickerEvent(eventAt, today) || eventAt} · 已过`, title: eventTitle, muted: true });
+  else if (eventAt) progress.push({ id: "next", label: "日時", value: formatContextPickerEvent(eventAt, today) || eventAt, title: eventTitle });
   else if (borrowed) progress.push({ id: "next", label: "日時", value: formatContextPickerEvent(borrowed.date, today), title: `借自准备稿 ${borrowed.note.path}` });
   else progress.push({ id: "next", label: "日時", value: "未定", muted: true });
   const due = getString(fm.due).trim();
@@ -355,7 +360,10 @@ function meetingHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today
   };
 }
 
-/** rounds 是该案件／面谈已关联的准备稿（interview-session 已经按正本分好）。 */
-export function buildCompanyHero(context: CompanyOverview, { rounds = [], today }: { rounds?: InterviewPrepDoc[]; today: string }): CompanyHero {
-  return context.kind === "meeting" ? meetingHero(context, rounds, today) : caseHero(context, rounds, today);
+/**
+ * rounds 是该案件／面谈已关联的准备稿（interview-session 已经按正本分好）；
+ * linkedCase 是面谈 todo 通过 case_id 挂着的案件（日時写在案件上时从这里借）。
+ */
+export function buildCompanyHero(context: CompanyOverview, { rounds = [], today, linkedCase = null }: { rounds?: InterviewPrepDoc[]; today: string; linkedCase?: Note | null }): CompanyHero {
+  return context.kind === "meeting" ? meetingHero(context, rounds, today, linkedCase) : caseHero(context, rounds, today);
 }

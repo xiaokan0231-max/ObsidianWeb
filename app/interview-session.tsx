@@ -30,7 +30,7 @@ import {
   calendarCompanyIdentity,
   countdownLabel,
 } from "@/lib/memory-atlas-data";
-import { formatDate, getType, type Note } from "@/lib/notes";
+import { formatDate, getString, getType, type Note } from "@/lib/notes";
 import { REVIEW_DIMENSION_META } from "@/lib/review-deep";
 import {
   buildCardCoverage,
@@ -1089,6 +1089,10 @@ function InterviewSession({
   const context = selected ? docContexts.get(selected.note.path) ?? null : contexts.find((item) => item.note.path === selection.contextPath) ?? null;
   // 头部「准备稿 N 轮」说的是这个案件／面谈名下的全部轮次——日历判定本场无稿时它们仍然存在，只是不借来当本场的稿。
   const contextRounds = useMemo(() => (context ? docs.filter((doc) => docContexts.get(doc.note.path)?.key === context.key) : []), [context, docs, docContexts]);
+  // 面谈 todo 自己没写日時时，头部借同 case_id 案件的 next_event_at——日历就是这么合并的，两处不能一个有日期一个「未定」。
+  const linkedCase = useMemo(() => (context?.kind === "meeting" && context.caseId
+    ? notes.find((note) => getType(note) === "job-case" && getString(note.frontmatter.case_id) === context.caseId) ?? null
+    : null), [context, notes]);
   const [legacyPrepPath, setLegacyPrepPath] = useState<string | null>(null);
   const [comparePaths, setComparePaths] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -1232,7 +1236,7 @@ function InterviewSession({
 
   if (!selected || legacyPrepPath !== selected.note.path) {
     // 顶部色条跟随案件状态（面接中橙・不採用灰…），与头部胶囊同一张色表。
-    return <><div className={`co-shell${context ? ` tone-${companyHeroTone(context, today)}` : ""}`}><header className="co-shell-head"><CompanyHeroCard context={context} rounds={contextRounds} today={today} fallbackCompany={selected?.company || initialCompany} fallbackTitle={selected?.round ?? ""} onOpen={onOpen} /><div className="co-shell-controls">{contextPicker}{companyAction}</div></header>
+    return <><div className={`co-shell${context ? ` tone-${companyHeroTone(context, today)}` : ""}`}><header className="co-shell-head"><CompanyHeroCard context={context} rounds={contextRounds} today={today} linkedCase={linkedCase} fallbackCompany={selected?.company || initialCompany} fallbackTitle={selected?.round ?? ""} onOpen={onOpen} /><div className="co-shell-controls">{contextPicker}{companyAction}</div></header>
       <nav className="co-legacy-tabs" aria-label="公司与面谈视图"><button type="button" aria-pressed="true">公司总览</button><button type="button" disabled={!selected} aria-pressed="false" onClick={() => selected && setLegacyPrepPath(selected.note.path)}>面谈准备</button>{!selected && <span className="co-prep-unavailable">本场尚无准备稿</span>}</nav>
       {companyContent}{context && <button type="button" className="co-compare-toggle" onClick={() => onOpen(context.note)}>{context.kind === "meeting" ? "打开面谈记录" : "打开案件记录"} ↗</button>}
     </div>{compareUI}</>;

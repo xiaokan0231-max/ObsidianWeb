@@ -44,6 +44,7 @@ import {
   type SharedAssetTarget,
 } from "@/lib/interview-shared-assets";
 import {
+  getType,
   noteBasename,
   type Note,
 } from "@/lib/notes";
@@ -411,6 +412,11 @@ function interviewNavigationKey(view: AppView, search: string) {
   return appViewHref(view, params);
 }
 
+
+type DerivedState = "fresh" | "stale" | "rebuilding";
+/** これらを書き換えると台帳・数据字典・面接傾向の generated 区块が古くなる（vault:stats の入力）。 */
+const DERIVED_SOURCE_TYPES = new Set(["job-case", "job-queue", "interview-answer-review", "transcript-study", "study-annotation"]);
+
 function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [view, setView] = useState<View>(initialView);
@@ -426,6 +432,14 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const [sharedAssetOrigin, setSharedAssetOrigin] = useState({ x: 0, y: 0 });
   // 求職分析から「進行中 N 件をすべて見る」で飛んできた時だけ、求人一覧に状態フィルタを引き継ぐ。
   const [jobsInitialFilters, setJobsInitialFilters] = useState<JobsInitialFilters | null>(null);
+  // 派生統計（台帳・数据字典・面接傾向の generated 区块）が手元の事実に追いついているか。
+  // 書込ルートは stale を返すだけで再計算できない（workerd）ので、殻が本機 bridge に頼む。
+  const [derivedState, setDerivedState] = useState<DerivedState>("fresh");
+  const [statsError, setStatsError] = useState("");
+  const [autoStats, setAutoStats] = useState(() => {
+    try { return window.localStorage.getItem("echo:auto-stats") !== "off"; } catch { return true; }
+  });
+  const statsTimer = useRef<number | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("note"),
   );
@@ -574,6 +588,39 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
    * 以前每次写入都 loadVault() 整库重拉（服务端 300 个 GET + 6MB JSON），
    * spinner 还要按住整条链路——为了换一条已经在手里的数据。
    */
+  const rebuildStats = useCallback(async () => {
+    if (statsTimer.current) { window.clearTimeout(statsTimer.current); statsTimer.current = null; }
+    setDerivedState("rebuilding");
+    setStatsError("");
+    try {
+      const response = await fetch("/api/vault/stats", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "重算派生统计失败");
+      setDerivedState("fresh");
+      // 台帳・数据字典は jobs scope、面接傾向は interview scope。書き換わった generated 区块を取り直す。
+      await loadVault({ scope: "jobs" });
+    } catch (rebuildError) {
+      setDerivedState("stale");
+      setStatsError(rebuildError instanceof Error ? rebuildError.message : "重算派生统计失败");
+    }
+  }, [loadVault]);
+
+  // 事実を書いた直後に呼ぶ。自動なら 3 秒待って（連打をまとめて）再計算、手動なら「待重算」の印だけ出す。
+  const markDerivedStale = useCallback(() => {
+    setDerivedState((current) => (current === "rebuilding" ? current : "stale"));
+    if (!autoStats) return;
+    if (statsTimer.current) window.clearTimeout(statsTimer.current);
+    statsTimer.current = window.setTimeout(() => void rebuildStats(), 3_000);
+  }, [autoStats, rebuildStats]);
+
+  const toggleAutoStats = useCallback(() => {
+    setAutoStats((current) => {
+      const next = !current;
+      try { window.localStorage.setItem("echo:auto-stats", next ? "on" : "off"); } catch { /* 私密窗口等拿不到 localStorage：只影响本次会话 */ }
+      return next;
+    });
+  }, []);
+
   const patchNote = useCallback((note: Note) => {
     // 在途の全量取得が写前スナップショットを持って着地しても潰されないよう、台帳にも残す。
     // 時刻を持たせるのは期限切れの判定用（食い違ったまま永久に貼り続けないため）。
@@ -585,7 +632,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       next[index] = note;
       return next;
     });
-  }, []);
+    if (DERIVED_SOURCE_TYPES.has(getType(note))) markDerivedStale();
+  }, [markDerivedStale]);
 
   const updateTodoStatus = useCallback(async (note: Note, status: string, expectedMtime?: number) => {
     try {
@@ -993,9 +1041,10 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   );
 
   const sourceLabel = error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接";
-  const sourceDetail = fetchedAt
+  const syncedAt = fetchedAt
     ? `${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(fetchedAt)} 同步`
     : "本地数据源";
+  const sourceDetail = derivedState === "rebuilding" ? "正在重算统计…" : derivedState === "stale" ? "统计待重算" : syncedAt;
 
   const navigateToView = useCallback((
     nextView: View,
@@ -1238,6 +1287,15 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               <small>{sourceDetail}</small>
             </span>
           </button>
+          {/* 派生統計の再計算：自動（既定）／手動。手動で待重算のときは押せば今すぐ再計算。 */}
+          <button
+            className={`topbar-stats state-${derivedState}`}
+            onClick={derivedState === "stale" ? () => void rebuildStats() : toggleAutoStats}
+            disabled={derivedState === "rebuilding"}
+            title={statsError || (derivedState === "stale" ? "点击立即重算派生统计" : autoStats ? "写入后自动重算派生统计（点击改为手动）" : "派生统计手动重算（点击改为自动）")}
+          >
+            {derivedState === "stale" ? "重算统计" : derivedState === "rebuilding" ? "重算中…" : autoStats ? "统计 · 自动" : "统计 · 手动"}
+          </button>
 
           <div className="topbar-keys">
             <button onClick={() => setSearchOpen(true)} aria-label="搜索与命令"><kbd>⌘K</kbd>搜索</button>
@@ -1377,6 +1435,9 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   notes={notes}
                   onOpen={openNote}
                   onViewJobs={viewJobsWithFilters}
+                  derivedState={derivedState}
+                  statsError={statsError}
+                  onRebuildStats={rebuildStats}
                 />
               )}
               {view === "todo" && (

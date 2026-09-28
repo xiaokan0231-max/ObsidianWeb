@@ -155,3 +155,16 @@ test("案件正本自己的 next_event_at 优先于准备稿日期，且带时�
   assert.deepEqual(ids(byId.active), [`context:${stale.note.path}`]);
   assert.equal(byId.active.items[0].eventAt, "");
 });
+
+test("面谈 todo 自己没写日時时借同 case_id 案件的 next_event_at，归进「即将面谈」并显示时刻", () => {
+  const linked = caseContext("株式会社テスト", "データエンジニア", { status: "面接中", next_event_at: "2026-09-24 10:00" });
+  const meeting = { ...meetingContext("株式会社テスト", "電話面談の確認と準備", { status: "進行中", category: "面接準備" }), caseId: linked.caseId };
+  const groups = buildContextPickerGroups({ contexts: [linked, meeting], series: [], docs: [], docContexts: new Map(), today: TODAY });
+  const upcoming = groups.find((group) => group.id === "upcoming");
+  const item = upcoming?.items.find((entry) => entry.id === `context:${meeting.note.path}`);
+  assert.ok(item, "面谈进了即将面谈组");
+  assert.equal(item.eventAt, "2026-09-24 10:00");
+  const orphan = { ...meetingContext("株式会社サンプル", "面談準備", { status: "進行中" }), caseId: "missing" };
+  const alone = buildContextPickerGroups({ contexts: [orphan], series: [], docs: [], docContexts: new Map(), today: TODAY });
+  assert.equal(alone.find((group) => group.id === "upcoming"), undefined, "没有案件可借就还是进行中");
+});

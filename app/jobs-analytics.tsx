@@ -291,11 +291,18 @@ function JobsAnalytics({
   notes,
   onOpen,
   onViewJobs,
+  derivedState = "fresh",
+  statsError = "",
+  onRebuildStats,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
   /** statuses を渡すと求人一覧側の状態フィルタに引き継がれる（渡さなければ全件）。 */
   onViewJobs: (filters?: JobsInitialFilters) => void;
+  /** 台帳の generated JSON が手元の事実に追いついているか（殻が管理）。stale の間、下のグラフは古い台帳を描いている。 */
+  derivedState?: "fresh" | "stale" | "rebuilding";
+  statsError?: string;
+  onRebuildStats?: () => void;
 }) {
   const [range, setRange] = useState<RangeId>("all");
   const [handScope, setHandScope] = useState<HandScopeId>("high");
@@ -511,6 +518,14 @@ function JobsAnalytics({
   return (
     <div className="analytics">
       <h1 className="sr-only">选考与分析</h1>
+      {derivedState !== "fresh" && (
+        <p className={`analytics-stale ${derivedState}`} role="status">
+          {derivedState === "rebuilding"
+            ? "案件状态已写入，正在重算台帳的派生统计…"
+            : `案件状态已写入，下方图表仍是上一次 vault:stats 的结果。${statsError ? ` ${statsError}` : ""}`}
+          {derivedState === "stale" && onRebuildStats && <button type="button" onClick={onRebuildStats}>立即重算</button>}
+        </p>
+      )}
       <dl className="analytics-head-glance module-stat-strip" aria-label="当前求职进展摘要">
         {GLANCE_CARDS.map((card) => {
           const count = glanceCounts[card.key];

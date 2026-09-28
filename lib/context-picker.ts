@@ -101,7 +101,7 @@ function haystack(parts: string[]) {
   return normalize(parts.filter(Boolean).join(" "));
 }
 
-function contextItem(context: CompanyOverview, rounds: InterviewPrepDoc[], today: string): { item: ContextPickerItem; group: BuiltGroupId } {
+function contextItem(context: CompanyOverview, rounds: InterviewPrepDoc[], today: string, linkedCase: Note | null = null): { item: ContextPickerItem; group: BuiltGroupId } {
   const note = context.note;
   const updatedOn = getString(note.frontmatter.status_updated) || getString(note.frontmatter.updated) || latestPrepDate(rounds);
   const prepDate = upcomingPrepDate(rounds, today);
@@ -118,7 +118,8 @@ function contextItem(context: CompanyOverview, rounds: InterviewPrepDoc[], today
     // 就会冒充一场面谈，和同一案件的案件行在「即将面谈」里并排出现两次。
     // 同理，已完了的准备任务不再是一场待办面谈——即使它的期限还没到。
     const closed = meetingClosed(note, today);
-    const event = parseEvent(getString(note.frontmatter.next_event_at));
+    // 挂在案件上的面接把日時写在 job-case（skill 规定不两处都写）；todo 自己没有时借案件的，否则归不进「即将面谈」。
+    const event = parseEvent(getString(note.frontmatter.next_event_at) || (linkedCase ? getString(linkedCase.frontmatter.next_event_at) : ""));
     const eventAt = closed ? "" : event && event.date >= today ? event.eventAt : prepDate;
     const item: ContextPickerItem = { ...base, kind: "meeting", status: "", detail: "", tone: "meeting", eventAt,
       haystack: haystack([context.company, context.title, "面谈 面談", noteBasename(note.path)]) };
@@ -186,7 +187,8 @@ export function buildContextPickerGroups({ contexts, series, docs, docContexts, 
   }
   const buckets = new Map<BuiltGroupId, ContextPickerItem[]>();
   const push = ({ item, group }: { item: ContextPickerItem; group: BuiltGroupId }) => buckets.set(group, [...(buckets.get(group) ?? []), item]);
-  for (const context of contexts) push(contextItem(context, roundsByContext.get(context.key) ?? [], today));
+  const casesById = new Map(contexts.flatMap((context) => (context.kind === "case" && context.caseId ? [[context.caseId, context.note] as const] : [])));
+  for (const context of contexts) push(contextItem(context, roundsByContext.get(context.key) ?? [], today, context.kind === "meeting" ? casesById.get(context.caseId) ?? null : null));
   // 有正本的准备稿已经挂在案件／面谈之下；只有完全没有正本的系列才单独列出。
   for (const item of series) if (!item.rounds.some((doc) => docContexts.get(doc.note.path))) push(seriesItem(item, today));
   return GROUP_ORDER.flatMap((id) => {

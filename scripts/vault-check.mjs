@@ -59,6 +59,8 @@ const problems = [];
 const warnings = [];
 const notes = await readJobCases();
 const caseIds = new Map();
+// case_id → 案件の next_event_at。面談らしい todo に日時が無い時、案件側にもあるかを見る。
+const caseNextEvent = new Map();
 
 const today = new Date().toLocaleDateString("sv-SE");
 
@@ -77,6 +79,7 @@ for (const note of notes) {
   }
 
   if (fm.case_id) {
+    caseNextEvent.set(String(fm.case_id), String(fm.next_event_at ?? "").trim());
     const files = caseIds.get(fm.case_id) ?? [];
     files.push(note.name);
     caseIds.set(fm.case_id, files);
@@ -342,6 +345,18 @@ for (const path of files) {
     }
     if (frontmatter.case_id && !caseIds.has(String(frontmatter.case_id))) {
       problems.push(`${relativePath}: case_id「${frontmatter.case_id}」に対応する job-case が無い`);
+    }
+    // 面談らしい todo（分類・ファイル名に面談/面接/説明会）に日時が無く、紐づく案件にも無い：
+    // 日历・首页・公司画像ヘッダーの三か所で同時に見えなくなる。日付がファイル名にしか無い形が実際に 2 件あった。
+    // 止めない（警告）——日時が本当に未定の面談もある。
+    if (
+      /面談|面接|説明会|面谈|面试/.test(`${category} ${relativePath}`) &&
+      frontmatter.company &&
+      !String(frontmatter.next_event_at ?? "").trim() &&
+      !["完了", "保留"].includes(status) &&
+      !(frontmatter.case_id && caseNextEvent.get(String(frontmatter.case_id)))
+    ) {
+      warnings.push(`${relativePath}: 面談らしい todo に next_event_at が無い（案件 ${frontmatter.case_id || "未紐付け"} にも無い）→ 日历・首页・画像ヘッダーに出ない`);
     }
 
     const action = String(frontmatter.action ?? "").trim();

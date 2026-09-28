@@ -455,7 +455,6 @@ function JobsView({
    * どれでも閉じられ、どれも書込み中を待たない。
    */
   const [statusErrors, setStatusErrors] = useState<Record<string, string>>({});
-  const [statsStale, setStatsStale] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const openDetail = useCallback((path: string) => {
     const params = new URLSearchParams(window.location.search);
@@ -759,7 +758,6 @@ function JobsView({
         // 無い場合（unchanged 応答・旧サーバ）だけ全量再取得へ退く。
         if (payload.note && onNoteWritten) onNoteWritten(payload.note);
         else await onVaultChanged?.();
-        if (payload.derivedState === "stale") setStatsStale(true);
         return null;
       } catch (error) {
         const message = error instanceof Error ? error.message : "写入 Vault 失败";
@@ -1240,13 +1238,6 @@ function JobsView({
           onCompare={() => toggleCompare(detail.path)}
           onOpenNote={(note) => onOpen(note ?? detail.note)}
         />
-      )}
-
-      {statsStale && (
-        <div className="job-stats-stale" role="status">
-          <span>案件状态已写入；派生统计将在下次运行 vault:stats 后更新。</span>
-          <button onClick={() => setStatsStale(false)} aria-label="关闭提示">×</button>
-        </div>
       )}
 
       {compareOpen && compared.length >= 2 && (

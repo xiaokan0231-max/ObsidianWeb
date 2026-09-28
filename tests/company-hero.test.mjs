@@ -196,3 +196,17 @@ test("面谈：不走七枚举，胶囊用面谈色、关闭后按 todo 状态�
     for (const item of [hero, done, shelved, undated]) assert.notEqual(item.status.label, status, `面谈胶囊不得出现案件状态词 ${status}`);
   }
 });
+
+test("面谈：todo 自己没写日時时借同 case_id 案件的 next_event_at，并注明借自谁；案件的日期过了也如实标已过", () => {
+  const todo = makeNote("20_求職/_TODO/テスト_面談準備.md", { type: "todo", status: "進行中", category: "面接準備", company: "株式会社テスト", case_id: "test", action: "質問を用意する" }, "# 株式会社テスト 面談準備");
+  const linkedCase = makeNote("20_求職/テスト/データエンジニア.md", { type: "job-case", case_id: "test", company: "株式会社テスト", status: "面接中", next_event_at: "2026-09-29 10:00" });
+  const meetingContext = context(todo, { kind: "meeting", key: `meeting:${todo.path}`, title: "面談準備" });
+  const borrowed = buildCompanyHero(meetingContext, { today: TODAY, linkedCase });
+  assert.deepEqual(borrowed.progress[0], { id: "next", label: "日時", value: "9/29 10:00", title: "借自案件 20_求職/テスト/データエンジニア.md" });
+  assert.equal(borrowed.status.label, "面谈");
+  const own = buildCompanyHero(context(makeNote("o.md", { ...todo.frontmatter, next_event_at: "2026-09-30 15:00" }, todo.content), { kind: "meeting", title: "面談準備" }), { today: TODAY, linkedCase });
+  assert.deepEqual(own.progress[0], { id: "next", label: "日時", value: "9/30 15:00", title: "2026-09-30 15:00" }, "自己写了就用自己的，不借");
+  const stale = buildCompanyHero(meetingContext, { today: TODAY, linkedCase: makeNote("c.md", { ...linkedCase.frontmatter, next_event_at: "2026-09-10 10:00" }) });
+  assert.deepEqual(stale.progress[0], { id: "next", label: "日時", value: "9/10 10:00 · 已过", title: "借自案件 c.md", muted: true });
+  assert.deepEqual(buildCompanyHero(meetingContext, { today: TODAY }).progress[0], { id: "next", label: "日時", value: "未定", muted: true }, "没有案件可借才是未定");
+});

@@ -907,6 +907,10 @@
   font-size: 9px;
   font-style: normal;
 }
+/* 分析页の「台帳が古い」帯。stale は橙、再計算中は灰。 */
+.analytics-stale { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding: 9px 14px; border-left: 3px solid var(--orange); background: rgba(230, 109, 69, 0.08); font-size: 12.5px; color: var(--ink); }
+.analytics-stale.rebuilding { border-left-color: var(--muted); background: var(--paper-deep); color: var(--muted); }
+.analytics-stale button { margin-left: auto; border: 1px solid rgba(230, 109, 69, 0.45); border-radius: 4px; background: transparent; padding: 3px 10px; font-size: 12px; color: var(--orange); cursor: pointer; }
 .analytics-priority-topline i.tone-interview,
 .analytics-watch-row i.tone-interview {
   color: #a44931;
