@@ -11,10 +11,25 @@ import { copySelectionWithoutRuby } from "./ruby-copy";
 import PrepMaterialReader from "./prep-material-reader";
 
 type SectionId = typeof PREP_V2_SECTIONS[number]["id"] | "company";
+
+/** `YYYY-MM-DD` の翌日（UTC 計算で十分：日付文字列同士の比較にしか使わない）。 */
+function nextDay(day: string) {
+  const [year, month, date] = day.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10);
+}
 const MAIN_SECTIONS: { id: SectionId; navLabel: string }[] = [{ id: "company", navLabel: "公司总览" }, ...PREP_V2_SECTIONS.filter((section) => section.id !== "backup").map((section) => ({ ...section, navLabel: section.id === "overview" ? "面谈纵览" : section.navLabel }))];
 
-export default function InterviewSessionV2({ doc, series, selectedSeries, sources, today, onSelect, onOpen, onOpenWiki, onOpenCard, onOpenAsset, companyOverview, contextPicker, companyAction }: {
+/** URL の ?prepTab= を読む。殻の ?section= は原笔记 drawer の見出し用なので別名にする。 */
+function tabFromUrl(): SectionId | null {
+  if (typeof window === "undefined") return null;
+  const value = new URLSearchParams(window.location.search).get("prepTab");
+  return value && (value === "company" || value === "backup" || PREP_V2_SECTIONS.some((section) => section.id === value)) ? value as SectionId : null;
+}
+
+export default function InterviewSessionV2({ doc, series, selectedSeries, sources, today, onSelect, onOpen, onOpenWiki, onOpenCard, onOpenAsset, companyOverview, contextPicker, companyAction, briefing }: {
   companyOverview: ReactNode;
+  /** v1 の「本轮提醒」（復盤から出た弱点）。纵览の頭に出す——skill が既定で v2 を出す今、ここに無いと復盤の沈殿が次の面接に届かない。 */
+  briefing?: ReactNode;
   contextPicker: ReactNode;
   companyAction: ReactNode;
   doc: InterviewPrepDoc;
@@ -28,7 +43,14 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   onOpenCard: (id: string) => void;
   onOpenAsset: (asset: SharedAssetTarget) => void;
 }) {
-  const [active, setActive] = useState<SectionId>("company");
+  // 既定タブ：URL に書いてあればそれ、面接が明日までに迫っていれば纵览、そうでなければ会社総覧。
+  // 以前は常に会社総覧で、当日に日历から来ても「面谈纵览」をもう一度押す必要があった。
+  const [active, setActive] = useState<SectionId>(() => {
+    const fromUrl = tabFromUrl();
+    if (fromUrl) return fromUrl;
+    const imminent = /^\d{4}-\d{2}-\d{2}$/.test(doc.date) && doc.date <= nextDay(today) && doc.date >= today;
+    return imminent ? "overview" : "company";
+  });
   const [reading, setReading] = useState(false);
   const [currentHeading, setCurrentHeading] = useState<number | null>(null);
   const mainRef = useRef<HTMLElement>(null);
@@ -50,6 +72,10 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
     savePosition();
     setCurrentHeading(null);
     setActive(next);
+    // 刷新・共有で同じタブに戻れるよう URL に残す（履歴には積まない）。
+    const params = new URLSearchParams(window.location.search);
+    if (next === "company") params.delete("prepTab"); else params.set("prepTab", next);
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
   };
   useLayoutEffect(() => {
     if (railRef.current) railRef.current.scrollTop = 0;
@@ -134,6 +160,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
     <div className={`v2-layout${active === "company" ? " v2-company-layout" : ""}`}>
       {active === "company" ? <main id="v2-panel" role="tabpanel" aria-labelledby="v2-tab-company" tabIndex={0} className="v2-company-panel" ref={mainRef}>{companyOverview}</main> : <>
       <main id="v2-panel" role={active === "backup" ? "region" : "tabpanel"} aria-labelledby={active === "backup" ? "v2-section-title" : `v2-tab-${active}`} tabIndex={0} className={`v2-body v2-${active}`} ref={mainRef}>
+        {active === "overview" && briefing}
         <header className="v2-section-head"><h2 id="v2-section-title">{active === "overview" ? "面谈纵览" : section?.title ?? "临场备用"}</h2><button type="button" onClick={() => { savePosition(); setReading(true); }}>专注阅读</button></header>
         {blocks.length ? <Blocks blocks={blocks} refs={refs} idPrefix={prefix} /> : <p className="v2-empty">本轮没有需要补充的内容，可从回答库打开共用话术。</p>}
         {active === "resources" && sources.some((source) => !doc.externalLinks.some((current) => current.href === source.href)) && <section className="v2-carried-sources"><h3>前轮沿用资料 · 截至本轮</h3><p>本轮新增资料见上文；以下来源保留前轮的阅读范围。</p>{sourceList(sources.filter((source) => !doc.externalLinks.some((current) => current.href === source.href)))}</section>}

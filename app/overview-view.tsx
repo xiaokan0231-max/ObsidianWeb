@@ -3,7 +3,7 @@
 import { memo, useMemo, useState, useSyncExternalStore } from "react";
 import { type AppView } from "./app-route";
 import { buildFocusBrief, focusDateLabel } from "@/lib/focus-action";
-import { awaitingCounterpart, compareJobs, toJobCard } from "@/lib/jobs";
+import { IN_PROGRESS_STATUSES, awaitingCounterpart, compareJobs, toJobCard } from "@/lib/jobs";
 import { joinReviewNotes } from "@/lib/review-join";
 import { parseInterviewPractice } from "@/lib/review-practice";
 import { formatDate, getString, getTitle, getType, type Note } from "@/lib/notes";
@@ -55,6 +55,9 @@ function Overview({
   today,
   onOpen,
   onView,
+  onViewJobs,
+  onOpenCase,
+  onFollowUp,
   onOpenReview,
   onTodoStatus,
 }: {
@@ -64,6 +67,12 @@ function Overview({
   today: string;
   onOpen: (note: Note) => void;
   onView: (view: View) => void;
+  /** 带状态筛选跳到看板（分析页同款）。 */
+  onViewJobs?: (filters?: { statuses?: readonly string[] }) => void;
+  /** 打开看板里这条案件的抽屉（有跟进表单），而不是只读的原笔记。 */
+  onOpenCase?: (note: Note) => void;
+  /** 等待区就地处理：改跟进日或改为等本人。返回错误文案，成功为 null。 */
+  onFollowUp?: (note: Note, values: { waitingFor?: string | null; followUpAt?: string | null }) => Promise<string | null>;
   onQuery: (query: string) => void;
   onOpenReview: (key?: string) => void;
   onTodoStatus: (note: Note, status: string, expectedMtime?: number) => Promise<string | null>;
@@ -153,10 +162,23 @@ function Overview({
   };
   const actionReviewDoc = reviewPreview.actionDoc;
   const primaryTodoStatus = primaryFocus?.source === "todo" ? todoStatus(primaryFocus.note) : "";
+  const openCase = (note: Note) => (onOpenCase ? onOpenCase(note) : onOpen(note));
+  const [followUpBusy, setFollowUpBusy] = useState("");
+  const [followUpError, setFollowUpError] = useState("");
+  const runFollowUp = async (note: Note, values: { waitingFor?: string | null; followUpAt?: string | null }) => {
+    if (!onFollowUp) return;
+    setFollowUpBusy(note.path);
+    setFollowUpError("");
+    const error = await onFollowUp(note, values);
+    setFollowUpBusy("");
+    if (error) setFollowUpError(error);
+  };
+  const plusDays = (days: number) => localDateKey(new Date(year, month - 1, day + days));
   const runPrimaryAction = async () => {
     if (!primaryFocus) return;
     if (primaryFocus.source !== "todo") {
-      onOpen(primaryFocus.note);
+      // 跟進は案件の抽屉で片付ける（跟進フォームはそこにしかない）。
+      openCase(primaryFocus.note);
       return;
     }
     setFocusBusy(true);
@@ -264,16 +286,34 @@ function Overview({
       </div>
     </article>
   ) : null;
+  const overdueCount = focusBrief.waiting.filter((item) => item.overdue).length;
   const waitingPanel = focusBrief.waiting.length > 0 ? (
     <article className="panel overview-waiting" key="waiting" data-overview-panel="waiting">
-      <PanelHeading title="等待回复" action={`全部 ${focusBrief.waiting.length} 项`} onAction={() => onView("analytics")} />
+      <PanelHeading
+        title={overdueCount > 0 ? `等待回复 · ${overdueCount} 项已到跟进日` : "等待回复"}
+        action={`全部 ${focusBrief.waiting.length} 项`}
+        onAction={() => (onViewJobs ? onViewJobs({ statuses: IN_PROGRESS_STATUSES }) : onView("jobs"))}
+      />
+      {followUpError && <p className="overview-focus-error" role="alert">{followUpError}</p>}
       <div className="overview-waiting-list">
-        {focusBrief.waiting.slice(0, 3).map((item) => (
-          <button key={item.note.path} onClick={() => onOpen(item.note)}>
-            <strong>{item.company || item.waitingFor}</strong>
-            <span>{item.label}</span>
-            {item.followUpAt && <small>{focusDateLabel(item.followUpAt)}后未回复则跟进</small>}
-          </button>
+        {focusBrief.waiting.slice(0, 5).map((item) => (
+          <div key={item.note.path} className={`overview-waiting-item${item.overdue ? " overdue" : ""}`}>
+            <button onClick={() => openCase(item.note)}>
+              <strong>{item.company || item.waitingFor}</strong>
+              <span>{item.label}</span>
+              {item.followUpAt && (
+                <small>{item.overdue
+                  ? `跟进日 ${focusDateLabel(item.followUpAt)} 已过，该催了`
+                  : `${focusDateLabel(item.followUpAt)}后未回复则跟进`}</small>
+              )}
+            </button>
+            {onFollowUp && (
+              <span className="overview-waiting-actions">
+                <button type="button" disabled={followUpBusy === item.note.path} onClick={() => void runFollowUp(item.note, { followUpAt: plusDays(7) })} title="记为已跟进，7 天后再提醒">已跟进 · +7 天</button>
+                <button type="button" disabled={followUpBusy === item.note.path} onClick={() => void runFollowUp(item.note, { waitingFor: "self", followUpAt: null })} title="球回到自己手里，不再催">改为等本人</button>
+              </span>
+            )}
+          </div>
         ))}
       </div>
     </article>

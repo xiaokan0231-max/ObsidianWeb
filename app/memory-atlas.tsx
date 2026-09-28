@@ -1079,6 +1079,29 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     navigateToView("review", params);
   }, [navigateToView]);
 
+  // 首页から案件へ：看板の抽屉（跟進フォーム付き）を直接開く。原笔记の drawer は読むだけで何も変えられない。
+  const openCase = useCallback((note: Note) => {
+    setJobsInitialFilters(null);
+    navigateToView("jobs", new URLSearchParams({ status: "all", case: note.path }), true);
+  }, [navigateToView]);
+
+  // 首页の等待区から一手で片付ける：「已跟进 · +7 天」「改为等本人」。書込ルートは看板と同じ /api/jobs/follow-up。
+  const followUpCase = useCallback(async (note: Note, values: { waitingFor?: string | null; followUpAt?: string | null }) => {
+    try {
+      const response = await fetch("/api/jobs/follow-up", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: note.path, ...values }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string; note?: Note };
+      if (!response.ok || !payload.ok || !payload.note) return payload.error || "更新案件跟进失败";
+      patchNote(payload.note);
+      return null;
+    } catch (writeError) {
+      return writeError instanceof Error ? writeError.message : "更新案件跟进失败";
+    }
+  }, [patchNote]);
+
   const viewJobsWithFilters = useCallback((filters?: JobsInitialFilters) => {
     setJobsInitialFilters(filters ?? null);
     const params = new URLSearchParams();
@@ -1355,6 +1378,9 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   today={today}
                   onOpen={openNote}
                   onView={navigateToView}
+                  onViewJobs={viewJobsWithFilters}
+                  onOpenCase={openCase}
+                  onFollowUp={followUpCase}
                   onQuery={runSavedQuery}
                   onOpenReview={openReview}
                   onTodoStatus={updateTodoStatus}

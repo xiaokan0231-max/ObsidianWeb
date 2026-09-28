@@ -1,5 +1,5 @@
 import { normalizeJobStatus } from "./job-status.ts";
-import { IN_FLIGHT_STATUSES, WAITING_FOR_LABEL, daysUntil, monthDay } from "./jobs.ts";
+import { IN_PROGRESS_STATUSES, WAITING_FOR_LABEL, daysUntil, monthDay } from "./jobs.ts";
 import { OPEN_TODO_STATUSES } from "./todo-status.mjs";
 import {
   getString,
@@ -36,6 +36,8 @@ export type FocusWaitingItem = {
   label: string;
   waitingFor: string;
   followUpAt: string;
+  /** 跟进日已过——该催了，首页要标出来而不是混在灰字里。 */
+  overdue: boolean;
 };
 
 export type FocusBrief = {
@@ -53,7 +55,17 @@ export type FocusBrief = {
 };
 
 const TODO_STATUSES = new Set(OPEN_TODO_STATUSES);
-const ACTIVE_JOB_STATUSES = new Set(IN_FLIGHT_STATUSES);
+
+/**
+ * 「等对方」の対象：選考が動いている案件（内定を含む——条件回答待ちも待ちである）に加えて、
+ * 未応募でも本人がいいかも／スカウト返信を済ませて企業の反応を待っている案件。
+ * 以前は 応募済・書類通過・面接中 だけで、未応募＋等对方と内定は跟進日が来ても永遠に出なかった。
+ */
+function waitsOnCounterpart(note: Note, status: string) {
+  const waitingFor = getString(note.frontmatter.waiting_for);
+  if (!waitingFor || waitingFor === "self") return false;
+  return IN_PROGRESS_STATUSES.includes(status) || status === "未応募";
+}
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
 function dateKey(date = new Date()) {
@@ -225,11 +237,11 @@ function todoAction(note: Note, today: string): FocusAction | null {
 function followUpAction(note: Note, today: string): FocusAction | null {
   if (getType(note) !== "job-case") return null;
   const status = normalizeJobStatus(getString(note.frontmatter.status)) ?? "";
-  if (!ACTIVE_JOB_STATUSES.has(status)) return null;
+  if (!waitsOnCounterpart(note, status)) return null;
 
   const waitingFor = getString(note.frontmatter.waiting_for);
   const followUpAt = validDate(getString(note.frontmatter.follow_up_at));
-  if (!waitingFor || waitingFor === "self" || !followUpAt || followUpAt > today) {
+  if (!followUpAt || followUpAt > today) {
     return null;
   }
 
@@ -254,14 +266,14 @@ function followUpAction(note: Note, today: string): FocusAction | null {
   return { ...base, reason: focusReason(base, today) };
 }
 
-function waitingItem(note: Note): FocusWaitingItem | null {
+function waitingItem(note: Note, today: string): FocusWaitingItem | null {
   if (getType(note) !== "job-case") return null;
   const status = normalizeJobStatus(getString(note.frontmatter.status)) ?? "";
-  if (!ACTIVE_JOB_STATUSES.has(status)) return null;
+  if (!waitsOnCounterpart(note, status)) return null;
 
   const waitingFor = getString(note.frontmatter.waiting_for);
-  if (!waitingFor || waitingFor === "self") return null;
   const company = getString(note.frontmatter.company);
+  const followUpAt = validDate(getString(note.frontmatter.follow_up_at));
   return {
     note,
     company,
@@ -269,7 +281,8 @@ function waitingItem(note: Note): FocusWaitingItem | null {
       compactText(getString(note.frontmatter.waiting_label) || getString(note.frontmatter.next_action), 72) ||
       `${WAITING_FOR_LABEL[waitingFor] || waitingFor}の対応待ち`,
     waitingFor: WAITING_FOR_LABEL[waitingFor] || waitingFor,
-    followUpAt: validDate(getString(note.frontmatter.follow_up_at)),
+    followUpAt,
+    overdue: Boolean(followUpAt) && followUpAt < today,
   };
 }
 
@@ -280,6 +293,11 @@ function compareActions(left: FocusAction, right: FocusAction, today: string) {
 
   const byDue = dueRank(left.due, today) - dueRank(right.due, today);
   if (byDue) return byDue;
+  // 同じ「已逾期」でも 30 日遅れと 1 日遅れは違う：遅れの大きい方を先に。
+  if (left.due && right.due && dueRank(left.due, today) === 0) {
+    const byOverdue = daysFrom(today, left.due) - daysFrom(today, right.due);
+    if (byOverdue) return byOverdue;
+  }
   if (left.blocksNextStage !== right.blocksNextStage) {
     return left.blocksNextStage ? -1 : 1;
   }
@@ -318,7 +336,7 @@ export function buildFocusBrief(
     .sort((left, right) => compareActions(left, right, today));
 
   const waiting = notes
-    .map(waitingItem)
+    .map((note) => waitingItem(note, today))
     .filter((item): item is FocusWaitingItem => Boolean(item))
     .sort(
       (left, right) =>

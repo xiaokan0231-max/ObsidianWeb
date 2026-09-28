@@ -192,19 +192,46 @@ function subsectionTabLabel(title: string) {
  * 索引だけ（どの節を見ろ）では7回ジャンプすることになるので、
  * 問い・読み上げる答案・なぜそう答えるかを1枚に並べる。答案は各所の正本からの参照。
  */
+/** 「言えた」の記憶は localStorage（本人の端末だけの進捗で、vault に書く事実ではない）。 */
+function readSaidQuestions(storageKey: string): ReadonlySet<string> {
+  try {
+    const raw = window.localStorage.getItem(`echo:said:${storageKey}`);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+function writeSaidQuestions(storageKey: string, done: ReadonlySet<string>) {
+  try {
+    window.localStorage.setItem(`echo:said:${storageKey}`, JSON.stringify([...done]));
+  } catch {
+    // 私密窗口等拿不到 localStorage：只影响本次会话
+  }
+}
+
 function KillMapPage({
   questions,
+  storageKey,
   onOpenCard,
   onOpenWiki,
   query,
 }: {
   questions: PrepKillQuestion[];
+  /** 「言えた」を憶えておく鍵（準備稿のパス）。以前はモードを切り替えるたびに全部消えていた。 */
+  storageKey: string;
   onOpenCard: (cardId: string) => void;
   onOpenWiki: (target: string, section?: string) => void;
   query: string;
 }) {
   // 当日の使い方：一問ずつ声に出す。読み終えたら「言えた」を押して次へ。
-  const [done, setDone] = useState<ReadonlySet<string>>(new Set());
+  const [done, setDoneState] = useState<ReadonlySet<string>>(() => readSaidQuestions(storageKey));
+  const setDone = (next: ReadonlySet<string> | ((current: ReadonlySet<string>) => ReadonlySet<string>)) => {
+    setDoneState((current) => {
+      const resolved = typeof next === "function" ? next(current) : next;
+      writeSaidQuestions(storageKey, resolved);
+      return resolved;
+    });
+  };
   const [openWhy, setOpenWhy] = useState<ReadonlySet<string>>(new Set());
   const refs = { onOpenCard, onOpenWiki, query };
   const toggle = (set: ReadonlySet<string>, id: string) => {
@@ -885,6 +912,7 @@ function DocReader({
           {isKillMap ? (
             <KillMapPage
               questions={killQuestions}
+              storageKey={doc.note.path}
               onOpenCard={onOpenCard}
               onOpenWiki={onOpenWiki}
               query={keyword}
@@ -1149,10 +1177,21 @@ function InterviewSession({
   const [sessionModeChoice, setSessionModeChoice] = useState<{
     path: string | null;
     mode: SessionMode;
-  }>(() => ({
-    path: selected?.note.path ?? null,
-    mode: selected ? defaultSessionMode(selected, today, briefing !== null) : "deep",
-  }));
+  }>(() => {
+    // URL の ?prepMode= が既定を上書きする（刷新しても同じモードに戻る）。殻の ?mode= は看板の表示形式用なので別名。
+    const fromUrl = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("prepMode");
+    const urlMode = SESSION_MODES.find((mode) => mode.id === fromUrl)?.id ?? null;
+    return {
+      path: selected?.note.path ?? null,
+      mode: urlMode ?? (selected ? defaultSessionMode(selected, today, briefing !== null) : "deep"),
+    };
+  });
+  const chooseSessionMode = (path: string, mode: SessionMode) => {
+    setSessionModeChoice({ path, mode });
+    const params = new URLSearchParams(window.location.search);
+    params.set("prepMode", mode);
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}?${params}`);
+  };
   const chosenMode =
     selected && sessionModeChoice.path === selected.note.path
       ? sessionModeChoice.mode
@@ -1172,13 +1211,6 @@ function InterviewSession({
         ? [selected]
         : [];
   const externalLinks = mergePrepExternalLinks(sourceDocs);
-  const duplicateCompanyNames = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of series) {
-      counts.set(item.company, (counts.get(item.company) ?? 0) + 1);
-    }
-    return counts;
-  }, [series]);
   const motivationAsset = selected
     ? companyMotivationAssetTarget(selected)
     : null;
@@ -1231,7 +1263,7 @@ function InterviewSession({
   if (selected?.prepVersion === 2) {
     return <><InterviewSessionV2 key={selected.note.path} doc={selected} series={series} selectedSeries={selectedSeries}
       sources={externalLinks} today={today} onSelect={selectDoc} onOpen={onOpen} onOpenWiki={onOpenWiki}
-      onOpenCard={onOpenCard} onOpenAsset={onOpenAsset} companyOverview={companyContent} contextPicker={contextPicker} companyAction={companyAction} />{compareUI}</>;
+      onOpenCard={onOpenCard} onOpenAsset={onOpenAsset} companyOverview={companyContent} contextPicker={contextPicker} companyAction={companyAction} briefing={digestBand} />{compareUI}</>;
   }
 
   if (!selected || legacyPrepPath !== selected.note.path) {
@@ -1272,34 +1304,8 @@ function InterviewSession({
               <h1>{selected.company || selected.title}</h1>
             </div>
             <div className="session-hero-side">
-              {series.length > 1 && (
-                <label className="session-company-switch">
-                  <span>公司／案件或面谈</span>
-                  <select
-                    aria-label="切换公司、案件或面谈"
-                    value={selectedSeries?.key ?? ""}
-                    onChange={(event) => {
-                      const nextSeries = series.find(
-                        (item) => item.key === event.target.value,
-                      );
-                      const next = nextSeries
-                        ? selectRelevantInterviewPrepDoc(nextSeries.rounds, today)
-                        : null;
-                      if (next) selectDoc(next);
-                    }}
-                  >
-                    {series.map((item) => (
-                      <option key={item.key} value={item.key}>
-                        {item.company}
-                        {duplicateCompanyNames.get(item.company)! > 1 && (item.caseLink || item.meetingLink)
-                          ? `｜${item.caseLink || item.meetingLink}`
-                          : ""}
-                        {`（${item.rounds.length}轮）`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              {/* 同じ画面に切換器が二つ（ContextPicker と原生 select）あった。公司総覧側と同じ面板を使う。 */}
+              {series.length > 1 && contextPicker}
               {(selectedSeries?.rounds.length ?? 0) > 1 && (
                 <label className="session-company-switch session-round-switch">
                   <span>面试轮次</span>
@@ -1363,7 +1369,7 @@ function InterviewSession({
                   type="button"
                   className={sessionMode === mode.id ? "active" : ""}
                   aria-current={sessionMode === mode.id ? "page" : undefined}
-                  onClick={() => setSessionModeChoice({ path: selected.note.path, mode: mode.id })}
+                  onClick={() => chooseSessionMode(selected.note.path, mode.id)}
                 >
                   <span>{mode.duration}</span>
                   <strong>{mode.label}</strong>

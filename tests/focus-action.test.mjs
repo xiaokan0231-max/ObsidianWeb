@@ -413,3 +413,17 @@ test("失効の理由を区別する：日付が過ぎた のか 案件が終わ
   assert.equal(byPath.get("by-case.md"), "case-closed");
   assert.equal(byPath.get("by-date.md"), "event-passed");
 });
+
+test("等待与跟进覆盖「未応募＋等对方」和「内定」；跟进日已过的项带 overdue，逾期更久的排更前", () => {
+  const notes = [
+    note("liked.md", { type: "job-case", company: "株式会社テスト", status: "未応募", waiting_for: "company", waiting_label: "いいかもの反応待ち", follow_up_at: "2026-09-20" }),
+    note("offer.md", { type: "job-case", company: "株式会社サンプル", status: "内定", waiting_for: "company", waiting_label: "条件面の回答待ち", follow_up_at: "2026-09-25" }),
+    note("fresh.md", { type: "job-case", company: "株式会社ダミー", status: "応募済", waiting_for: "company", follow_up_at: "2026-10-05" }),
+    note("self.md", { type: "job-case", company: "株式会社ホールド", status: "応募済", waiting_for: "self", follow_up_at: "2026-09-01" }),
+    note("dead.md", { type: "job-case", company: "株式会社リジェクト", status: "不採用", waiting_for: "company", follow_up_at: "2026-09-01" }),
+  ];
+  const brief = buildFocusBrief(notes, "2026-09-26");
+  assert.deepEqual(brief.waiting.map((item) => [item.note.path, item.overdue]), [["liked.md", true], ["offer.md", true], ["fresh.md", false]], "等本人和已终结的不在等待区");
+  assert.deepEqual(brief.ranked.map((action) => action.note.path), ["liked.md", "offer.md"], "跟进到期的两条都成为行动，逾期 6 天排在逾期 1 天前");
+  assert.equal(brief.primary?.source, "follow-up");
+});

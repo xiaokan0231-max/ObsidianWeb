@@ -136,3 +136,14 @@
   .overview-view .todo-preview-list .todo-status { grid-column: 2; justify-self: start; }
   .overview-view .todo-preview-list .todo-pri { min-width: 0; }
 }
+
+/* 等待区：一项＝案件按钮＋两个就地处理按钮；跟进日已过的项标橙（该催了）。 */
+.overview-waiting-item { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding: 10px 0; }
+.overview-waiting-item > button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; border: 0; padding: 0; background: transparent; text-align: left; cursor: pointer; }
+.overview-waiting-item > button > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.overview-waiting-item > button:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+.overview-waiting-item.overdue > button > small { color: var(--orange); font-weight: 600; }
+.overview-waiting-actions { display: flex; gap: 6px; }
+.overview-waiting-actions > button { border: 1px solid var(--line); border-radius: 4px; background: transparent; padding: 3px 9px; font-size: 11px; color: var(--muted); cursor: pointer; }
+.overview-waiting-actions > button:hover { color: var(--ink); border-color: var(--ink); }
+.overview-waiting-actions > button:disabled { opacity: .5; cursor: progress; }
