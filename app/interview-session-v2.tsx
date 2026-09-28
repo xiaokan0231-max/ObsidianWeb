@@ -9,6 +9,7 @@ import type { Note } from "@/lib/notes";
 import { Blocks } from "./prep-doc-render";
 import { copySelectionWithoutRuby } from "./ruby-copy";
 import PrepMaterialReader from "./prep-material-reader";
+import { OPEN_NOTE_LABEL } from "@/lib/ui-labels";
 
 type SectionId = typeof PREP_V2_SECTIONS[number]["id"] | "company";
 
@@ -174,7 +175,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
         }} aria-current={currentHeading === heading.index ? "location" : undefined}>{heading.title}</a></li>)}</ol></nav>}
         {citations.length > 0 && <section><h3>当前主题的来源</h3>{sourceList(citations)}</section>}
         {featured.length > 0 && <section><h3>优先阅读</h3>{sourceList(featured)}</section>}
-        <div className="v2-original"><button type="button" onClick={() => { savePosition(); onOpen(doc.note); }}>打开原笔记</button>{(doc.caseLink || doc.meetingLink) && <button type="button" onClick={() => refs.onOpenWiki(doc.caseLink || doc.meetingLink)}>{doc.caseLink ? "案件记录" : "面谈记录"}</button>}</div>
+        <div className="v2-original"><button type="button" onClick={() => { savePosition(); onOpen(doc.note); }}>{OPEN_NOTE_LABEL}</button>{(doc.caseLink || doc.meetingLink) && <button type="button" onClick={() => refs.onOpenWiki(doc.caseLink || doc.meetingLink)}>{doc.caseLink ? "案件记录" : "面谈记录"}</button>}</div>
       </aside>
       </>}
     </div>

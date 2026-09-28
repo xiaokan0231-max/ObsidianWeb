@@ -2,6 +2,7 @@
 
 import { memo, useMemo, useState } from "react";
 import ScopeLoading from "./scope-loading";
+import { enumCodec, useUrlState } from "./use-url-state";
 import {
   jobMatchesRatingBands,
   jobRatingBand,
@@ -38,6 +39,9 @@ const RANGES = [
 ] as const;
 
 type RangeId = (typeof RANGES)[number]["id"];
+const RANGE_IDS: readonly RangeId[] = RANGES.map((item) => item.id);
+// URL の手書き値（?range=m12 など）は白名单外なら黙って全期間に戻る。
+const RANGE_CODEC = enumCodec(RANGE_IDS);
 
 /**
  * 「現在の手札」セクションの母集団。既定は 7 点以上。
@@ -291,6 +295,7 @@ function condMatch(job: JobCard, cond: CondFilters, except?: keyof CondFilters) 
 function JobsAnalytics({
   notes,
   onOpen,
+  onOpenCase,
   onViewJobs,
   derivedState = "fresh",
   statsError = "",
@@ -299,6 +304,11 @@ function JobsAnalytics({
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
+  /**
+   * 応募案件の行を開く。殻は案件を「公司画像の案件タブ」で開ける（原笔记より文脈が多い）ので、
+   * 渡されていればそちらを使い、無ければ従来どおり原笔记の drawer に落とす。
+   */
+  onOpenCase?: (note: Note) => void;
   /** statuses を渡すと求人一覧側の状態フィルタに引き継がれる（渡さなければ全件）。 */
   onViewJobs: (filters?: JobsInitialFilters) => void;
   /** 台帳の generated JSON が手元の事実に追いついているか（殻が管理）。stale の間、下のグラフは古い台帳を描いている。 */
@@ -308,7 +318,9 @@ function JobsAnalytics({
   /** この視図の scope がまだ届いていない：台帳の空状態ではなく読取中を出す。 */
   loading?: boolean;
 }) {
-  const [range, setRange] = useState<RangeId>("all");
+  // 期間は URL に持つ：刷新・別画面からの戻りで「直近3か月」を毎回選び直さなくて済むように。
+  const [range, setRange] = useUrlState<RangeId>("range", "all", RANGE_CODEC);
+  const openCase = onOpenCase ?? onOpen;
   const [handScope, setHandScope] = useState<HandScopeId>("high");
   const [cond, setCond] = useState<CondFilters>(EMPTY_COND);
 
@@ -564,14 +576,14 @@ function JobsAnalytics({
         </header>
         {priorityJob ? (
           <div className="analytics-command-grid">
-            <ProgressPriority job={priorityJob} onOpen={onOpen} />
+            <ProgressPriority job={priorityJob} onOpen={openCase} />
             <div className="analytics-watch-list">
               <header>
                 <strong>观察名单</strong>
                 <small>高优先・选考中</small>
               </header>
               {watchJobs.length > 0 ? (
-                watchJobs.map((job) => <ProgressWatchRow key={job.path} job={job} onOpen={onOpen} />)
+                watchJobs.map((job) => <ProgressWatchRow key={job.path} job={job} onOpen={openCase} />)
               ) : (
                 <p className="chart-empty">暂时没有其他需要持续观察的高优先案件。</p>
               )}
@@ -860,7 +872,10 @@ function JobsAnalytics({
             caption={
               stats.timeline.appliedKnownFrom
                 ? `応募数が分かるのは ${stats.timeline.appliedKnownFrom} 以降。それ以前は未走査。`
-                : "応募日台帳がまだ無いので応募数は全月不明。"
+                : loading
+                  // 台帳がまだ届いていないだけの時に「無い」と言い切らない（经路別カードと同じ理由）。
+                  ? "応募日台帳を読込中…"
+                  : "応募日台帳がまだ無いので応募数は全月不明。"
             }
           >
             {timeline.length > 0 ? (
@@ -897,6 +912,8 @@ function JobsAnalytics({
                   rows={timeline.map((row) => [row.month, row.applied === null ? "不明" : row.applied, row.rejected])}
                 />
               </>
+            ) : loading ? (
+              <ScopeLoading label="月別推移" />
             ) : (
               <p className="chart-empty">この期間に該当するデータがない。</p>
             )}
@@ -966,6 +983,8 @@ function JobsAnalytics({
                     .map((d) => [d.date, d.applied, d.resolved, d.appliedCum, d.resolvedCum, d.pending])}
                 />
               </>
+            ) : loading ? (
+              <ScopeLoading label="応募日台帳" />
             ) : (
               <p className="chart-empty">応募日台帳がまだ無い。</p>
             )}

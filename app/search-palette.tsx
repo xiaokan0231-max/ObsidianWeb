@@ -10,18 +10,12 @@ import {
 import { stripMarkdown, getTitle, type Note } from "@/lib/notes";
 import { getGroup, GROUPS, noteMatches } from "@/lib/memory-atlas-data";
 import type { AppView } from "./app-route";
+import { DEFAULT_PAGE_COMMAND_VIEWS, PAGE_COMMANDS } from "./navigation";
 import { useDialogFocus } from "./use-dialog-focus";
 
-const PAGE_COMMANDS: Array<{
-  view: AppView;
-  label: string;
-  description: string;
-  keywords: string;
-}> = [
-  { view: "todo", label: "行动清单", description: "处理今天要做的事", keywords: "行动 清单 todo 开始 完成" },
-  { view: "practice", label: "回答重练", description: "开始今天的素振り", keywords: "回答 重练 练习 practice 面试" },
-  { view: "jobs", label: "岗位机会", description: "判断下一项応募", keywords: "岗位 机会 求职 応募 job" },
-];
+const DEFAULT_PAGE_COMMANDS = DEFAULT_PAGE_COMMAND_VIEWS.flatMap((view) =>
+  PAGE_COMMANDS.filter((command) => command.view === view),
+);
 
 /**
  * 全库检索是「跳到任意笔记」的导航工具，不是某一页的主操作，
@@ -57,7 +51,7 @@ export default function SearchPalette({
   );
   const commands = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
-    if (!normalized) return PAGE_COMMANDS;
+    if (!normalized) return DEFAULT_PAGE_COMMANDS;
     return PAGE_COMMANDS.filter((command) =>
       `${command.label} ${command.description} ${command.keywords}`
         .toLocaleLowerCase()

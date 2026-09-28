@@ -26,6 +26,7 @@ import ScopeLoading from "./scope-loading";
 import { isTypingTarget as isEditableTarget } from "@/lib/keyboard";
 import type { Note } from "@/lib/notes";
 import { Inlines } from "./prep-doc-render";
+import { textCodec, useUrlState } from "./use-url-state";
 
 type PracticeMode =
   | "recall"
@@ -382,7 +383,8 @@ function LanguageExpressionCourses({
   onNoteWritten?: (note: Note) => void;
 }) {
   const courses = useMemo(() => findLanguageExpressionCourses(notes), [notes]);
-  const [selectedCourseId, setSelectedCourseId] = useState("");
+  // 选中的课程放进 URL，便于刷新后停在原处；各课程的练习位置仍由本机的 study state 记住。
+  const [selectedCourseId, setSelectedCourseId] = useUrlState("course", "", textCodec);
   const storedStudyState = useSyncExternalStore(
     subscribeStudyState,
     getStudyStateSnapshot,
@@ -411,14 +413,11 @@ function LanguageExpressionCourses({
     }));
   };
 
+  // URL 里的课程已下架（改名・删除）时，不当成「选中了一个不存在的课」，依次落回上次学习的课与第一门。
   const selected =
-    courses.find(
-      (course) =>
-        course.courseId === (
-          selectedCourseId ||
-          storedStudyState?.activeCourseId
-        ),
-    ) ?? courses[0];
+    courses.find((course) => course.courseId === selectedCourseId) ??
+    courses.find((course) => course.courseId === storedStudyState?.activeCourseId) ??
+    courses[0];
 
   if (!selected) {
     if (loading) return <div className="expression-courses-view"><ScopeLoading label="专项课程" /></div>;

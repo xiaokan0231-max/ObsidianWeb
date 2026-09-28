@@ -1,26 +1,11 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import ts from "typescript";
-import * as notes from "../lib/notes.ts";
-import * as calendarMonth from "../lib/calendar-month.ts";
-import * as model from "../lib/memory-atlas-data.ts";
+import { loadAppModule } from "./helpers/render-tsx.mjs";
 
-const source = await readFile(new URL("../app/calendar-view.tsx", import.meta.url), "utf8");
-const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
-const require = createRequire(import.meta.url);
-const components = {};
-const modules = { "@/lib/notes": notes, "@/lib/calendar-month": calendarMonth, "@/lib/memory-atlas-data": model };
-runInNewContext(compiled.outputText, {
-  exports: components,
-  require: (specifier) => modules[specifier] ?? require(specifier),
-  window: { location: { search: "?month=2026-08" } },
-  URLSearchParams,
-});
+// 月份从 ?month= 读：注入一个只有 location 的 window，其余 lib 依赖由加载器按真实模块解析。
+const components = await loadAppModule("app/calendar-view.tsx", { globals: { window: { location: { search: "?month=2026-08" } } } });
 
 test("日历月格与议程显示明确时间范围，并标注日本时间", () => {
   const html = renderToStaticMarkup(createElement(components.default, {

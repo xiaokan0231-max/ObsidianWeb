@@ -29,7 +29,7 @@ import SceneNoteReader from "./scene-note-reader";
 import Overview from "./overview-view";
 import SearchPalette from "./search-palette";
 import TimelineView from "./timeline-view";
-import TodoView from "./todo-view";
+import TodoView, { OPEN_TAB } from "./todo-view";
 import {
   appViewFromPathname,
   appViewHref,
@@ -38,6 +38,15 @@ import {
   companyOverviewSearch,
   type AppView,
 } from "./app-route";
+import {
+  MOBILE_PRIMARY_NAV_IDS,
+  NAVIGATION,
+  SECONDARY_NAVIGATION,
+  TOP_BAR_SECTION_IDS,
+  type NavIconName,
+} from "./navigation";
+import { useUndoFlash, UndoFlashBar } from "./undo-flash";
+import { notifyUrlChange, SHELL_URL_KEYS } from "./use-url-state";
 import { describeConnectionError } from "@/lib/connection-error";
 import { ConflictError, postJson } from "@/lib/client-api";
 import { mergeScopedNotes } from "@/lib/vault-merge";
@@ -58,6 +67,7 @@ import {
   GROUPS,
   localDateKey,
   mergePendingWrites,
+  todoStatus,
   type PendingWrite,
   type Commitment,
   type GroupKey,
@@ -65,6 +75,7 @@ import {
 import { vaultScopeForView, type VaultScope } from "@/lib/vault-scope";
 import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { resolveNoteLink } from "@/lib/wiki-target";
+import { changedToLabel } from "@/lib/ui-labels";
 
 
 export type { Note };
@@ -80,122 +91,6 @@ type VaultResponse = {
 };
 
 type View = AppView;
-type PrimaryNavId =
-  | "overview"
-  | "actions"
-  | "career"
-  | "interview"
-  | "training"
-  | "resources";
-type NavIconName = "home" | "actions" | "career" | "interview" | "training" | "resources";
-
-type PrimaryNavigationItem = {
-  id: PrimaryNavId;
-  label: string;
-  mobileLabel: string;
-  glyph: NavIconName;
-  target: View;
-  views: View[];
-};
-
-type SecondaryNavigationItem = {
-  id: View;
-  label: string;
-  // 二级菜单是「章节标签」：汉字印章负责一眼辨认，拉丁小字负责分层，两者都不是装饰的可选项。
-  glyph: string;
-  caption: string;
-};
-
-
-// 一级菜单表达用户目标，不再逐页暴露实现视图。顺序先处理已在进行的案件，再寻找新机会。
-const NAVIGATION: PrimaryNavigationItem[] = [
-  {
-    id: "overview",
-    label: "总览",
-    mobileLabel: "总览",
-    glyph: "home",
-    target: "overview",
-    views: ["overview"],
-  },
-  {
-    id: "actions",
-    label: "行动",
-    mobileLabel: "行动",
-    glyph: "actions",
-    target: "calendar",
-    views: ["calendar", "todo"],
-  },
-  {
-    id: "career",
-    label: "求职",
-    mobileLabel: "求职",
-    glyph: "career",
-    target: "jobs",
-    views: ["jobs", "analytics"],
-  },
-  {
-    id: "interview",
-    label: "面试作战",
-    mobileLabel: "面试",
-    glyph: "interview",
-    target: "session",
-    views: ["session", "prep", "review", "practice"],
-  },
-  {
-    id: "training",
-    label: "训练中心",
-    mobileLabel: "训练",
-    glyph: "training",
-    target: "language",
-    views: ["language", "topics"],
-  },
-  {
-    id: "resources",
-    label: "资料库",
-    mobileLabel: "资料",
-    glyph: "resources",
-    target: "library",
-    views: ["library", "timeline", "graph"],
-  },
-];
-
-const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigationItem[]>> = {
-  actions: [
-    { id: "calendar", label: "日历", glyph: "暦", caption: "COMMITMENTS" },
-    { id: "todo", label: "行动清单", glyph: "行", caption: "ACTIONS" },
-  ],
-  career: [
-    { id: "jobs", label: "岗位机会", glyph: "機", caption: "OPPORTUNITIES" },
-    { id: "analytics", label: "选考与分析", glyph: "選", caption: "PIPELINE" },
-  ],
-  interview: [
-    { id: "session", label: "本场面试", glyph: "場", caption: "SESSION" },
-    { id: "prep", label: "通用准备", glyph: "備", caption: "PLAYBOOK" },
-    { id: "review", label: "面试复盘", glyph: "復", caption: "REVIEW" },
-    { id: "practice", label: "回答重练", glyph: "練", caption: "PRACTICE" },
-  ],
-  training: [
-    { id: "language", label: "日语训练", glyph: "話", caption: "NIHONGO" },
-    { id: "topics", label: "专项训练", glyph: "専", caption: "FOCUS" },
-  ],
-  resources: [
-    { id: "library", label: "全部资料", glyph: "庫", caption: "ARCHIVE" },
-    { id: "timeline", label: "时间线", glyph: "歴", caption: "TIMELINE" },
-    { id: "graph", label: "关系图", glyph: "網", caption: "GRAPH" },
-  ],
-};
-
-/**
- * 二级导航住在哪：
- * 资料库的三项是**同一批笔记的三种看法**（列表・时序・关系），切换是浏览时的常态动作，
- * 值得在内容区顶部常驻一条章节标签带。
- * 面试作战・训练中心的子项是三件**不同的事**，内容互不相干，切换属于换任务——
- * 那种跳转归左栏。而且这两个分区的页面自己已经有一层切换（当前面试的 6 章节导航、
- * 专项训练的 5 种练法），再压一条带子就是三层标签叠在 150px 里。
- *
- * 移动端没有左栏，所以那两个分区的带子在 820px 以下会回来（CSS 按 data-placement 切）。
- */
-const TOP_BAR_SECTION_IDS = new Set<PrimaryNavId>(["actions", "career", "resources"]);
 
 function NavigationIcon({ name }: { name: NavIconName }) {
   return (
@@ -210,15 +105,36 @@ function NavigationIcon({ name }: { name: NavIconName }) {
   );
 }
 
-/** 单键快捷键（R）在输入场景必须让路，否则在搜索框里打 r 就会触发重读。 */
 
+/** 写回后是否自动重算派生统计（vault:stats）。本机偏好，存在 localStorage。 */
+const AUTO_STATS_KEY = "echo:auto-stats";
+const AUTO_STATS_EVENT = "echo:autostatschange";
+// 私密窗口等拿不到 localStorage 时，只在本次会话里记住。
+let autoStatsFallback = true;
 
-const MOBILE_PRIMARY_NAV_IDS = new Set<PrimaryNavId>([
-  "overview",
-  "actions",
-  "career",
-  "interview",
-]);
+function readAutoStats() {
+  try {
+    const stored = window.localStorage.getItem(AUTO_STATS_KEY);
+    return stored === null ? autoStatsFallback : stored !== "off";
+  } catch {
+    return autoStatsFallback;
+  }
+}
+
+function writeAutoStats(next: boolean) {
+  autoStatsFallback = next;
+  try { window.localStorage.setItem(AUTO_STATS_KEY, next ? "on" : "off"); } catch { /* 见 autoStatsFallback */ }
+  window.dispatchEvent(new Event(AUTO_STATS_EVENT));
+}
+
+function subscribeAutoStats(onChange: () => void) {
+  window.addEventListener(AUTO_STATS_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(AUTO_STATS_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
 
 /**
  * 侧栏折叠态存在 `<html data-rail>` 上而不是 React state：
@@ -410,17 +326,48 @@ function SharedAssetOverlay({
   );
 }
 
+/*
+ * 只认外壳的键（哪一场、哪份稿）。视图自己放进 URL 的筛选・模式（filter / pattern / prepMode …）
+ * 走 replaceState，不经过这里；把它们算进来的话，关掉原笔记 drawer 回退时键就对不上，
+ * 整页重挂，正在写的批注草稿随之丢失。
+ */
+const INTERVIEW_ENTRY_KEYS: ReadonlySet<string> = new Set(
+  SHELL_URL_KEYS.filter((key) => key !== "note" && key !== "section"),
+);
+
 function interviewNavigationKey(view: AppView, search: string) {
-  const params = new URLSearchParams(search);
-  params.delete("note");
-  params.delete("section");
+  const params = new URLSearchParams();
+  for (const [key, value] of new URLSearchParams(search)) {
+    if (INTERVIEW_ENTRY_KEYS.has(key)) params.append(key, value);
+  }
   return appViewHref(view, params);
 }
 
 
 type DerivedState = "fresh" | "stale" | "rebuilding";
+type TodoStatusResponse = {
+  ok?: boolean;
+  error?: string;
+  note?: Note;
+  /** 已经是这个值，没有写入。 */
+  unchanged?: boolean;
+  /** 写入前的状态，撤销时写回它。 */
+  previousStatus?: string;
+};
 /** これらを書き換えると台帳・数据字典・面接傾向の generated 区块が古くなる（vault:stats の入力）。 */
 const DERIVED_SOURCE_TYPES = new Set(["job-case", "job-queue", "interview-answer-review", "transcript-study", "study-annotation"]);
+
+function historyEntryId(state: unknown): string | null {
+  const id = state && typeof state === "object" ? (state as { __echoEntry?: unknown }).__echoEntry : undefined;
+  return typeof id === "string" ? id : null;
+}
+
+let historyEntrySequence = 0;
+/** 历史条目 id。只要在本标签页内唯一：时间戳防刷新后重号，序号防同一毫秒内连点。 */
+function newHistoryEntryId() {
+  historyEntrySequence += 1;
+  return `${Date.now().toString(36)}-${historyEntrySequence}`;
+}
 
 function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const [notes, setNotes] = useState<Note[]>([]);
@@ -441,10 +388,11 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   // 書込ルートは stale を返すだけで再計算できない（workerd）ので、殻が本機 bridge に頼む。
   const [derivedState, setDerivedState] = useState<DerivedState>("fresh");
   const [statsError, setStatsError] = useState("");
-  const [autoStats, setAutoStats] = useState(() => {
-    try { return window.localStorage.getItem("echo:auto-stats") !== "off"; } catch { return true; }
-  });
+  // 服务端与首帧一律按「自动」渲染，挂载后再读本机偏好——在 useState 初始化里直接读 localStorage，
+  // 本机设成手动时首帧文字与服务端不一致，React 会丢掉整棵服务端 HTML 重画。
+  const autoStats = useSyncExternalStore(subscribeAutoStats, readAutoStats, () => true);
   const statsTimer = useRef<number | null>(null);
+  // 写回后的「已改为 X · 撤销」全壳只有一条；各页拿到的是稳定的 show。
   const [selectedPath, setSelectedPath] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("note"),
   );
@@ -476,15 +424,57 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [writeError, setWriteError] = useState("");
+  // 撤销失败而它的提示已被新的一次写入顶掉时，理由落到全局的写入错误横幅上（见 useUndoFlash）。
+  const reportStaleUndoFailure = useCallback((message: string) => setWriteError(`撤销没有完成：${message}`), []);
+  const undoFlash = useUndoFlash({ onStaleFailure: reportStaleUndoFailure });
+  const { show: showFlash } = undoFlash;
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   // どの scope が手元に揃ったか。視図はこれで「まだ来ていない」と「本当に無い」を分ける（假空态の根）。
   const [readyScopes, setReadyScopes] = useState<ReadonlySet<VaultScope>>(() => new Set());
   const interviewScopeReady = readyScopes.has("all") || readyScopes.has("interview");
   const scopeReady = readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
 
-  // 模块间切换不继承上一页的滚动位置，否则新页面会从标题或工具栏中段开始。
+  // 浏览器后退／前进回到某一页时要回到的纵向位置。
+  const pendingScrollRestore = useRef<number | null>(null);
+  const currentView = useRef<View>(initialView);
+  // 每条历史条目一个 id（history.state.__echoEntry），滚动时持续记下「这一条目当前滚到哪」。
+  // 只在点导航离开时盖章是不够的：用后退／前进离开的那一页从没盖过章，回来时要么回到顶部，要么回到更早的旧位置。
+  const scrollByEntry = useRef(new Map<string, number>());
+  // 正在显示的那一条目。popstate 触发时 history.state 已经换成目的地，要靠它知道「刚离开的是谁」。
+  const currentEntry = useRef<string | null>(null);
+
   useEffect(() => {
-    window.scrollTo({ left: 0, top: 0 });
+    if (!historyEntryId(window.history.state)) {
+      window.history.replaceState({ ...(window.history.state ?? {}), __echoEntry: newHistoryEntryId() }, "");
+    }
+    currentEntry.current = historyEntryId(window.history.state);
+    const record = () => {
+      const id = historyEntryId(window.history.state);
+      if (id) scrollByEntry.current.set(id, window.scrollY);
+    };
+    window.addEventListener("scroll", record, { passive: true });
+    return () => window.removeEventListener("scroll", record);
+  }, []);
+
+  // 往前走（点导航）时新页面从顶部开始，否则会从标题或工具栏中段开始；
+  // 用后退回到刚才那页时则回到离开时的位置——看完一条案件想回列表接着往下看，不该每次从头翻。
+  useEffect(() => {
+    currentView.current = view;
+    const restoreY = pendingScrollRestore.current;
+    pendingScrollRestore.current = null;
+    if (restoreY === null) {
+      window.scrollTo({ left: 0, top: 0 });
+      return;
+    }
+    const restore = () => window.scrollTo({ left: 0, top: restoreY });
+    // rAF 在后台／隐藏的面板里不跑。先立刻定一次，等列表按新 view 排完版（数据已在手）再补一次。
+    restore();
+    const early = window.setTimeout(restore, 0);
+    const late = window.setTimeout(restore, 150);
+    return () => {
+      window.clearTimeout(early);
+      window.clearTimeout(late);
+    };
   }, [view]);
 
   // 次の深夜0時ちょうどに一度だけ起こす（常駐タイマーを置かないため）。
@@ -634,13 +624,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     statsTimer.current = window.setTimeout(() => void rebuildStats(), 3_000);
   }, [autoStats, rebuildStats]);
 
-  const toggleAutoStats = useCallback(() => {
-    setAutoStats((current) => {
-      const next = !current;
-      try { window.localStorage.setItem("echo:auto-stats", next ? "on" : "off"); } catch { /* 私密窗口等拿不到 localStorage：只影响本次会话 */ }
-      return next;
-    });
-  }, []);
+  const toggleAutoStats = useCallback(() => writeAutoStats(!readAutoStats()), []);
 
   const patchNote = useCallback((note: Note) => {
     // 在途の全量取得が写前スナップショットを持って着地しても潰されないよう、台帳にも残す。
@@ -657,8 +641,10 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   }, [markDerivedStale]);
 
   const updateTodoStatus = useCallback(async (note: Note, status: string, expectedMtime?: number) => {
+    // 路由若回了写前的值就用它；旧路由没有时退回调用方手里那条笔记的值。
+    const statusBefore = todoStatus(note);
     try {
-      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/todos/status", {
+      const payload = await postJson<TodoStatusResponse>("/api/todos/status", {
         path: note.path,
         status,
         ...(expectedMtime !== undefined ? { expectedMtime } : {}),
@@ -666,6 +652,30 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       if (!payload.note) throw new Error(payload.error || "更新行动状态失败");
       patchNote(payload.note);
       setWriteError("");
+      const previous = payload.previousStatus || statusBefore;
+      // 本来就是这个值时什么也没写，给「撤销」反而会把别处的改动改回去。
+      if (!payload.unchanged && previous !== status) {
+        const written = payload.note;
+        showFlash(changedToLabel(status), async () => {
+          try {
+            // 带上刚写入的 mtime：撤销前若别处又改过，宁可失败也不覆盖那次改动。
+            const reverted = await postJson<TodoStatusResponse>("/api/todos/status", {
+              path: written.path,
+              status: previous,
+              expectedMtime: written.stat.mtime,
+            });
+            if (!reverted.note) return reverted.error || "撤销失败";
+            patchNote(reverted.note);
+            return null;
+          } catch (cause) {
+            if (cause instanceof ConflictError) {
+              void loadVault();
+              return "已在别处更新，无法撤销";
+            }
+            return cause instanceof Error ? cause.message : "撤销失败";
+          }
+        });
+      }
       return null;
     } catch (cause) {
       if (cause instanceof ConflictError) await loadVault();
@@ -673,7 +683,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       setWriteError(message);
       return message;
     }
-  }, [loadVault, patchNote]);
+  }, [loadVault, patchNote, showFlash]);
 
   const openPrepCard = useCallback((cardId: string) => {
     // setState→overlay の effect を待つと、focus と overflow の変更後の座標を
@@ -834,6 +844,23 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     };
     const onPopState = (event: PopStateEvent) => {
       syncOverlays(event.state);
+      // 只认浏览器真正的后退／前进（isTrusted）：日历补齐场次时自己派发的 popstate 不是「回来」。
+      // 同一页内的回退（关 drawer・关回答库浮层）由各自的逻辑复位，这里不插手。
+      const routedView = appViewFromPathname(window.location.pathname);
+      // 先取「这一条目最后滚到的位置」；刷新过页面（内存里的表空了）才退回离开时盖的章。
+      const entryId = historyEntryId(event.state);
+      const stamped = event.state && typeof event.state === "object"
+        ? (event.state as { __echoScrollY?: unknown }).__echoScrollY
+        : undefined;
+      // 滚动事件按帧派发：刚滚完就后退时，最后那次滚动可能还没记进表里。离开的这一刻再补记一次。
+      if (currentEntry.current) scrollByEntry.current.set(currentEntry.current, window.scrollY);
+      currentEntry.current = entryId;
+      const scrollY = (entryId ? scrollByEntry.current.get(entryId) : undefined) ?? stamped;
+      if (event.isTrusted && routedView && routedView !== currentView.current && typeof scrollY === "number") {
+        pendingScrollRestore.current = scrollY;
+      }
+      // 看板的「带筛选跳转」种子只属于那一次点击；从历史回到 /jobs 时以地址栏为准，不再套旧种子。
+      setJobsInitialFilters(null);
       syncRoute();
     };
     syncOverlays(window.history.state);
@@ -1077,8 +1104,15 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     setSelectedPath(null);
     setSelectedSection(null);
     setMobileMoreOpen(false);
-    window.history.pushState({ __echoAppView: nextView }, "", appViewHref(nextView, search));
+    // 离开前把当前位置也盖在这一条历史上：刷新后内存里的表没了，还能靠它回到大致位置。
+    window.history.replaceState({ ...(window.history.state ?? {}), __echoScrollY: window.scrollY }, "");
+    if (currentEntry.current) scrollByEntry.current.set(currentEntry.current, window.scrollY);
+    const entry = newHistoryEntryId();
+    window.history.pushState({ __echoAppView: nextView, __echoEntry: entry }, "", appViewHref(nextView, search));
+    currentEntry.current = entry;
     setView(nextView);
+    // 同一页上再点一次导航时，页内放进 URL 的状态要跟着新地址回到默认（pushState 不触发 popstate）。
+    notifyUrlChange();
   }, []);
 
   // 以下の遷移系コールバックは全部 useCallback：視圖側は React.memo で包んであり、
@@ -1120,6 +1154,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     const params = new URLSearchParams();
     if (filters?.statuses?.length) params.set("status", filters.statuses.join(","));
     if (filters?.ratings?.length) params.set("rating", filters.ratings.join(","));
+    if (filters?.touch?.length) params.set("touch", filters.touch.join(","));
     navigateToView("jobs", params, true);
   }, [navigateToView]);
 
@@ -1128,6 +1163,16 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     if (target) navigateToView(target.view, calendarInterviewSearch(target));
     else openNote(commitment.note);
   }, [interviewTargets, navigateToView, openNote]);
+
+  // 顶栏「最近安排」直达那场面试的准备页；认不出对应面试的日程才退回日历。
+  const openNextEvent = useCallback(() => {
+    const target = nextEvent ? interviewTargets.get(nextEvent.id) : undefined;
+    if (target) navigateToView(target.view, calendarInterviewSearch(target));
+    else navigateToView("calendar");
+  }, [interviewTargets, navigateToView, nextEvent]);
+
+  const openAnswerLibrary = useCallback(() => navigateToView("prep"), [navigateToView]);
+  const openOpenTodos = useCallback(() => navigateToView("todo", new URLSearchParams({ tab: OPEN_TAB })), [navigateToView]);
 
   const syncInterviewSelection = useCallback((company: string, prepPath: string) => {
     const params = new URLSearchParams();
@@ -1152,7 +1197,11 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   }, []);
 
   const syncReviewSelection = useCallback((key: string | null) => {
-    const params = new URLSearchParams();
+    // 复盘页自己的筛选（filter / pattern）原样留着，外壳只重写自己的键。
+    // 换了一场（或回到一览）时，panel / block / sentence 指的是上一场里的位置；
+    // 日历带来的 event / date / round 也不再成立，留着会让「回到一览」被当成那场的入口而显示等待页。
+    const params = new URLSearchParams(window.location.search);
+    for (const owned of SHELL_URL_KEYS) params.delete(owned);
     if (key) params.set("review", key);
     window.history.replaceState(
       { ...(window.history.state ?? {}), __echoAppView: "review" }, "", appViewHref("review", params),
@@ -1301,7 +1350,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
           {nextEvent && view !== "session" && (
             <button
               className="topbar-next"
-              onClick={() => navigateToView("calendar")}
+              onClick={openNextEvent}
               title={`${nextEvent.date}${nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST ${nextEvent.label}`}
             >
               <small>最近安排</small>
@@ -1393,6 +1442,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   onView={navigateToView}
                   onViewJobs={viewJobsWithFilters}
                   onOpenCase={openCase}
+                  onOpenSchedule={openCalendarInterview}
+                  onViewOpenTodos={openOpenTodos}
                   onFollowUp={followUpCase}
                   onQuery={runSavedQuery}
                   onOpenReview={openReview}
@@ -1436,6 +1487,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   onOpenWiki={openWikiLink}
                   onOpenCard={openPrepCard}
                   onOpenAsset={openSharedAsset}
+                  onOpenLibrary={openAnswerLibrary}
                   initialCompany={interviewParams.get("company") ?? ""}
                   initialPath={prepInitialPath}
                   initialContextPath={companyContextPath}
@@ -1449,6 +1501,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   loading={!scopeReady}
                   notes={notes}
                   onOpen={openNote}
+                  syncUrl
                 />
               )}
               {view === "language" && (
@@ -1470,6 +1523,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   onVaultChanged={loadVault}
                   onNoteWritten={patchNote}
                   initialFilters={jobsInitialFilters}
+                  onFlash={showFlash}
                 />
               )}
               {view === "analytics" && (
@@ -1477,6 +1531,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   loading={!scopeReady}
                   notes={notes}
                   onOpen={openNote}
+                  onOpenCase={openCase}
                   onViewJobs={viewJobsWithFilters}
                   derivedState={derivedState}
                   statsError={statsError}
@@ -1564,12 +1619,14 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               className={item.views.includes(view) ? "active" : ""}
               onClick={() => navigateToView(item.target)}
             >
-              <span aria-hidden="true">{item.glyph}</span>
+              <span aria-hidden="true"><NavigationIcon name={item.glyph} /></span>
               {item.label}
             </button>
           ))}
         </nav>
       )}
+
+      <UndoFlashBar state={undoFlash} />
 
       {searchOpen && (
         <SearchPalette

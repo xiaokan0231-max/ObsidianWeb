@@ -1,79 +1,5 @@
-/* 摘要不依赖相邻区块顺序，移动到页面顶部后仍保持紧凑。 */
-.analytics > .analytics-head-glance {
-  gap: 8px;
-  margin: 0;
-}
-.analytics > .analytics-head-glance > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-height: 0;
-  padding: 14px 16px;
-  border-radius: var(--radius-control);
-  box-shadow: none;
-}
-.analytics > .analytics-head-glance dt { align-self: center; font-size: 13px; white-space: normal; }
-.analytics > .analytics-head-glance dd { align-self: center; gap: 4px; margin: 0; }
-.analytics > .analytics-head-glance dd strong { font-size: 26px; line-height: 1.1; }
-.analytics > .analytics-head-glance dd small { font-size: 12px; }
 .focus-language-glance dt { font-size: 12px; line-height: 1.4; white-space: normal; }
-
-/* 先展示汇总，按需展开操作；不同长度的内容不互相撑高。 */
-.analytics > .analytics-command-disclosure {
-  margin-top: 16px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-}
-.analytics-command-disclosure > summary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  padding: 16px 20px;
-  list-style: none;
-  cursor: pointer;
-}
-.analytics-command-disclosure > summary::-webkit-details-marker { display: none; }
-.analytics-command-disclosure > summary strong { font-size: 14px; }
-.analytics-command-disclosure > summary span { color: var(--muted); font-size: 12px; }
-.analytics-command-disclosure > summary i { margin-left: auto; font-style: normal; }
-.analytics-command-disclosure > summary i::before { content: "＋"; }
-.analytics-command-disclosure[open] > summary i::before { content: "−"; }
-.analytics-command-disclosure[open] > summary { border-bottom: 1px solid var(--line); }
-.analytics-command-disclosure > summary:focus-visible,
 .language-operation-help > summary:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
-.analytics-command-disclosure > header { justify-content: flex-end; margin: 0; padding: 8px 20px; }
-.analytics-command-disclosure > header button { font-size: 12px; }
-.analytics-command-disclosure > .chart-empty { padding: 0 20px 16px; }
-.analytics-command-disclosure .analytics-command-grid { border: 0; border-radius: 0 0 12px 12px; box-shadow: none; align-items: start; }
-.analytics-command-disclosure .analytics-priority-card { min-height: 0; grid-template-rows: none; padding: 16px 20px; }
-.analytics-command-disclosure .analytics-priority-card > strong { margin-top: 12px; font-size: 22px; overflow-wrap: anywhere; }
-.analytics-command-disclosure .analytics-priority-action { margin-top: 12px; }
-.analytics-command-disclosure .analytics-priority-card > small,
-.analytics-command-disclosure .analytics-priority-card dt,
-.analytics-command-disclosure .analytics-priority-topline b,
-.analytics-command-disclosure .analytics-priority-topline i,
-.analytics-command-disclosure .analytics-priority-action span,
-.analytics-command-disclosure .analytics-priority-open,
-.analytics-command-disclosure .analytics-watch-list small,
-.analytics-command-disclosure .analytics-watch-row i { font-size: 12px; }
-.analytics-command-disclosure .analytics-watch-row { grid-template-columns: 46px minmax(0, 1fr) minmax(0, .9fr) auto; }
-.analytics-command-disclosure .analytics-watch-row > span:nth-child(2) strong,
-.analytics-command-disclosure .analytics-watch-row > span:nth-child(2) small,
-.analytics-command-disclosure .analytics-watch-row > span:nth-child(3) small {
-  display: -webkit-box;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-.analytics-command-disclosure .analytics-watch-row > span:nth-child(2) strong { font-size: 14px; }
-.analytics .analytics-hand > summary small,
-.analytics .analytics-history > summary small { font-size: 12px; }
-
 .focus-language-view { padding-bottom: 32px; }
 .focus-language-resume { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .focus-language-resume > span { color: var(--muted); font-size: 12px; }
@@ -135,11 +61,6 @@
   .focus-stage-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
-@media (max-width: 1080px) {
-  .analytics-command-disclosure .analytics-command-grid { grid-template-columns: 1fr; }
-  .analytics-command-disclosure .analytics-priority-card { border-right: 0; border-bottom: 1px solid var(--line); }
-}
-
 @media (max-width: 900px) {
   .focus-language-table .head { display: none; }
   .focus-language-table article { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
@@ -153,10 +74,6 @@
 }
 
 @media (max-width: 700px) {
-  .analytics-command-disclosure > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; padding: 16px; gap: 6px; }
-  .analytics-command-disclosure > summary span { grid-column: 1; }
-  .analytics-command-disclosure > summary i { grid-column: 2; grid-row: 1 / 3; }
-  .analytics-command-disclosure .analytics-watch-row { grid-template-columns: 42px minmax(0, 1fr) auto; }
   .focus-language-now { grid-template-columns: auto minmax(0, 1fr); padding: 16px; }
   .focus-language-now-steps,
   .focus-language-now .focus-language-size,
@@ -169,7 +86,6 @@
 }
 
 @media (max-width: 580px) {
-  .analytics > .analytics-head-glance > div { padding: 12px; }
   .focus-language-glance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .focus-language-glance > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 10px; align-items: center; }
   .focus-language-glance > div:nth-child(2) { border-right: 0; }

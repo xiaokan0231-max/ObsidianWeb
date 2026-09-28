@@ -1,20 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import ts from "typescript";
-import * as model from "../lib/company-hero.ts";
+import { loadAppModule } from "./helpers/render-tsx.mjs";
 import { readAppCss } from "./css-source.mjs";
 
-const source = await readFile(new URL("../app/company-hero.tsx", import.meta.url), "utf8");
 const session = await readFile(new URL("../app/interview-session.tsx", import.meta.url), "utf8");
-const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
-const require = createRequire(import.meta.url);
-const components = {};
-runInNewContext(compiled.outputText, { exports: components, require: (specifier) => specifier === "@/lib/company-hero" ? model : require(specifier) });
+const components = await loadAppModule("app/company-hero.tsx");
 const render = (props) => renderToStaticMarkup(createElement(components.default, { rounds: [], today: "2026-09-26", fallbackCompany: "", onOpen() {}, ...props }));
 
 const makeNote = (path, frontmatter, content = "# 株式会社テスト — データエンジニア") => ({ path, frontmatter, content, tags: [], stat: { ctime: 0, mtime: 0, size: 0 } });

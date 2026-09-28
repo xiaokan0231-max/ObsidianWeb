@@ -32,6 +32,7 @@ import {
 } from "@/lib/memory-atlas-data";
 import { formatDate, getString, getType, type Note } from "@/lib/notes";
 import { REVIEW_DIMENSION_META } from "@/lib/review-deep";
+import { OPEN_NOTE_LABEL } from "@/lib/ui-labels";
 import {
   buildCardCoverage,
   buildInterviewTrends,
@@ -1010,10 +1011,12 @@ function SessionAssets({
   motivationAsset,
   onOpenCard,
   onOpenAsset,
+  onOpenLibrary,
 }: {
   motivationAsset: SharedAssetTarget | null;
   onOpenCard: (cardId: string) => void;
   onOpenAsset: (asset: SharedAssetTarget) => void;
+  onOpenLibrary?: () => void;
 }) {
   return (
     <section className="session-assets" aria-label="本轮专属与全局共用的面试话术">
@@ -1053,7 +1056,8 @@ function SessionAssets({
           {asset.label}
         </button>
       ))}
-      <button type="button" className="to-library" onClick={() => onOpenCard("p01")}>
+      {/* 「回答库 →」说的是整个库：去通用准备页翻，而不是只弹出 p01 那一张。 */}
+      <button type="button" className="to-library" onClick={() => (onOpenLibrary ? onOpenLibrary() : onOpenCard("p01"))}>
         回答库 →
       </button>
     </section>
@@ -1067,6 +1071,7 @@ function InterviewSession({
   onOpenWiki,
   onOpenCard,
   onOpenAsset,
+  onOpenLibrary,
   initialCompany = "",
   initialPath = "",
   initialContextPath = "",
@@ -1079,6 +1084,8 @@ function InterviewSession({
   onOpenWiki: (target: string, section?: string) => void;
   onOpenCard: (cardId: string) => void;
   onOpenAsset: (asset: SharedAssetTarget) => void;
+  /** 打开完整回答库（通用准备页）。缺省时退回在浮层里打开 p01。 */
+  onOpenLibrary?: () => void;
   initialCompany?: string;
   initialPath?: string;
   initialContextPath?: string;
@@ -1330,7 +1337,7 @@ function InterviewSession({
                 <summary>更多</summary>
                 <div>
                   <button type="button" onClick={() => onOpen(selected.note)}>
-                    打开 Obsidian 原笔记 ↗
+                    {OPEN_NOTE_LABEL} ↗
                   </button>
                   {(selected.caseLink || selected.meetingLink) && (
                     <button type="button" onClick={() => onOpenWiki(selected.caseLink || selected.meetingLink)}>
@@ -1423,6 +1430,7 @@ function InterviewSession({
                 motivationAsset={motivationAsset}
                 onOpenCard={onOpenCard}
                 onOpenAsset={onOpenAsset}
+                onOpenLibrary={onOpenLibrary}
               />
             </div>
           </details>

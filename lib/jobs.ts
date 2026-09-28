@@ -1,6 +1,6 @@
 import { getString, getTitle, stripMarkdown, type Note } from "./notes.ts";
 import { jobSectionBody } from "./job-sections.ts";
-import { daysBetween, intakeSortKey } from "./job-intake.ts";
+import { daysBetween, intakeSortKey, jobIntake, type JobIntake } from "./job-intake.ts";
 import {
   DEFAULT_JOB_STATUS,
   jobStatusNote,
@@ -229,9 +229,13 @@ export function jobVerification(note: Note): JobVerification {
   return detectVerification(note.content) as JobVerification;
 }
 
+/**
+ * 画面の中文層に出す短い語。旧表記「原文確認済／要確認」は日本語と中文が一枚の札に混ざっていた。
+ * 語が短いぶん「何を核对したのか」が落ちるので、カード・一覧の札には title で「求人原文：」を添える。
+ */
 export const VERIFICATION_LABEL: Record<JobVerification, string> = {
-  verified: "原文確認済",
-  warned: "要確認",
+  verified: "已核对",
+  warned: "需确认",
   unchecked: "未核对",
 };
 
@@ -640,3 +644,150 @@ export const WAITING_FOR_LABEL: Record<string, string> = {
   agent: "中介",
   platform: "平台",
 };
+
+/**
+ * 「动手状态」：未応募 の中を「未着手」と「已动手·等对方」に分ける軸（awaitingCounterpart と同じ規則）。
+ * 応募済以降の案件には値が無い——応募したかどうかは status の方で既に言えていて、
+ * ここに「未着手」と出すと「応募済なのに未着手」という読めない組み合わせになる。
+ */
+export type JobTouch = "untouched" | "awaiting";
+
+export const JOB_TOUCHES: { id: JobTouch; label: string; hint: string }[] = [
+  { id: "untouched", label: "未着手", hint: "未応募，本人还没动过手" },
+  { id: "awaiting", label: "已动手·等对方", hint: "未応募，但已点过いいかも／回过スカウト，球在对方手里" },
+];
+
+export function jobTouch(job: Pick<JobCard, "status" | "waitingFor">): JobTouch | null {
+  if (job.status !== "未応募") return null;
+  return awaitingCounterpart(job) ? "awaiting" : "untouched";
+}
+
+/*
+ * 看板的筛选条件。放在 lib 而不是 jobs-view.tsx 里，是为了让「统计格的数字 = 点开后的条数」
+ * 能被 node 测试直接证明：两边若各写一份判定，迟早一边改了另一边没改，数字就开始说谎。
+ */
+
+/** v2 採点の擬似値「未採点」。frontmatter には無い——採点待ちの案件を拾えるようにするために置く。 */
+export const UNRATED_FIT = "none";
+export const jobFitGate = (job: Pick<JobCard, "fit">) => job.fit?.hardGate ?? UNRATED_FIT;
+export const jobFitBand = (job: Pick<JobCard, "fit">) => job.fit?.band ?? UNRATED_FIT;
+export const jobFitAccess = (job: Pick<JobCard, "fit">) => job.fit?.accessState || UNRATED_FIT;
+
+export type JobBoardFilters = {
+  statuses: string[];
+  ratings: JobRatingBand[];
+  minSalary: number;
+  stacks: string[];
+  regions: string[];
+  sources: string[];
+  verifications: JobVerification[];
+  intakes: JobIntake[];
+  /** 动手状态。値を持つのは未応募だけなので、選んでいる間は応募済以降が全部外れる。 */
+  touches: JobTouch[];
+  /** v2 採点：hard_gate / fit_band_final / access_state の値、または UNRATED_FIT。 */
+  gates: string[];
+  bands: string[];
+  accesses: string[];
+  remoteOnly: boolean;
+};
+
+export const EMPTY_JOB_FILTERS: JobBoardFilters = {
+  statuses: [],
+  ratings: [],
+  minSalary: 0,
+  stacks: [],
+  regions: [],
+  sources: [],
+  verifications: [],
+  intakes: [],
+  touches: [],
+  gates: [],
+  bands: [],
+  accesses: [],
+  remoteOnly: false,
+};
+
+/** 一个筛选维度。算联动 facet 计数时用它指出「这一组先不算」。 */
+export type JobFilterKey =
+  | "query"
+  | "statuses"
+  | "rating"
+  | "salary"
+  | "stacks"
+  | "regions"
+  | "sources"
+  | "verifications"
+  | "intakes"
+  | "touches"
+  | "gates"
+  | "bands"
+  | "accesses"
+  | "remote";
+
+/** 看板一条岗位是否通过全部筛选。`except` 指定的那一组不参与判定（facet 联动计数用）。 */
+export function jobMatchesFilters(
+  job: JobCard,
+  filters: JobBoardFilters,
+  { query = "", today, except }: { query?: string; today: string; except?: JobFilterKey },
+) {
+  const keep = (key: JobFilterKey, predicate: () => boolean) => key === except || predicate();
+  return (
+    keep("query", () => jobMatchesQuery(job, query)) &&
+    keep("statuses", () => filters.statuses.length === 0 || filters.statuses.includes(job.status)) &&
+    keep("rating", () => jobMatchesRatingBands(job.rating, filters.ratings)) &&
+    keep("salary", () => filters.minSalary === 0 || (job.salary.max ?? 0) >= filters.minSalary) &&
+    keep("stacks", () => filters.stacks.length === 0 || job.stack.some((tag) => filters.stacks.includes(tag))) &&
+    keep("regions", () => filters.regions.length === 0 || job.regions.some((region) => filters.regions.includes(region))) &&
+    keep("sources", () => filters.sources.length === 0 || filters.sources.includes(job.sourceGroup)) &&
+    keep("verifications", () => filters.verifications.length === 0 || filters.verifications.includes(job.verification)) &&
+    keep("intakes", () => filters.intakes.length === 0 || filters.intakes.includes(jobIntake(job.date, today))) &&
+    keep("touches", () => {
+      if (filters.touches.length === 0) return true;
+      const touch = jobTouch(job);
+      return touch !== null && filters.touches.includes(touch);
+    }) &&
+    keep("gates", () => filters.gates.length === 0 || filters.gates.includes(jobFitGate(job))) &&
+    keep("bands", () => filters.bands.length === 0 || filters.bands.includes(jobFitBand(job))) &&
+    keep("accesses", () => filters.accesses.length === 0 || filters.accesses.includes(jobFitAccess(job))) &&
+    keep("remote", () => !filters.remoteOnly || job.remote)
+  );
+}
+
+/** 看板顶部的统计格。每格的数字是「点开后列表的条数」的承诺，filters 与 count 必须同口径。 */
+export type JobStatTileId = "untouched" | "awaiting" | "ready" | "recent" | "verified";
+
+export const JOB_STAT_TILES: {
+  id: JobStatTileId;
+  label: string;
+  filters: Partial<JobBoardFilters>;
+}[] = [
+  { id: "untouched", label: "未着手", filters: { statuses: ["未応募"], touches: ["untouched"] } },
+  { id: "awaiting", label: "已动手 · 等对方", filters: { statuses: ["未応募"], touches: ["awaiting"] } },
+  // 「7 分以上」は 7plus（しきい値）で表す。7/8/9 の排他帯を3つ並べても件数は同じだが、1つの方が chip で読める。
+  { id: "ready", label: "7 分以上待判断", filters: { statuses: ["未応募"], touches: ["untouched"], ratings: ["7plus"] } },
+  { id: "recent", label: "7 日内新增", filters: { statuses: ["未応募"], intakes: ["today", "d3", "d7"] } },
+  { id: "verified", label: "原文已核对", filters: { statuses: ["未応募"], verifications: ["verified"] } },
+];
+
+/** 统计格点开后的完整筛选：其余条件全部清空，免得旧条件把数字悄悄削小。 */
+export function jobStatTileFilters(id: JobStatTileId): JobBoardFilters {
+  const tile = JOB_STAT_TILES.find((item) => item.id === id);
+  return { ...EMPTY_JOB_FILTERS, ...(tile?.filters ?? {}) };
+}
+
+/**
+ * 统计格的母集合。**从全部案件算，不看当前筛选**——统计格是「现在手里有什么」的总览，
+ * 跟着筛选变的话，点完一格其余四格也跟着塌，就没法再从这里换到别的格。
+ * 判定故意按业务口径直写（而不是调 jobMatchesFilters），测试才能证明两套写法数到同一个数。
+ */
+export function jobStatTilePools<T extends JobCard>(jobs: T[], today: string): Record<JobStatTileId, T[]> {
+  const notApplied = jobs.filter((job) => job.status === "未応募");
+  const untouched = notApplied.filter((job) => !awaitingCounterpart(job));
+  return {
+    untouched,
+    awaiting: notApplied.filter(awaitingCounterpart),
+    ready: untouched.filter((job) => job.rating >= 7),
+    recent: notApplied.filter((job) => ["today", "d3", "d7"].includes(jobIntake(job.date, today))),
+    verified: notApplied.filter((job) => job.verification === "verified"),
+  };
+}

@@ -34,7 +34,8 @@ test("星图 3D 观感机制：错层分区、侧角常驻机位、一次性开�
 
 test("语义图与普通双链共享数据，并可筛选公司和技能实体", () => {
   // 视图从 memory-atlas 拆出到 graph-view.tsx，契约不变、落点变了。
-  assert.ok(graphView.includes('useState<GraphViewMode>("semantic")'));
+  // 模式进了 URL（?mode=），默认仍是语义图。
+  assert.ok(graphView.includes('useUrlState<GraphViewMode>("mode", "semantic", MODE_CODEC)'));
   assert.ok(graphView.includes("buildKnowledgeGraph(notes)"));
   assert.ok(graphView.includes("selectKnowledgeGraphView(graph,"));
   assert.ok(graphView.includes("语义关系"));

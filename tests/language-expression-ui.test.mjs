@@ -4,15 +4,17 @@ import test from "node:test";
 import { readAppCss } from "./css-source.mjs";
 
 test("专项训练作为独立入口接入五种自由表达练习", async () => {
-  const [ui, atlas, css] = await Promise.all([
+  const [ui, atlas, navigation, css] = await Promise.all([
     readFile("app/language-expression-courses.tsx", "utf8"),
     readFile("app/memory-atlas.tsx", "utf8"),
+    // 导航表已从外壳移到 app/navigation.ts。
+    readFile("app/navigation.ts", "utf8"),
     readAppCss(),
   ]);
 
-  assert.ok(atlas.includes('id: "topics", label: "专项训练"'));
+  assert.ok(navigation.includes('id: "topics", label: "专项训练"'));
   assert.ok(atlas.includes("<LanguageExpressionCourses"));
-  assert.ok(atlas.indexOf('id: "language"') < atlas.indexOf('id: "topics"'));
+  assert.ok(navigation.indexOf('id: "language"') < navigation.indexOf('id: "topics"'));
 
   for (const mode of ["recall", "collocation", "substitution", "improv", "rewrite"]) {
     assert.ok(ui.includes(`id: "${mode}"`), `缺少 ${mode} 练习`);

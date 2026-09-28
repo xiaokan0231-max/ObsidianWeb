@@ -20,6 +20,8 @@ import { isTypingTarget, PrepSearchBox, useSlashFocus } from "./prep-search";
 import { useCopyFlash } from "./copy-flash";
 import ReadingMode from "./reading-mode";
 import { headingPlainText } from "@/lib/reading-document";
+import { OPEN_NOTE_LABEL } from "@/lib/ui-labels";
+import { textCodec, useUrlState } from "./use-url-state";
 
 function GuidanceBlock({
   title,
@@ -46,6 +48,7 @@ export default function InterviewPrep({
   onOpen,
   initialCardId,
   loading = false,
+  syncUrl = false,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
@@ -53,17 +56,23 @@ export default function InterviewPrep({
   initialCardId?: string | null;
   /** この視図の scope がまだ届いていない：空状態ではなく読取中を出す。 */
   loading?: boolean;
+  /**
+   * 分类与选中的卡片写进 URL。只有独立的回答库页才开：同一组件也在本场面试上以浮层打开，
+   * 浮层若改写 URL，会把底下那一页的查询串弄乱。
+   */
+  syncUrl?: boolean;
 }) {
   const library = useMemo(() => findInterviewPrepLibrary(notes), [notes]);
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("全部");
+  const [categoryParam, setCategory] = useUrlState("cat", "全部", textCodec, { enabled: syncUrl });
   const [readerOpen, setReaderOpen] = useState(false);
   const readingHeadings = useMemo(() => (library?.items ?? []).map((item) => ({
     id: `reader-answer-${item.id}`,
     text: headingPlainText(item.title),
   })), [library]);
-  // 飛び込みで来たカードを最初の選択にする。以降は本人の選択が優先される
-  const [selectedId, setSelectedId] = useState<string | null>(initialCardId ?? null);
+  // 飛び込みで来たカードを最初の選択にする。以降は本人の選択が優先される。
+  // 空文字＝未選択（URL から消える）。浮層では syncUrl が無いので initialCardId がそのまま初期値になる。
+  const [selectedId, setSelectedId] = useUrlState("card", initialCardId ?? "", textCodec, { enabled: syncUrl });
   const { copiedId, flash } = useCopyFlash();
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -71,6 +80,8 @@ export default function InterviewPrep({
     () => library ? ["全部", ...new Set(library.items.map((item) => item.category))] : ["全部"],
     [library],
   );
+  // URL の分類が改名・削除で無くなっていたら「全部」扱い：空の一覧で行き止まりにしない。
+  const category = categories.includes(categoryParam) ? categoryParam : "全部";
   const filteredItems = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase();
     return (library?.items ?? []).filter((item) => {
@@ -105,7 +116,8 @@ export default function InterviewPrep({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [filteredItems]);
+    // setSelectedId は useUrlState が返す useState の setter そのもの（参照は不変）。
+  }, [filteredItems, setSelectedId]);
 
   const copyAnswer = async (item: InterviewPrepItem) => {
     await navigator.clipboard.writeText(interviewPrepPlainText(item.standardAnswer));
@@ -145,13 +157,13 @@ export default function InterviewPrep({
               className={category === item ? "active" : ""}
               onClick={() => {
                 setCategory(item);
-                setSelectedId(null);
+                setSelectedId("");
               }}
             >{item}</button>
           ))}
         </div>
         <button className="prep-source" type="button" onClick={() => onOpen(library.note)}>
-          打开 Obsidian 原笔记 ↗
+          {OPEN_NOTE_LABEL} ↗
         </button>
         <button type="button" className="reader-entry" onClick={() => setReaderOpen(true)}>
           全文阅读

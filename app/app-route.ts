@@ -33,6 +33,9 @@ const VIEW_PATHS: Record<AppView, string> = {
   todo: "/actions",
 };
 
+/** 全部视图。导航表与 ⌘K 的覆盖测试以它为准，新增一页时漏配会被测试拦住。 */
+export const APP_VIEWS: readonly AppView[] = Object.keys(VIEW_PATHS) as AppView[];
+
 const PATH_VIEWS = new Map(
   Object.entries(VIEW_PATHS).map(([view, path]) => [path, view as AppView]),
 );

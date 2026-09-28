@@ -41,7 +41,7 @@ export function obsidianErrorResponse(error: unknown, fallback: string) {
   return Response.json({ error: message }, { status });
 }
 
-function badRequestError(message: string) {
+export function badRequestError(message: string) {
   const error = new Error(message);
   (error as { status?: number }).status = 400;
   return error;
@@ -85,7 +85,7 @@ export async function readJson<T>(request: Request): Promise<T> {
   try {
     return (await request.json()) as T;
   } catch {
-    throw new Error("请求 JSON 格式无效。");
+    throw badRequestError("请求 JSON 格式无效。");
   }
 }
 

@@ -9,6 +9,8 @@ import {
   type InterviewPracticeAction,
   type InterviewPracticeRating,
 } from "@/lib/review-practice";
+import { textCodec, useUrlState } from "./use-url-state";
+import { practiceStatusLabel } from "@/lib/ui-labels";
 
 type PracticeItem = ReturnType<typeof parseInterviewPractice>[number] & {
   key: string;
@@ -34,7 +36,8 @@ function InterviewPractice({
   onNoteWritten: (note: Note) => void;
 }) {
   const [showCompleted, setShowCompleted] = useState(false);
-  const [selectedKey, setSelectedKey] = useState("");
+  // 选中的题放进 URL：去原笔记查完再回来，仍停在这一题。已完成／过期的键找不到时落回队首，不会空白。
+  const [selectedKey, setSelectedKey] = useUrlState("item", "", textCodec);
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -117,7 +120,7 @@ function InterviewPractice({
                 className={item.key === selected?.key ? "active" : ""}
                 onClick={() => selectItem(item.key)}
               >
-                <small>{String(index + 1).padStart(2, "0")} · {item.status}</small>
+                <small>{String(index + 1).padStart(2, "0")} · {practiceStatusLabel(item.status)}</small>
                 <strong>{item.questionTitle || item.blockId}</strong>
                 <span>{item.company}{item.round ? ` · ${item.round}` : ""}</span>
               </button>

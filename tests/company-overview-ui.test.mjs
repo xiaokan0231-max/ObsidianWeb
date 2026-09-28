@@ -1,24 +1,13 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import ts from "typescript";
 import * as model from "../lib/company-overview.ts";
 import * as prepModel from "../lib/interview-prep-doc.ts";
-import * as jobsModel from "../lib/jobs.ts";
+import { loadAppModule } from "./helpers/render-tsx.mjs";
 
-const source = await readFile(new URL("../app/company-overview.tsx", import.meta.url), "utf8");
-const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
-const require = createRequire(import.meta.url);
-const inlineSource = await readFile(new URL("../app/prep-doc-render.tsx", import.meta.url), "utf8");
-const inlineCompiled = ts.transpileModule(inlineSource, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
-const inlineComponents = {};
-runInNewContext(inlineCompiled.outputText, { exports: inlineComponents, require: (specifier) => specifier === "@/lib/interview-prep-doc" ? prepModel : require(specifier) });
-const components = {};
-runInNewContext(compiled.outputText, { exports: components, require: (specifier) => specifier === "@/lib/company-overview" ? model : specifier === "@/lib/jobs" ? jobsModel : specifier === "./prep-doc-render" ? inlineComponents : specifier === "./use-dialog-focus" ? { useDialogFocus() {} } : require(specifier) });
+// prep-doc-render 用真组件（总结正文的行内渲染要一起验）；lib 依赖与本文件顶上的 import 是同一实例。
+const components = await loadAppModule("app/company-overview.tsx");
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 const dimensions = (scores, version = 2) => model.companyFitDimensions(version).map((item, index) => ({ ...item, score: scores[index], rationale: `${item.label}的可核对依据`, evidence: [{ label: "公司原文", url: "https://example.com/evidence" }], unknowns: [] }));
 const context = (title, version = 2) => ({ key: `case:${title}`, kind: "case", note: { path: `${title}.md`, frontmatter: { type: "job-case", company: "株式会社テスト" }, content: "", tags: [], stat: { ctime: 0, mtime: 0, size: 0 } }, company: "株式会社テスト", title, profile: null, assessment: { criteriaVersion: version, assessedOn: "2026-01-02", aiAuthor: "Codex", summary: `${title}的独立判断`, dimensions: dimensions([4, 3, null, 4, null, 3], version), strengths: ["发挥已有经验"], questions: ["实际职责待确认"], contextFacts: [] }, issues: [] });
@@ -163,18 +152,11 @@ test("加入按钮与选择器的状态切换都遵守三项上限，可取消�
 });
 
 // 用真实会话入口验证日历已确定「本场没有准备稿」时不会借用同案件旧轮次。
-const sessionSource = await readFile(new URL("../app/interview-session.tsx", import.meta.url), "utf8");
-const sessionCompiled = ts.transpileModule(sessionSource, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
-const sessionDependencies = Object.fromEntries(await Promise.all([
-  "interview-prep-doc.ts", "interview-prep-index.ts", "memory-atlas-data.ts", "notes.ts", "review-deep.ts", "interview-trends.mjs", "interview-shared-assets.ts", "context-picker.ts", "company-hero.ts",
-].map(async (name) => [`@/lib/${name.replace(/\.ts$/, "")}`, await import(`../lib/${name}`)])));
-const sessionExports = {};
-runInNewContext(sessionCompiled.outputText, { exports: sessionExports, require: (specifier) => {
-  if (specifier === "@/lib/company-overview") return model;
+const sessionExports = await loadAppModule("app/interview-session.tsx", { stubs: (specifier) => {
   if (specifier === "./company-overview") return components;
   if (specifier === "./interview-session-v2") return { default: ({ doc, companyAction }) => createElement("div", { "data-selected-prep": doc.note.path }, doc.round, companyAction) };
   if (specifier.startsWith("./")) return { Blocks() {}, Inlines() {}, default() {}, PrepSearchBox() {}, useSlashFocus() {}, copySelectionWithoutRuby() {} };
-  return sessionDependencies[specifier] ?? require(specifier);
+  return undefined;
 } });
 const makeNote = (path, frontmatter, content = "# 株式会社テスト — 数据工程") => ({ path, frontmatter, content, tags: [], stat: { ctime: 0, mtime: 0, size: 0 } });
 const job = makeNote("20_求職/测试/数据工程.md", { type: "job-case", company: "株式会社テスト", case_id: "test-data" });
