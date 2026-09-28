@@ -12,9 +12,9 @@ import {
 
 /** 終結（不採用）時に消す残骸。待ち・跟進・面談予定は死んだ案件の待办ではない（inbox-sync skill と同じ規則）。 */
 const TERMINAL_CLEANUP_KEYS = ["waiting_for", "follow_up_at", "follow_up_action", "next_event_at"] as const;
-import { errorResponse, parseOptionalText, parseRequiredText, readJson } from "@/lib/server/api";
+import { assertExpectedMtime, errorResponse, parseExpectedMtime, parseOptionalText, parseRequiredText, readJson } from "@/lib/server/api";
 import { patchFrontmatterScalars } from "@/lib/server/frontmatter-patch";
-import { readNote, writeNote } from "@/lib/server/obsidian";
+import { readNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
 import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
 
 type Body = {
@@ -28,7 +28,8 @@ type Body = {
    * 書き換えてよいものではない）。
    */
   channel?: string;
-  expectedStatusUpdated?: string;
+  /** 上一次已知的笔记 mtime。status_updated 只有日精度，同一天两处改同一案件会互相覆盖，所以换成 mtime。 */
+  expectedMtime?: number;
 };
 
 // 「読む→status を差し替える→書く」は原子的ではない。看板の連打や二重送信が
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
     const status = parseRequiredText(body.status, "status");
     const statusNote = parseOptionalText(body.statusNote, "statusNote") ?? "";
     const channel = parseOptionalText(body.channel, "channel") ?? "";
-    const expectedStatusUpdated = parseOptionalText(body.expectedStatusUpdated, "expectedStatusUpdated");
+    const expectedMtime = parseExpectedMtime(body.expectedMtime);
 
     if (!path.startsWith(JOB_CASE_ROOT) || !path.toLowerCase().endsWith(".md") || path.includes("..")) {
       throw new Error(`只允许修改 ${JOB_CASE_ROOT} 下的应募案件。`);
@@ -64,11 +65,7 @@ export async function POST(request: Request) {
         throw new Error("这条笔记不是应募案件，拒绝写入。");
       }
       const currentStatusUpdated = String(note.frontmatter.status_updated ?? "").trim();
-      if (expectedStatusUpdated && expectedStatusUpdated !== currentStatusUpdated) {
-        const conflict = new Error("状态已更新，版本不一致。请刷新后重试。");
-        (conflict as { status?: number }).status = 409;
-        throw conflict;
-      }
+      assertExpectedMtime(expectedMtime, note.stat.mtime);
 
       const existingChannel = String(note.frontmatter.channel ?? "").trim();
       // 応募経路は歴史事実：一度書いた channel を状態変更のついでに上書きさせない。
@@ -132,6 +129,9 @@ export async function POST(request: Request) {
         ...extra,
       });
       await writeNote(path, content);
+      // mtime は楽観ロックの版そのもの。Date.now() を返すと次のクリックが必ず 409 になるので、
+      // 書いた直後にディスクの stat を読み直す（内容と frontmatter は手元の値を使う）。
+      const written = await readNoteOrNull(path);
       // 更新後のノートを応答へ載せる。サーバは全文を手元に持っているのに、
       // クライアントが1件の差し替えのために全庫を再取得する理由はない。
       const frontmatter: Record<string, unknown> = {
@@ -147,7 +147,7 @@ export async function POST(request: Request) {
       const updated = {
         ...note,
         content,
-        stat: { ...note.stat, mtime: Date.now(), size: content.length },
+        stat: written?.stat ?? { ...note.stat, mtime: Date.now(), size: content.length },
         frontmatter,
       };
       return Response.json({

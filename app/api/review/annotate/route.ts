@@ -1,4 +1,5 @@
 import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
+import { assertSameOrigin, errorResponse } from "@/lib/server/api";
 import { upsertAppendNote } from "@/lib/server/note-append";
 import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
 import { tokyoParts } from "@/lib/dojo/utils";
@@ -67,6 +68,8 @@ function annotationSkeleton(notePath: string) {
 }
 
 export async function POST(request: Request) {
+  // 同源でない呼び出しは 403。
+  try { assertSameOrigin(request); } catch (error) { return errorResponse(error, "拒绝请求"); }
   let body: AnnotateRequest;
   try {
     body = (await request.json()) as AnnotateRequest;

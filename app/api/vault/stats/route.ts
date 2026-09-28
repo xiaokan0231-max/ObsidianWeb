@@ -1,4 +1,5 @@
 import { errorResponse } from "@/lib/server/api";
+import { assertSameOrigin } from "@/lib/server/api";
 import { invokeCodex } from "@/lib/server/codex-bridge";
 
 /**
@@ -9,8 +10,10 @@ import { invokeCodex } from "@/lib/server/codex-bridge";
  * 次の Claude Code の応答は Stop hook に止められる。ここは本機の codex-bridge
  * （宿主 Node、LLM は使わない）へ「vault:stats を走らせろ」と頼む窓口。
  */
-export async function POST() {
+export async function POST(request: Request) {
   try {
+    // 同源でない呼び出し（他サイト・非ブラウザ）は vault を書かせない。403 は errorResponse が返す。
+    assertSameOrigin(request);
     const result = await invokeCodex<{ ok: boolean; summary: string }>("vault_stats", {});
     return Response.json({ ok: true, summary: result.output?.summary ?? "" });
   } catch (error) {

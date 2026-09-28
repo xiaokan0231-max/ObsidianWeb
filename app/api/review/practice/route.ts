@@ -1,4 +1,5 @@
 import { tokyoParts, yamlScalar } from "@/lib/dojo/utils";
+import { assertSameOrigin, errorResponse } from "@/lib/server/api";
 import { getString as text, noteBasename as basename } from "@/lib/notes";
 import { parseInterviewAnswerReview } from "@/lib/review-deep";
 import {
@@ -24,6 +25,8 @@ function queuedAtInTokyo() {
 }
 
 export async function POST(request: Request) {
+  // 同源でない呼び出しは 403。
+  try { assertSameOrigin(request); } catch (error) { return errorResponse(error, "拒绝请求"); }
   let body: Body;
   try {
     body = (await request.json()) as Body;

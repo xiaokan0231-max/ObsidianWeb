@@ -719,7 +719,7 @@ function JobsView({
       status: string,
       statusNote = "",
       channel?: string,
-      expectedStatusUpdated = "",
+      expectedMtime?: number,
     ): Promise<string | null> => {
       setSavingPaths((current) => current.includes(path) ? current : [...current, path]);
       setStatusErrors((current) => {
@@ -736,7 +736,7 @@ function JobsView({
             status,
             statusNote,
             ...(channel ? { channel } : {}),
-            ...(expectedStatusUpdated !== undefined ? { expectedStatusUpdated } : {}),
+            ...(expectedMtime !== undefined ? { expectedMtime } : {}),
           });
         } catch (writeError) {
           if (writeError instanceof ConflictError) {
@@ -766,11 +766,12 @@ function JobsView({
   const changeFollowUp = useCallback(async (
     path: string,
     values: { waitingFor: string | null; followUpAt: string | null; nextEventAt: string | null },
+    expectedMtime?: number,
   ): Promise<string | null> => {
     setSavingPaths((current) => current.includes(path) ? current : [...current, path]);
     dismissStatusError(path);
     try {
-      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/jobs/follow-up", { path, ...values });
+      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/jobs/follow-up", { path, ...values, ...(expectedMtime !== undefined ? { expectedMtime } : {}) });
       if (!payload.note) throw new Error(payload.error || "写入 Vault 失败");
       onNoteWritten?.(payload.note);
       return null;
@@ -1133,7 +1134,7 @@ function JobsView({
                     status,
                     note,
                     channel,
-                    job.statusUpdated,
+                    job.note.stat.mtime,
                   )}
                 />
               ))}
@@ -1152,7 +1153,7 @@ function JobsView({
                 status,
                 note,
                 channel,
-                decisionDetail.statusUpdated,
+                decisionDetail.note.stat.mtime,
               )}
               onOpenNote={() => onOpen(decisionDetail.note)}
             />
@@ -1220,9 +1221,9 @@ function JobsView({
                 status,
                 note,
                 channel,
-                detail.statusUpdated,
+                detail.note.stat.mtime,
               )}
-          onFollowUp={(values) => changeFollowUp(detail.path, values)}
+          onFollowUp={(values) => changeFollowUp(detail.path, values, detail.note.stat.mtime)}
           onCompare={() => toggleCompare(detail.path)}
           onOpenNote={(note) => onOpen(note ?? detail.note)}
         />
@@ -1270,7 +1271,7 @@ function StatusPicker({
   sourceGuess,
   today,
   saving,
-  expectedStatusUpdated,
+  expectedMtime,
   onChange,
 }: {
   value: string;
@@ -1281,12 +1282,13 @@ function StatusPicker({
   sourceGuess: string;
   today: string;
   saving: boolean;
-  expectedStatusUpdated?: string;
+  /** 上一次已知的笔记 mtime：写入时带上，服务端不一致就 409。 */
+  expectedMtime?: number;
   onChange: (
     status: string,
     note: string,
     channel?: string,
-    expectedStatusUpdated?: string,
+    expectedMtime?: number,
   ) => Promise<string | null>;
 }) {
   const customValue = value && !isJobStatus(value) ? value : null;
@@ -1307,7 +1309,7 @@ function StatusPicker({
 
   const submit = async () => {
     if (draftError) return;
-    if (!(await onChange(value, draft, undefined, expectedStatusUpdated))) setEditing(false);
+    if (!(await onChange(value, draft, undefined, expectedMtime))) setEditing(false);
   };
 
   const pickStatus = (next: string) => {
@@ -1324,13 +1326,13 @@ function StatusPicker({
       return;
     }
     setPendingStatus(null);
-    void onChange(next, "", undefined, expectedStatusUpdated);
+    void onChange(next, "", undefined, expectedMtime);
   };
 
   const submitChannel = async () => {
     // Enter 連打での同一ノートへの並行 POST を塞ぐ（保存ボタンは disabled で守られている）。
     if (saving || !pendingStatus || !channelDraft) return;
-    if (!(await onChange(pendingStatus, "", channelDraft, expectedStatusUpdated))) setPendingStatus(null);
+    if (!(await onChange(pendingStatus, "", channelDraft, expectedMtime))) setPendingStatus(null);
   };
 
   return (
@@ -1444,7 +1446,7 @@ function JobCardView({
     status: string,
     note: string,
     channel?: string,
-    expectedStatusUpdated?: string,
+    expectedMtime?: number,
   ) => Promise<string | null>;
 }) {
   return (
@@ -1516,7 +1518,7 @@ function JobCardView({
               sourceGuess={job.sourceGroup}
               today={today}
               saving={saving}
-              expectedStatusUpdated={job.statusUpdated}
+              expectedMtime={job.note.stat.mtime}
               onChange={onStatus}
             />
         <button
@@ -1575,7 +1577,7 @@ function JobDecisionWorkspace({
     status: string,
     note: string,
     channel?: string,
-    expectedStatusUpdated?: string,
+    expectedMtime?: number,
   ) => Promise<string | null>;
   onOpenNote: () => void;
 }) {
@@ -1617,7 +1619,7 @@ function JobDecisionWorkspace({
             sourceGuess={selected.sourceGroup}
             today={today}
             saving={saving}
-            expectedStatusUpdated={selected.statusUpdated}
+            expectedMtime={selected.note.stat.mtime}
             onChange={onStatus}
           />
         </header>
@@ -2049,7 +2051,7 @@ function JobDrawer({
     status: string,
     note: string,
     channel?: string,
-    expectedStatusUpdated?: string,
+    expectedMtime?: number,
   ) => Promise<string | null>;
   onFollowUp: (values: {
     waitingFor: string | null;
@@ -2117,7 +2119,7 @@ function JobDrawer({
               sourceGuess={job.sourceGroup}
               today={today}
               saving={saving}
-              expectedStatusUpdated={job.statusUpdated}
+              expectedMtime={job.note.stat.mtime}
               onChange={onStatus}
             />
             {/* 列表 / 看板 / 周复盘视图里没有对比按钮，都从详情这里加入。 */}

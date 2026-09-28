@@ -1,8 +1,8 @@
 import { JOB_CASE_ROOT, JOB_CASE_TYPE } from "@/lib/jobs";
 import { WAITING_FOR_VALUES } from "@/lib/job-case-schema";
-import { errorResponse, parseRequiredText, readJson } from "@/lib/server/api";
+import { assertExpectedMtime, errorResponse, parseExpectedMtime, parseRequiredText, readJson } from "@/lib/server/api";
 import { patchFrontmatterScalars } from "@/lib/server/frontmatter-patch";
-import { readNote, writeNote } from "@/lib/server/obsidian";
+import { readNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
 import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
 
 type Body = {
@@ -10,6 +10,8 @@ type Body = {
   waitingFor?: string | null;
   followUpAt?: string | null;
   nextEventAt?: string | null;
+  /** 上一次已知的笔记 mtime；有值时做并发保护（skill 与页面同时改同一案件时不互相覆盖）。 */
+  expectedMtime?: number;
 };
 
 const DATE = /^20\d{2}-\d{2}-\d{2}$/;
@@ -29,6 +31,7 @@ export async function POST(request: Request) {
     if (!path.startsWith(JOB_CASE_ROOT) || !path.toLowerCase().endsWith(".md") || path.includes("..")) {
       throw new Error(`只允许修改 ${JOB_CASE_ROOT} 下的应募案件。`);
     }
+    const expectedMtime = parseExpectedMtime(body.expectedMtime);
 
     const waitingFor = normalized(body.waitingFor);
     const followUpAt = normalized(body.followUpAt);
@@ -43,6 +46,7 @@ export async function POST(request: Request) {
     return await inFollowUpQueue(path, async () => {
       const note = await readNote(path);
       if (note.frontmatter.type !== JOB_CASE_TYPE) throw new Error("这条笔记不是应募案件，拒绝写入。");
+      assertExpectedMtime(expectedMtime, note.stat.mtime);
       const effectiveWaitingFor = waitingFor === undefined
         ? String(note.frontmatter.waiting_for ?? "").trim() || null
         : waitingFor;
@@ -58,6 +62,7 @@ export async function POST(request: Request) {
       if (waitingFor === null && followUpAt === undefined) updates.follow_up_at = null;
       const content = patchFrontmatterScalars(note.content, updates);
       await writeNote(path, content);
+      const written = await readNoteOrNull(path);
       const frontmatter = { ...note.frontmatter };
       for (const [key, value] of Object.entries(updates)) {
         if (value === null) delete frontmatter[key];
@@ -69,7 +74,7 @@ export async function POST(request: Request) {
         note: {
           ...note,
           content,
-          stat: { ...note.stat, mtime: Date.now(), size: content.length },
+          stat: written?.stat ?? { ...note.stat, mtime: Date.now(), size: content.length },
           frontmatter,
         },
       });

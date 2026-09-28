@@ -1106,7 +1106,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   // 首页の等待区から一手で片付ける：「已跟进 · +7 天」「改为等本人」。書込ルートは看板と同じ /api/jobs/follow-up。
   const followUpCase = useCallback(async (note: Note, values: { waitingFor?: string | null; followUpAt?: string | null }) => {
     try {
-      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/jobs/follow-up", { path: note.path, ...values });
+      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/jobs/follow-up", { path: note.path, ...values, expectedMtime: note.stat.mtime });
       if (!payload.note) return payload.error || "更新案件跟进失败";
       patchNote(payload.note);
       return null;
