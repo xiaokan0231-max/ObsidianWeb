@@ -46,6 +46,10 @@ import PrepMaterialReader from "./prep-material-reader";
 import InterviewSessionV2 from "./interview-session-v2";
 import { buildCompanyOverviews, resolveCompanyOverview, type CompanyOverview } from "@/lib/company-overview";
 import CompanyOverviewContent, { COMPANY_COMPARE_LIMIT, CompanyCompare, CompanyCompareButton, CompanyCompareSelector, CompanyCompareTray, toggleCompanyComparison } from "./company-overview";
+import ContextPicker from "./context-picker";
+import CompanyHeroCard from "./company-hero";
+import { buildContextPickerGroups } from "@/lib/context-picker";
+import { companyHeroTone } from "@/lib/company-hero";
 import { copySelectionWithoutRuby } from "./ruby-copy";
 import { isTypingTarget, PrepSearchBox, useSlashFocus } from "./prep-search";
 
@@ -1063,6 +1067,7 @@ function InterviewSession({
   const digest = useMemo(() => buildDigest(notes), [notes]);
   const contexts = useMemo(() => buildCompanyOverviews(notes), [notes]);
   const docContexts = useMemo(() => new Map(docs.map((doc) => [doc.note.path, resolveCompanyOverview(notes, doc.note)])), [docs, notes]);
+  const pickerGroups = useMemo(() => buildContextPickerGroups({ contexts, series, docs, docContexts, today }), [contexts, series, docs, docContexts, today]);
   const [selection, setSelection] = useState<{ prepPath: string | null; contextPath: string | null }>(() => {
     const exact = initialPath ? docs.find((doc) => doc.note.path === initialPath) ?? null : null;
     if (exact) return { prepPath: exact.note.path, contextPath: docContexts.get(exact.note.path)?.note.path ?? null };
@@ -1082,6 +1087,8 @@ function InterviewSession({
   });
   const selected = docs.find((doc) => doc.note.path === selection.prepPath) ?? null;
   const context = selected ? docContexts.get(selected.note.path) ?? null : contexts.find((item) => item.note.path === selection.contextPath) ?? null;
+  // 头部「准备稿 N 轮」说的是这个案件／面谈名下的全部轮次——日历判定本场无稿时它们仍然存在，只是不借来当本场的稿。
+  const contextRounds = useMemo(() => (context ? docs.filter((doc) => docContexts.get(doc.note.path)?.key === context.key) : []), [context, docs, docContexts]);
   const [legacyPrepPath, setLegacyPrepPath] = useState<string | null>(null);
   const [comparePaths, setComparePaths] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -1115,15 +1122,11 @@ function InterviewSession({
     if (compared.some((item) => item.key === context.key)) removeCompare(context.note.path);
     else setComparePaths((current) => toggleCompanyComparison(current, context.note.path));
   }} /></div>;
-  const contextPicker = <label className="co-context-picker">公司／岗位或面谈<select aria-label="切换公司、案件或面谈" value={context ? `context:${context.note.path}` : selectedSeriesKey()} onChange={(event) => {
-    const value = event.target.value;
+  // 选项 id 与旧 select 的 option value 同形（context:<path> / series:<key>），切换逻辑照旧。
+  const contextPicker = <ContextPicker groups={pickerGroups} today={today} selectedId={context ? `context:${context.note.path}` : selectedSeriesKey()} onSelect={(value) => {
     if (value.startsWith("context:")) { const next = contexts.find((item) => item.note.path === value.slice(8)); if (next) selectContext(next); }
     else { const item = series.find((item) => `series:${item.key}` === value); const next = item && selectRelevantInterviewPrepDoc(item.rounds, today); if (next) selectDoc(next); }
-  }}>
-    {!context && !selected && <option value="">请选择公司／岗位或面谈</option>}
-    {[...contexts].sort((left, right) => Number(!!right.assessment) - Number(!!left.assessment) || left.company.localeCompare(right.company)).map((item) => <option key={item.key} value={`context:${item.note.path}`}>{item.company}｜{item.title}{item.assessment ? " · 已评估" : ""}</option>)}
-    {series.filter((item) => !item.rounds.some((doc) => docContexts.get(doc.note.path))).map((item) => <option key={item.key} value={`series:${item.key}`}>{item.company}｜{item.caseLink || item.meetingLink || "历史准备"}（{item.rounds.length}轮）</option>)}
-  </select></label>;
+  }} />;
   function selectedSeriesKey() { const item = selected ? interviewPrepSeriesForDoc(series, selected) : null; return item ? `series:${item.key}` : ""; }
   const companyContent = <CompanyOverviewContent context={context} historical={!!selected && ["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today))} onOpenWiki={onOpenWiki} />;
   const compareUI = <><CompanyCompareTray contexts={compared} onRemove={removeCompare} onClear={() => { setComparePaths([]); setCompareOpen(false); }} onOpen={() => setCompareOpen(true)} />
@@ -1228,7 +1231,8 @@ function InterviewSession({
   }
 
   if (!selected || legacyPrepPath !== selected.note.path) {
-    return <><div className="co-shell"><header className="co-shell-head"><div><p className="co-kicker">公司画像{context?.kind === "meeting" ? " · 面谈" : ""}</p><h1>{context?.company || selected?.company || initialCompany || "公司总览"}</h1><p className="co-context-title">{context?.title || selected?.round || "选择一个真实案件或面谈，查看公司与岗位的最新资料。"}</p></div><div className="co-shell-controls">{contextPicker}{companyAction}</div></header>
+    // 顶部色条跟随案件状态（面接中橙・不採用灰…），与头部胶囊同一张色表。
+    return <><div className={`co-shell${context ? ` tone-${companyHeroTone(context, today)}` : ""}`}><header className="co-shell-head"><CompanyHeroCard context={context} rounds={contextRounds} today={today} fallbackCompany={selected?.company || initialCompany} fallbackTitle={selected?.round ?? ""} onOpen={onOpen} /><div className="co-shell-controls">{contextPicker}{companyAction}</div></header>
       <nav className="co-legacy-tabs" aria-label="公司与面谈视图"><button type="button" aria-pressed="true">公司总览</button><button type="button" disabled={!selected} aria-pressed="false" onClick={() => selected && setLegacyPrepPath(selected.note.path)}>面谈准备</button>{!selected && <span className="co-prep-unavailable">本场尚无准备稿</span>}</nav>
       {companyContent}{context && <button type="button" className="co-compare-toggle" onClick={() => onOpen(context.note)}>{context.kind === "meeting" ? "打开面谈记录" : "打开案件记录"} ↗</button>}
     </div>{compareUI}</>;

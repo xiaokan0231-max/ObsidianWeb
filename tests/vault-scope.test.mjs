@@ -25,9 +25,11 @@ test("views map to stable module scopes", () => {
   assert.equal(vaultScopeForView("graph"), "all");
 });
 
-test("面试只加载公司契合报告，不引入无关AI报告", () => {
-  const fit = note("ai-report");
-  fit.frontmatter.report_kind = "company-fit";
-  assert.equal(noteInVaultScope(fit, "interview"), true);
+test("面试加载公司契合与总结报告，不引入无关AI报告", () => {
+  for (const kind of ["company-fit", "company-summary"]) {
+    const report = note("ai-report");
+    report.frontmatter.report_kind = kind;
+    assert.equal(noteInVaultScope(report, "interview"), true);
+  }
   assert.equal(noteInVaultScope(note("ai-report"), "interview"), false);
 });

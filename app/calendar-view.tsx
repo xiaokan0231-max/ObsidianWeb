@@ -5,22 +5,21 @@ import { formatDate, type Note } from "@/lib/notes";
 import { calendarMonthDays } from "@/lib/calendar-month";
 import type { CalendarInterviewTarget } from "@/lib/calendar-interview";
 import {
+  calendarEventTime,
   localDateKey,
-  type Commitment,
+  type CalendarEvent,
 } from "@/lib/memory-atlas-data";
 
 const COMMITMENT_TYPES = {
   event: { label: "面试 / 面谈", description: "已确认的面试、面谈和招聘说明会" },
-  action: { label: "行动期限", description: "需要本人完成的事项及截止日期" },
-  "follow-up": { label: "等待回复", description: "等待企业、中介或平台回复的跟进日期" },
-} satisfies Record<Commitment["kind"], { label: string; description: string }>;
+} satisfies Record<CalendarEvent["kind"], { label: string; description: string }>;
 
 function interviewDestination(target: CalendarInterviewTarget) {
-  return target.view === "review" ? "面试复盘" : "面试准备";
+  return target.view === "review" ? "面试复盘" : "查看安排";
 }
 
-function eventActionLabel(event: Commitment, target?: CalendarInterviewTarget) {
-  const context = [event.date, event.time, event.company, event.label].filter(Boolean).join(" · ");
+function eventActionLabel(event: CalendarEvent, target?: CalendarInterviewTarget) {
+  const context = [event.date, calendarEventTime(event), "JST", event.company, event.label].filter(Boolean).join(" · ");
   return `${context} · ${target ? interviewDestination(target) : "查看原始记录"}`;
 }
 
@@ -31,10 +30,10 @@ function CalendarView({
   interviewTargets,
   onInterview,
 }: {
-  events: Commitment[];
+  events: CalendarEvent[];
   onOpen: (note: Note) => void;
   interviewTargets: ReadonlyMap<string, CalendarInterviewTarget>;
-  onInterview: (event: Commitment) => void;
+  onInterview: (event: CalendarEvent) => void;
   /** 「今日」は殻が持つ。memo 越しなので中で求めると日付を跨いでも昨日のままになる。 */
   today: string;
 }) {
@@ -58,7 +57,7 @@ function CalendarView({
     inMonth: date.getMonth() === month.getMonth(),
   }));
   const eventsByDate = useMemo(() => {
-    const map = new Map<string, Commitment[]>();
+    const map = new Map<string, CalendarEvent[]>();
     events.forEach((event) => map.set(event.date, [...(map.get(event.date) ?? []), event]));
     return map;
   }, [events]);
@@ -90,9 +89,9 @@ function CalendarView({
       <div className="calendar-layout">
         <div className="calendar-board">
           <div className="calendar-toolbar">
-            <h2>{monthLabel}</h2>
+            <h2>{monthLabel}<small className="calendar-timezone">日本时间（JST）</small></h2>
             <ul className="calendar-legend" aria-label="日历类型图例">
-              {(Object.keys(COMMITMENT_TYPES) as Commitment["kind"][]).map((kind) => (
+              {(Object.keys(COMMITMENT_TYPES) as CalendarEvent["kind"][]).map((kind) => (
                 <li className={`calendar-legend-item kind-${kind}`} key={kind} title={COMMITMENT_TYPES[kind].description}>
                   <i aria-hidden="true" />
                   {COMMITMENT_TYPES[kind].label}
@@ -141,7 +140,7 @@ function CalendarView({
                             aria-label={actionLabel}
                           >
                             <span className="calendar-event-meta">
-                              {event.time && <time dateTime={`${event.date}T${event.time}`}>{event.time}</time>}
+                              {event.time && <time dateTime={`${event.date}T${event.time}+09:00`}>{calendarEventTime(event)}</time>}
                               <span>{event.label}</span>
                             </span>
                             <strong>{event.company}</strong>
@@ -188,7 +187,7 @@ function CalendarView({
             </summary>
             <AgendaGroup
               title="历史事实"
-              empty="还没有历史日程或跟进记录。"
+              empty="还没有历史日程。"
               events={recent}
               onOpen={onOpen}
               interviewTargets={interviewTargets}
@@ -211,10 +210,10 @@ function AgendaGroup({
 }: {
   title: string;
   empty: string;
-  events: Commitment[];
+  events: CalendarEvent[];
   onOpen: (note: Note) => void;
   interviewTargets: ReadonlyMap<string, CalendarInterviewTarget>;
-  onInterview: (event: Commitment) => void;
+  onInterview: (event: CalendarEvent) => void;
 }) {
   return (
     <section className="agenda-group">
@@ -236,7 +235,7 @@ function AgendaGroup({
                   <span>{formatDate(event.date)}</span>
                 </time>
                 <span className="agenda-copy">
-                  <small>{event.time ? `${event.time} · ${event.label}` : event.label}</small>
+                  <small>{event.time ? `${calendarEventTime(event)} · ${event.label}` : event.label}</small>
                   <strong>{event.company}</strong>
                   {target && <span className="calendar-interview-destination" aria-hidden="true">{interviewDestination(target)} →</span>}
                 </span>

@@ -1,13 +1,13 @@
-import { getString, getTitle, stripMarkdown, type Note } from "./notes";
-import { jobSectionBody } from "./job-sections";
-import { intakeSortKey } from "./job-intake";
+import { getString, getTitle, stripMarkdown, type Note } from "./notes.ts";
+import { jobSectionBody } from "./job-sections.ts";
+import { daysBetween, intakeSortKey } from "./job-intake.ts";
 import {
   DEFAULT_JOB_STATUS,
   jobStatusNote,
   normalizeJobStatus,
-} from "./job-status";
+} from "./job-status.ts";
 import { JOB_CASE_TYPE } from "./vault-boundary.mjs";
-import { JOB_CASE_SECTION, detectVerification } from "./job-case-schema";
+import { JOB_CASE_SECTION, detectVerification } from "./job-case-schema.ts";
 
 export {
   composeJobStatus,
@@ -21,7 +21,7 @@ export {
   normalizeJobStatus,
   statusRequiresChannel,
   type JobStatus,
-} from "./job-status";
+} from "./job-status.ts";
 
 export {
   daysBetween,
@@ -31,7 +31,7 @@ export {
   JOB_INTAKES,
   normalizeDay,
   type JobIntake,
-} from "./job-intake";
+} from "./job-intake.ts";
 
 /** 応募案件は発見経路に関係なく 20_求職 配下に置く。 */
 export const JOB_CASE_ROOT = "20_求職/";
@@ -418,3 +418,64 @@ export function jobMatchesQuery(job: JobCard, rawQuery: string) {
   if (!query) return true;
   return query.split(/\s+/).every((token) => job.haystack.includes(token));
 }
+
+/*
+ * 下面几个是看板与公司画像头部共用的显示格式。原来只在 app/jobs-view.tsx 里，
+ * 头部要用时复制了一份 shortDay——两份规则迟早漂移，所以搬到这里让两处 import 同一个。
+ */
+
+/** `800〜1200万` / `800万〜` / `…（月給換算）`。解析不出区间时退回笔记原文。 */
+export function salaryLabel(job: Pick<JobCard, "salary" | "salaryText">) {
+  const { min, max, estimated } = job.salary;
+  if (min === null) return job.salaryText || "薪资未记录";
+  const range = max !== null && max !== min ? `${min}〜${max}万` : `${min}万〜`;
+  return estimated ? `${range}（月給換算）` : range;
+}
+
+/** バッジに出す文字。未採点は 0 ではなく「—」——「読んでいない」と「見込みなし」は別。 */
+export function rateText(job: { rating: number; rated: boolean }) {
+  return job.rated ? String(job.rating) : "—";
+}
+
+/** 応募优先度色阶：9+ 橙 / 7+ 绿 / 5+ 琥珀 / 其余灰。 */
+export function rateTone(rating: number) {
+  if (rating >= 9) return "high";
+  if (rating >= 7) return "good";
+  if (rating >= 5) return "mid";
+  return "low";
+}
+
+/** `2026-07-20` → `7/20`。年は今の運用（数か月単位）では邪魔なだけなので落とす。 */
+export function shortDay(day: string) {
+  const match = day.match(/^\d{4}-(\d{2})-(\d{2})$/);
+  return match ? `${Number(match[1])}/${Number(match[2])}` : day;
+}
+
+/**
+ * 応募からの経過。**「何日待っているか」は催促の判断に直結する**ので、
+ * 相対表示だけにして絶対日付は title に回す（一覧をスキャンしている時に効くのは日数のほう）。
+ */
+export function elapsedLabel(appliedOn: string, today: string) {
+  const days = daysBetween(appliedOn, today);
+  if (days === null) return "";
+  if (days <= 0) return "今日";
+  return `${days}日経過`;
+}
+
+/** 案件如何进入 vault 的显示词。看板卡片、详情抽屉、公司画像头部共用，别再各写一份。 */
+export const JOB_ORIGIN_LABEL: Record<string, string> = {
+  "ai-reco": "AI 发现",
+  manual: "本人录入",
+  agent: "中介推荐",
+  scout: "Scout",
+  legacy: "历史导入",
+  "ra-batch": "RA 批量投递",
+};
+
+/** waiting_for 的显示词（球在谁手里）。看板的下拉选项与公司画像头部共用。 */
+export const WAITING_FOR_LABEL: Record<string, string> = {
+  self: "本人",
+  company: "企业",
+  agent: "中介",
+  platform: "平台",
+};

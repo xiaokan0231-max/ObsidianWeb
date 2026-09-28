@@ -35,7 +35,7 @@ export function noteInVaultScope(note: Note, scope: VaultScope) {
     return type === "job-case" || Boolean(note.frontmatter.case_id) || ["ledger", "job-queue", "job-audit", "job_platform_sync", "ai-report"].includes(type);
   }
   if (scope === "interview") return INTERVIEW_TYPES.has(type) || COMMITMENT_TYPES.has(type) || type === "company" || type === "self"
-    || (type === "ai-report" && note.frontmatter.report_kind === "company-fit");
+    || (type === "ai-report" && ["company-fit", "company-summary"].includes(String(note.frontmatter.report_kind)));
   return TRAINING_TYPES.has(type) || type === "self";
 }
 

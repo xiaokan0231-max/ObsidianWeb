@@ -34,7 +34,7 @@ function resolveReference(value: string, notes: Note[]) {
   return { note: matches.length === 1 ? matches[0] : null, ambiguous: matches.length > 1 };
 }
 
-function interviewContext(note: Note, notes: Note[], source = false): InterviewContext {
+export function interviewContext(note: Note, notes: Note[], source = false): InterviewContext {
   const context: InterviewContext = {
     caseId: getString(note.frontmatter.case_id), ownerKind: "", owner: "", invalid: false,
   };
@@ -100,7 +100,7 @@ function normalizedTime(value: string) {
   return match ? `${match[1].padStart(2, "0")}:${match[2]}` : "";
 }
 
-function noteTime(note: Note, date: string) {
+export function interviewNoteTime(note: Note, date: string) {
   for (const key of ["time", "start_time", "starts_at", "next_event_at"]) {
     const value = getString(note.frontmatter[key]);
     const embeddedDate = value.match(/\d{4}-\d{2}-\d{2}/)?.[0];
@@ -131,7 +131,7 @@ function matchingNotes(event: Commitment, notes: Note[]): MatchingNote[] {
     if (context === null) continue;
     const round = interviewRound(getString(note.frontmatter.round));
     if (round && expectedRound && round !== expectedRound) continue;
-    const time = noteTime(note, event.date);
+    const time = interviewNoteTime(note, event.date);
     if (time && expectedTime && time !== expectedTime) continue;
     matches.push({
       note,
@@ -150,6 +150,11 @@ function selectMatchingNote(candidates: MatchingNote[], type: string): Note | nu
     ? matches[0].note : null;
 }
 
+/** 旧复盘没有案件关联时，只能由唯一匹配的场次补足，不能按公司猜案件。 */
+export function matchingInterviewPrep(event: Commitment, notes: Note[]): Note | null {
+  return selectMatchingNote(matchingNotes(event, notes), "interview-prep");
+}
+
 function conflictingInterviews(candidates: MatchingNote[], notes: Note[], date: string) {
   const rounds = new Set<string>();
   const times = new Set<string>();
@@ -158,7 +163,7 @@ function conflictingInterviews(candidates: MatchingNote[], notes: Note[], date: 
   const owners = new Set<string>();
   for (const { note } of candidates) {
     const round = interviewRound(getString(note.frontmatter.round));
-    const time = noteTime(note, date);
+    const time = interviewNoteTime(note, date);
     const context = interviewContext(note, notes);
     if (round) rounds.add(round);
     if (time) times.add(time);

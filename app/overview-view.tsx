@@ -9,6 +9,7 @@ import { formatDate, getString, getTitle, getType, type Note } from "@/lib/notes
 import {
   ACTIVE_JOB_STATUSES,
   buildReviewPreview,
+  calendarEventTime,
   careerStatus,
   getLatestNoteDate,
   localDateKey,
@@ -130,7 +131,7 @@ function Overview({
 
   const [year, month, day] = today.split("-").map(Number);
   const horizon = localDateKey(new Date(year, month - 1, day + 6));
-  const upcoming = derived.commitments.filter((event) => event.phase === "upcoming" && event.date <= horizon);
+  const upcoming = derived.calendarEvents.filter((event) => event.phase === "upcoming" && event.date <= horizon);
   const actionReviewDoc = reviewPreview.actionDoc;
   const primaryTodoStatus = primaryFocus?.source === "todo" ? todoStatus(primaryFocus.note) : "";
   const runPrimaryAction = async () => {
@@ -233,11 +234,11 @@ function Overview({
   const schedulePanel = upcoming.length > 0 ? (
     <article className="panel overview-schedule" key="schedule" data-overview-panel="schedule">
       <PanelHeading title="近期安排" action="打开日历" onAction={() => onView("calendar")} />
-      <p className="overview-panel-meta">未来 7 天 · {upcoming.length} 项</p>
+      <p className="overview-panel-meta">未来 7 天 · {upcoming.length} 项 · 日本时间（JST）</p>
       <div className="overview-schedule-list">
         {upcoming.slice(0, 5).map((event) => (
           <button className={`kind-${event.kind}`} key={event.id} onClick={() => onOpen(event.note)}>
-            <span><time dateTime={event.date}>{focusDateLabel(event.date)}{event.time && ` ${event.time}`}</time><small>{event.label}</small></span>
+            <span><time dateTime={event.date}>{focusDateLabel(event.date)}{event.time && ` ${calendarEventTime(event)}`}</time><small>{event.label}</small></span>
             <strong>{event.company}</strong>
           </button>
         ))}

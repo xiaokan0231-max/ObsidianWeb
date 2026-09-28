@@ -155,8 +155,8 @@ const graphNotes = files.map((path) => {
   let frontmatter = parseFrontmatter(content);
   // 旧校验器只读顶层标量；新画像含嵌套对象，须与 Obsidian 的 YAML 读取一致。
   // 只扩展新结构，避免改变历史笔记既有校验口径。JSON_SCHEMA 不把日期变成 Date。
-  if (frontmatter.company_profile !== undefined ||
-    String(frontmatter.report_kind ?? "").replace(/^["']|["']$/g, "") === "company-fit") {
+  if (frontmatter.company_profile !== undefined || frontmatter.company_summary !== undefined ||
+    ["company-fit", "company-summary"].includes(String(frontmatter.report_kind ?? "").replace(/^["']|["']$/g, ""))) {
     const raw = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? "";
     try {
       const parsed = loadYaml(raw, { schema: JSON_SCHEMA });
@@ -233,8 +233,8 @@ for (const path of files) {
       if (!curriculum) problems.push(`${relativePath}: language-curriculum JSON 区块が読めない`);
     }
   }
-  // company-fit 的版本与作者／日期／证据规则由画像校验负责，不套用分析归档的 schema v2。
-  if (ANALYSIS_TYPES.has(type) && frontmatter.report_kind !== "company-fit") {
+  // 公司研究的版本与作者／日期／证据规则由画像校验负责，不套用分析归档的 schema v2。
+  if (ANALYSIS_TYPES.has(type) && !["company-fit", "company-summary"].includes(frontmatter.report_kind)) {
     const lifecycle = String(frontmatter.lifecycle ?? "");
     if (!GENERATED_LIFECYCLES.includes(lifecycle)) {
       problems.push(`${relativePath}: ${type} lifecycle は ${GENERATED_LIFECYCLES.join(" / ")} のいずれかが必須`);

@@ -12,7 +12,11 @@ import {
 } from "react";
 import {
   compareJobs,
-  daysBetween,
+  elapsedLabel,
+  rateText,
+  rateTone,
+  salaryLabel,
+  shortDay,
   intakeLabel,
   intakeRelative,
   isJobStatus,
@@ -21,6 +25,7 @@ import {
   jobMatchesRatingBands,
   jobStatusNoteError,
   JOB_INTAKES,
+  JOB_ORIGIN_LABEL,
   JOB_RATING_BANDS,
   JOB_SORTS,
   JOB_STATUSES,
@@ -31,6 +36,7 @@ import {
   statusRequiresChannel,
   toJobCard,
   VERIFICATION_LABEL,
+  WAITING_FOR_LABEL,
   type JobCard,
   type JobIntake,
   type JobRatingBand,
@@ -58,21 +64,11 @@ const VERIFICATIONS: JobVerification[] = ["verified", "warned", "unchecked"];
 
 const COMPARE_LIMIT = 3;
 
-const ORIGIN_LABEL: Record<string, string> = {
-  "ai-reco": "AI 发现",
-  manual: "本人录入",
-  agent: "中介推荐",
-  scout: "Scout",
-  legacy: "历史导入",
-  "ra-batch": "RA 批量投递",
-};
+const ORIGIN_LABEL = JOB_ORIGIN_LABEL;
 
 const WAITING_FOR_OPTIONS = [
   { value: "", label: "没有外部等待" },
-  { value: "self", label: "本人" },
-  { value: "company", label: "企业" },
-  { value: "agent", label: "中介" },
-  { value: "platform", label: "平台" },
+  ...Object.entries(WAITING_FOR_LABEL).map(([value, label]) => ({ value, label })),
 ];
 
 /** 结果区的四种视图。卡片/列表/看板共享同一份筛选结果，周复盘看的是全量笔记。 */
@@ -240,26 +236,6 @@ function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
 }
 
-function salaryLabel(job: JobCard) {
-  const { min, max, estimated } = job.salary;
-  if (min === null) return job.salaryText || "薪资未记录";
-  const range = max !== null && max !== min ? `${min}〜${max}万` : `${min}万〜`;
-  return estimated ? `${range}（月給換算）` : range;
-}
-
-/** 応募优先度色阶：9+ 橙 / 7+ 绿 / 5+ 琥珀 / 其余灰。 */
-/** バッジに出す文字。未採点は 0 ではなく「—」——「読んでいない」と「見込みなし」は別。 */
-function rateText(job: { rating: number; rated: boolean }) {
-  return job.rated ? String(job.rating) : "—";
-}
-
-function rateTone(rating: number) {
-  if (rating >= 9) return "high";
-  if (rating >= 7) return "good";
-  if (rating >= 5) return "mid";
-  return "low";
-}
-
 /**
  * 「已经动过手，但还没形成応募」的机会。
  *
@@ -352,23 +328,6 @@ function dayLabel(raw: string) {
  */
 function eventDay(job: JobCard) {
   return job.statusUpdated || job.date;
-}
-
-/** `2026-07-20` → `7/20`。年は今の運用（数か月単位）では邪魔なだけなので落とす。 */
-function shortDay(day: string) {
-  const match = day.match(/^\d{4}-(\d{2})-(\d{2})$/);
-  return match ? `${Number(match[1])}/${Number(match[2])}` : day;
-}
-
-/**
- * 応募からの経過。**「何日待っているか」は催促の判断に直結する**ので、
- * 相対表示だけにして絶対日付は title に回す（一覧をスキャンしている時に効くのは日数のほう）。
- */
-function elapsedLabel(appliedOn: string, today: string) {
-  const days = daysBetween(appliedOn, today);
-  if (days === null) return "";
-  if (days <= 0) return "今日";
-  return `${days}日経過`;
 }
 
 /** 时间线上的事件文案由状态推导 —— 状态与日期是笔记里的证据，不是 AI 的假设。 */

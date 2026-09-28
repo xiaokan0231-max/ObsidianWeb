@@ -127,22 +127,24 @@ test("frontmatter update preserves body and is idempotent", () => {
   assert.match(once, /# 正文/u);
 });
 
-test("company-fit reports retain their independent schema and all historical versions", () => {
-  const notes = [
-    note("80_AI分析/公司契合/latest.md", "ai-report", "最新评价", {
-      report_kind: "company-fit", schema_version: 1, criteria_version: 1, assessed_on: "2026-09-19",
-    }),
-    note("80_AI分析/公司契合/history.md", "ai-report", "历史评价", {
-      report_kind: '"company-fit"', schema_version: 1, criteria_version: 1, date: "2024-01-01", lifecycle: "superseded",
-    }),
-  ];
-  const before = structuredClone(notes);
-  const plan = planVaultCompaction(notes, { now: new Date("2026-09-19T00:00:00Z"), reportRetentionDays: 1 });
-  assert.deepEqual(plan.candidates, []);
-  assert.equal(plan.updates.size, 0);
-  assert.deepEqual(plan.keep.map((entry) => entry.path), notes.map((entry) => entry.relativePath));
-  assert.deepEqual(notes, before);
-});
+for (const kind of ["company-fit", "company-summary"]) {
+  test(`${kind} reports retain their independent schema and all historical versions`, () => {
+    const notes = [
+      note(`80_AI分析/${kind}/latest.md`, "ai-report", "最新判断", {
+        report_kind: kind, schema_version: 1, assessed_on: "2026-09-19",
+      }),
+      note(`80_AI分析/${kind}/history.md`, "ai-report", "历史判断", {
+        report_kind: `"${kind}"`, schema_version: 1, date: "2024-01-01", lifecycle: "superseded",
+      }),
+    ];
+    const before = structuredClone(notes);
+    const plan = planVaultCompaction(notes, { now: new Date("2026-09-19T00:00:00Z"), reportRetentionDays: 1 });
+    assert.deepEqual(plan.candidates, []);
+    assert.equal(plan.updates.size, 0);
+    assert.deepEqual(plan.keep.map((entry) => entry.path), notes.map((entry) => entry.relativePath));
+    assert.deepEqual(notes, before);
+  });
+}
 
 function run(command, args, options = {}) {
   return spawnSync(command, args, { encoding: "utf8", ...options });
@@ -219,19 +221,21 @@ test("compact apply refuses a dirty candidate", async (t) => {
   await assert.rejects(access(join(root, "90_归档/80_AI分析/日本語訓練/old.md")));
 });
 
-test("compact apply leaves current and historical company-fit files byte-for-byte intact", async (t) => {
-  const root = await fixtureVault();
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const reports = ["latest-fit.md", "old-fit.md"].map((name) => join(root, "80_AI分析", name));
-  const contents = reports.map((_, index) => `---\ntype: ai-report\nreport_kind: "company-fit"\nschema_version: 1\ncriteria_version: 1\nassessed_on: ${index ? "2020-01-01" : "2026-09-19"}\nai_author: Codex\n---\n# 株式会社テスト 契合评价\n\n原始判断${index}。\n`);
-  for (const [index, path] of reports.entries()) await writeFile(path, contents[index]);
-  const applied = runCompact(root, "--apply", "--json");
-  assert.equal(applied.status, 0, applied.stderr);
-  const result = JSON.parse(applied.stdout);
-  assert.ok(result.keep.some((entry) => entry.path.endsWith("latest-fit.md")));
-  assert.ok(result.keep.some((entry) => entry.path.endsWith("old-fit.md")));
-  for (const [index, path] of reports.entries()) assert.equal(await readFile(path, "utf8"), contents[index]);
-});
+for (const kind of ["company-fit", "company-summary"]) {
+  test(`compact apply leaves current and historical ${kind} files byte-for-byte intact`, async (t) => {
+    const root = await fixtureVault();
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const names = [`latest-${kind}.md`, `old-${kind}.md`];
+    const reports = names.map((name) => join(root, "80_AI分析", name));
+    const contents = reports.map((_, index) => `---\ntype: ai-report\nreport_kind: "${kind}"\nschema_version: 1\nassessed_on: ${index ? "2020-01-01" : "2026-09-19"}\nai_author: Codex\n---\n# 株式会社テスト 公司分析\n\n原始判断${index}。\n`);
+    for (const [index, path] of reports.entries()) await writeFile(path, contents[index]);
+    const applied = runCompact(root, "--apply", "--json");
+    assert.equal(applied.status, 0, applied.stderr);
+    const result = JSON.parse(applied.stdout);
+    for (const name of names) assert.ok(result.keep.some((entry) => entry.path.endsWith(name)));
+    for (const [index, path] of reports.entries()) assert.equal(await readFile(path, "utf8"), contents[index]);
+  });
+}
 
 test("compact apply refuses while an operational note still links to a candidate", async (t) => {
   const root = await fixtureVault();

@@ -7,15 +7,53 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import * as model from "../lib/company-overview.ts";
+import * as prepModel from "../lib/interview-prep-doc.ts";
 
 const source = await readFile(new URL("../app/company-overview.tsx", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
 const require = createRequire(import.meta.url);
+const inlineSource = await readFile(new URL("../app/prep-doc-render.tsx", import.meta.url), "utf8");
+const inlineCompiled = ts.transpileModule(inlineSource, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
+const inlineComponents = {};
+runInNewContext(inlineCompiled.outputText, { exports: inlineComponents, require: (specifier) => specifier === "@/lib/interview-prep-doc" ? prepModel : require(specifier) });
 const components = {};
-runInNewContext(compiled.outputText, { exports: components, require: (specifier) => specifier === "@/lib/company-overview" ? model : specifier === "./use-dialog-focus" ? { useDialogFocus() {} } : require(specifier) });
+runInNewContext(compiled.outputText, { exports: components, require: (specifier) => specifier === "@/lib/company-overview" ? model : specifier === "./prep-doc-render" ? inlineComponents : specifier === "./use-dialog-focus" ? { useDialogFocus() {} } : require(specifier) });
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 const dimensions = (scores, version = 2) => model.companyFitDimensions(version).map((item, index) => ({ ...item, score: scores[index], rationale: `${item.label}的可核对依据`, evidence: [{ label: "公司原文", url: "https://example.com/evidence" }], unknowns: [] }));
 const context = (title, version = 2) => ({ key: `case:${title}`, kind: "case", note: { path: `${title}.md` }, company: "株式会社テスト", title, profile: null, assessment: { criteriaVersion: version, assessedOn: "2026-01-02", aiAuthor: "Codex", summary: `${title}的独立判断`, dimensions: dimensions([4, 3, null, 4, null, 3], version), strengths: ["发挥已有经验"], questions: ["实际职责待确认"], contextFacts: [] }, issues: [] });
+
+test("公司总结先于事实卡完整呈现自然段，来源可展开但正文不折叠", () => {
+  const item = context("数据平台岗位");
+  item.summary = { note: { path: "80_AI分析/公司研究.md" }, schemaVersion: 1, assessedOn: "2026-09-20", aiAuthor: "Codex", coveragePeriod: "2023～2026年",
+    paragraphs: ["公司以**业务软件**为主。", "[技术博客](https://example.com/tech)披露了系统改造。", "管理者表达了提高交付效率的方向。", "据此推测招聘用于补齐能力，实际分工仍待确认。"].map(prepModel.parseInline),
+    sources: [{ label: "公司公开资料", url: "https://example.com/company" }] };
+  item.summaryStatus = "available";
+  const html = render(components.default, { context: item, onOpenWiki() {} });
+  assert.ok(html.indexOf(">公司总结</h2>") < html.indexOf(">公司与岗位</h2>"));
+  assert.match(html, /资料截至 <time dateTime="2026-09-20">2026-09-20<\/time>/);
+  assert.match(html, /覆盖 2023～2026年/);
+  assert.match(html, /Codex/);
+  assert.match(html, />研究笔记 ↗<\/button>/);
+  const prose = html.match(/<div class="co-summary-prose">([\s\S]*?)<\/div>/)?.[1] ?? "";
+  assert.equal((prose.match(/<p>/g) ?? []).length, 4);
+  assert.match(prose, /<strong><span>业务软件<\/span><\/strong>/);
+  assert.match(prose, /href="https:\/\/example.com\/tech"/);
+  assert.match(prose, /据此推测招聘用于补齐能力，实际分工仍待确认/);
+  assert.doesNotMatch(prose, /<details|hidden=|aria-hidden/);
+  assert.match(html, /<details class="co-summary-sources"><summary>研究来源 · 1 项<\/summary>/);
+  assert.match(html, /href="https:\/\/example.com\/company"/);
+  assert.match(html, /数据平台岗位的独立判断/, "岗位契合短评仍独立显示");
+});
+
+test("缺失与损坏的总结显示轻量空态，已有岗位画像仍可阅读", () => {
+  for (const summaryStatus of ["missing", "invalid"]) {
+    const item = { ...context("已有岗位"), summary: null, summaryStatus };
+    const html = render(components.default, { context: item, onOpenWiki() {} });
+    assert.match(html, summaryStatus === "invalid" ? /公司总结暂不可用/ : /公司总结待整理/);
+    assert.match(html, /已有岗位的独立判断/);
+    assert.doesNotMatch(html, /co-summary-prose|研究笔记 ↗/);
+  }
+});
 
 test("未知维度在雷达图保留真实缺口，只有全六维齐全才有面积", () => {
   const incomplete = render(components.CompanyFitRadar, { dimensions: dimensions([4, 3, null, 4, null, 3]), label: "株式会社テスト" });
@@ -127,7 +165,7 @@ test("加入按钮与选择器的状态切换都遵守三项上限，可取消�
 const sessionSource = await readFile(new URL("../app/interview-session.tsx", import.meta.url), "utf8");
 const sessionCompiled = ts.transpileModule(sessionSource, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
 const sessionDependencies = Object.fromEntries(await Promise.all([
-  "interview-prep-doc.ts", "interview-prep-index.ts", "memory-atlas-data.ts", "notes.ts", "review-deep.ts", "interview-trends.mjs", "interview-shared-assets.ts",
+  "interview-prep-doc.ts", "interview-prep-index.ts", "memory-atlas-data.ts", "notes.ts", "review-deep.ts", "interview-trends.mjs", "interview-shared-assets.ts", "context-picker.ts", "company-hero.ts",
 ].map(async (name) => [`@/lib/${name.replace(/\.ts$/, "")}`, await import(`../lib/${name}`)])));
 const sessionExports = {};
 runInNewContext(sessionCompiled.outputText, { exports: sessionExports, require: (specifier) => {

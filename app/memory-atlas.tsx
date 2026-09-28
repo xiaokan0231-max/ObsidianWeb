@@ -56,6 +56,7 @@ import {
 } from "@/lib/knowledge-graph";
 import {
   buildDerivedData,
+  calendarEventTime,
   countdownLabel,
   GROUPS,
   localDateKey,
@@ -985,15 +986,15 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     ["job-case", "todo"].includes(String(note.frontmatter.type)) && Boolean(note.frontmatter.company),
   );
 
-  // 顶栏「下一件」与首页、日历共用同一承诺投影，避免 TODO 截止与外部跟进消失。
+  // 最近安排只表示实际约定；行动期限和外部跟进留在待办与等待区。
   const nextEvent = useMemo(
     () =>
-      derived.commitments
+      derived.calendarEvents
         .filter((event) => event.phase === "upcoming")
         .toSorted((left, right) =>
           `${left.date} ${left.time}`.localeCompare(`${right.date} ${right.time}`),
         )[0] ?? null,
-    [derived.commitments],
+    [derived.calendarEvents],
   );
 
   const sourceLabel = error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接";
@@ -1221,10 +1222,10 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
             <button
               className="topbar-next"
               onClick={() => navigateToView(nextEvent.phase === "upcoming" ? "calendar" : "calendar")}
-              title={`${nextEvent.date}${nextEvent.time ? ` ${nextEvent.time}` : ""} ${nextEvent.label}`}
+              title={`${nextEvent.date}${nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST ${nextEvent.label}`}
             >
               <small>最近安排</small>
-              <em>{countdownLabel(nextEvent.date)}{nextEvent.time ? ` ${nextEvent.time}` : ""}</em>
+              <em>{countdownLabel(nextEvent.date)}{nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST</em>
               <strong>{nextEvent.company}</strong>
               <i aria-hidden="true">→</i>
             </button>
@@ -1400,7 +1401,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "calendar" && (
                 <CalendarView
-                  events={derived.commitments}
+                  events={derived.calendarEvents}
                   today={today}
                   onOpen={openNote}
                   interviewTargets={interviewTargets}

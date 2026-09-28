@@ -10,6 +10,7 @@ import {
   type CompanyReview,
 } from "@/lib/company-overview";
 import { useDialogFocus } from "./use-dialog-focus";
+import { Inlines } from "./prep-doc-render";
 
 export const COMPANY_COMPARE_LIMIT = 3;
 const SCORE_LABELS = ["", "明确不合", "契合较弱", "基本适配", "明显契合", "高度契合"];
@@ -92,6 +93,7 @@ export default function CompanyOverviewContent({ context, onOpenWiki, historical
   const prefix = useId().replaceAll(":", "");
   const assessment = context?.assessment;
   const profile = context?.profile;
+  const companySummary = context?.summary;
   const criteriaVersion = assessment?.criteriaVersion ?? 2;
   const axes = companyFitDimensions(criteriaVersion);
   const facts = [...(profile?.facts ?? []), ...(assessment?.contextFacts ?? [])];
@@ -99,6 +101,14 @@ export default function CompanyOverviewContent({ context, onOpenWiki, historical
     <div className="co-dates"><span>公司资料 <b>{profile?.updatedOn || "尚未整理"}</b></span><span>契合评价 <b>{assessment?.assessedOn || "尚未评估"}</b>{assessment && <small> · {assessment.aiAuthor}</small>}</span><span className="co-latest">最新画像{historical ? " · 历史面谈正文保持原样" : ""}</span></div>
     {!context && <p className="co-notice">这份准备尚未关联可唯一识别的案件或面谈记录，公司画像待补齐。</p>}
     {!!context?.issues.length && <details className="co-notice"><summary>部分资料暂不可用</summary><ul>{context.issues.map((item) => <li key={item}>{item}</li>)}</ul></details>}
+    <section className="co-company-summary" aria-labelledby={`${prefix}-summary`}>
+      <header className="co-section-header"><h2 id={`${prefix}-summary`}>公司总结</h2>{companySummary && <button type="button" onClick={() => onOpenWiki(companySummary.note.path)}>研究笔记 ↗</button>}</header>
+      {companySummary ? <>
+        <p className="co-summary-meta"><span>资料截至 <time dateTime={companySummary.assessedOn}>{companySummary.assessedOn}</time></span><span>覆盖 {companySummary.coveragePeriod}</span><span>{companySummary.aiAuthor}</span></p>
+        <div className="co-summary-prose">{companySummary.paragraphs.map((paragraph, index) => <p key={index}><Inlines nodes={paragraph} refs={{ onOpenWiki: (target, section) => onOpenWiki(section ? `${target}#${section}` : target) }} /></p>)}</div>
+        <details className="co-summary-sources"><summary>研究来源 · {companySummary.sources.length} 项</summary><Evidence items={companySummary.sources} onOpenWiki={onOpenWiki} /></details>
+      </> : <p className="co-muted co-summary-empty">{context?.summaryStatus === "invalid" ? "公司总结暂不可用，请核对研究笔记的引用与内容。" : "公司总结待整理。补齐研究后，将在这里连贯说明公司的现状、发展变化与招聘背景。"}</p>}
+    </section>
     <section className="co-company-facts" aria-labelledby={`${prefix}-facts`}><header className="co-section-header"><span>01</span><h2 id={`${prefix}-facts`}>公司与岗位</h2>{context?.dossier && <button type="button" onClick={() => onOpenWiki(context.dossier!.path)}>公司卷宗 ↗</button>}</header>
       {facts.length ? <dl className="co-fact-grid">{facts.map((fact, index) => <div key={`${fact.id}:${index}`}><dt>{fact.label}</dt><dd><Fact fact={fact} onOpenWiki={onOpenWiki} /></dd></div>)}</dl> : <p className="co-muted">公司规模、业务、岗位条件等资料待整理；已存在的案件和面谈记录仍可查看。</p>}
     </section>
