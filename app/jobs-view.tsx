@@ -49,6 +49,7 @@ import {
   IN_PROGRESS_STATUSES,
 } from "@/lib/jobs";
 import { isTypingTarget } from "@/lib/keyboard";
+import { ConflictError, postJson } from "@/lib/client-api";
 import { parseAppliedLedger } from "@/lib/job-stats.mjs";
 import { opportunityAppliedOn } from "@/lib/job-opportunity";
 import { JOB_CASE_TYPE } from "@/lib/vault-boundary.mjs";
@@ -728,29 +729,21 @@ function JobsView({
         return next;
       });
       try {
-        const response = await fetch("/api/jobs/status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        let payload: { ok?: boolean; error?: string; note?: Note; derivedState?: "fresh" | "stale" };
+        try {
+          payload = await postJson("/api/jobs/status", {
             path,
             status,
             statusNote,
             ...(channel ? { channel } : {}),
             ...(expectedStatusUpdated !== undefined ? { expectedStatusUpdated } : {}),
-          }),
-        });
-        const payload = (await response.json()) as {
-          ok?: boolean;
-          error?: string;
-          note?: Note;
-          derivedState?: "fresh" | "stale";
-        };
-        if (!response.ok || !payload.ok) {
-          if (response.status === 409) {
+          });
+        } catch (writeError) {
+          if (writeError instanceof ConflictError) {
             await onVaultChanged?.();
-            throw new Error(payload.error || "状态已更新，已自动刷新到最新版本，请重新点击。");
+            throw new Error(writeError.message || "状态已更新，已自动刷新到最新版本，请重新点击。");
           }
-          throw new Error(payload.error || "写入 Vault 失败");
+          throw writeError;
         }
         // 画面へ反映してから savingPaths を落とす（finally は下の分岐の後）。
         // そうしないと一瞬だけ古い値に戻って、書けたのか失敗したのか読めなくなる。
@@ -777,13 +770,8 @@ function JobsView({
     setSavingPaths((current) => current.includes(path) ? current : [...current, path]);
     dismissStatusError(path);
     try {
-      const response = await fetch("/api/jobs/follow-up", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, ...values }),
-      });
-      const payload = (await response.json()) as { ok?: boolean; error?: string; note?: Note };
-      if (!response.ok || !payload.ok || !payload.note) throw new Error(payload.error || "写入 Vault 失败");
+      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/jobs/follow-up", { path, ...values });
+      if (!payload.note) throw new Error(payload.error || "写入 Vault 失败");
       onNoteWritten?.(payload.note);
       return null;
     } catch (error) {

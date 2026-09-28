@@ -320,7 +320,19 @@ export type JobCard = {
   haystack: string;
 };
 
+// 看板・分析・首页・画像ヘッダーが同じノートを各自 toJobCard していた（stripMarkdown 全文込み）。
+// Note オブジェクトは差し替え式（書込後は新しいオブジェクト）なので、オブジェクト単位で憶えれば古い値は残らない。
+const cardCache = new WeakMap<Note, JobCard>();
+
 export function toJobCard(note: Note): JobCard {
+  const cached = cardCache.get(note);
+  if (cached) return cached;
+  const card = buildJobCard(note);
+  cardCache.set(note, card);
+  return card;
+}
+
+function buildJobCard(note: Note): JobCard {
   const company = getString(note.frontmatter.company) || getTitle(note).split(/\s[—–-]\s/)[0].trim();
   const position = jobPosition(note);
   const salaryText = getString(note.frontmatter.salary);

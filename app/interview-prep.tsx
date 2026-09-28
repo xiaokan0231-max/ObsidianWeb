@@ -12,6 +12,7 @@ import {
   type InterviewPrepItem,
 } from "@/lib/interview-prep";
 import { parseInline } from "@/lib/interview-prep-doc";
+import ScopeLoading from "./scope-loading";
 import type { Note } from "@/lib/notes";
 import { Inlines } from "./prep-doc-render";
 import { copySelectionWithoutRuby } from "./ruby-copy";
@@ -44,11 +45,14 @@ export default function InterviewPrep({
   notes,
   onOpen,
   initialCardId,
+  loading = false,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
   /** 本场面试のドキュメントから `[[面接標準回答集#pNN …]]` を踏んで来たときに開くカード */
   initialCardId?: string | null;
+  /** この視図の scope がまだ届いていない：空状態ではなく読取中を出す。 */
+  loading?: boolean;
 }) {
   const library = useMemo(() => findInterviewPrepLibrary(notes), [notes]);
   const [query, setQuery] = useState("");
@@ -109,6 +113,7 @@ export default function InterviewPrep({
   };
 
   if (!library) {
+    if (loading) return <div className="prep-view"><ScopeLoading label="标准回答库" /></div>;
     return (
       <div className="prep-view">
         <div className="prep-empty">

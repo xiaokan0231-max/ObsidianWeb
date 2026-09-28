@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useMemo, useState } from "react";
+import ScopeLoading from "./scope-loading";
 import {
   jobMatchesRatingBands,
   jobRatingBand,
@@ -294,6 +295,7 @@ function JobsAnalytics({
   derivedState = "fresh",
   statsError = "",
   onRebuildStats,
+  loading = false,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
@@ -303,6 +305,8 @@ function JobsAnalytics({
   derivedState?: "fresh" | "stale" | "rebuilding";
   statsError?: string;
   onRebuildStats?: () => void;
+  /** この視図の scope がまだ届いていない：台帳の空状態ではなく読取中を出す。 */
+  loading?: boolean;
 }) {
   const [range, setRange] = useState<RangeId>("all");
   const [handScope, setHandScope] = useState<HandScopeId>("high");
@@ -824,7 +828,7 @@ function JobsAnalytics({
                 />
               </>
             ) : (
-              <p className="chart-empty">台帳の集計がまだ生成されていない。</p>
+              loading ? <ScopeLoading label="台帳" /> : <p className="chart-empty">台帳の集計がまだ生成されていない。</p>
             )}
           </Card>
 

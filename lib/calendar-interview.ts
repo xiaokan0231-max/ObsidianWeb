@@ -25,10 +25,33 @@ function referencePath(value: string) {
     .trim().replace(/\.md$/i, "").normalize("NFKC");
 }
 
+// 每篇笔记的关联解析都要扫一遍全部笔记（日历为每篇算 interviewContext → O(N×M)）。
+// notes 数组在两次刷新之间是同一个引用，按数组建一次索引即可；数组换了索引自然作废。
+type ReferenceIndex = { byPath: Map<string, Note[]>; byBasename: Map<string, Note[]> };
+const referenceIndexes = new WeakMap<Note[], ReferenceIndex>();
+
+function referenceIndex(notes: Note[]): ReferenceIndex {
+  const cached = referenceIndexes.get(notes);
+  if (cached) return cached;
+  const byPath = new Map<string, Note[]>();
+  const byBasename = new Map<string, Note[]>();
+  for (const note of notes) {
+    const path = referencePath(note.path);
+    byPath.set(path, [...(byPath.get(path) ?? []), note]);
+    const basename = path.slice(path.lastIndexOf("/") + 1);
+    byBasename.set(basename, [...(byBasename.get(basename) ?? []), note]);
+  }
+  const index = { byPath, byBasename };
+  referenceIndexes.set(notes, index);
+  return index;
+}
+
 function resolveReference(value: string, notes: Note[]) {
   const reference = referencePath(value);
-  const exact = notes.filter((note) => referencePath(note.path) === reference);
-  const matches = exact.length ? exact : notes.filter((note) =>
+  const index = referenceIndex(notes);
+  const exact = index.byPath.get(reference) ?? [];
+  const basename = reference.slice(reference.lastIndexOf("/") + 1);
+  const matches = exact.length ? exact : (index.byBasename.get(basename) ?? []).filter((note) =>
     referencePath(note.path).endsWith(`/${reference}`),
   );
   return { note: matches.length === 1 ? matches[0] : null, ambiguous: matches.length > 1 };

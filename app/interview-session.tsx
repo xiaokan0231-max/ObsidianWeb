@@ -44,7 +44,7 @@ import {
 import { Blocks, Inlines } from "./prep-doc-render";
 import PrepMaterialReader from "./prep-material-reader";
 import InterviewSessionV2 from "./interview-session-v2";
-import { buildCompanyOverviews, resolveCompanyOverview, type CompanyOverview } from "@/lib/company-overview";
+import { buildCompanyOverviews, resolveCompanyOverview, resolveCompanyOverviewFrom, type CompanyOverview } from "@/lib/company-overview";
 import CompanyOverviewContent, { COMPANY_COMPARE_LIMIT, CompanyCompare, CompanyCompareButton, CompanyCompareSelector, CompanyCompareTray, toggleCompanyComparison } from "./company-overview";
 import ContextPicker from "./context-picker";
 import CompanyHeroCard from "./company-hero";
@@ -1094,7 +1094,7 @@ function InterviewSession({
   const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
   const digest = useMemo(() => buildDigest(notes), [notes]);
   const contexts = useMemo(() => buildCompanyOverviews(notes), [notes]);
-  const docContexts = useMemo(() => new Map(docs.map((doc) => [doc.note.path, resolveCompanyOverview(notes, doc.note)])), [docs, notes]);
+  const docContexts = useMemo(() => new Map(docs.map((doc) => [doc.note.path, resolveCompanyOverviewFrom(contexts, notes, doc.note)])), [contexts, docs, notes]);
   const pickerGroups = useMemo(() => buildContextPickerGroups({ contexts, series, docs, docContexts, today }), [contexts, series, docs, docContexts, today]);
   const [selection, setSelection] = useState<{ prepPath: string | null; contextPath: string | null }>(() => {
     const exact = initialPath ? docs.find((doc) => doc.note.path === initialPath) ?? null : null;

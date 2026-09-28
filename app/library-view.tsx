@@ -47,8 +47,11 @@ function LibraryView({
   onFilter,
   onQuery,
   onOpen,
+  loading = false,
 }: {
   notes: Note[];
+  /** 全量がまだ届いていない：件数を「N 篇」と断言せず読取中と出す。 */
+  loading?: boolean;
   filter: GroupKey | "all";
   query: string;
   onFilter: (filter: GroupKey | "all") => void;
@@ -227,7 +230,7 @@ function LibraryView({
           <div className="library-result-head">
             <div>
               <small>{query ? `搜索 “${query}”` : `${filter === "all" ? "全部分区" : GROUPS[filter].label} · ${activeScopeLabel}`}</small>
-              <h2>{orderedNotes.length} 篇记忆</h2>
+              <h2>{loading ? "正在读取全部资料…" : `${orderedNotes.length} 篇记忆`}</h2>
             </div>
             <div className="library-result-actions">
               <label>

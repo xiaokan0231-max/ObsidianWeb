@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useMemo, useState } from "react";
+import { postJson } from "@/lib/client-api";
 import { getString, getType, type Note } from "@/lib/notes";
 import {
   interviewPracticeKey,
@@ -75,18 +76,13 @@ function InterviewPractice({
     setError("");
     setMessage("");
     try {
-      const response = await fetch("/api/review/practice/action", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          practicePath: selected.practicePath,
-          blockId: selected.blockId,
-          action,
-          rating,
-        }),
+      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note; dueAt?: string }>("/api/review/practice/action", {
+        practicePath: selected.practicePath,
+        blockId: selected.blockId,
+        action,
+        rating,
       });
-      const payload = (await response.json()) as { error?: string; note?: Note; dueAt?: string };
-      if (!response.ok || !payload.note) throw new Error(payload.error || "记录练习失败");
+      if (!payload.note) throw new Error(payload.error || "记录练习失败");
       onNoteWritten(payload.note);
       if (action === "attempt") setMessage(`已记录：${rating ? RATING_LABEL[rating] : "本次练习"}`);
       if (action === "complete") { setMessage("已完成，正在切换下一题。"); setRevealed(false); setSelectedKey(""); }

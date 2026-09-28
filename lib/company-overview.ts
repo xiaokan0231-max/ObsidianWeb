@@ -479,10 +479,17 @@ export function buildCompanyOverviews(notes: Note[]): CompanyOverview[] {
 
 /** source 可为真实正本或准备稿；同公司不同岗位永不通过公司名合并。 */
 export function resolveCompanyOverview(notes: Note[], source: Note | string): CompanyOverview | null {
+  return resolveCompanyOverviewFrom(buildCompanyOverviews(notes), notes, source);
+}
+
+/**
+ * 同上，但复用已算好的画像列表。本场面试页对每份准备稿各解析一遍全部画像（含 markdown），
+ * 准备稿 × 案件数的平方级重算；页面已经持有 contexts，就不要再建一次。
+ */
+export function resolveCompanyOverviewFrom(contexts: CompanyOverview[], notes: Note[], source: Note | string): CompanyOverview | null {
   const note = typeof source === "string" ? resolveCompanyReference(notes, source) : source;
   if (!note) return null;
   const direct = contextKind(note);
-  const contexts = buildCompanyOverviews(notes);
   if (direct) return contexts.find((entry) => entry.note.path === note.path) ?? null;
   const fields = (["case", "meeting"] as const).filter((field) => note.frontmatter[field] !== undefined);
   if (fields.length !== 1) return null;

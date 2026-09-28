@@ -1245,6 +1245,20 @@
 }
 
 /* 首页の状態胶囊。色は看板と同じ .tone-*（jobs.css）の変数を読む——以前は独自の active/rejected/idle 三色で内定が灰だった。 */
+/* 视图要的笔记还没到：骨架而不是「还没有 X」的假空态。 */
+.scope-loading { display: flex; align-items: center; gap: 12px; padding: 48px 24px; color: var(--muted); font-size: 14px; }
+.scope-loading p { margin: 0; }
+.scope-loading-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); animation: scope-loading-pulse 1.2s ease-in-out infinite; }
+@keyframes scope-loading-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .scope-loading-dot { animation: none; opacity: .7; } }
+/* 单个视图渲染失败：与连接错误同一版式，但只占视图区，侧栏与顶栏照常。 */
+.view-error { max-width: 720px; margin: 48px auto; padding: 0 24px; }
+.view-error .error-code { font-family: var(--font-geist-mono), monospace; font-size: 11px; letter-spacing: .12em; color: var(--orange); }
+.view-error h1 { margin: 10px 0 8px; font-size: 24px; }
+.view-error p { color: var(--muted); }
+.view-error code { display: block; margin: 12px 0; padding: 10px 12px; background: var(--paper-deep); font-size: 12px; overflow-wrap: anywhere; }
+.view-error button { border: 1px solid var(--ink); border-radius: 4px; background: var(--ink); color: var(--paper); padding: 8px 14px; cursor: pointer; }
+
 /* 顶栏の派生統計ボタン：待重算は橙で目立たせ、自動／手動の切替は静かに。 */
 .topbar-stats {
   border: 1px solid var(--line);

@@ -1,6 +1,8 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ClientApiError, postJson } from "@/lib/client-api";
+import ScopeLoading from "./scope-loading";
 import { isTypingTarget } from "@/lib/keyboard";
 import {
   computeStats,
@@ -194,16 +196,13 @@ async function postReviewWrite<T extends WriteResponse = WriteResponse>(
   body: unknown,
   failureLabel: string,
 ): Promise<T> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const payload = (await response.json()) as T;
-  if (!response.ok || !payload.ok) {
-    throw new Error(payload.error ?? `${failureLabel}（${response.status}）`);
+  try {
+    // 復盤の生成は長い（Codex 経由）。共通の postJson に載せ、上限だけこちらで広げる。
+    return await postJson<T>(url, body, { timeoutMs: 600_000 });
+  } catch (error) {
+    if (error instanceof ClientApiError) throw new Error(error.message || `${failureLabel}（${error.status}）`);
+    throw error;
   }
-  return payload;
 }
 
 function InterviewReview({
@@ -212,8 +211,11 @@ function InterviewReview({
   onNoteWritten,
   initialSelectedKey = null,
   onSelectionChange,
+  loading = false,
 }: {
   notes: Note[];
+  /** この視図の scope がまだ届いていない：「还没有整理稿」ではなく読取中を出す。 */
+  loading?: boolean;
   onVaultChanged: () => void | Promise<void>;
   /** 追記系の書込は応答の note を1件差し替えるだけでよい。復盤の再生成だけ全量再取得に残す。 */
   onNoteWritten?: (note: Note) => void;
@@ -485,6 +487,7 @@ function InterviewReview({
     return (
       <>
         <ReviewIndex
+          loading={loading}
           docs={docs}
           onSelect={(key, reviewBlockId) => {
             setSelectedKey(key);
@@ -1521,9 +1524,12 @@ function DeepReviewPanel({
 function ReviewIndex({
   docs,
   onSelect,
+  loading = false,
 }: {
   docs: ReviewDoc[];
   onSelect: (key: string, reviewBlockId?: string) => void;
+  /** 面接 scope がまだ届いていない：「还没有整理稿」ではなく読取中を出す。 */
+  loading?: boolean;
 }) {
   const [selectedTrend, setSelectedTrend] = useState<AnswerStrategyTag | null>(null);
   const aggregate = useMemo(() => {
@@ -1687,7 +1693,9 @@ function ReviewIndex({
         </section>
       )}
 
-      {docs.length === 0 ? (
+      {docs.length === 0 && loading ? (
+        <ScopeLoading label="整理稿与复盘" />
+      ) : docs.length === 0 ? (
         <div className="rv-empty">
           <h2>还没有整理稿</h2>
           <p>

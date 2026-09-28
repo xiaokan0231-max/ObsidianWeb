@@ -39,6 +39,9 @@ import {
   type AppView,
 } from "./app-route";
 import { describeConnectionError } from "@/lib/connection-error";
+import { ConflictError, postJson } from "@/lib/client-api";
+import { mergeScopedNotes } from "@/lib/vault-merge";
+import ViewErrorBoundary from "./view-error-boundary";
 import {
   isRoundSpecificAsset,
   type SharedAssetTarget,
@@ -72,6 +75,8 @@ type VaultResponse = {
   error?: string;
   notes: Note[];
   scope?: VaultScope;
+  /** 該 scope に現存する全パス。無い（旧サーバ）なら削除同期はしない。 */
+  paths?: string[];
 };
 
 type View = AppView;
@@ -472,7 +477,10 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const [error, setError] = useState("");
   const [writeError, setWriteError] = useState("");
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
-  const [interviewScopeReady, setInterviewScopeReady] = useState(false);
+  // どの scope が手元に揃ったか。視図はこれで「まだ来ていない」と「本当に無い」を分ける（假空态の根）。
+  const [readyScopes, setReadyScopes] = useState<ReadonlySet<VaultScope>>(() => new Set());
+  const interviewScopeReady = readyScopes.has("all") || readyScopes.has("interview");
+  const scopeReady = readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
 
   // 模块间切换不继承上一页的滚动位置，否则新页面会从标题或工具栏中段开始。
   useEffect(() => {
@@ -522,6 +530,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const pendingWrites = useRef(new Map<string, PendingWrite>());
   const loadedScopes = useRef(new Set<VaultScope>());
   const loadingScopes = useRef(new Set<VaultScope>());
+  // scope ごとの ETag。焦点が戻った時の照合で 304 なら十数 MB の JSON を受け取らない。
+  const scopeEtags = useRef(new Map<VaultScope, string>());
 
   const applyPendingWrites = useCallback((incoming: Note[]) => {
     const { notes: merged, settled } = mergePendingWrites(incoming, pendingWrites.current);
@@ -544,26 +554,38 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       const params = new URLSearchParams({ scope });
       if (options?.fresh) params.set("refresh", "1");
       const url = `/api/vault?${params.toString()}`;
-      const response = await fetch(url, { cache: "no-store" });
+      const knownEtag = options?.fresh ? null : scopeEtags.current.get(scope);
+      const response = await fetch(url, {
+        cache: "no-store",
+        headers: knownEtag ? { "If-None-Match": knownEtag } : {},
+        // Obsidian 側が黙ると「正在读取」が永遠に続く。読み取りは 20 秒で諦めて再試行に回す。
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (response.status === 304) {
+        // 路径集合も最新 mtime も変わっていない：手元のままでよい。
+        loadedScopes.current.add(scope);
+        setReadyScopes((current) => (current.has(scope) ? current : new Set(current).add(scope)));
+        setFetchedAt(Date.now());
+        return;
+      }
       const payload = (await response.json()) as VaultResponse;
       if (!response.ok || !payload.connected) {
         throw new Error(payload.error || "无法连接 Obsidian");
       }
+      const etag = response.headers.get("ETag");
+      if (etag) scopeEtags.current.set(scope, etag);
       const incoming = applyPendingWrites(payload.notes);
-      setNotes((current) => {
-        if (scope === "all" || current.length === 0) return incoming;
-        const merged = new Map(current.map((note) => [note.path, note]));
-        incoming.forEach((note) => merged.set(note.path, note));
-        return [...merged.values()].sort((left, right) => right.stat.mtime - left.stat.mtime);
-      });
+      // 該 scope で消えた／改名したノートは paths に無い → 落とす（lib/vault-merge.ts）。
+      setNotes((current) => mergeScopedNotes(current, incoming, scope, payload.paths));
       loadedScopes.current.add(scope);
-      if (scope === "all" || scope === "interview") setInterviewScopeReady(true);
+      setReadyScopes((current) => (current.has(scope) ? current : new Set(current).add(scope)));
       setFetchedAt(payload.fetchedAt ?? Date.now());
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "无法连接 Obsidian");
     } finally {
       loadingScopes.current.delete(scope);
-      setLoading(false);
+      // 複数 scope を並行で取っている時、先に終わった方が全体の loading を落としてはいけない。
+      setLoading(loadingScopes.current.size > 0);
     }
   }, [applyPendingWrites]);
 
@@ -593,9 +615,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     setDerivedState("rebuilding");
     setStatsError("");
     try {
-      const response = await fetch("/api/vault/stats", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-      const payload = (await response.json()) as { ok?: boolean; error?: string };
-      if (!response.ok || !payload.ok) throw new Error(payload.error || "重算派生统计失败");
+      // vault:stats は数秒かかる（bridge 側の上限 90 秒）。
+      await postJson("/api/vault/stats", {}, { timeoutMs: 100_000 });
       setDerivedState("fresh");
       // 台帳・数据字典は jobs scope、面接傾向は interview scope。書き換わった generated 区块を取り直す。
       await loadVault({ scope: "jobs" });
@@ -637,26 +658,17 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
 
   const updateTodoStatus = useCallback(async (note: Note, status: string, expectedMtime?: number) => {
     try {
-      const response = await fetch("/api/todos/status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          path: note.path,
-          status,
-          ...(expectedMtime !== undefined ? { expectedMtime } : {}),
-        }),
+      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/todos/status", {
+        path: note.path,
+        status,
+        ...(expectedMtime !== undefined ? { expectedMtime } : {}),
       });
-      const payload = (await response.json()) as { error?: string; note?: Note };
-      if (!response.ok || !payload.note) {
-        if (response.status === 409) {
-          await loadVault();
-        }
-        throw new Error(payload.error || "更新行动状态失败");
-      }
+      if (!payload.note) throw new Error(payload.error || "更新行动状态失败");
       patchNote(payload.note);
       setWriteError("");
       return null;
     } catch (cause) {
+      if (cause instanceof ConflictError) await loadVault();
       const message = cause instanceof Error ? cause.message : "更新行动状态失败";
       setWriteError(message);
       return message;
@@ -1040,6 +1052,12 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     [derived.calendarEvents],
   );
 
+  // ?note= が指すノートが今の scope に無い（他ページのリンクや共有 URL）：黙って開かないのではなく、全量を一度取りに行く。
+  useEffect(() => {
+    if (!selectedPath || selectedNote || loadedScopes.current.has("all") || loadingScopes.current.has("all")) return;
+    void loadVault({ scope: "all" });
+  }, [selectedPath, selectedNote, loadVault]);
+
   const sourceLabel = error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接";
   const syncedAt = fetchedAt
     ? `${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(fetchedAt)} 同步`
@@ -1088,13 +1106,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   // 首页の等待区から一手で片付ける：「已跟进 · +7 天」「改为等本人」。書込ルートは看板と同じ /api/jobs/follow-up。
   const followUpCase = useCallback(async (note: Note, values: { waitingFor?: string | null; followUpAt?: string | null }) => {
     try {
-      const response = await fetch("/api/jobs/follow-up", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: note.path, ...values }),
-      });
-      const payload = (await response.json()) as { ok?: boolean; error?: string; note?: Note };
-      if (!response.ok || !payload.ok || !payload.note) return payload.error || "更新案件跟进失败";
+      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/jobs/follow-up", { path: note.path, ...values });
+      if (!payload.note) return payload.error || "更新案件跟进失败";
       patchNote(payload.note);
       return null;
     } catch (writeError) {
@@ -1331,7 +1344,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
         ) : loading && notes.length === 0 ? (
           <LoadingState />
         ) : (
-          <>
+          <ViewErrorBoundary key={view} label={view}>
             {error && notes.length > 0 && (
               <div className="stale-data-banner" role="status">
                 <span>同步中断，正在显示 {sourceDetail} 的可用快照。</span>
@@ -1398,6 +1411,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "review" && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && calendarInterview.path)) && (
                 <InterviewReview
+                  loading={!scopeReady}
                   key={interviewRouteVersion}
                   notes={notes}
                   onVaultChanged={loadVault}
@@ -1432,6 +1446,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "prep" && (
                 <InterviewPrep
+                  loading={!scopeReady}
                   notes={notes}
                   onOpen={openNote}
                 />
@@ -1441,6 +1456,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "topics" && (
                 <LanguageExpressionCourses
+                  loading={!scopeReady}
                   notes={notes}
                   onVaultChanged={loadVault}
                   onNoteWritten={patchNote}
@@ -1458,6 +1474,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "analytics" && (
                 <JobsAnalytics
+                  loading={!scopeReady}
                   notes={notes}
                   onOpen={openNote}
                   onViewJobs={viewJobsWithFilters}
@@ -1501,6 +1518,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "library" && (
                 <LibraryView
+                  loading={!scopeReady}
                   notes={notes}
                   filter={groupFilter}
                   query={libraryQuery}
@@ -1510,7 +1528,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                 />
               )}
             </div>
-          </>
+          </ViewErrorBoundary>
         )}
       </main>
 
