@@ -47,7 +47,15 @@ import {
   SELECTION_STATUSES,
   statusTone,
   IN_PROGRESS_STATUSES,
+  ACCESS_STATE_LABEL,
+  HARD_GATE_LABEL,
+  JOB_FIT_AXES,
+  JOB_FIT_GATE_LABEL,
+  JOB_FIT_SCORE_LABEL,
+  UNRATED_V2_LABEL,
+  type JobFit,
 } from "@/lib/jobs";
+import { ACCESS_STATE_VALUES, FIT_BANDS, HARD_GATE_VALUES } from "@/lib/job-case-schema";
 import { isTypingTarget } from "@/lib/keyboard";
 import { ConflictError, postJson } from "@/lib/client-api";
 import { parseAppliedLedger } from "@/lib/job-stats.mjs";
@@ -71,6 +79,19 @@ const VERIFICATIONS: JobVerification[] = ["verified", "warned", "unchecked"];
 const COMPARE_LIMIT = 3;
 
 const ORIGIN_LABEL = JOB_ORIGIN_LABEL;
+
+/**
+ * v2 採点の絞り込み値。`none` は「未採点（v2）」の擬似値で frontmatter には無い——
+ * 採点待ちの案件を拾えるようにするために置く。枚举本体は lib/job-case-schema.ts と共有し、ここで書き直さない。
+ */
+const UNRATED_FIT = "none";
+const GATE_FILTER_VALUES: readonly string[] = [...HARD_GATE_VALUES, UNRATED_FIT];
+const BAND_FILTER_VALUES: readonly string[] = [...FIT_BANDS, UNRATED_FIT];
+const ACCESS_FILTER_VALUES: readonly string[] = [...ACCESS_STATE_VALUES, UNRATED_FIT];
+const fitGate = (job: JobCard) => job.fit?.hardGate ?? UNRATED_FIT;
+const fitBand = (job: JobCard) => job.fit?.band ?? UNRATED_FIT;
+const fitAccess = (job: JobCard) => job.fit?.accessState || UNRATED_FIT;
+const fitFilterLabel = (value: string, labels: Record<string, string>) => (value === UNRATED_FIT ? UNRATED_V2_LABEL : labels[value] ?? value);
 
 const WAITING_FOR_OPTIONS = [
   { value: "", label: "没有外部等待" },
@@ -103,6 +124,9 @@ type FilterKey =
   | "sources"
   | "verifications"
   | "intakes"
+  | "gates"
+  | "bands"
+  | "accesses"
   | "remote";
 
 type Filters = {
@@ -114,6 +138,10 @@ type Filters = {
   sources: string[];
   verifications: JobVerification[];
   intakes: JobIntake[];
+  /** v2 採点：hard_gate / fit_band_final / access_state の値、または UNRATED_FIT。 */
+  gates: string[];
+  bands: string[];
+  accesses: string[];
   remoteOnly: boolean;
 };
 
@@ -126,6 +154,9 @@ const EMPTY_FILTERS: Filters = {
   sources: [],
   verifications: [],
   intakes: [],
+  gates: [],
+  bands: [],
+  accesses: [],
   remoteOnly: false,
 };
 
@@ -184,6 +215,9 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
     "source",
     "verification",
     "intake",
+    "gate",
+    "band",
+    "access",
     "remote",
   ].some((key) => params.has(key));
   const ratings = csvParam(params, "rating").filter((value): value is JobRatingBand =>
@@ -214,6 +248,9 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
           sources: csvParam(params, "source"),
           verifications,
           intakes,
+          gates: csvParam(params, "gate").filter((value) => GATE_FILTER_VALUES.includes(value)),
+          bands: csvParam(params, "band").filter((value) => BAND_FILTER_VALUES.includes(value)),
+          accesses: csvParam(params, "access").filter((value) => ACCESS_FILTER_VALUES.includes(value)),
           remoteOnly: params.get("remote") === "1",
         }
       : baseFilters,
@@ -233,6 +270,9 @@ function isDefaultOpportunityFilters(filters: Filters) {
     filters.sources.length === 0 &&
     filters.verifications.length === 0 &&
     filters.intakes.length === 0 &&
+    filters.gates.length === 0 &&
+    filters.bands.length === 0 &&
+    filters.accesses.length === 0 &&
     !filters.remoteOnly;
 }
 
@@ -347,6 +387,51 @@ function Highlight({ text, query }: { text: string; query: string }) {
 }
 
 /** 技術スタック 有四十多个标签，默认只露出高频的几个，避免筛选栏把结果区挤到屏幕外。 */
+/** カード右上の v2 採点札。Band と合計だけ——Gate は hold が既定で情報量が薄く、reject の時だけ色で知らせる。 */
+function FitChip({ fit }: { fit: JobFit }) {
+  return (
+    <span
+      className={`job-fit-chip band-${fit.band} gate-${fit.hardGate}`}
+      title={`v2 採点 ${fit.score}/100 · Band ${fit.band} · Gate ${HARD_GATE_LABEL[fit.hardGate]}`}
+    >
+      <b>{fit.band}</b><small>{fit.score}</small>
+    </span>
+  );
+}
+
+/** 抽屉の v2 六軸。未採点は文言のまま出す——0 のバーを 6 本並べると「全部最低」に見える。 */
+function FitPanel({ fit }: { fit: JobFit | null }) {
+  if (!fit) return <p className="job-fit-panel job-fit-unrated">v2 採点：{UNRATED_V2_LABEL}</p>;
+  const gateKeys = Object.keys(JOB_FIT_GATE_LABEL) as (keyof JobFit["gates"])[];
+  return (
+    <section className="job-fit-panel" aria-label="v2 採点">
+      <header>
+        <strong>Fit {fit.score}<small>/100</small></strong>
+        <em className={`job-fit-band band-${fit.band}`}>Band {fit.band}</em>
+        <em className={`job-fit-gate gate-${fit.hardGate}`}>Gate {HARD_GATE_LABEL[fit.hardGate]}</em>
+        {fit.accessState && <span className="job-fit-access">{ACCESS_STATE_LABEL[fit.accessState]}</span>}
+      </header>
+      <ul className="job-fit-axes">
+        {JOB_FIT_AXES.map((key) => {
+          const { label, max } = JOB_FIT_SCORE_LABEL[key];
+          return (
+            <li key={key}>
+              <span>{label}</span>
+              <i><b style={{ width: `${(fit.scores[key] / max) * 100}%` }} /></i>
+              <small>{fit.scores[key]}/{max}</small>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="job-fit-gates">
+        {gateKeys.map((key) => fit.gates[key] && (
+          <span key={key} className={`gate-${fit.gates[key]}`}>{JOB_FIT_GATE_LABEL[key]} {HARD_GATE_LABEL[fit.gates[key]]}</span>
+        ))}
+      </p>
+    </section>
+  );
+}
+
 function FilterChips({
   label,
   options,
@@ -527,6 +612,9 @@ function JobsView({
         keep("sources", () => filters.sources.length === 0 || filters.sources.includes(job.sourceGroup)) &&
         keep("verifications", () => filters.verifications.length === 0 || filters.verifications.includes(job.verification)) &&
         keep("intakes", () => filters.intakes.length === 0 || filters.intakes.includes(jobIntake(job.date, today))) &&
+        keep("gates", () => filters.gates.length === 0 || filters.gates.includes(fitGate(job))) &&
+        keep("bands", () => filters.bands.length === 0 || filters.bands.includes(fitBand(job))) &&
+        keep("accesses", () => filters.accesses.length === 0 || filters.accesses.includes(fitAccess(job))) &&
         keep("remote", () => !filters.remoteOnly || job.remote),
       );
     },
@@ -547,6 +635,9 @@ function JobsView({
       sources: count(narrow("sources"), (job) => (job.sourceGroup ? [job.sourceGroup] : [])),
       verifications: count(narrow("verifications"), (job) => [job.verification]),
       intakes: count(narrow("intakes"), (job) => [jobIntake(job.date, today)]),
+      gates: count(narrow("gates"), (job) => [fitGate(job)]),
+      bands: count(narrow("bands"), (job) => [fitBand(job)]),
+      accesses: count(narrow("accesses"), (job) => [fitAccess(job)]),
       ratingPool: narrow("rating"),
       salaryPool: narrow("salary"),
       remote: narrow("remote").filter((job) => job.remote).length,
@@ -826,6 +917,9 @@ function JobsView({
       if (filters.sources.length) params.set("source", filters.sources.join(","));
       if (filters.verifications.length) params.set("verification", filters.verifications.join(","));
       if (filters.intakes.length) params.set("intake", filters.intakes.join(","));
+      if (filters.gates.length) params.set("gate", filters.gates.join(","));
+      if (filters.bands.length) params.set("band", filters.bands.join(","));
+      if (filters.accesses.length) params.set("access", filters.accesses.join(","));
       if (filters.remoteOnly) params.set("remote", "1");
     }
     if (sort !== "rating") params.set("sort", sort);
@@ -974,6 +1068,27 @@ function JobsView({
                     ratings: toggle(current.ratings, value as JobRatingBand),
                   }))
                 }
+              />
+
+              {/* v2 採点は応募优先度とは別軸：rating は求人原文を読んだ上での主観的な優先度、
+                  Gate / Band は六軸採点の結論。未採点を擬似値として並べるのは、採点待ちの案件を拾うため。 */}
+              <FilterChips
+                label="Gate（v2）"
+                options={GATE_FILTER_VALUES.map((value) => ({ value, label: fitFilterLabel(value, HARD_GATE_LABEL), count: facets.gates.get(value) ?? 0 }))}
+                selected={filters.gates}
+                onToggle={(value) => setFilters((current) => ({ ...current, gates: toggle(current.gates, value) }))}
+              />
+              <FilterChips
+                label="Band（v2）"
+                options={BAND_FILTER_VALUES.map((value) => ({ value, label: fitFilterLabel(value, {}), count: facets.bands.get(value) ?? 0 }))}
+                selected={filters.bands}
+                onToggle={(value) => setFilters((current) => ({ ...current, bands: toggle(current.bands, value) }))}
+              />
+              <FilterChips
+                label="到達（v2）"
+                options={ACCESS_FILTER_VALUES.map((value) => ({ value, label: fitFilterLabel(value, ACCESS_STATE_LABEL), count: facets.accesses.get(value) ?? 0 }))}
+                selected={filters.accesses}
+                onToggle={(value) => setFilters((current) => ({ ...current, accesses: toggle(current.accesses, value) }))}
               />
 
               {/* 来源在年収より上：応募経路の混在（ワークポート起票以降 6 経路超）で、
@@ -1466,7 +1581,10 @@ function JobCardView({
             {job.position && <p className="job-position"><Highlight text={job.position} query={query} /></p>}
           </div>
         </div>
-        <span className={`job-verify verify-${job.verification}`}>{VERIFICATION_LABEL[job.verification]}</span>
+        <span className="job-card-marks">
+          {job.fit && <FitChip fit={job.fit} />}
+          <span className={`job-verify verify-${job.verification}`}>{VERIFICATION_LABEL[job.verification]}</span>
+        </span>
       </header>
 
       <div className="job-salary-row">
@@ -1607,7 +1725,7 @@ function JobDecisionWorkspace({
       <article className="jobs-decision-detail">
         <header>
           <div>
-            <span>{ORIGIN_LABEL[selected.origin] ?? "岗位机会"} · 応募优先度 {selected.rating}/10</span>
+            <span>{ORIGIN_LABEL[selected.origin] ?? "岗位机会"} · 応募优先度 {selected.rating}/10{selected.fit && ` · Fit ${selected.fit.score} · Band ${selected.fit.band}`}</span>
             <h2>{selected.company}</h2>
             <p>{selected.position || "职位未记录"}</p>
           </div>
@@ -1625,6 +1743,7 @@ function JobDecisionWorkspace({
         </header>
         <dl>
           <div><dt>年収</dt><dd>{salaryLabel(selected)}</dd></div>
+          <div><dt>v2 採点</dt><dd>{selected.fit ? `Fit ${selected.fit.score} · Band ${selected.fit.band} · Gate ${HARD_GATE_LABEL[selected.fit.hardGate]}` : UNRATED_V2_LABEL}</dd></div>
           <div><dt>勤務地</dt><dd>{selected.location || "—"}</dd></div>
           <div><dt>原文</dt><dd>{VERIFICATION_LABEL[selected.verification]}</dd></div>
           <div><dt>入库</dt><dd>{selected.date || "—"}</dd></div>
@@ -2111,6 +2230,8 @@ function JobDrawer({
             </div>
           </div>
 
+          <FitPanel fit={job.fit} />
+
           <div className="job-detail-actions">
             <StatusPicker
               value={job.status}
@@ -2240,7 +2361,19 @@ function JobDrawer({
 
 const COMPARE_ROWS: { label: string; render: (job: JobCard) => ReactNode }[] = [
   { label: "応募优先度", render: (job) => <strong className="job-compare-rating">{job.rating} / 10</strong> },
-  { label: "年収", render: (job) => job.salaryText || "—" },
+  {
+    label: "v2 採点",
+    render: (job) => job.fit
+      ? <><strong className="job-compare-rating">{job.fit.score}</strong> / 100 · Band {job.fit.band} · Gate {HARD_GATE_LABEL[job.fit.hardGate]}</>
+      : <span className="job-compare-unrated">{UNRATED_V2_LABEL}</span>,
+  },
+  // 六軸は行を分けて並べる：合計だけ見ると「B 同士」で差が無いように見える案件が、軸単位では逆転している。
+  ...JOB_FIT_AXES.map((key) => ({
+    label: `　${JOB_FIT_SCORE_LABEL[key].label}`,
+    render: (job: JobCard) => (job.fit ? `${job.fit.scores[key]} / ${JOB_FIT_SCORE_LABEL[key].max}` : "—"),
+  })),
+  // 年収は構造化値（salary_min/max）優先で自由文を title に残す——古い求人票の文言と採点時の確認値がずれることがある。
+  { label: "年収", render: (job) => <span title={job.salaryText || undefined}>{salaryLabel(job)}</span> },
   { label: "勤務地", render: (job) => job.location || "—" },
   { label: "雇用形態", render: (job) => job.employment || "—" },
   { label: "状态", render: (job) => job.status },

@@ -2291,3 +2291,29 @@
   .job-detail-facts { grid-template-columns: 1fr; }
   .job-compare-backdrop { padding: 12px; }
 }
+
+/* v2 採点（六軸）。応募优先度の丸バッジとは別軸なので形も変える：角丸の小さな札。
+   Gate は hold が既定で情報量が薄く、reject の時だけ橙で知らせる。 */
+.job-card-marks { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.job-fit-chip { display: inline-flex; align-items: baseline; gap: 3px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 2px; font-size: 11px; color: var(--muted); }
+.job-fit-chip b { font-weight: 600; color: inherit; }
+.job-fit-chip.band-A, .job-fit-band.band-A { color: var(--green); border-color: var(--green); }
+.job-fit-chip.band-B, .job-fit-band.band-B { color: var(--green); }
+.job-fit-chip.gate-reject, .job-fit-gate.gate-reject, .job-fit-gates .gate-reject { color: var(--orange); border-color: var(--orange); }
+.job-fit-gates .gate-hold { color: var(--gold); }
+
+.job-fit-panel { margin: 14px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 4px; }
+.job-fit-panel.job-fit-unrated { color: var(--muted); font-size: 12px; }
+.job-fit-panel header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+.job-fit-panel header strong { font-family: "Songti SC", "Noto Serif CJK SC", serif; font-size: 18px; }
+.job-fit-panel header strong small { margin-left: 2px; font-size: 11px; color: var(--muted); }
+.job-fit-panel header em { font-style: normal; padding: 1px 6px; border: 1px solid var(--line); border-radius: 2px; }
+.job-fit-access { color: var(--muted); }
+.job-fit-axes { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 18px; font-size: 12px; }
+.job-fit-axes li { display: grid; grid-template-columns: 5em minmax(0, 1fr) 3.4em; align-items: center; gap: 8px; }
+.job-fit-axes i { display: block; height: 6px; border-radius: 3px; background: rgba(47, 107, 89, 0.12); overflow: hidden; }
+.job-fit-axes b { display: block; height: 100%; background: var(--green); }
+.job-fit-axes small { text-align: right; color: var(--muted); }
+.job-fit-gates { margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--muted); }
+.job-fit-gates span { padding: 1px 6px; border: 1px solid var(--line); border-radius: 2px; }
+.job-compare-unrated { color: var(--muted); }

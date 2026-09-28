@@ -272,3 +272,6 @@
 .co-compare-table .co-reviews > article + article { border-left: 0; border-top: 1px solid var(--co-line); padding: 15px 0 0; margin-top: 15px; }
 .co-compare-table .co-review-meta { gap: 8px; }
 .co-compare-table ul:not(.co-evidence) { padding-left: 17px; margin: 0; }
+
+/* 対比表の案件 v2 採点：合計行の下に六軸を小さく列挙。公司画像の六維とは別軸。 */
+.co-case-fit ul { margin: 4px 0 0; padding-left: 14px; font-size: 12px; }

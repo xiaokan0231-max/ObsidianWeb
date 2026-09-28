@@ -7,7 +7,10 @@ import {
   normalizeJobStatus,
 } from "./job-status.ts";
 import { JOB_CASE_TYPE } from "./vault-boundary.mjs";
-import { JOB_CASE_SECTION, detectVerification } from "./job-case-schema.ts";
+import {
+  ACCESS_STATE_VALUES, FIT_BANDS, HARD_GATE_VALUES, JOB_CASE_SECTION, PRIMARY_COHORT_VALUES, ROLE_FAMILY_VALUES,
+  SALARY_RANGE_CLASS_VALUES, detectVerification,
+} from "./job-case-schema.ts";
 
 export {
   composeJobStatus,
@@ -179,6 +182,14 @@ export function parseSalary(raw: string): SalaryRange {
   return { min: Math.min(min, max), max: Math.max(min, max), estimated: monthly };
 }
 
+/** v2 の salary_min / salary_max（万円）。両方揃って順序が正しい時だけ採用する。 */
+function structuredSalary(note: Note): SalaryRange | null {
+  const min = Number(note.frontmatter.salary_min);
+  const max = Number(note.frontmatter.salary_max);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max < min) return null;
+  return { min, max, estimated: false };
+}
+
 /** 从 `東京都港区三田・一部在宅` 里取出「東京都」这类可筛选的行政区划。 */
 export function jobRegions(location: string): string[] {
   const matches = Array.from(location.matchAll(/([^\s／/・（(]{2,4}?[都道府県])/g), (match) => match[1]);
@@ -268,6 +279,91 @@ export function jobAppliedOn(note: Note, statusText: string): string {
   return statusText.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1] ?? "";
 }
 
+/** v2 採点（rating_version: v2）の六軸と Gate。vault:check が交差検証している値を画面でも使う。 */
+export type JobFit = {
+  /** 六軸合計（0–100）。 */
+  score: number;
+  /** cap 適用後の最終 Band（A–D）。 */
+  band: string;
+  /** 各 Gate の最悪値：pass / hold / reject。 */
+  hardGate: string;
+  gates: Record<"employmentVisa" | "salary" | "english" | "roleCenter" | "japaneseClient" | "original", string>;
+  scores: Record<"technicalValue" | "documentMatch" | "transferability" | "orgLegibility" | "clientDeployability" | "roleCoherence", number>;
+  /** 企業への到達摩擦（Fit とは別軸）。 */
+  accessState: string;
+  salaryRangeClass: string;
+  roleFamily: string;
+  primaryCohort: string;
+};
+
+export const JOB_FIT_SCORE_LABEL: Record<keyof JobFit["scores"], { label: string; max: number }> = {
+  technicalValue: { label: "技術価値", max: 25 },
+  documentMatch: { label: "書類一致", max: 10 },
+  transferability: { label: "転用性", max: 15 },
+  orgLegibility: { label: "組織可読性", max: 20 },
+  clientDeployability: { label: "客先配置", max: 20 },
+  roleCoherence: { label: "役割整合", max: 10 },
+};
+/** 六軸の表示順（skill の採点表と同じ）。 */
+export const JOB_FIT_AXES: readonly (keyof JobFit["scores"])[] = ["technicalValue", "documentMatch", "transferability", "orgLegibility", "clientDeployability", "roleCoherence"];
+export const JOB_FIT_GATE_LABEL: Record<keyof JobFit["gates"], string> = {
+  employmentVisa: "在留資格", salary: "年収", english: "英語", roleCenter: "役割中心", japaneseClient: "日本客先", original: "原文",
+};
+export const HARD_GATE_LABEL: Record<string, string> = { pass: "通过", hold: "保留", reject: "拒否" };
+/** rating_version が v2 でない、または六軸が揃わない案件の表示。0 と区別するため文言で出す。 */
+export const UNRATED_V2_LABEL = "未採点（v2）";
+export const ACCESS_STATE_LABEL: Record<string, string> = {
+  company_selected: "企业已筛选", direct: "直投", company_received: "企业已收", not_sent: "未发送", agent_only: "仅代理",
+};
+
+const oneOf = (value: unknown, allowed: readonly string[]) => (allowed.includes(String(value ?? "")) ? String(value) : "");
+/** 空欄は「未記入」であって 0 点ではない——Number("") が 0 になる罠を先に塞ぐ。 */
+const intIn = (value: unknown, max: number) => {
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 && number <= max ? number : null;
+};
+
+/**
+ * v2 の採点欄を読む。rating_version が v2 でない、または六軸のどれかが欠ける／範囲外なら null——
+ * 「未採点（v2）」と「0 点」は別物で、片方だけ数字にすると絞り込みが嘘をつく。
+ */
+export function jobFit(note: Note): JobFit | null {
+  const fm = note.frontmatter;
+  if (getString(fm.rating_version) !== "v2") return null;
+  const scores = {
+    technicalValue: intIn(fm.score_technical_value, 25),
+    documentMatch: intIn(fm.score_document_match, 10),
+    transferability: intIn(fm.score_transferability, 15),
+    orgLegibility: intIn(fm.score_org_legibility, 20),
+    clientDeployability: intIn(fm.score_client_deployability, 20),
+    roleCoherence: intIn(fm.score_role_coherence, 10),
+  };
+  if (Object.values(scores).some((value) => value === null)) return null;
+  const filled = scores as JobFit["scores"];
+  const band = oneOf(fm.fit_band_final, FIT_BANDS) || oneOf(fm.fit_band, FIT_BANDS);
+  const hardGate = oneOf(fm.hard_gate, HARD_GATE_VALUES);
+  if (!band || !hardGate) return null;
+  return {
+    score: intIn(fm.fit_score_100, 100) ?? Object.values(filled).reduce((sum, value) => sum + value, 0),
+    band,
+    hardGate,
+    gates: {
+      employmentVisa: oneOf(fm.gate_employment_visa, HARD_GATE_VALUES),
+      salary: oneOf(fm.gate_salary, HARD_GATE_VALUES),
+      english: oneOf(fm.gate_english, HARD_GATE_VALUES),
+      roleCenter: oneOf(fm.gate_role_center, HARD_GATE_VALUES),
+      japaneseClient: oneOf(fm.gate_japanese_client, HARD_GATE_VALUES),
+      original: oneOf(fm.gate_original, HARD_GATE_VALUES),
+    },
+    scores: filled,
+    accessState: oneOf(fm.access_state, ACCESS_STATE_VALUES),
+    salaryRangeClass: oneOf(fm.salary_range_class, SALARY_RANGE_CLASS_VALUES),
+    roleFamily: oneOf(fm.role_family, ROLE_FAMILY_VALUES),
+    primaryCohort: oneOf(fm.primary_cohort, PRIMARY_COHORT_VALUES),
+  };
+}
+
 /** 卡片、抽屉、对比都用这一份派生数据，避免每处各解析一遍。 */
 export type JobCard = {
   note: Note;
@@ -296,7 +392,10 @@ export type JobCard = {
   followUpAt: string;
   nextEventAt: string;
   salaryText: string;
+  /** v2 の salary_min/max が揃っていればそれ（vault:check が range_class と突き合わせ済み）、無ければ自由文 salary の解析。 */
   salary: SalaryRange;
+  /** v2 採点。無ければ null（「未採点（v2）」であって 0 ではない）。 */
+  fit: JobFit | null;
   location: string;
   regions: string[];
   remote: boolean;
@@ -362,7 +461,8 @@ function buildJobCard(note: Note): JobCard {
     followUpAt: getString(note.frontmatter.follow_up_at),
     nextEventAt: getString(note.frontmatter.next_event_at),
     salaryText,
-    salary: parseSalary(salaryText),
+    salary: structuredSalary(note) ?? parseSalary(salaryText),
+    fit: jobFit(note),
     location,
     regions: jobRegions(location),
     remote: jobRemote(note),
@@ -387,10 +487,11 @@ function buildJobCard(note: Note): JobCard {
   };
 }
 
-export type JobSort = "rating" | "salary" | "date" | "applied" | "updated" | "company";
+export type JobSort = "rating" | "fit" | "salary" | "date" | "applied" | "updated" | "company";
 
 export const JOB_SORTS: { id: JobSort; label: string }[] = [
   { id: "rating", label: "応募优先度" },
+  { id: "fit", label: "v2 採点（Fit）" },
   { id: "salary", label: "年収上限" },
   { id: "date", label: "入库时间" },
   { id: "applied", label: "応募日（古い順）" },
@@ -399,7 +500,11 @@ export const JOB_SORTS: { id: JobSort; label: string }[] = [
 ];
 
 export function compareJobs(left: JobCard, right: JobCard, sort: JobSort) {
-  if (sort === "salary") {
+  if (sort === "fit") {
+    // 未採点（null）は最下位。0 点扱いにすると D バンドの案件と混ざる。
+    const diff = (right.fit?.score ?? -1) - (left.fit?.score ?? -1);
+    if (diff !== 0) return diff;
+  } else if (sort === "salary") {
     const diff = (right.salary.max ?? -1) - (left.salary.max ?? -1);
     if (diff !== 0) return diff;
   } else if (sort === "date") {

@@ -9,6 +9,7 @@ import {
   type CompanyOverview,
   type CompanyReview,
 } from "@/lib/company-overview";
+import { HARD_GATE_LABEL, JOB_FIT_AXES, JOB_FIT_SCORE_LABEL, UNRATED_V2_LABEL, toJobCard } from "@/lib/jobs";
 import { useDialogFocus } from "./use-dialog-focus";
 import { Inlines } from "./prep-doc-render";
 
@@ -76,6 +77,13 @@ function Dimension({ dimension, label, id, onOpenWiki }: { dimension?: CompanyFi
     <summary><span>{label}</span><b className={score === null ? "unknown" : ""}>{score === null ? "资料不足" : `${score} / 5`}<small>{score === null ? "" : SCORE_LABELS[score]}</small></b></summary>
     <div className="co-dimension-detail"><p>{dimension?.rationale || "还没有足够证据评价这一维。"}</p>{!!dimension?.unknowns.length && <ul>{dimension.unknowns.map((item) => <li key={item}>{item}</li>)}</ul>}<Evidence items={dimension?.evidence ?? []} onOpenWiki={onOpenWiki} /></div>
   </details>;
+}
+
+/** 案件側の v2 採点。公司画像の六維（会社としての契合）とは別の軸なので、行を分けて併記する。面谈は案件を持たない。 */
+function CaseFit({ context }: { context: CompanyOverview }) {
+  const fit = context.kind === "case" ? toJobCard(context.note).fit : null;
+  if (!fit) return <span className="co-muted">{context.kind === "case" ? UNRATED_V2_LABEL : "面谈 · 无案件采点"}</span>;
+  return <div className="co-case-fit"><strong>Fit {fit.score}</strong> · Band {fit.band} · Gate {HARD_GATE_LABEL[fit.hardGate]}<ul>{JOB_FIT_AXES.map((key) => <li key={key}>{JOB_FIT_SCORE_LABEL[key].label} {fit.scores[key]}/{JOB_FIT_SCORE_LABEL[key].max}</li>)}</ul></div>;
 }
 
 function Reviews({ reviews, onOpenWiki }: { reviews: CompanyReview[]; onOpenWiki: (target: string) => void }) {
@@ -171,6 +179,7 @@ export function CompanyCompare({ contexts, onClose, onDetail, onRemove, onOpenWi
     { label: "资料与评价日期", render: (context) => <>{context.profile?.updatedOn || "资料待补"}<br />{context.assessment?.assessedOn || "评价待补"}</> },
     { label: "评价口径", render: (context) => !context.assessment ? "尚未评估" : context.assessment.criteriaVersion === 1 ? "旧口径 · 待更新" : "面试前口径" },
     { label: "一句话判断", render: (context) => context.assessment?.summary || "尚未评估" },
+    { label: "案件 v2 採点", render: (context) => <CaseFit context={context} /> },
     ...[...facts].map(([id, label]) => ({ label, render: (context: CompanyOverview) => <Fact fact={[...(context.assessment?.contextFacts ?? []), ...(context.profile?.facts ?? [])].find((fact) => fact.id === id)} onOpenWiki={onOpenWiki} /> })),
     ...(mixedCriteria ? [] : axes.map((dimension) => ({ label: dimension.label, render: (context: CompanyOverview) => <Dimension label={dimension.label} dimension={context.assessment?.dimensions.find((item) => item.key === dimension.key)} onOpenWiki={onOpenWiki} /> }))),
     { label: "外部评价", render: (context) => <Reviews reviews={context.profile?.reviews ?? []} onOpenWiki={onOpenWiki} /> },

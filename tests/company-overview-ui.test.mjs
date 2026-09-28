@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import * as model from "../lib/company-overview.ts";
 import * as prepModel from "../lib/interview-prep-doc.ts";
+import * as jobsModel from "../lib/jobs.ts";
 
 const source = await readFile(new URL("../app/company-overview.tsx", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
@@ -17,10 +18,10 @@ const inlineCompiled = ts.transpileModule(inlineSource, { compilerOptions: { jsx
 const inlineComponents = {};
 runInNewContext(inlineCompiled.outputText, { exports: inlineComponents, require: (specifier) => specifier === "@/lib/interview-prep-doc" ? prepModel : require(specifier) });
 const components = {};
-runInNewContext(compiled.outputText, { exports: components, require: (specifier) => specifier === "@/lib/company-overview" ? model : specifier === "./prep-doc-render" ? inlineComponents : specifier === "./use-dialog-focus" ? { useDialogFocus() {} } : require(specifier) });
+runInNewContext(compiled.outputText, { exports: components, require: (specifier) => specifier === "@/lib/company-overview" ? model : specifier === "@/lib/jobs" ? jobsModel : specifier === "./prep-doc-render" ? inlineComponents : specifier === "./use-dialog-focus" ? { useDialogFocus() {} } : require(specifier) });
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 const dimensions = (scores, version = 2) => model.companyFitDimensions(version).map((item, index) => ({ ...item, score: scores[index], rationale: `${item.label}的可核对依据`, evidence: [{ label: "公司原文", url: "https://example.com/evidence" }], unknowns: [] }));
-const context = (title, version = 2) => ({ key: `case:${title}`, kind: "case", note: { path: `${title}.md` }, company: "株式会社テスト", title, profile: null, assessment: { criteriaVersion: version, assessedOn: "2026-01-02", aiAuthor: "Codex", summary: `${title}的独立判断`, dimensions: dimensions([4, 3, null, 4, null, 3], version), strengths: ["发挥已有经验"], questions: ["实际职责待确认"], contextFacts: [] }, issues: [] });
+const context = (title, version = 2) => ({ key: `case:${title}`, kind: "case", note: { path: `${title}.md`, frontmatter: { type: "job-case", company: "株式会社テスト" }, content: "", tags: [], stat: { ctime: 0, mtime: 0, size: 0 } }, company: "株式会社テスト", title, profile: null, assessment: { criteriaVersion: version, assessedOn: "2026-01-02", aiAuthor: "Codex", summary: `${title}的独立判断`, dimensions: dimensions([4, 3, null, 4, null, 3], version), strengths: ["发挥已有经验"], questions: ["实际职责待确认"], contextFacts: [] }, issues: [] });
 
 test("公司总结先于事实卡完整呈现自然段，来源可展开但正文不折叠", () => {
   const item = context("数据平台岗位");
@@ -196,4 +197,18 @@ test("普通公司入口仍可选择相关旧稿，精确准备路径始终优�
   const exact = render(sessionExports.default, { ...sessionProps, forceOverviewOnly: true, initialPath: oldPrep.path });
   assert.match(exact, /data-selected-prep="20_求職\/测试\/准备_s01.md"/);
   assert.doesNotMatch(exact, /本场尚无准备稿/);
+});
+
+test("对比表带「案件 v2 採点」行：无 v2 字段显示未採点文言，有则并排合计与六轴，面谈不读案件", () => {
+  const scored = context("已采点岗位");
+  scored.note.frontmatter = {
+    ...scored.note.frontmatter, rating_version: "v2", fit_score_100: 74, fit_band_final: "B", hard_gate: "hold",
+    score_technical_value: 20, score_document_match: 6, score_transferability: 12, score_org_legibility: 16, score_client_deployability: 12, score_role_coherence: 8,
+  };
+  const meeting = { ...context("面谈"), kind: "meeting", key: "meeting:x" };
+  const html = render(components.CompanyCompare, { contexts: [scored, context("未采点岗位"), meeting], onClose() {}, onDetail() {}, onRemove() {}, onOpenWiki() {}, onEdit() {} });
+  assert.match(html, /<th scope="row">案件 v2 採点<\/th>/);
+  assert.match(html, /<div class="co-case-fit"><strong>Fit 74<\/strong> · Band B · Gate 保留<ul><li>技術価値 20\/25<\/li>/);
+  assert.match(html, /<span class="co-muted">未採点（v2）<\/span>/);
+  assert.match(html, /<span class="co-muted">面谈 · 无案件采点<\/span>/);
 });
