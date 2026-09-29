@@ -66,7 +66,7 @@ export const NAVIGATION: PrimaryNavigationItem[] = [
     mobileLabel: "面试",
     glyph: "interview",
     target: "session",
-    views: ["session", "prep", "review", "practice"],
+    views: ["session", "prep", "review", "insights", "practice"],
   },
   {
     id: "training",
@@ -99,6 +99,7 @@ export const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigat
     { id: "session", label: "本场面试", glyph: "場", caption: "SESSION" },
     { id: "prep", label: "通用准备", glyph: "備", caption: "PLAYBOOK" },
     { id: "review", label: "面试复盘", glyph: "復", caption: "REVIEW" },
+    { id: "insights", label: "横向对照", glyph: "比", caption: "INSIGHTS" },
     { id: "practice", label: "回答重练", glyph: "練", caption: "PRACTICE" },
   ],
   training: [
@@ -152,6 +153,7 @@ const PAGE_COMMAND_HINTS: Record<AppView, { description: string; keywords: strin
   session: { description: "当前这场面试的准备稿与话术", keywords: "本场 面试 当日 准备稿 session interview 面接 本番 志望動機 逆質問" },
   prep: { description: "通用回答库与标准答案", keywords: "通用 准备 回答库 标准答案 playbook prep answers 回答集 自己紹介" },
   review: { description: "面试复盘与待裁定的批注", keywords: "复盘 面试 裁定 批注 review 振り返り 反省" },
+  insights: { description: "跨场面试的顾问分析与多轮对照", keywords: "横向 对照 洞察 顾问 分析 跨面试 insights advisory 横断 傾向" },
   practice: { description: "开始今天的素振り", keywords: "回答 重练 练习 practice 面试" },
   language: { description: "日语表达与会话训练", keywords: "日语 训练 会话 日本語 nihongo japanese language 敬語" },
   topics: { description: "按专项练习日语表达", keywords: "专项 训练 表达 课程 topics focus course 表現 練習" },

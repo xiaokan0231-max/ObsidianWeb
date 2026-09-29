@@ -1,6 +1,6 @@
 # 输出契约
 
-## Bridge JSON
+## 回答质量 Bridge JSON
 
 Bridge 模式返回一个 JSON 对象，不输出代码围栏或说明文字。顶层字段：
 
@@ -85,13 +85,41 @@ Markdown 和 Web 都在评分前展示 `overviewZh`。旧报告允许缺少该�
 - `priorityBlockIds` 必须来自 `blocks[]`，最多 8 个。
 - 所有输入 qNN 都必须有一个输出块，不遗漏、不重复。
 
+## 独立顾问与横向 Bridge JSON
+
+共享 schema 正本为 `lib/interview-advisory-contract.mjs`，运行时校验与 Markdown 正本读写在 `lib/interview-advisory.ts`。Bridge 只返回下列分析字段；服务器增加 `version: 1`、`generatedAt`、`model`、`sourceFingerprint`，不让模型自填来源指纹、覆盖统计或评分。
+
+`review_interview_advisory`：
+
+- `stage`: `agency | matching | technical | final | other`，描述本次会谈阶段。
+- `commentaryZh`、`fitZh`、`recommendationZh`、`changeConditionsZh`：整场顾问评论、双方匹配、投入建议及改变判断的条件；中文充分展开，不设固定长度。
+- `evidence`、`contextPaths`：顶层评论的原句与背景依据。
+- `observations[]`: `{ id, titleZh, observationZh, interpretationZh, alternativeZh, implicationZh, evidence, contextPaths }`，精读对话；其他解释无意义时可空。
+- `answerOptions[]`: `{ id, titleZh, situationZh, whyZh, answerJa, scope, evidence, contextPaths }`。`scope=general | company`；包含有效表达和无需扣分的提升机会，必要时给真实日语方案。
+- `nextSteps[]`: `{ id, titleZh, detailZh, triggerZh, evidence, contextPaths }`，不自动成为待办或外发消息。
+
+`review_interview_insights`：
+
+- `overviewZh`：跨场整体解释。
+- `modules[]`：五个 key 各一次：`employerPriorities | positioning | effectiveAnswers | opportunities | nextStage`。
+- 每个 module 为 `{ key, titleZh, commentaryZh, findings }`；资料不足可 `findings=[]`。
+- 每个 finding 为 `{ id, titleZh, bodyZh, boundaryZh, evidence, contextPaths }`，至少引用两份不同 sourcePath 的实际原话，保留反例与阶段边界。
+
+两类任务的引用都使用 `{ sourcePath, blockId, sentenceIds }`。sourcePath 是完整 Vault 相对路径，qNN/sNN 必须属于该场次，不允许用日期+轮次替代身份。contextPaths 仅能引用输入存在的背景、通知或反馈笔记；模型不能新增来源。条目 ID 使用英文、数字、下划线或短横线，全报告唯一。
+
+后续结果只以可追溯资料确认，并注明在现场之后；不能用结果倒推当场意图。数量、比例与覆盖范围由程序计算。旧 AI 意见、评分和错误标签不能作为新判断的事实依据。
+
 ## 人工反馈语义
 
-- `agree` 确认旧评价。
+- `agree` 只确认原对象、原版本与判断快照，不能自动继承给新观点。
 - `disagree` 要求重新核对旧评价，不代表可以篡改现场发言。
 - `context` 是本人补充事实；用于解释潜在能力、背景或真实意图。
 
 当反馈“其实会回答，但现场没说”时：现场覆盖仍判为遗漏，同时在评价和改善回答中使用该能力事实。不要把两层混为一谈。
+
+旧 POST `{ notePath, blockId, kind, text }` 与旧 qNN 人工记录继续可用。新顾问/洞察反馈使用 `{ notePath, kind, text, target: { type: "advisory" | "insight", id, revision, snapshot } }`，revision 为目标分析 generatedAt。服务器检查当前版本和 ID，并从当前报告获取 snapshot，不信任客户端快照；过期反馈返回 409，不能写成新版本已同意。
+
+单场反馈仍追记 `*_回答品質批注.md`，跨场反馈追记 `20_求職/_素材/面接横断_顧問批注.md`。新条目标题使用 `fNNN｜advisory:id` 或 `fNNN｜insight:id`，`対象::` 保存目标 JSON，`我::` 保留本人内容。去重同时包含对象、版本、快照和反馈内容。没有版本的旧 qNN 反馈不能绑定顾问观点。
 
 ## 持久化报告
 
@@ -106,3 +134,9 @@ schema v2 的旧报告只有 `score` 和 `rationaleZh`、没有 `deductions`，W
 读旧报告时不要把它的 `score` 反推成扣分明细——那些分数本来就没有逐条依据。
 
 不要手写或修改逐字稿、整理稿、`*_批注.md`、`*_回答品質批注.md`、`*_回答練習.md`。人工反馈和重练选择必须继续由各自的 Web API 追记。
+
+单场顾问层保存在原回答质量 JSON 的可选 `advisory` 中，独立版本化；只更新顾问时不重算旧 dimensions、overallScore 或 blocks。横向分析保存为 `20_求職/_素材/面接横断_顧問分析.md`（type: interview-insights）。两者由服务端定向合并，不覆盖报告的人工追加正文；失败不写入半成品。新完整复盘按回答质量 → 单场顾问 → 横向分析顺序执行，批量历史补齐最后统一汇总，来源指纹未变则跳过已有内容。
+
+
+横向 Markdown 的生成内容及 JSON 正本位于 `<!-- interview-insights:start -->` / `<!-- interview-insights:end -->` 内；更新只替换该区和生成元数据，区外人工追加与自定义 frontmatter 保留。标记不完整时拒绝覆盖。单场标记仍为 `interview-advisory:start/end`，两类均保存作者署名与独立版本。
+输入含 `provenance.reconstruction=memory` 或 `provenance.verbatim=false` 时，必须标明本人记忆重构，不把重构句用于现场措辞、语速或语法判断；横向输入同样传递该限制。

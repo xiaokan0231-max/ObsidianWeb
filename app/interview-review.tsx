@@ -22,6 +22,8 @@ import { findDayNote, findRoundNote, joinReviewNotes } from "@/lib/review-join";
 import { reviewSiblingPath } from "@/lib/review-paths";
 import { getString, type Note } from "@/lib/notes";
 import InterviewNovelReader from "./interview-novel-reader";
+import InterviewAdvisory from "./interview-advisory";
+import type { AdvisoryEvidenceRef } from "@/lib/interview-advisory";
 import {
   allDeductions,
   DEDUCTION_SEVERITY_META,
@@ -230,6 +232,11 @@ function InterviewReview({
   onVaultChanged,
   onNoteWritten,
   initialSelectedKey = null,
+  initialPanel = "advisory",
+  initialBlockId = null,
+  initialSentenceId = null,
+  onOpenEvidence,
+  onOpenInsights,
   onSelectionChange,
   loading = false,
 }: {
@@ -240,20 +247,29 @@ function InterviewReview({
   /** 追記系の書込は応答の note を1件差し替えるだけでよい。復盤の再生成だけ全量再取得に残す。 */
   onNoteWritten?: (note: Note) => void;
   initialSelectedKey?: string | null;
+  initialPanel?: "advisory" | "quality" | "source";
+  initialBlockId?: string | null;
+  initialSentenceId?: string | null;
+  onOpenEvidence: (ref: AdvisoryEvidenceRef) => void;
+  onOpenInsights: () => void;
   onSelectionChange?: (key: string | null) => void;
 }) {
   const docs = useMemo(() => buildDocs(notes), [notes]);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(initialSelectedKey);
-  const mode = useSyncExternalStore(subscribeMode, readMode, () => "study" as Mode);
+  const [panel, setPanel] = useState<"advisory" | "quality" | "source">(initialPanel);
+  const savedMode = useSyncExternalStore(subscribeMode, readMode, () => "study" as Mode);
+  const [modeOverride, setModeOverride] = useState<"compare" | null>(initialPanel === "source" && initialBlockId ? "compare" : null);
+  const mode = modeOverride ?? savedMode;
   const novelLang = useSyncExternalStore(subscribeMode, readNovelLanguage, () => "ja" as NovelLanguage);
   const previousMode = useRef<"study" | "compare">("study");
   const [filter, setFilter] = useUrlState<Filter>("filter", "all", FILTER_CODEC);
   const [patternParam, setPatternFilter] = useUrlState<string | null>("pattern", null, PATTERN_CODEC);
   // 打开详情时一覧滚到了哪里。返回时回到原处，不必从头再找下一场；未知时（刷新后直接进详情）回顶部。
   const listScrollTop = useRef<number | null>(null);
-  const [openBlocks, setOpenBlocks] = useState<Set<string>>(new Set());
-  const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  // 证据链接带着 block／sentence 进来时，先把那一块展开、那一句揭开。
+  const [openBlocks, setOpenBlocks] = useState<Set<string>>(new Set(initialBlockId ? [initialBlockId] : []));
+  const [revealed, setRevealed] = useState<Set<string>>(new Set(initialSentenceId ? [initialSentenceId] : []));
   const [errOpen, setErrOpen] = useState<Set<string>>(new Set());
   const [rawOpen, setRawOpen] = useState<Set<string>>(new Set());
   /**
@@ -268,10 +284,10 @@ function InterviewReview({
   const [deepBusy, setDeepBusy] = useState(false);
   const [practiceBusy, setPracticeBusy] = useState<string | null>(null);
   const [feedbackBusy, setFeedbackBusy] = useState<string | null>(null);
-  const [deepOpen, setDeepOpen] = useState(false);
+  const [deepOpen, setDeepOpen] = useState(initialPanel === "quality");
   const [deepFocusBlockId, setDeepFocusBlockId] = useState<string | null>(null);
   const [deepFocusDimension, setDeepFocusDimension] = useState<ReviewDimensionKey | null>(null);
-  const [evidenceFocus, setEvidenceFocus] = useState<string | null>(null);
+  const [evidenceFocus, setEvidenceFocus] = useState<string | null>(initialSentenceId);
   const [message, setMessage] = useState<string | null>(null);
   /**
    * 🔴 写入失败**不走** `message`。`message` 只在正文流的一个位置（第二阶段面板之后）渲染，
@@ -289,6 +305,7 @@ function InterviewReview({
   const inFlightAnnotations = useRef(new Set<string>());
 
   const switchMode = (next: Mode) => {
+    setModeOverride(null);
     if (next === "novel" && mode !== "novel") previousMode.current = mode;
     window.localStorage.setItem(MODE_KEY, next);
     window.dispatchEvent(new Event(MODE_EVENT));
@@ -335,9 +352,10 @@ function InterviewReview({
   };
 
   const doc = docs.find((item) => item.key === selectedKey) ?? null;
+  const docKey = doc?.key;
 
   useEffect(() => {
-    if (!doc || mode === "novel") return;
+    if (!doc || mode === "novel" || panel !== "source") return;
     const byKey: Record<string, Filter> = {
       "1": "all",
       "2": "pending",
@@ -361,7 +379,16 @@ function InterviewReview({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // 两个 setter 都是 useUrlState 交出的 useState setter，引用不变，列进来只为满足规则。
-  }, [doc, mode, setFilter, setPatternFilter]);
+  }, [doc, mode, panel, setFilter, setPatternFilter]);
+
+  useEffect(() => {
+    if (!docKey || !initialBlockId || panel !== "source") return;
+    const timer = window.setTimeout(() => {
+      document.getElementById(initialSentenceId ? `rvs-${initialSentenceId}` : `rvb-${initialBlockId}`)
+        ?.scrollIntoView({ block: "center" });
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [docKey, initialBlockId, initialSentenceId, panel]);
 
   /** 同一个 key 也用于「重试前先清掉上一次的失败」：成功了就不会再被写回去。 */
   const dismissWriteAlert = useCallback((key: string) => {
@@ -524,6 +551,7 @@ function InterviewReview({
         <ReviewIndex
           loading={loading}
           docs={docs}
+          onOpenInsights={onOpenInsights}
           onSelect={(key, reviewBlockId) => {
             setSelectedKey(key);
             onSelectionChange?.(key);
@@ -535,6 +563,7 @@ function InterviewReview({
             setErrOpen(new Set());
             setRawOpen(new Set());
             focusDeepReview(reviewBlockId ?? null);
+            setPanel(reviewBlockId ? "quality" : "advisory");
             if (reviewBlockId) switchMode("study");
             resetAnnotationDraft();
             listScrollTop.current = window.scrollY;
@@ -548,7 +577,7 @@ function InterviewReview({
   }
 
   // 连读直接使用整份整理稿，不能继承学习页的筛选或句卡展开状态。
-  if (mode === "novel") {
+  if (mode === "novel" && panel === "source") {
     return (
       <>
         <InterviewNovelReader
@@ -648,6 +677,8 @@ function InterviewReview({
       setMessage(`整理稿中找不到证据句 ${sentenceId}。`);
       return;
     }
+    setPanel("source");
+    switchMode("compare");
     setFilter("all");
     setPatternFilter(null);
     setOpenBlocks((current) => {
@@ -685,7 +716,7 @@ function InterviewReview({
           <h1>{doc.company}</h1>
           <span>{doc.round} · {doc.date}{doc.result ? ` · ${doc.result}` : ""}</span>
         </div>
-        <div className="rv-mode-wrap">
+        <div className="rv-mode-wrap" hidden={panel !== "source"}>
           <div className="rv-mode" role="tablist" aria-label="阅读模式">
             <button
               role="tab"
@@ -708,6 +739,22 @@ function InterviewReview({
           </div>
         </div>
       </header>
+
+      <nav className="rv-section-tabs" aria-label="面试复盘内容">
+        {([['advisory', '顾问解读'], ['quality', '回答质量'], ['source', '原文与语言']] as const).map(([value, label]) => <button type="button" key={value}
+          aria-pressed={panel === value} onClick={() => { setPanel(value); if (value === "quality") setDeepOpen(true); if (value === "source" && mode === "novel") switchMode("study"); }}>{label}</button>)}
+        <button type="button" className="rv-cross-link" onClick={onOpenInsights}>横向对照 ↗</button>
+      </nav>
+
+      {doc.deepReview?.overviewZh && <section className="rv-review-introduction" aria-label="综合导读" hidden={panel === "source"}>
+        <h2>综合导读</h2>
+        {doc.deepReview.overviewZh.split(/\n\s*\n/).filter(Boolean).map((paragraph, index) => <p key={index}>{paragraph}</p>)}
+      </section>}
+
+      <div hidden={panel !== "advisory"}><InterviewAdvisory key={doc.key} report={doc.deepReview?.advisory} notes={notes} notePath={doc.note.path}
+        onOpenEvidence={onOpenEvidence} onVaultChanged={onVaultChanged} onNoteWritten={onNoteWritten} onOpenInsights={onOpenInsights} /></div>
+
+      <div hidden={panel !== "source"}>
 
       <section className="rv-stats">
         <div className="rv-counts">
@@ -783,15 +830,8 @@ function InterviewReview({
         </button>
       </section>
 
-      {doc.deepReview?.overviewZh && (
-        <section className="rv-review-introduction" aria-label="综合导读">
-          <h2>综合导读</h2>
-          {doc.deepReview.overviewZh.split(/\n\s*\n/).filter(Boolean).map((paragraph, index) => (
-            <p key={index}>{paragraph}</p>
-          ))}
-        </section>
-      )}
-
+      </div>
+      <div hidden={panel !== "quality"}>
       <section className={`rv-deep-stage ${unresolvedDecisionTasks.length > 0 ? "locked" : "ready"}`}>
         <div className="rv-deep-stage-copy">
           <span>第二阶段 · 回答质量</span>
@@ -901,6 +941,9 @@ function InterviewReview({
         />
       )}
 
+      </div>
+      <div hidden={panel !== "source"}>
+
       {!doc.annotationExists && (
         <p className="rv-message">这场面试还没有批注文件（{doc.annotationPath}）。先在 vault 里建好再批注。</p>
       )}
@@ -993,7 +1036,7 @@ function InterviewReview({
                     key={sentence.id}
                     doc={doc}
                     sentence={sentence}
-                    mode={mode}
+                    mode={mode === "novel" ? "study" : mode}
                     revealed={revealed.has(sentence.id)}
                     errored={errOpen.has(sentence.id)}
                     rawShown={rawOpen.has(sentence.id)}
@@ -1019,6 +1062,7 @@ function InterviewReview({
         })}
       </div>
 
+      </div>
       <ReviewWriteAlerts alerts={writeAlerts} onDismiss={dismissWriteAlert} />
     </div>
   );
@@ -1551,10 +1595,12 @@ function DeepReviewPanel({
 function ReviewIndex({
   docs,
   onSelect,
+  onOpenInsights,
   loading = false,
 }: {
   docs: ReviewDoc[];
   onSelect: (key: string, reviewBlockId?: string) => void;
+  onOpenInsights: () => void;
   /** 面接 scope がまだ届いていない：「还没有整理稿」ではなく読取中を出す。 */
   loading?: boolean;
 }) {
@@ -1676,6 +1722,7 @@ function ReviewIndex({
 
   return (
     <div className="review-view">
+      <section className="rv-insights-entry"><div><h2>把不同公司的面谈放在一起看</h2><p>从企业关注、双方匹配和实际推进条件里，找到下一阶段的方向。</p></div><button type="button" onClick={onOpenInsights}>进入横向对照 →</button></section>
       {aggregate.length > 0 && (
         <section className="rv-agg" aria-label="跨面试错误型摘要">
           <span>跨面试错误型 TOP</span>

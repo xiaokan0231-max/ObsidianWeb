@@ -1,7 +1,7 @@
 ---
 name: review-interview-answers
 description: >-
-  Analyze completed interview transcripts with a natural-language holistic introduction covering candidate performance, interviewer priorities, evidence of employer interest, and remaining uncertainty; then produce evidence-backed answer-quality reviews, recover compound subquestions, identify missed or off-target answers, score five dimensions, produce concise Japanese improved answers, and attach stable strategy tags for cross-interview trends. Use for 面试复盘、面试导读、深度复盘、回答质量、漏答、答非所问、日本面试风险、五维评分、AI/MCP/DDD 复合问题，or when generating, regenerating, or auditing ObsidianWeb `*_回答品質復盤.md` from a `*_整理稿.md` after human transcript decisions are complete.
+  Analyze completed interview transcripts with evidence-backed answer-quality reviews, independent consultant commentary about company signals and candidate fit, and cross-interview insights. Preserve translation, grammar work and five-dimension scoring while offering strategic advice, effective answer reuse and next-step guidance. Use for 面试复盘、顾问解读、企业信号、横向分析、跨面试洞察、回答质量、漏答、五维评分，or when generating, regenerating, or auditing ObsidianWeb interview reviews after human transcript decisions are complete.
 ---
 
 # 面试回答深度复盘
@@ -14,7 +14,9 @@ description: >-
 - 用户给出整理稿或要求直接复盘：执行 **Vault 模式**。先读项目 `AGENTS.md`、Vault 的 `99_系统/_整理稿スペック.md`，再读同场面试的整理稿、批注、回答品质批注和旧报告。
 - 用户要求检查现有报告：执行 **审计模式**。读取报告与整理稿，运行校验脚本并报告证据或契约问题；除非用户同时要求修改，否则不重生成。
 
-在 ObsidianWeb 中，以 `lib/review-deep.ts` 和 `scripts/codex-bridge.mjs` 为运行时字段契约，以 Vault 的 `_整理稿スペック.md` 为文件契约。序列化细节冲突时遵循代码；分析口径遵循本技能。
+在 ObsidianWeb 中，以 `lib/review-deep.ts`、`lib/interview-advisory.ts`、共享的 `lib/interview-advisory-contract.mjs` 和 `scripts/codex-bridge.mjs` 为运行时字段契约，以 Vault 的 `_整理稿スペック.md` 为文件契约。序列化细节冲突时遵循代码；分析口径遵循本技能。
+
+Bridge 任务分为 `review_interview_answers`（原有回答质量）、`review_interview_advisory`（单场顾问解读）和 `review_interview_insights`（跨场洞察）。严格只返回当前任务 schema，不在顾问任务中重算旧评分。完整 Vault 复盘按回答质量 → 顾问解读 → 横向洞察执行；只补顾问层或历史补齐时保留已有逐题评价与评分。批量完成所有可用单场后再汇总横向分析。
 
 ## 必须读取的参考
 
@@ -81,7 +83,7 @@ Bridge 模式不得为了读取参考而突破调用方的“不可调用工具�
 
 ### 6. 处理本人对 AI 的反馈
 
-- `agree`：把该结论视为已获本人确认，但仍保留证据引用。
+- `agree`：只把原版本和原判断快照视为已获本人确认，仍保留证据引用。新观点不能继承旧同意；无版本的旧 qNN 反馈也不能自动应用到顾问观点。
 - `disagree`：重新核对逐字证据，不得机械重复旧结论。若本人反馈与现场发言指向不同层面，分别写“现场表现”和“潜在能力”。
 - `context`：把补充事实纳入解释；不得用它改写逐字稿中实际发生的回答。
 
@@ -105,7 +107,7 @@ Bridge 模式不得为了读取参考而突破调用方的“不可调用工具�
 - `priorityBlockIds` 最多 8 个，优先选择漏答、答非所问、高风险表达和岗位关键能力缺口。
 - 强项和弱项都引用具体 qNN，不写空泛人格评价。
 - Bridge 模式严格返回 `references/output-contract.md` 中的 JSON，不加 Markdown 前后文。
-- Vault 模式只更新 `*_回答品質復盤.md` 这份 AI 派生报告；不改逐字稿、整理稿、批注、回答品质批注或回答练习。
+- 回答质量任务只更新 `*_回答品質復盤.md` 的原评价层；顾问任务定向合并独立 `advisory`；横向任务更新固定的 `20_求職/_素材/面接横断_顧問分析.md`。保留报告中人工追加内容，不改逐字稿、整理稿、批注、回答品质批注或回答练习。
 
 ### 8. 验证
 
@@ -121,13 +123,34 @@ node .agents/skills/review-interview-answers/scripts/validate-review.mjs \
 
 ### 9. 回流到面试标准回答库（闭环，Vault 模式）
 
-复盘只诊断这一场；诊断出的失分点要能进入面试**前**查阅的标准回答库，否则库会和最新面试脱节。生成报告后，对本场 `priorityBlockIds` 里的每个漏答/答非所问/高风险表达做一次回流检查——对象是 `20_求職/_素材/面接標準回答集.md`（`type: interview-prep-library`，Web「面试准备」页读取；结构契约见 `99_系统/_数据字典.md`）：
+复盘所得要能进入面试**前**查阅的标准回答库，否则库会和最新面试脱节。生成报告后，对本场 `priorityBlockIds` 里的每个漏答/答非所问/高风险表达，以及顾问层中 scope=general 的有效表达和提升方案做一次回流检查——对象是 `20_求職/_素材/面接標準回答集.md`（`type: interview-prep-library`，Web「面试准备」页读取；结构契约见 `99_系统/_数据字典.md`）：
 
 - **已有对应卡**（如复合问题漏答↔p12、转职次数↔p08、他社選考↔p24、结尾一言↔p25）：把本场新证据追加进该卡的「证据」节（`[[本場整理稿#qNN …]]`），必要时据此修订「使用边界」。不重写已验证的口径。
 - **没有对应卡且是跨公司通用题**：新增一张 `## p{下一个编号}` 卡，分节结构照库内现有卡；每条证据必须回链到具体整理稿/復盤，不写无出典的漂亮话。
 - **公司特有题**（志望動機的具体桥接、逆質問等）：不进通用库，留在该公司文件夹或面接准备文档。
 
 回流是本技能的**边界内动作**（写的是独立的回答库，不是复盘报告本身，也不碰逐字稿/整理稿/批注）。改动回答库后，若本机有 vault 环境，运行 `npm run vault:check` 确认无枚举/结构问题。判断为「本场无需回流」时，一句话说明理由，不要静默跳过。
+
+### 10. 独立的单场顾问解读
+
+顾问分析要解释“对方为什么问、双方怎样理解彼此、这份机会对本人意味着什么、后续怎样投入更有价值”。内容按材料展开，不固定段数和观点数，不为简洁删除有用推理；也不为显得深入强行制造隐含信号。
+
+- 整场评论综合企业与本人视角，判断这轮实际在核对条件、匹配项目、验证技术还是确认长期合作。stage 只描述本次会谈，不是公司永久标签。
+- 精读有价值的原话和追问链，分别给观察、推断、其他合理解释以及对本人的意义。可以有明确顾问判断，不能读心；每条关键判断回链完整 `sourcePath + blockId + sentenceIds`，背景引用只能使用输入真实 `contextPaths`。
+- 匹配分析解释限制来自什么：表达、能力、真实意愿、公司项目条件，或尚未谈清的信息。分别衡量具体安排、条件性推进与礼貌话语，不给录用概率。
+- 既收集合格且有效的表达，也提出“不扣分但值得优化”的方案。说明适用情境与改善理由，日语只使用确认过的经历和意愿，不为推销补造能力。
+- 后续建议说明核实事项和触发条件；不自动改变案件状态、日程、待办或对外发消息。已有后续结果需注明事后时间，日期不足以推定同日事件先后。
+- 本人反馈与背景高于旧 AI 标签。局部听清后完成回答，不再因原始听返标签推成没听懂；本人已澄清的技术用途、单位、团队范围、合同意愿必须进入解释。
+
+### 11. 跨面试顾问洞察
+
+固定五个模块：企业关注、个人定位、有效表达、机会限制与后续、下一阶段建议。保留完整模块但不强填观点；材料不足在模块评论中说清。每条横向 finding 至少引用两份不同场次整理稿，保留反例、阶段差异和适用边界。
+
+必须回查原话与本人补充，单场顾问意见、旧评分和策略标签只是线索。按中介、匹配、技术、最终等实际阶段分析，不能把没有被问到当作改善，把准确复述当作技术验证，把同公司多轮当作多个独立企业。场次使用完整来源路径识别，不能只用日期加轮次。
+
+统计数量、覆盖率等交由程序计算，不在 AI 散文里手写派生数字。解释现场信号时与后来收到的结果分开，不事后倒推。只对可用且已裁定资料生成，缺失、冲突、未裁定的场次列出原因，不能造齐覆盖。
+
+反馈绑定 `target.type/id/revision/snapshot`。本人反对企业动机推断不等于反对回答评价；再生成时重新核对旧快照，不删除、不覆盖人工层。顾问或横向任务失败保留最后一份有效报告及已完成原评价，说明待更新阶段。
 
 ## 完成标准
 
@@ -140,3 +163,5 @@ node .agents/skills/review-interview-answers/scripts/validate-review.mjs \
 6. 原文与人工事实层没有被改写。
 7. 已对本场优先失分点做回流检查：或更新/新增面试标准回答库卡片（证据回链本场），或说明本场无需回流。
 8. 评分前有独立的自然语言综合导读，同时解释本人表现、对方可能的判断与推进意愿；可观察证据、合理推断、后续确认与未知没有混淆。
+9. 完整复盘有独立顾问层与横向洞察，重要观点可回到原句；仅补顾问时历史评分与逐题评价保持不变。横向结论引用多场原话，阶段和后续时间不混淆。
+10. 人工反馈按对象及版本核对，未完成部分和实际覆盖范围可见；不把生成分析变成新日程、状态变化或对外承诺。

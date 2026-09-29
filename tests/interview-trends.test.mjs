@@ -4,6 +4,7 @@ import {
   buildCardCoverage,
   buildInterviewTrends,
   interviewKeyFromNoteName,
+  reviewTrendEntry,
   renderInterviewTrends,
 } from "../lib/interview-trends.mjs";
 
@@ -198,4 +199,23 @@ test("生成本文は最弱維と反復タグを明示し、標本が無いと�
     renderInterviewTrends(buildInterviewTrends([])),
     "まだ回答品質復盤がありません（`type: interview-answer-review` のノートが 0 件）。",
   );
+});
+
+test("同日同名の別社面接は完全パスで区別し、曖昧な旧カードをどちらにも付けない", () => {
+  const data = review({ priority: ["q01"], blocks: [block("q01", "希望職務", ["weak-evidence"])] });
+  const content = `<!-- interview-answer-review-data -->\n\`\`\`json\n${JSON.stringify(data)}\n\`\`\``;
+  const a = reviewTrendEntry("20_求職/株式会社テスト/2026-01-01_一次面接_回答品質復盤.md", { company: "株式会社テスト", date: "2026-01-01", round: "一次面接" }, content);
+  const b = reviewTrendEntry("20_求職/株式会社サンプル/2026-01-01_一次面接_回答品質復盤.md", { company: "株式会社サンプル", date: "2026-01-01", round: "一次面接" }, content);
+  assert.notEqual(a.key, b.key);
+  assert.equal(a.key, "20_求職/株式会社テスト/2026-01-01_一次面接");
+  const legacy = buildCardCoverage("## p01 希望\n- [[2026-01-01_一次面接_整理稿#q01 希望]]");
+  const ambiguous = buildInterviewTrends([a, b], legacy);
+  assert.equal(ambiguous.tags[0].interviews, 2);
+  assert.ok(ambiguous.interviews.every((item) => item.priorityBlocks[0].cards.length === 0));
+  const unique = buildInterviewTrends([a], legacy);
+  assert.equal(unique.interviews[0].priorityBlocks[0].cards[0].id, "p01");
+  const exact = buildCardCoverage("## p02 希望\n- [[20_求職/株式会社テスト/2026-01-01_一次面接_整理稿.md#q01 希望]]");
+  const resolved = buildInterviewTrends([a, b], exact);
+  assert.equal(resolved.interviews.find((item) => item.key === a.key).priorityBlocks[0].cards[0].id, "p02");
+  assert.equal(resolved.interviews.find((item) => item.key === b.key).priorityBlocks[0].cards.length, 0);
 });

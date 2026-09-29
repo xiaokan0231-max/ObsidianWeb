@@ -15,9 +15,11 @@ export const STRATEGY_TREND_META: Record<
   { label: string; description: string }
 >;
 
+/** 保留完整目录，只统一同场笔记后缀。旧 basename 输入仅供兼容。 */
 export function interviewKeyFromNoteName(name: string): string;
 
 export type TrendEntry = {
+  /** 带公司目录的完整场次路径前缀，不再是 basename。 */
   key: string;
   company: string;
   date: string;

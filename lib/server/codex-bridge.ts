@@ -85,6 +85,8 @@ export async function invokeCodex<T>(
     | "coach_language_output"
     | "grade_language_exam"
     | "review_interview_answers"
+    | "review_interview_advisory"
+    | "review_interview_insights"
     // LLM を使わない本機タスク：派生統計の再計算（workerd からは本機スクリプトを起動できない）。
     | "vault_stats",
   payload: Record<string, unknown>,

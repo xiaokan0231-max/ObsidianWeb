@@ -7,6 +7,7 @@ import {
   REVIEW_RELEVANCE_VALUES,
   REVIEW_STRATEGY_TAGS,
 } from "./review-contract.mjs";
+import { renderInterviewAdvisory, type InterviewAdvisory } from "./interview-advisory.ts";
 
 // 枚举本体不在这里，在 review-contract.mjs——那份同时被 codex-bridge 的 JSON schema
 // 和 skill 的校验器读。在这里再写一遍联合类型，就等于多一个不会变红的副本。
@@ -100,6 +101,8 @@ export type InterviewAnswerReview = {
   weaknesses: string[];
   priorityBlockIds: string[];
   blocks: InterviewAnswerBlockReview[];
+  /** 独立生成的顾问评论；旧报告缺省，不参与回答质量评分。 */
+  advisory?: InterviewAdvisory;
 };
 
 const DATA_MARKER = "<!-- interview-answer-review-data -->";
@@ -312,7 +315,9 @@ const RENDERED_HEADINGS = new Set([
  */
 export function carryOverSections(previousContent: string) {
   if (!previousContent) return "";
-  const body = previousContent.split(DATA_MARKER)[0];
+  // 顾问块由 JSON 正本独立渲染；不能把它当未知章节再抄一份。
+  const body = previousContent.split(DATA_MARKER)[0]
+    .replace(/<!-- interview-advisory:start -->[\s\S]*?<!-- interview-advisory:end -->\s*/g, "");
   const sections: string[] = [];
   // 見出し行で切って、qNN 節に入ったら打ち切る（そこから先は全部再生成対象）。
   const parts = body.split(/^(#{2,3} .*)$/m);
@@ -338,8 +343,12 @@ export function renderInterviewAnswerReview(
     feedbackName?: string | null;
     /** carryOverSections() の戻り値。前回本文のうち機械が再現できない節。 */
     carriedSections?: string;
+    /** 回答质量重生成时显式携带旧顾问层，不重新生成或规范化它。 */
+    preservedAdvisory?: InterviewAdvisory;
   },
 ) {
+  const advisory = meta.preservedAdvisory ?? review.advisory;
+  const durableReview = advisory ? { ...review, advisory } : review;
   const dimensionSection = review.dimensions
     ? `### 採点内訳（各20%）\n\n${(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[])
         .map((key) => {
@@ -411,6 +420,7 @@ layer: ai-derived
 > 文法の採点ではなく、質問理解・論点網羅・回答の直接性・日本面接での戦略リスクを評価する AI 派生レポート。
 > 元の整理稿と本人の裁定・批注が更新された場合は Web から再生成する。
 ${review.overviewZh ? `\n## 综合导读\n\n${review.overviewZh}\n` : ""}
+${advisory ? `\n${renderInterviewAdvisory(advisory)}\n` : ""}
 ## 全体評価
 
 **${review.overallScore} / 100** — ${review.summaryZh}
@@ -427,7 +437,7 @@ ${blockSections}
 
 ${DATA_MARKER}
 \`\`\`json
-${JSON.stringify(review, null, 2)}
+${JSON.stringify(durableReview, null, 2)}
 \`\`\`
 `;
 }

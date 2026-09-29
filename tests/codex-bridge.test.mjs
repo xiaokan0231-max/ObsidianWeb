@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -23,7 +23,7 @@ async function waitForBridge(url, token) {
   throw new Error("Fake bridge did not start");
 }
 
-function startBridge({ port, token, logPath, login = "chatgpt" }) {
+function startBridge({ port, token, logPath, login = "chatgpt", executable = fakeCodexPath, searchPath = process.env.PATH }) {
   return spawn(process.execPath, [bridgePath], {
     cwd: resolve("."),
     stdio: ["ignore", "pipe", "pipe"],
@@ -31,7 +31,8 @@ function startBridge({ port, token, logPath, login = "chatgpt" }) {
       ...process.env,
       CODEX_BRIDGE_PORT: String(port),
       CODEX_BRIDGE_TOKEN: token,
-      CODEX_BRIDGE_CODEX_PATH: fakeCodexPath,
+      CODEX_BRIDGE_CODEX_PATH: executable,
+      PATH: searchPath,
       FAKE_CODEX_LOG: logPath,
       FAKE_CODEX_LOGIN: login,
       OPENAI_API_KEY: "must-not-reach-child",
@@ -39,6 +40,23 @@ function startBridge({ port, token, logPath, login = "chatgpt" }) {
     },
   });
 }
+
+test("bridge discovers Codex through PATH when no explicit binary is configured", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dojo-bridge-path-"));
+  const logPath = join(directory, "fake.log");
+  await symlink(fakeCodexPath, join(directory, "codex"));
+  const port = 46000 + Math.floor(Math.random() * 1000);
+  const token = "path-discovery-token-longer-than-24-characters";
+  const child = startBridge({ port, token, logPath, executable: "", searchPath: `${directory}:${process.env.PATH}` });
+  try {
+    const status = await waitForBridge(`http://127.0.0.1:${port}`, token);
+    assert.equal(status.authentication, "chatgpt");
+    assert.equal(status.safeBilling, true);
+  } finally {
+    await stopBridge(child);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 async function stopBridge(child) {
   if (child.exitCode !== null) return;
@@ -124,12 +142,21 @@ test("bridge accepts only allowlisted tasks and strips API key credentials", asy
     });
     assert.equal(languageExam.status, 200, await languageExam.text());
 
+    for (const task of ["review_interview_advisory", "review_interview_insights"]) {
+      const response = await fetch(`${url}/invoke`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ task, payload: { interviews: [], blocks: [] } }),
+      });
+      assert.equal(response.status, 200, await response.text());
+    }
+
     const events = (await readFile(logPath, "utf8"))
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
     const executions = events.filter((event) => event.args?.includes("exec"));
-    assert.equal(executions.length, 4);
+    assert.equal(executions.length, 6);
     const execution = executions[0];
     for (const event of executions) {
       assert.equal(event.hasOpenAiKey, false);
@@ -149,6 +176,10 @@ test("bridge accepts only allowlisted tasks and strips API key credentials", asy
     assert.equal(executions[1].args[executions[1].args.indexOf("-m") + 1], "gpt-5.6-sol");
     assert.equal(executions[2].args[executions[2].args.indexOf("-m") + 1], "gpt-5.6-terra");
     assert.equal(executions[3].args[executions[3].args.indexOf("-m") + 1], "gpt-5.6-terra");
+    for (const execution of executions.slice(4)) {
+      assert.equal(execution.args[execution.args.indexOf("-m") + 1], "gpt-5.6-sol");
+      assert.ok(execution.args.includes("read-only"));
+    }
   } finally {
     await stopBridge(child);
     await rm(directory, { recursive: true, force: true });

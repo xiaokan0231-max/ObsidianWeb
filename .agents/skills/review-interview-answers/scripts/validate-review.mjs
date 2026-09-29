@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { validateInterviewAdvisory, validateInterviewInsights } from "./interview-advisory.ts";
 
 // 契約値は skill の中に閉じた ./review-contract.mjs から取る。
 // リポジトリ外（../../../lib/…）を参照すると、skill だけ別の場所へコピーして
@@ -26,14 +28,14 @@ const RELEVANCE = new Set(REVIEW_RELEVANCE_VALUES);
 const QUALITY = new Set(REVIEW_QUALITY_VALUES);
 
 function usage() {
-  console.error("Usage: node validate-review.mjs --review <review.md|review.json|-> [--source <整理稿.md>]");
+  console.error("Usage: node validate-review.mjs --review <review.md|review.json|-> [--source <整理稿.md>] [--vault <vault root>]");
 }
 
 function parseArgs(argv) {
   const args = {};
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
-    if (key !== "--review" && key !== "--source") throw new Error(`Unknown argument: ${key}`);
+    if (key !== "--review" && key !== "--source" && key !== "--vault") throw new Error(`Unknown argument: ${key}`);
     const value = argv[index + 1];
     if (!value) throw new Error(`Missing value for ${key}`);
     args[key.slice(2)] = value;
@@ -50,7 +52,8 @@ async function readInput(path) {
 }
 
 function parseReview(content) {
-  const marker = "<!-- interview-answer-review-data -->";
+  const marker = content.includes("<!-- interview-insights-data -->")
+    ? "<!-- interview-insights-data -->" : "<!-- interview-answer-review-data -->";
   const tail = content.includes(marker) ? content.slice(content.indexOf(marker) + marker.length) : content;
   const fenced = tail.match(/```json\s*([\s\S]*?)\s*```/i)?.[1];
   return JSON.parse((fenced ?? tail).trim());
@@ -76,6 +79,36 @@ function isStringArray(value) {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+async function advisoryContext(value, args) {
+  const sourcePaths = new Set();
+  const contextPaths = new Set();
+  const collect = (item) => {
+    if (!item || typeof item !== "object") return;
+    for (const ref of item.evidence ?? []) sourcePaths.add(ref.sourcePath);
+    for (const path of item.contextPaths ?? []) contextPaths.add(path);
+  };
+  collect(value);
+  for (const key of ["observations", "answerOptions", "nextSteps"]) {
+    for (const item of value[key] ?? []) collect(item);
+  }
+  for (const section of value.modules ?? []) {
+    for (const item of section.findings ?? []) collect(item);
+  }
+  const sources = new Map();
+  for (const path of sourcePaths) {
+    let localPath;
+    if (args.vault) localPath = join(resolve(args.vault), path);
+    else if (args.source && resolve(args.source).endsWith(`/${path}`)) localPath = args.source;
+    else throw new Error(`顾问证据 ${path} 需要 --vault，或对应完整路径的 --source。`);
+    sources.set(path, parseSource(await readFile(localPath, "utf8")));
+  }
+  for (const path of contextPaths) {
+    if (!args.vault) throw new Error("顾问背景引用需要 --vault 才能验证。");
+    await readFile(join(resolve(args.vault), path), "utf8");
+  }
+  return { sources, contextPaths };
+}
+
 async function main() {
   let args;
   try {
@@ -95,6 +128,27 @@ async function main() {
   const errors = [];
   const warnings = [];
   const fail = (message) => errors.push(message);
+
+  // 顾问与横向洞察不参与五维评分；它们各自严格验证证据，不能冒充零扣分报告。
+  const isInsights = review && Array.isArray(review.modules);
+  const isAdvisory = review && Array.isArray(review.observations);
+  const advisory = isAdvisory ? review : review?.advisory;
+  if (isInsights || advisory) {
+    const value = isInsights ? review : advisory;
+    const validate = isInsights ? validateInterviewInsights : validateInterviewAdvisory;
+    try {
+      // 先校验路径格式，再用路径读文件，避免坏引用越过 Vault 边界。
+      validate(value);
+      validate(value, await advisoryContext(value, args));
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (isInsights || isAdvisory) {
+    console.log(JSON.stringify({ ok: errors.length === 0, kind: isInsights ? "interview-insights" : "interview-advisory", errors, warnings }, null, 2));
+    if (errors.length) process.exitCode = 1;
+    return;
+  }
 
   if (!review || typeof review !== "object" || Array.isArray(review)) {
     fail("review must be a JSON object");

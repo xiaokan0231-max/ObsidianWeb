@@ -8,6 +8,7 @@ const OVERVIEW_REVIEW_TYPES = new Set(["interview-answer-practice", "transcript-
 const INTERVIEW_TYPES = new Set([
   "interview-prep", "interview-prep-library", "transcript", "transcript-study", "study-annotation",
   "review", "interview-answer-review", "interview-answer-practice", "interview-answer-feedback",
+  "interview-insights", "interview-insights-feedback", "interview-advisory-state",
   // material＝自己紹介台本・転職理由台本・当日フレーズ集・単語文法帳・NG集・横断傾向。
   // 準備稿の ![[…]] の展開先であり、全局共用資産の入口が開く実体でもある。
   // 外すと埋め込みが「解決できません」になり、共用入口を押しても何も出ない。
@@ -53,7 +54,7 @@ export function vaultScopeForView(view: string): VaultScope {
   if (view === "overview") return "overview";
   if (view === "todo" || view === "calendar") return "actions";
   if (view === "jobs" || view === "analytics") return "jobs";
-  if (view === "session" || view === "prep" || view === "review" || view === "practice") return "interview";
+  if (view === "session" || view === "prep" || view === "review" || view === "practice" || view === "insights") return "interview";
   if (view === "language" || view === "topics") return "training";
   return "all";
 }

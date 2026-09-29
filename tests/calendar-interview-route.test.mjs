@@ -6,7 +6,20 @@ import {
   calendarInterviewFromSearch,
   calendarInterviewSearch,
   companyOverviewSearch,
+  reviewEvidenceSearch,
 } from "../app/app-route.ts";
+
+test("横向页与完整证据链接可恢复同日同轮的正确公司和句子", () => {
+  assert.equal(appViewFromPathname("/interview/insights"), "insights");
+  assert.equal(appViewHref("insights"), "/interview/insights");
+  const sourcePath = "20_求職/株式会社テスト A&B/2026-01-01_一次面接_整理稿.md";
+  const url = new URL(appViewHref("review", reviewEvidenceSearch({ sourcePath, blockId: "q03", sentenceIds: ["s008", "s009"] })), "https://example.test");
+  assert.equal(url.searchParams.get("review"), sourcePath);
+  assert.equal(url.searchParams.get("panel"), "source");
+  assert.equal(url.searchParams.get("block"), "q03");
+  assert.equal(url.searchParams.get("sentence"), "s008");
+  assert.equal(url.hash, "");
+});
 
 test("公司总览以真实上下文路径分享，无准备稿不借用其他场次", () => {
   const context = "20_求職/_TODO/テスト A&B_面談.md";

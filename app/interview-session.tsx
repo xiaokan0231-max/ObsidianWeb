@@ -1078,6 +1078,7 @@ function InterviewSession({
   forceOverviewOnly = false,
   onContextChange,
   onSelectionChange,
+  onOpenInsights,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
@@ -1093,6 +1094,7 @@ function InterviewSession({
   forceOverviewOnly?: boolean;
   onContextChange?: (company: string, contextPath: string, prepPath: string) => void;
   onSelectionChange?: (company: string, prepPath: string) => void;
+  onOpenInsights?: () => void;
   /** 「今日」は殻が持つ。memo 越しなので中で求めると、日付を跨いでも昨日のまま凍る
    *  ——当日かどうかで既定モード（确认/冲刺/深度）が変わる画面なので、ここが一番効く。 */
   today: string;
@@ -1253,6 +1255,7 @@ function InterviewSession({
         )}
       </summary>
       <div className="prep-weakness-body">
+        {onOpenInsights && <div className="prep-insights-entry"><p>准备前也可以对照其他公司的关注点、有效表达与机会条件。</p><button type="button" onClick={onOpenInsights}>打开横向对照 →</button></div>}
         <p>根据 {digest.interviews.length} 场回答质量复盘统计；正本来自 vault 的「面接傾向_横断」。</p>
         <ul>
           {digest.tags.filter((tag) => tag.repeated).map((tag) => (

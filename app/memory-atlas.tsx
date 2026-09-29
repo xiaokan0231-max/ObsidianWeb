@@ -11,6 +11,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import InterviewReview from "./interview-review";
+import InterviewInsights from "./interview-insights";
+import type { AdvisoryEvidenceRef } from "@/lib/interview-advisory";
 import InterviewPractice from "./interview-practice";
 import InterviewPrep from "./interview-prep";
 import InterviewSession from "./interview-session";
@@ -36,6 +38,7 @@ import {
   calendarInterviewFromSearch,
   calendarInterviewSearch,
   companyOverviewSearch,
+  reviewEvidenceSearch,
   type AppView,
 } from "./app-route";
 import {
@@ -1132,6 +1135,12 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     navigateToView("review", params);
   }, [navigateToView]);
 
+  const openReviewEvidence = useCallback((ref: AdvisoryEvidenceRef) => {
+    navigateToView("review", reviewEvidenceSearch(ref));
+  }, [navigateToView]);
+
+  const openInterviewInsights = useCallback(() => navigateToView("insights"), [navigateToView]);
+
   // 首页から案件へ：看板の抽屉（跟進フォーム付き）を直接開く。原笔记の drawer は読むだけで何も変えられない。
   const openCase = useCallback((note: Note) => {
     setJobsInitialFilters(null);
@@ -1470,9 +1479,16 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   onVaultChanged={loadVault}
                   onNoteWritten={patchNote}
                   initialSelectedKey={reviewInitialKey}
+                  initialPanel={interviewParams.get("panel") === "source" ? "source" : interviewParams.get("panel") === "quality" ? "quality" : "advisory"}
+                  initialBlockId={interviewParams.get("block")}
+                  initialSentenceId={interviewParams.get("sentence")}
+                  onOpenEvidence={openReviewEvidence}
+                  onOpenInsights={openInterviewInsights}
                   onSelectionChange={syncReviewSelection}
                 />
               )}
+              {view === "insights" && <InterviewInsights notes={notes} onOpenEvidence={openReviewEvidence} onOpenReview={openReview}
+                onVaultChanged={loadVault} onNoteWritten={patchNote} />}
               {view === "practice" && (
                 <InterviewPractice
                   notes={notes}
@@ -1496,6 +1512,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   forceOverviewOnly={Boolean(calendarInterview && !calendarInterview.path && calendarCompanyContext)}
                   onSelectionChange={syncInterviewSelection}
                   onContextChange={syncCompanyContext}
+                  onOpenInsights={openInterviewInsights}
                 />
               )}
               {view === "prep" && (

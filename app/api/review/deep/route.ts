@@ -4,6 +4,7 @@ import { readNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
 import {
   carryOverSections,
   normalizeInterviewAnswerReview,
+  parseInterviewAnswerReview,
   renderInterviewAnswerReview,
 } from "@/lib/review-deep";
 import {
@@ -15,6 +16,9 @@ import {
 import { getString as text, noteBasename as basename } from "@/lib/notes";
 import { parseReviewFeedback, uniqueReviewFeedback } from "@/lib/review-feedback";
 import { isReviewNotePath, reviewSiblingPath } from "@/lib/review-paths";
+import { interviewAdvisory } from "@/lib/server/interview-advisory";
+import { withReviewWrite } from "@/lib/server/review-write-queue";
+import { commitReviewWithFreshInputs } from "@/lib/server/review-input-guard";
 
 type Body = { notePath?: string };
 
@@ -49,9 +53,6 @@ export async function POST(request: Request) {
     }
 
     const existingReview = (await readNoteOrNull(existingReviewPath))?.content ?? "";
-
-    // 前回の回答品質復盤。上書きする前に、レンダラが再現できない節を回収しておく。
-    const previousOutput = (await readNoteOrNull(outputPath))?.content ?? "";
 
     const feedbackNote = await readNoteOrNull(feedbackPath);
     const feedbackExists = feedbackNote !== null;
@@ -91,6 +92,14 @@ export async function POST(request: Request) {
       },
     });
     const generatedAt = new Date().toISOString();
+    // 写入前核对原始输出，不能让规范化静默过滤掉模型漏答或跨题引用。
+    const rawBlocks = Array.isArray(result.output.blocks) ? result.output.blocks as Record<string, unknown>[] : [];
+    const byBlock = new Map(parsed.blocks.map((block) => [block.id, new Set(block.sentences.map((sentence) => sentence.id))]));
+    if (rawBlocks.length !== parsed.blocks.length || new Set(rawBlocks.map((block) => block.blockId)).size !== parsed.blocks.length ||
+      rawBlocks.some((block) => !byBlock.has(String(block.blockId)) ||
+        !Array.isArray(block.evidenceSentenceIds) || block.evidenceSentenceIds.some((id) => !byBlock.get(String(block.blockId))!.has(String(id))))) {
+      throw new Error("回答质量复盘的问题覆盖或证据归属无效，原报告已保留。");
+    }
     const deepReview = normalizeInterviewAnswerReview(
       result.output,
       { generatedAt, model: result.model },
@@ -105,19 +114,34 @@ export async function POST(request: Request) {
       throw new Error("Codex 没有返回可用的问题块；Vault 未写入，请重试。");
     }
 
-    await writeNote(
-      outputPath,
-      renderInterviewAnswerReview(deepReview, {
-        company: text(source.frontmatter.company),
-        date: text(source.frontmatter.date),
-        round: text(source.frontmatter.round),
-        sourceName: basename(notePath),
-        annotationName: annotationContent === null ? null : basename(annotationPath),
-        feedbackName: feedbackExists ? basename(feedbackPath) : null,
-        carriedSections: carryOverSections(previousOutput),
-      }),
-    );
-    return Response.json({ ok: true, path: outputPath, review: deepReview });
+    await withReviewWrite(outputPath, async () => {
+      await commitReviewWithFreshInputs([
+        { path: notePath, content: source.content },
+        { path: annotationPath, content: annotationContent },
+        { path: feedbackPath, content: feedbackNote?.content ?? null },
+      ], readNoteOrNull, async () => {
+        // 模型运行期间可能已有新的顾问评论或人工章节，保留最新版本而非调用前快照。
+        const previousOutput = (await readNoteOrNull(outputPath))?.content ?? "";
+        await writeNote(outputPath, renderInterviewAnswerReview(deepReview, {
+          company: text(source.frontmatter.company),
+          date: text(source.frontmatter.date),
+          round: text(source.frontmatter.round),
+          sourceName: basename(notePath),
+          annotationName: annotationContent === null ? null : basename(annotationPath),
+          feedbackName: feedbackExists ? basename(feedbackPath) : null,
+          carriedSections: carryOverSections(previousOutput),
+          preservedAdvisory: parseInterviewAnswerReview(previousOutput)?.advisory,
+        }));
+      });
+    });
+    // 评分先独立保存。顾问生成失败也不能把已完成的回答复盘报成保存失败。
+    try {
+      const advisory = await interviewAdvisory.generateSource(notePath);
+      return Response.json({ ok: true, path: outputPath, review: deepReview, advisory: advisory.report });
+    } catch (error) {
+      return Response.json({ ok: true, path: outputPath, review: deepReview,
+        advisoryError: error instanceof Error ? error.message : "顾问分析待重试。" });
+    }
   } catch (error) {
     return errorResponse(error, "生成回答质量复盘失败");
   }
