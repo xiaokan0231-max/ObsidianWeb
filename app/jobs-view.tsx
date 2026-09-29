@@ -12,15 +12,35 @@ import {
 } from "react";
 import {
   compareJobs,
-  daysBetween,
+  elapsedLabel,
+  rateText,
+  rateTone,
+  salaryLabel,
+  shortDay,
   intakeLabel,
   intakeRelative,
   isJobStatus,
   jobIntake,
-  jobMatchesQuery,
+  jobMatchesFilters,
   jobMatchesRatingBands,
+  jobFitAccess,
+  jobFitBand,
+  jobFitGate,
+  jobStatTileFilters,
+  jobStatTilePools,
+  jobTouch,
+  jobWaitsOnCounterpart,
+  EMPTY_JOB_FILTERS,
+  JOB_STAT_TILES,
+  JOB_TOUCHES,
+  UNRATED_FIT,
+  type JobBoardFilters,
+  type JobFilterKey,
+  type JobStatTileId,
+  type JobTouch,
   jobStatusNoteError,
   JOB_INTAKES,
+  JOB_ORIGIN_LABEL,
   JOB_RATING_BANDS,
   JOB_SORTS,
   JOB_STATUSES,
@@ -31,13 +51,28 @@ import {
   statusRequiresChannel,
   toJobCard,
   VERIFICATION_LABEL,
+  WAITING_FOR_LABEL,
   type JobCard,
   type JobIntake,
   type JobRatingBand,
   type JobSort,
   type JobStatus,
   type JobVerification,
+  awaitingCounterpart,
+  SELECTION_STATUSES,
+  statusTone,
+  IN_PROGRESS_STATUSES,
+  ACCESS_STATE_LABEL,
+  HARD_GATE_LABEL,
+  JOB_FIT_AXES,
+  JOB_FIT_GATE_LABEL,
+  JOB_FIT_SCORE_LABEL,
+  UNRATED_V2_LABEL,
+  type JobFit,
 } from "@/lib/jobs";
+import { ACCESS_STATE_VALUES, FIT_BANDS, HARD_GATE_VALUES } from "@/lib/job-case-schema";
+import { isTypingTarget } from "@/lib/keyboard";
+import { ConflictError, postJson } from "@/lib/client-api";
 import { parseAppliedLedger } from "@/lib/job-stats.mjs";
 import { opportunityAppliedOn } from "@/lib/job-opportunity";
 import { JOB_CASE_TYPE } from "@/lib/vault-boundary.mjs";
@@ -47,10 +82,13 @@ import {
   getTitle,
   getType,
   noteBasename,
-  stripFrontmatter,
   type Note,
 } from "@/lib/notes";
+import { OPEN_NOTE_LABEL, changedToLabel } from "@/lib/ui-labels";
+import MarkdownDocument from "./markdown-document";
+import type { UndoAction } from "./undo-flash";
 import { useDialogFocus } from "./use-dialog-focus";
+import { URL_CHANGE_EVENT } from "./use-url-state";
 
 const SALARY_STEPS = [0, 600, 700, 800, 900, 1000, 1200];
 
@@ -58,21 +96,21 @@ const VERIFICATIONS: JobVerification[] = ["verified", "warned", "unchecked"];
 
 const COMPARE_LIMIT = 3;
 
-const ORIGIN_LABEL: Record<string, string> = {
-  "ai-reco": "AI 发现",
-  manual: "本人录入",
-  agent: "中介推荐",
-  scout: "Scout",
-  legacy: "历史导入",
-  "ra-batch": "RA 批量投递",
-};
+const ORIGIN_LABEL = JOB_ORIGIN_LABEL;
+
+/**
+ * v2 採点の絞り込み値。`none`（UNRATED_FIT）は「未採点（v2）」の擬似値で frontmatter には無い——
+ * 採点待ちの案件を拾えるようにするために置く。枚举本体は lib/job-case-schema.ts と共有し、ここで書き直さない。
+ */
+const GATE_FILTER_VALUES: readonly string[] = [...HARD_GATE_VALUES, UNRATED_FIT];
+const BAND_FILTER_VALUES: readonly string[] = [...FIT_BANDS, UNRATED_FIT];
+const ACCESS_FILTER_VALUES: readonly string[] = [...ACCESS_STATE_VALUES, UNRATED_FIT];
+const TOUCH_VALUES: readonly JobTouch[] = JOB_TOUCHES.map((touch) => touch.id);
+const fitFilterLabel = (value: string, labels: Record<string, string>) => (value === UNRATED_FIT ? UNRATED_V2_LABEL : labels[value] ?? value);
 
 const WAITING_FOR_OPTIONS = [
   { value: "", label: "没有外部等待" },
-  { value: "self", label: "本人" },
-  { value: "company", label: "企业" },
-  { value: "agent", label: "中介" },
-  { value: "platform", label: "平台" },
+  ...Object.entries(WAITING_FOR_LABEL).map(([value, label]) => ({ value, label })),
 ];
 
 /** 结果区的四种视图。卡片/列表/看板共享同一份筛选结果，周复盘看的是全量笔记。 */
@@ -87,47 +125,13 @@ const VIEW_MODES = [
 type ViewMode = (typeof VIEW_MODES)[number]["id"];
 
 /** 看板里始终显示的核心列，其余状态列只有有数据时才占位。 */
-const KANBAN_CORE_STATUSES: JobStatus[] = ["未応募", "応募済", "書類通過", "面接中", "内定"];
+const KANBAN_CORE_STATUSES: string[] = ["未応募", ...IN_PROGRESS_STATUSES];
 
-/** 选考推进中 KPI 的口径：书类通过之后的阶段。 */
-const SELECTION_STATUSES: string[] = ["書類通過", "面接中", "内定"];
 
-/** 一个筛选维度。算联动 facet 计数时用它指出「这一组先不算」。 */
-type FilterKey =
-  | "query"
-  | "statuses"
-  | "rating"
-  | "salary"
-  | "stacks"
-  | "regions"
-  | "sources"
-  | "verifications"
-  | "intakes"
-  | "remote";
-
-type Filters = {
-  statuses: string[];
-  ratings: JobRatingBand[];
-  minSalary: number;
-  stacks: string[];
-  regions: string[];
-  sources: string[];
-  verifications: JobVerification[];
-  intakes: JobIntake[];
-  remoteOnly: boolean;
-};
-
-const EMPTY_FILTERS: Filters = {
-  statuses: [],
-  ratings: [],
-  minSalary: 0,
-  stacks: [],
-  regions: [],
-  sources: [],
-  verifications: [],
-  intakes: [],
-  remoteOnly: false,
-};
+/** 判定本体は lib/jobs.ts（統計格の件数テストが同じ関数を叩けるように）。 */
+type FilterKey = JobFilterKey;
+type Filters = JobBoardFilters;
+const EMPTY_FILTERS: Filters = EMPTY_JOB_FILTERS;
 
 /**
  * 「岗位机会」は新しい応募先を選ぶ画面。終了案件まで含む全件を既定表示すると、
@@ -144,6 +148,10 @@ const DEFAULT_OPPORTUNITY_FILTERS: Filters = {
 export type JobsInitialFilters = {
   statuses?: readonly string[];
   ratings?: readonly JobRatingBand[];
+  /** 动手状态（URL では `touch`）。「未着手」「已动手·等对方」は status だけでは表せない。 */
+  touch?: readonly JobTouch[];
+  /** 只看等对方（URL では `waiting=1`）。首页「等待回复」と同じ判定。 */
+  waiting?: boolean;
 };
 
 type JobsUrlState = {
@@ -166,13 +174,15 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
   const params = typeof window === "undefined"
     ? new URLSearchParams()
     : new URLSearchParams(window.location.search);
-  const seeded = initialFilters?.statuses?.length || initialFilters?.ratings?.length;
+  const seeded = initialFilters?.statuses?.length || initialFilters?.ratings?.length || initialFilters?.touch?.length || initialFilters?.waiting;
   const statusParam = params.get("status");
   const baseFilters = seeded
     ? {
         ...EMPTY_FILTERS,
         statuses: [...(initialFilters?.statuses ?? [])],
         ratings: [...(initialFilters?.ratings ?? [])],
+        touches: (initialFilters?.touch ?? []).filter((value) => TOUCH_VALUES.includes(value)),
+        waitingOnly: Boolean(initialFilters?.waiting),
       }
     : DEFAULT_OPPORTUNITY_FILTERS;
   const hasUrlFilters = [
@@ -184,7 +194,12 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
     "source",
     "verification",
     "intake",
+    "touch",
+    "gate",
+    "band",
+    "access",
     "remote",
+    "waiting",
   ].some((key) => params.has(key));
   const ratings = csvParam(params, "rating").filter((value): value is JobRatingBand =>
     JOB_RATING_BANDS.some((band) => band.id === value),
@@ -194,6 +209,9 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
   );
   const intakes = csvParam(params, "intake").filter((value): value is JobIntake =>
     JOB_INTAKES.some((bucket) => bucket.id === value),
+  );
+  const touches = csvParam(params, "touch").filter((value): value is JobTouch =>
+    TOUCH_VALUES.includes(value as JobTouch),
   );
   const salary = Number(params.get("salary") ?? 0);
   const sortParam = params.get("sort");
@@ -214,7 +232,12 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
           sources: csvParam(params, "source"),
           verifications,
           intakes,
+          touches,
+          gates: csvParam(params, "gate").filter((value) => GATE_FILTER_VALUES.includes(value)),
+          bands: csvParam(params, "band").filter((value) => BAND_FILTER_VALUES.includes(value)),
+          accesses: csvParam(params, "access").filter((value) => ACCESS_FILTER_VALUES.includes(value)),
           remoteOnly: params.get("remote") === "1",
+          waitingOnly: params.get("waiting") === "1",
         }
       : baseFilters,
     viewMode: VIEW_MODES.some((mode) => mode.id === modeParam) ? modeParam as ViewMode : "decision",
@@ -233,31 +256,16 @@ function isDefaultOpportunityFilters(filters: Filters) {
     filters.sources.length === 0 &&
     filters.verifications.length === 0 &&
     filters.intakes.length === 0 &&
-    !filters.remoteOnly;
+    filters.touches.length === 0 &&
+    filters.gates.length === 0 &&
+    filters.bands.length === 0 &&
+    filters.accesses.length === 0 &&
+    !filters.remoteOnly &&
+    !filters.waitingOnly;
 }
 
 function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
-}
-
-function salaryLabel(job: JobCard) {
-  const { min, max, estimated } = job.salary;
-  if (min === null) return job.salaryText || "薪资未记录";
-  const range = max !== null && max !== min ? `${min}〜${max}万` : `${min}万〜`;
-  return estimated ? `${range}（月給換算）` : range;
-}
-
-/** 応募优先度色阶：9+ 橙 / 7+ 绿 / 5+ 琥珀 / 其余灰。 */
-/** バッジに出す文字。未採点は 0 ではなく「—」——「読んでいない」と「見込みなし」は別。 */
-function rateText(job: { rating: number; rated: boolean }) {
-  return job.rated ? String(job.rating) : "—";
-}
-
-function rateTone(rating: number) {
-  if (rating >= 9) return "high";
-  if (rating >= 7) return "good";
-  if (rating >= 5) return "mid";
-  return "low";
 }
 
 /**
@@ -270,18 +278,6 @@ function rateTone(rating: number) {
  * 混在一起会同时坏两头：未応募 的数字虚高，首页还催你去「判断是否応募」
  * 一个你三天前就点过的岗位。用 waiting_for 把两者分开。
  */
-function awaitingCounterpart(job: JobCard) {
-  return job.status === "未応募" && Boolean(job.waitingFor) && job.waitingFor !== "self";
-}
-
-/** 状态配色分组。自定义状态（不在枚举里）走中性色。 */
-function statusTone(status: string) {
-  if (status === "未応募") return "pending";
-  if (status === "応募済" || status === "書類通過" || status === "面接中") return "progress";
-  if (status === "内定") return "offer";
-  if (status === "不採用") return "reject";
-  return "neutral";
-}
 
 /**
  * 入库时期的强调档。今天进的必须一眼跳出来 —— 卡片按匹配度排时，
@@ -291,12 +287,6 @@ function intakeTone(intake: JobIntake) {
   if (intake === "today") return "new";
   if (intake === "d3" || intake === "d7") return "recent";
   return "old";
-}
-
-/** 周复盘时间线上的小圆点：面接中要比其它「进行中」更显眼，所以单独给橙色。 */
-function eventTone(status: string) {
-  if (status === "面接中") return "interview";
-  return statusTone(status);
 }
 
 function clip(text: string, limit: number) {
@@ -340,10 +330,7 @@ function dayInRange(raw: string, from: string, to: string) {
   return day !== null && day >= from && day <= to;
 }
 
-function dayLabel(raw: string) {
-  const day = normalizeDay(raw);
-  return day ? `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}` : "—";
-}
+const dayLabel = (raw: string) => shortDay(raw, "—");
 
 /**
  * 周复盘事件锚定在最近一次状态变化日（status_updated）。
@@ -352,23 +339,6 @@ function dayLabel(raw: string) {
  */
 function eventDay(job: JobCard) {
   return job.statusUpdated || job.date;
-}
-
-/** `2026-07-20` → `7/20`。年は今の運用（数か月単位）では邪魔なだけなので落とす。 */
-function shortDay(day: string) {
-  const match = day.match(/^\d{4}-(\d{2})-(\d{2})$/);
-  return match ? `${Number(match[1])}/${Number(match[2])}` : day;
-}
-
-/**
- * 応募からの経過。**「何日待っているか」は催促の判断に直結する**ので、
- * 相対表示だけにして絶対日付は title に回す（一覧をスキャンしている時に効くのは日数のほう）。
- */
-function elapsedLabel(appliedOn: string, today: string) {
-  const days = daysBetween(appliedOn, today);
-  if (days === null) return "";
-  if (days <= 0) return "今日";
-  return `${days}日経過`;
 }
 
 /** 时间线上的事件文案由状态推导 —— 状态与日期是笔记里的证据，不是 AI 的假设。 */
@@ -405,6 +375,51 @@ function Highlight({ text, query }: { text: string; query: string }) {
 }
 
 /** 技術スタック 有四十多个标签，默认只露出高频的几个，避免筛选栏把结果区挤到屏幕外。 */
+/** カード右上の v2 採点札。Band と合計だけ——Gate は hold が既定で情報量が薄く、reject の時だけ色で知らせる。 */
+function FitChip({ fit }: { fit: JobFit }) {
+  return (
+    <span
+      className={`job-fit-chip band-${fit.band} gate-${fit.hardGate}`}
+      title={`v2 採点 ${fit.score}/100 · Band ${fit.band} · Gate ${HARD_GATE_LABEL[fit.hardGate]}`}
+    >
+      <b>{fit.band}</b><small>{fit.score}</small>
+    </span>
+  );
+}
+
+/** 抽屉の v2 六軸。未採点は文言のまま出す——0 のバーを 6 本並べると「全部最低」に見える。 */
+function FitPanel({ fit }: { fit: JobFit | null }) {
+  if (!fit) return <p className="job-fit-panel job-fit-unrated">v2 採点：{UNRATED_V2_LABEL}</p>;
+  const gateKeys = Object.keys(JOB_FIT_GATE_LABEL) as (keyof JobFit["gates"])[];
+  return (
+    <section className="job-fit-panel" aria-label="v2 採点">
+      <header>
+        <strong>Fit {fit.score}<small>/100</small></strong>
+        <em className={`job-fit-band band-${fit.band}`}>Band {fit.band}</em>
+        <em className={`job-fit-gate gate-${fit.hardGate}`}>Gate {HARD_GATE_LABEL[fit.hardGate]}</em>
+        {fit.accessState && <span className="job-fit-access">{ACCESS_STATE_LABEL[fit.accessState]}</span>}
+      </header>
+      <ul className="job-fit-axes">
+        {JOB_FIT_AXES.map((key) => {
+          const { label, max } = JOB_FIT_SCORE_LABEL[key];
+          return (
+            <li key={key}>
+              <span>{label}</span>
+              <i><b style={{ width: `${(fit.scores[key] / max) * 100}%` }} /></i>
+              <small>{fit.scores[key]}/{max}</small>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="job-fit-gates">
+        {gateKeys.map((key) => fit.gates[key] && (
+          <span key={key} className={`gate-${fit.gates[key]}`}>{JOB_FIT_GATE_LABEL[key]} {HARD_GATE_LABEL[fit.gates[key]]}</span>
+        ))}
+      </p>
+    </section>
+  );
+}
+
 function FilterChips({
   label,
   options,
@@ -472,12 +487,16 @@ function FilterChips({
 
 function JobsView({
   notes,
+  today,
   onOpen,
   onVaultChanged,
   onNoteWritten,
   initialFilters,
+  onFlash,
 }: {
   notes: Note[];
+  /** 「今日」は殻が持つ（零時の切替も殻が面倒を見る）。ここで new Date() すると跨日後の「今日入库」が前日のまま凍る。 */
+  today: string;
   onOpen: (note: Note) => void;
   onVaultChanged?: () => void | Promise<void>;
   /** 写路由が返した更新後の note を1件だけ差し替える。全量再取得（onVaultChanged）の代替。 */
@@ -492,6 +511,11 @@ function JobsView({
    * 画面がそのまま嘘になる。
    */
   initialFilters?: JobsInitialFilters | null;
+  /**
+   * 状态写入成功后的「已改为 X · 撤销」。条幅由外壳统一渲染（同一时刻只该有一条），
+   * 这里只把消息和撤销动作交出去。
+   */
+  onFlash?: (message: string, undo?: UndoAction) => void;
 }) {
   const [initialUrlState] = useState(() => readJobsUrlState(initialFilters));
   const [query, setQuery] = useState(initialUrlState.query);
@@ -500,7 +524,6 @@ function JobsView({
   const [viewMode, setViewMode] = useState<ViewMode>(initialUrlState.viewMode);
   const [weekOffset, setWeekOffset] = useState(initialUrlState.weekOffset);
   // 这个面板常挂着不关，「今天」要在跨天后重新取，否则周复盘会一直停在打开那天的那一周。
-  const [today, setToday] = useState(() => isoDate(new Date()));
   const [detailPath, setDetailPath] = useState<string | null>(initialUrlState.detailPath);
   const [comparePaths, setComparePaths] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -512,7 +535,6 @@ function JobsView({
    * どれでも閉じられ、どれも書込み中を待たない。
    */
   const [statusErrors, setStatusErrors] = useState<Record<string, string>>({});
-  const [statsStale, setStatsStale] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const openDetail = useCallback((path: string) => {
     const params = new URLSearchParams(window.location.search);
@@ -573,19 +595,7 @@ function JobsView({
    */
   const narrow = useCallback(
     (except?: FilterKey) => {
-      const keep = (key: FilterKey, predicate: () => boolean) => key === except || predicate();
-      return jobs.filter((job) =>
-        keep("query", () => jobMatchesQuery(job, query)) &&
-        keep("statuses", () => filters.statuses.length === 0 || filters.statuses.includes(job.status)) &&
-        keep("rating", () => jobMatchesRatingBands(job.rating, filters.ratings)) &&
-        keep("salary", () => filters.minSalary === 0 || (job.salary.max ?? 0) >= filters.minSalary) &&
-        keep("stacks", () => filters.stacks.length === 0 || job.stack.some((tag) => filters.stacks.includes(tag))) &&
-        keep("regions", () => filters.regions.length === 0 || job.regions.some((region) => filters.regions.includes(region))) &&
-        keep("sources", () => filters.sources.length === 0 || filters.sources.includes(job.sourceGroup)) &&
-        keep("verifications", () => filters.verifications.length === 0 || filters.verifications.includes(job.verification)) &&
-        keep("intakes", () => filters.intakes.length === 0 || filters.intakes.includes(jobIntake(job.date, today))) &&
-        keep("remote", () => !filters.remoteOnly || job.remote),
-      );
+      return jobs.filter((job) => jobMatchesFilters(job, filters, { query, today, except }));
     },
     // today 进依赖是必须的：跨天后「今日」那一档要重算，否则面板挂一夜就永远停在昨天。
     [jobs, query, filters, today],
@@ -604,9 +614,17 @@ function JobsView({
       sources: count(narrow("sources"), (job) => (job.sourceGroup ? [job.sourceGroup] : [])),
       verifications: count(narrow("verifications"), (job) => [job.verification]),
       intakes: count(narrow("intakes"), (job) => [jobIntake(job.date, today)]),
+      touches: count(narrow("touches"), (job) => {
+        const touch = jobTouch(job);
+        return touch ? [touch] : [];
+      }),
+      gates: count(narrow("gates"), (job) => [jobFitGate(job)]),
+      bands: count(narrow("bands"), (job) => [jobFitBand(job)]),
+      accesses: count(narrow("accesses"), (job) => [jobFitAccess(job)]),
       ratingPool: narrow("rating"),
       salaryPool: narrow("salary"),
       remote: narrow("remote").filter((job) => job.remote).length,
+      waiting: narrow("waiting").filter(jobWaitsOnCounterpart).length,
     };
   }, [narrow, today]);
 
@@ -664,7 +682,7 @@ function JobsView({
         // 所以口径是「状态在本周变化到未応募以外」，而不是只数还活着的。
         value: count((job) => job.status !== "未応募" && dayInRange(eventDay(job), week.from, week.to)),
       },
-      { label: "面接进行中", tone: "orange", value: count((job) => job.status === "面接中") },
+      { label: "面试进行中", tone: "orange", value: count((job) => job.status === "面接中") },
       { label: "选考推进中", tone: "ink", value: count((job) => SELECTION_STATUSES.includes(job.status)) },
       { label: "待投递（8+）", tone: "gold", value: count((job) => job.status === "未応募" && job.rating >= 8) },
     ];
@@ -731,9 +749,14 @@ function JobsView({
     filters.sources.length +
     filters.verifications.length +
     filters.intakes.length +
+    filters.touches.length +
+    filters.gates.length +
+    filters.bands.length +
+    filters.accesses.length +
     filters.ratings.length +
     (filters.minSalary > 0 ? 1 : 0) +
-    (filters.remoteOnly ? 1 : 0);
+    (filters.remoteOnly ? 1 : 0) +
+    (filters.waitingOnly ? 1 : 0);
 
   const resetFilters = () => {
     setFilters(DEFAULT_OPPORTUNITY_FILTERS);
@@ -770,13 +793,47 @@ function JobsView({
     });
   }, []);
 
+  /**
+   * 撤销＝把服务端记下的旧值原样放回。只对「刚写完的那个版本」有效（expectedMtime 必填）：
+   * 中间有别处改过就 409，这时放回旧值会连那次修改一起抹掉，所以只报告、不重试。
+   * 撤销成功不再弹条幅——条幅本身会收起，再弹一条「已改为」反而分不清哪次是哪次。
+   */
+  const statusUndo = useCallback(
+    (path: string, restore: Record<string, string | null> | undefined, mtime: number | undefined): UndoAction | undefined => {
+      if (!restore || mtime === undefined) return undefined;
+      return async () => {
+        setSavingPaths((current) => current.includes(path) ? current : [...current, path]);
+        try {
+          const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/jobs/status", {
+            path,
+            restore,
+            expectedMtime: mtime,
+          });
+          if (payload.note && onNoteWritten) onNoteWritten(payload.note);
+          else await onVaultChanged?.();
+          return null;
+        } catch (error) {
+          if (error instanceof ConflictError) {
+            // 画面の版が古いままだと次の操作も 409 になる。撤销はしないが最新は取り直す。
+            await onVaultChanged?.();
+            return "已在别处更新，无法撤销";
+          }
+          return error instanceof Error ? error.message : "撤销失败";
+        } finally {
+          setSavingPaths((current) => current.filter((item) => item !== path));
+        }
+      };
+    },
+    [onNoteWritten, onVaultChanged],
+  );
+
   const changeStatus = useCallback(
     async (
       path: string,
       status: string,
       statusNote = "",
       channel?: string,
-      expectedStatusUpdated = "",
+      expectedMtime?: number,
     ): Promise<string | null> => {
       setSavingPaths((current) => current.includes(path) ? current : [...current, path]);
       setStatusErrors((current) => {
@@ -786,29 +843,29 @@ function JobsView({
         return next;
       });
       try {
-        const response = await fetch("/api/jobs/status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            path,
-            status,
-            statusNote,
-            ...(channel ? { channel } : {}),
-            ...(expectedStatusUpdated !== undefined ? { expectedStatusUpdated } : {}),
-          }),
-        });
-        const payload = (await response.json()) as {
+        let payload: {
           ok?: boolean;
           error?: string;
           note?: Note;
           derivedState?: "fresh" | "stale";
+          unchanged?: boolean;
+          /** 这次写入动过的键的旧值。服务端判断无法按标量写回时不给。 */
+          undo?: Record<string, string | null>;
         };
-        if (!response.ok || !payload.ok) {
-          if (response.status === 409) {
+        try {
+          payload = await postJson("/api/jobs/status", {
+            path,
+            status,
+            statusNote,
+            ...(channel ? { channel } : {}),
+            ...(expectedMtime !== undefined ? { expectedMtime } : {}),
+          });
+        } catch (writeError) {
+          if (writeError instanceof ConflictError) {
             await onVaultChanged?.();
-            throw new Error(payload.error || "状态已更新，已自动刷新到最新版本，请重新点击。");
+            throw new Error(writeError.message || "状态已更新，已自动刷新到最新版本，请重新点击。");
           }
-          throw new Error(payload.error || "写入 Vault 失败");
+          throw writeError;
         }
         // 画面へ反映してから savingPaths を落とす（finally は下の分岐の後）。
         // そうしないと一瞬だけ古い値に戻って、書けたのか失敗したのか読めなくなる。
@@ -816,7 +873,7 @@ function JobsView({
         // 無い場合（unchanged 応答・旧サーバ）だけ全量再取得へ退く。
         if (payload.note && onNoteWritten) onNoteWritten(payload.note);
         else await onVaultChanged?.();
-        if (payload.derivedState === "stale") setStatsStale(true);
+        if (!payload.unchanged) onFlash?.(changedToLabel(status), statusUndo(path, payload.undo, payload.note?.stat.mtime));
         return null;
       } catch (error) {
         const message = error instanceof Error ? error.message : "写入 Vault 失败";
@@ -826,23 +883,19 @@ function JobsView({
         setSavingPaths((current) => current.filter((item) => item !== path));
       }
     },
-    [onNoteWritten, onVaultChanged],
+    [onFlash, onNoteWritten, onVaultChanged, statusUndo],
   );
 
   const changeFollowUp = useCallback(async (
     path: string,
     values: { waitingFor: string | null; followUpAt: string | null; nextEventAt: string | null },
+    expectedMtime?: number,
   ): Promise<string | null> => {
     setSavingPaths((current) => current.includes(path) ? current : [...current, path]);
     dismissStatusError(path);
     try {
-      const response = await fetch("/api/jobs/follow-up", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, ...values }),
-      });
-      const payload = (await response.json()) as { ok?: boolean; error?: string; note?: Note };
-      if (!response.ok || !payload.ok || !payload.note) throw new Error(payload.error || "写入 Vault 失败");
+      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/jobs/follow-up", { path, ...values, ...(expectedMtime !== undefined ? { expectedMtime } : {}) });
+      if (!payload.note) throw new Error(payload.error || "写入 Vault 失败");
       onNoteWritten?.(payload.note);
       return null;
     } catch (error) {
@@ -862,8 +915,7 @@ function JobsView({
         return;
       }
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (isTypingTarget(event.target)) return;
       event.preventDefault();
       searchRef.current?.focus();
     };
@@ -872,20 +924,10 @@ function JobsView({
   }, [closeDetail, compareOpen, detailOpen]);
 
   useEffect(() => {
-    const sync = () => setToday((current) => {
-      const now = isoDate(new Date());
-      return now === current ? current : now;
-    });
-    document.addEventListener("visibilitychange", sync);
-    window.addEventListener("focus", sync);
-    return () => {
-      document.removeEventListener("visibilitychange", sync);
-      window.removeEventListener("focus", sync);
-    };
-  }, []);
-
-  useEffect(() => {
+    const pathname = window.location.pathname;
     const syncFromUrl = () => {
+      // 回到别的页面时本组件马上卸载；别把对方页面的同名参数（mode 等）读进看板。
+      if (window.location.pathname !== pathname) return;
       const next = readJobsUrlState();
       setQuery(next.query);
       setSort(next.sort);
@@ -895,7 +937,12 @@ function JobsView({
       setDetailPath(next.detailPath);
     };
     window.addEventListener("popstate", syncFromUrl);
-    return () => window.removeEventListener("popstate", syncFromUrl);
+    // 在看板上再点一次左栏「岗位机会」：外壳 pushState 回到不带参数的 /jobs，筛选要跟着回到默认。
+    window.addEventListener(URL_CHANGE_EVENT, syncFromUrl);
+    return () => {
+      window.removeEventListener("popstate", syncFromUrl);
+      window.removeEventListener(URL_CHANGE_EVENT, syncFromUrl);
+    };
   }, []);
 
   useEffect(() => {
@@ -910,7 +957,12 @@ function JobsView({
       if (filters.sources.length) params.set("source", filters.sources.join(","));
       if (filters.verifications.length) params.set("verification", filters.verifications.join(","));
       if (filters.intakes.length) params.set("intake", filters.intakes.join(","));
+      if (filters.touches.length) params.set("touch", filters.touches.join(","));
+      if (filters.gates.length) params.set("gate", filters.gates.join(","));
+      if (filters.bands.length) params.set("band", filters.bands.join(","));
+      if (filters.accesses.length) params.set("access", filters.accesses.join(","));
       if (filters.remoteOnly) params.set("remote", "1");
+      if (filters.waitingOnly) params.set("waiting", "1");
     }
     if (sort !== "rating") params.set("sort", sort);
     if (viewMode !== "decision") params.set("mode", viewMode);
@@ -924,13 +976,11 @@ function JobsView({
     );
   }, [detailPath, filters, query, sort, viewMode, weekOffset]);
 
-  const notAppliedJobs = jobs.filter((job) => job.status === "未応募");
+  // 统计格从全部案件数（不随筛选变），口径与点开后的筛选在 lib/jobs.ts 里成对定义、由测试钉住。
   // 已经动过手的不再算「待判断」——本人这边没有下一步，催也没用。
-  const awaitingJobs = notAppliedJobs.filter(awaitingCounterpart);
-  const untouchedJobs = notAppliedJobs.filter((job) => !awaitingCounterpart(job));
-  const readyJobs = untouchedJobs
-    .filter((job) => job.rating >= 7)
-    .sort((left, right) => compareJobs(left, right, "rating"));
+  const tilePools = jobStatTilePools(jobs, today);
+  const untouchedJobs = tilePools.untouched;
+  const readyJobs = [...tilePools.ready].sort((left, right) => compareJobs(left, right, "rating"));
   const nextPick =
     readyJobs[0] ??
     [...untouchedJobs].sort((left, right) => compareJobs(left, right, "rating"))[0] ??
@@ -945,10 +995,16 @@ function JobsView({
   const resultVisible = highlightedNextPick
     ? visible.filter((job) => job.path !== highlightedNextPick.path)
     : visible;
-  const recentNotApplied = notAppliedJobs.filter((job) =>
-    ["today", "d3", "d7"].includes(jobIntake(job.date, today)),
-  ).length;
-  const verifiedNotApplied = notAppliedJobs.filter((job) => job.verification === "verified").length;
+  // 统计格＝一次性替换全部筛选：从空条件起步、清掉关键词，只保留排序与视图。
+  // 在旧条件上叠加的话，点开后的条数会比格子上的数字少，格子就成了谎话。
+  const applyStatTile = (id: JobStatTileId) => {
+    setFilters(jobStatTileFilters(id));
+    setQuery("");
+    // 周复盘不画列表：停在那里的话，点了「只看这 N 条」却什么都看不到。
+    if (viewMode === "weekly") setViewMode("decision");
+  };
+  const statTileActive = (id: JobStatTileId) =>
+    query.trim() === "" && JSON.stringify(filters) === JSON.stringify(jobStatTileFilters(id));
 
   const isJobList = viewMode !== "weekly";
   const decisionDetail = viewMode === "decision" ? detail ?? visible[0] ?? null : null;
@@ -988,12 +1044,22 @@ function JobsView({
         </section>
       )}
 
-      <div className="jobs-stat page-stat-strip module-stat-strip" aria-label="当前岗位机会摘要">
-        <div data-zero={untouchedJobs.length === 0}><strong>{untouchedJobs.length}</strong><span>未着手</span></div>
-        <div data-zero={awaitingJobs.length === 0}><strong>{awaitingJobs.length}</strong><span>已动手 · 等对方</span></div>
-        <div data-zero={readyJobs.length === 0}><strong>{readyJobs.length}</strong><span>7 分以上待判断</span></div>
-        <div data-zero={recentNotApplied === 0}><strong>{recentNotApplied}</strong><span>7 日内新增</span></div>
-        <div data-zero={verifiedNotApplied === 0}><strong>{verifiedNotApplied}</strong><span>原文已核对</span></div>
+      <div className="jobs-stat page-stat-strip module-stat-strip" role="group" aria-label="当前岗位机会摘要（点击查看对应岗位）">
+        {JOB_STAT_TILES.map((tile) => {
+          const count = tilePools[tile.id].length;
+          return (
+            <button
+              key={tile.id}
+              type="button"
+              data-zero={count === 0}
+              aria-pressed={statTileActive(tile.id)}
+              title={`只看这 ${count} 条（替换当前全部筛选）`}
+              onClick={() => applyStatTile(tile.id)}
+            >
+              <strong>{count}</strong><span>{tile.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="jobs-body">
@@ -1024,6 +1090,39 @@ function JobsView({
                 selected={filters.statuses}
                 onToggle={(value) => setFilters((current) => ({ ...current, statuses: toggle(current.statuses, value) }))}
               />
+
+              {/* 只有未応募才有动手状态；选中后应募済以降会全部落选，与顶部统计格同一口径。 */}
+              <FilterChips
+                label="动手状态"
+                options={JOB_TOUCHES.map((touch) => ({
+                  value: touch.id,
+                  label: touch.label,
+                  hint: touch.hint,
+                  count: facets.touches.get(touch.id) ?? 0,
+                }))}
+                selected={filters.touches}
+                onToggle={(value) =>
+                  setFilters((current) => ({ ...current, touches: toggle(current.touches, value as JobTouch) }))
+                }
+              />
+
+              {/* 首页「等待回复 · 全部 N 项」落在这里：判定与首页同一个函数（jobWaitsOnCounterpart），条数一致。 */}
+              {(facets.waiting > 0 || filters.waitingOnly) && (
+                <div className="job-filter-row">
+                  <span className="job-filter-label">等待</span>
+                  <div className="job-chips">
+                    <button
+                      type="button"
+                      className={`job-chip${filters.waitingOnly ? " active" : ""}`}
+                      aria-pressed={filters.waitingOnly}
+                      title="已记等待对象、且不是本人的案件（选考中・内定，或未応募但已动手）"
+                      onClick={() => setFilters((current) => ({ ...current, waitingOnly: !current.waitingOnly }))}
+                    >
+                      <span>只看等对方</span> <small>{facets.waiting}</small>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* 顺序固定按「新→旧」，不像 facetOptions 那样按计数排 —— 时间轴重排了就读不成时间轴了。 */}
               <FilterChips
@@ -1058,6 +1157,27 @@ function JobsView({
                     ratings: toggle(current.ratings, value as JobRatingBand),
                   }))
                 }
+              />
+
+              {/* v2 採点は応募优先度とは別軸：rating は求人原文を読んだ上での主観的な優先度、
+                  Gate / Band は六軸採点の結論。未採点を擬似値として並べるのは、採点待ちの案件を拾うため。 */}
+              <FilterChips
+                label="Gate（v2）"
+                options={GATE_FILTER_VALUES.map((value) => ({ value, label: fitFilterLabel(value, HARD_GATE_LABEL), count: facets.gates.get(value) ?? 0 }))}
+                selected={filters.gates}
+                onToggle={(value) => setFilters((current) => ({ ...current, gates: toggle(current.gates, value) }))}
+              />
+              <FilterChips
+                label="Band（v2）"
+                options={BAND_FILTER_VALUES.map((value) => ({ value, label: fitFilterLabel(value, {}), count: facets.bands.get(value) ?? 0 }))}
+                selected={filters.bands}
+                onToggle={(value) => setFilters((current) => ({ ...current, bands: toggle(current.bands, value) }))}
+              />
+              <FilterChips
+                label="到達（v2）"
+                options={ACCESS_FILTER_VALUES.map((value) => ({ value, label: fitFilterLabel(value, ACCESS_STATE_LABEL), count: facets.accesses.get(value) ?? 0 }))}
+                selected={filters.accesses}
+                onToggle={(value) => setFilters((current) => ({ ...current, accesses: toggle(current.accesses, value) }))}
               />
 
               {/* 来源在年収より上：応募経路の混在（ワークポート起票以降 6 経路超）で、
@@ -1218,7 +1338,7 @@ function JobsView({
                     status,
                     note,
                     channel,
-                    job.statusUpdated,
+                    job.note.stat.mtime,
                   )}
                 />
               ))}
@@ -1237,7 +1357,7 @@ function JobsView({
                 status,
                 note,
                 channel,
-                decisionDetail.statusUpdated,
+                decisionDetail.note.stat.mtime,
               )}
               onOpenNote={() => onOpen(decisionDetail.note)}
             />
@@ -1305,19 +1425,12 @@ function JobsView({
                 status,
                 note,
                 channel,
-                detail.statusUpdated,
+                detail.note.stat.mtime,
               )}
-          onFollowUp={(values) => changeFollowUp(detail.path, values)}
+          onFollowUp={(values) => changeFollowUp(detail.path, values, detail.note.stat.mtime)}
           onCompare={() => toggleCompare(detail.path)}
           onOpenNote={(note) => onOpen(note ?? detail.note)}
         />
-      )}
-
-      {statsStale && (
-        <div className="job-stats-stale" role="status">
-          <span>案件状态已写入；派生统计将在下次运行 vault:stats 后更新。</span>
-          <button onClick={() => setStatsStale(false)} aria-label="关闭提示">×</button>
-        </div>
       )}
 
       {compareOpen && compared.length >= 2 && (
@@ -1362,7 +1475,7 @@ function StatusPicker({
   sourceGuess,
   today,
   saving,
-  expectedStatusUpdated,
+  expectedMtime,
   onChange,
 }: {
   value: string;
@@ -1373,12 +1486,13 @@ function StatusPicker({
   sourceGuess: string;
   today: string;
   saving: boolean;
-  expectedStatusUpdated?: string;
+  /** 上一次已知的笔记 mtime：写入时带上，服务端不一致就 409。 */
+  expectedMtime?: number;
   onChange: (
     status: string,
     note: string,
     channel?: string,
-    expectedStatusUpdated?: string,
+    expectedMtime?: number,
   ) => Promise<string | null>;
 }) {
   const customValue = value && !isJobStatus(value) ? value : null;
@@ -1399,7 +1513,7 @@ function StatusPicker({
 
   const submit = async () => {
     if (draftError) return;
-    if (!(await onChange(value, draft, undefined, expectedStatusUpdated))) setEditing(false);
+    if (!(await onChange(value, draft, undefined, expectedMtime))) setEditing(false);
   };
 
   const pickStatus = (next: string) => {
@@ -1416,13 +1530,13 @@ function StatusPicker({
       return;
     }
     setPendingStatus(null);
-    void onChange(next, "", undefined, expectedStatusUpdated);
+    void onChange(next, "", undefined, expectedMtime);
   };
 
   const submitChannel = async () => {
     // Enter 連打での同一ノートへの並行 POST を塞ぐ（保存ボタンは disabled で守られている）。
     if (saving || !pendingStatus || !channelDraft) return;
-    if (!(await onChange(pendingStatus, "", channelDraft, expectedStatusUpdated))) setPendingStatus(null);
+    if (!(await onChange(pendingStatus, "", channelDraft, expectedMtime))) setPendingStatus(null);
   };
 
   return (
@@ -1536,7 +1650,7 @@ function JobCardView({
     status: string,
     note: string,
     channel?: string,
-    expectedStatusUpdated?: string,
+    expectedMtime?: number,
   ) => Promise<string | null>;
 }) {
   return (
@@ -1556,7 +1670,10 @@ function JobCardView({
             {job.position && <p className="job-position"><Highlight text={job.position} query={query} /></p>}
           </div>
         </div>
-        <span className={`job-verify verify-${job.verification}`}>{VERIFICATION_LABEL[job.verification]}</span>
+        <span className="job-card-marks">
+          {job.fit && <FitChip fit={job.fit} />}
+          <span className={`job-verify verify-${job.verification}`} title={`求人原文：${VERIFICATION_LABEL[job.verification]}`}>{VERIFICATION_LABEL[job.verification]}</span>
+        </span>
       </header>
 
       <div className="job-salary-row">
@@ -1608,7 +1725,7 @@ function JobCardView({
               sourceGuess={job.sourceGroup}
               today={today}
               saving={saving}
-              expectedStatusUpdated={job.statusUpdated}
+              expectedMtime={job.note.stat.mtime}
               onChange={onStatus}
             />
         <button
@@ -1667,7 +1784,7 @@ function JobDecisionWorkspace({
     status: string,
     note: string,
     channel?: string,
-    expectedStatusUpdated?: string,
+    expectedMtime?: number,
   ) => Promise<string | null>;
   onOpenNote: () => void;
 }) {
@@ -1697,7 +1814,7 @@ function JobDecisionWorkspace({
       <article className="jobs-decision-detail">
         <header>
           <div>
-            <span>{ORIGIN_LABEL[selected.origin] ?? "岗位机会"} · 応募优先度 {selected.rating}/10</span>
+            <span>{ORIGIN_LABEL[selected.origin] ?? "岗位机会"} · 応募优先度 {selected.rating}/10{selected.fit && ` · Fit ${selected.fit.score} · Band ${selected.fit.band}`}</span>
             <h2>{selected.company}</h2>
             <p>{selected.position || "职位未记录"}</p>
           </div>
@@ -1709,12 +1826,13 @@ function JobDecisionWorkspace({
             sourceGuess={selected.sourceGroup}
             today={today}
             saving={saving}
-            expectedStatusUpdated={selected.statusUpdated}
+            expectedMtime={selected.note.stat.mtime}
             onChange={onStatus}
           />
         </header>
         <dl>
           <div><dt>年収</dt><dd>{salaryLabel(selected)}</dd></div>
+          <div><dt>v2 採点</dt><dd>{selected.fit ? `Fit ${selected.fit.score} · Band ${selected.fit.band} · Gate ${HARD_GATE_LABEL[selected.fit.hardGate]}` : UNRATED_V2_LABEL}</dd></div>
           <div><dt>勤務地</dt><dd>{selected.location || "—"}</dd></div>
           <div><dt>原文</dt><dd>{VERIFICATION_LABEL[selected.verification]}</dd></div>
           <div><dt>入库</dt><dd>{selected.date || "—"}</dd></div>
@@ -1731,7 +1849,7 @@ function JobDecisionWorkspace({
           {selected.url && selected.url !== selected.officialApplyUrl && (
             <a href={selected.url} target="_blank" rel="noopener noreferrer">查看求人原文 ↗</a>
           )}
-          <button onClick={onOpenNote}>查看完整案件笔记</button>
+          <button type="button" onClick={onOpenNote}>{OPEN_NOTE_LABEL}</button>
         </footer>
       </article>
     </div>
@@ -1780,7 +1898,7 @@ function JobListView({
             {intakeLabel(job.date, today)}
           </span>
           <span className={`job-status-pill tone-${statusTone(job.status)}`} title={job.status}>{job.status}</span>
-          <span className={`job-verify verify-${job.verification}`}>{VERIFICATION_LABEL[job.verification]}</span>
+          <span className={`job-verify verify-${job.verification}`} title={`求人原文：${VERIFICATION_LABEL[job.verification]}`}>{VERIFICATION_LABEL[job.verification]}</span>
         </button>
       ))}
     </div>
@@ -1826,166 +1944,6 @@ function JobKanbanView({
         </section>
       ))}
     </div>
-  );
-}
-
-/**
- * 复盘笔记的轻量 Markdown 渲染。只覆盖复盘实际用到的语法
- * （##〜#### 标题／表格／列表／引用／粗体／行内码／[[wiki链接]]），刻意不引第三方库。
- */
-type MdBlock =
-  | { kind: "heading"; depth: number; text: string }
-  | { kind: "quote"; lines: string[] }
-  | { kind: "list"; items: string[] }
-  | { kind: "table"; header: string[]; rows: string[][] }
-  | { kind: "para"; text: string };
-
-function parseMdBlocks(content: string): MdBlock[] {
-  const blocks: MdBlock[] = [];
-  const lines = content.split("\n");
-  let index = 0;
-  while (index < lines.length) {
-    const trimmed = lines[index].trim();
-    if (!trimmed || /^-{3,}$/.test(trimmed)) {
-      index += 1;
-      continue;
-    }
-    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
-    if (heading) {
-      blocks.push({ kind: "heading", depth: heading[1].length, text: heading[2] });
-      index += 1;
-      continue;
-    }
-    if (trimmed.startsWith(">")) {
-      const quote: string[] = [];
-      while (index < lines.length && lines[index].trim().startsWith(">")) {
-        quote.push(lines[index].trim().replace(/^>\s?/, ""));
-        index += 1;
-      }
-      blocks.push({ kind: "quote", lines: quote.filter(Boolean) });
-      continue;
-    }
-    if (trimmed.startsWith("|")) {
-      const rows: string[][] = [];
-      while (index < lines.length && lines[index].trim().startsWith("|")) {
-        const cells = lines[index].trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
-        // |---|---| 是对齐行，不是数据
-        if (!cells.every((cell) => /^:?-{3,}:?$/.test(cell))) rows.push(cells);
-        index += 1;
-      }
-      const [header = [], ...body] = rows;
-      blocks.push({ kind: "table", header, rows: body });
-      continue;
-    }
-    if (/^(?:[-*]|\d+\.)\s+/.test(trimmed)) {
-      const items: string[] = [];
-      while (index < lines.length) {
-        const item = lines[index].trim().match(/^(?:[-*]|\d+\.)\s+(.+)$/);
-        if (!item) break;
-        items.push(item[1]);
-        index += 1;
-      }
-      blocks.push({ kind: "list", items });
-      continue;
-    }
-    const para: string[] = [trimmed];
-    index += 1;
-    while (index < lines.length) {
-      const next = lines[index].trim();
-      if (!next || /^#{1,4}\s/.test(next) || next.startsWith(">") || next.startsWith("|") || /^(?:[-*]|\d+\.)\s+/.test(next)) break;
-      para.push(next);
-      index += 1;
-    }
-    blocks.push({ kind: "para", text: para.join(" ") });
-  }
-  return blocks;
-}
-
-function InlineMd({ text, onWiki }: { text: string; onWiki: (target: string) => void }) {
-  const parts = text.split(/(\[\[[^\]]+\]\]|\*\*[^*]+\*\*|`[^`]+`)/g);
-  return (
-    <>
-      {parts.map((part, index) => {
-        const wiki = part.match(/^\[\[([^\]]+)\]\]$/);
-        if (wiki) {
-          const label = (wiki[1].split("|").pop() ?? wiki[1]).split("#")[0].split("/").pop() ?? wiki[1];
-          return (
-            <button key={index} type="button" className="job-week-wiki" onClick={() => onWiki(wiki[1])}>
-              {label}
-            </button>
-          );
-        }
-        if (/^\*\*[^*]+\*\*$/.test(part)) return <strong key={index}>{part.slice(2, -2)}</strong>;
-        if (/^`[^`]+`$/.test(part)) return <code key={index}>{part.slice(1, -1)}</code>;
-        return <Fragment key={index}>{part}</Fragment>;
-      })}
-    </>
-  );
-}
-
-function MdBlockView({ block, onWiki }: { block: MdBlock; onWiki: (target: string) => void }) {
-  if (block.kind === "heading") {
-    // H1 是笔记标题，面板头部已经显示过了
-    if (block.depth === 1) return null;
-    const Tag = block.depth === 2 ? "h3" : block.depth === 3 ? "h4" : "h5";
-    return (
-      <Tag>
-        <InlineMd text={block.text} onWiki={onWiki} />
-      </Tag>
-    );
-  }
-  if (block.kind === "quote") {
-    return (
-      <blockquote>
-        {block.lines.map((line, index) => (
-          <p key={index}>
-            <InlineMd text={line} onWiki={onWiki} />
-          </p>
-        ))}
-      </blockquote>
-    );
-  }
-  if (block.kind === "list") {
-    return (
-      <ul>
-        {block.items.map((item, index) => (
-          <li key={index}>
-            <InlineMd text={item} onWiki={onWiki} />
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  if (block.kind === "table") {
-    return (
-      <table>
-        <thead>
-          <tr>
-            {block.header.map((cell, index) => (
-              <th key={index}>
-                <InlineMd text={cell} onWiki={onWiki} />
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {block.rows.map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              {row.map((cell, cellIndex) => (
-                <td key={cellIndex}>
-                  <InlineMd text={cell} onWiki={onWiki} />
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    );
-  }
-  return (
-    <p>
-      <InlineMd text={block.text} onWiki={onWiki} />
-    </p>
   );
 }
 
@@ -2046,7 +2004,7 @@ function JobWeeklyView({
                 <button key={job.path} type="button" className="job-week-event" onClick={() => onDetail(job.path)}>
                   <time>{dayLabel(eventDay(job))}</time>
                   <span>
-                    <i className={`tone-${eventTone(job.status)}`} aria-hidden="true" />
+                    <i className={`tone-${statusTone(job.status)}`} aria-hidden="true" />
                     <strong>{job.company}</strong>
                     <small>{eventLabel(job)}</small>
                   </span>
@@ -2087,13 +2045,12 @@ function JobWeeklyView({
             <div className="job-week-review-head">
               <strong>{getTitle(review)}</strong>
               <button type="button" className="job-week-review-open" onClick={() => onOpenReview(review)}>
-                在记忆库中打开
+                {OPEN_NOTE_LABEL}
               </button>
             </div>
+            {/* 与原笔记 drawer 同一个渲染器：私有的简版解析器漏掉了代码块・callout・外链，两处读到的不是同一篇。 */}
             <div className="job-week-md">
-              {parseMdBlocks(stripFrontmatter(review.content)).map((block, index) => (
-                <MdBlockView key={index} block={block} onWiki={onWiki} />
-              ))}
+              <MarkdownDocument content={review.content} onWikiLink={onWiki} />
             </div>
           </>
         ) : (
@@ -2141,7 +2098,7 @@ function JobDrawer({
     status: string,
     note: string,
     channel?: string,
-    expectedStatusUpdated?: string,
+    expectedMtime?: number,
   ) => Promise<string | null>;
   onFollowUp: (values: {
     waitingFor: string | null;
@@ -2201,6 +2158,8 @@ function JobDrawer({
             </div>
           </div>
 
+          <FitPanel fit={job.fit} />
+
           <div className="job-detail-actions">
             <StatusPicker
               value={job.status}
@@ -2209,7 +2168,7 @@ function JobDrawer({
               sourceGuess={job.sourceGroup}
               today={today}
               saving={saving}
-              expectedStatusUpdated={job.statusUpdated}
+              expectedMtime={job.note.stat.mtime}
               onChange={onStatus}
             />
             {/* 列表 / 看板 / 周复盘视图里没有对比按钮，都从详情这里加入。 */}
@@ -2231,7 +2190,7 @@ function JobDrawer({
             {job.url && job.url !== job.officialApplyUrl && (
               <a className="job-link" href={job.url} target="_blank" rel="noopener noreferrer">求人票 ↗</a>
             )}
-            <button type="button" className="job-detail" onClick={() => onOpenNote()}>在记忆库中打开</button>
+            <button type="button" className="job-detail" onClick={() => onOpenNote()}>{OPEN_NOTE_LABEL}</button>
           </div>
 
           <dl className="job-detail-facts">
@@ -2330,7 +2289,19 @@ function JobDrawer({
 
 const COMPARE_ROWS: { label: string; render: (job: JobCard) => ReactNode }[] = [
   { label: "応募优先度", render: (job) => <strong className="job-compare-rating">{job.rating} / 10</strong> },
-  { label: "年収", render: (job) => job.salaryText || "—" },
+  {
+    label: "v2 採点",
+    render: (job) => job.fit
+      ? <><strong className="job-compare-rating">{job.fit.score}</strong> / 100 · Band {job.fit.band} · Gate {HARD_GATE_LABEL[job.fit.hardGate]}</>
+      : <span className="job-compare-unrated">{UNRATED_V2_LABEL}</span>,
+  },
+  // 六軸は行を分けて並べる：合計だけ見ると「B 同士」で差が無いように見える案件が、軸単位では逆転している。
+  ...JOB_FIT_AXES.map((key) => ({
+    label: `　${JOB_FIT_SCORE_LABEL[key].label}`,
+    render: (job: JobCard) => (job.fit ? `${job.fit.scores[key]} / ${JOB_FIT_SCORE_LABEL[key].max}` : "—"),
+  })),
+  // 年収は構造化値（salary_min/max）優先で自由文を title に残す——古い求人票の文言と採点時の確認値がずれることがある。
+  { label: "年収", render: (job) => <span title={job.salaryText || undefined}>{salaryLabel(job)}</span> },
   { label: "勤務地", render: (job) => job.location || "—" },
   { label: "雇用形態", render: (job) => job.employment || "—" },
   { label: "状态", render: (job) => job.status },

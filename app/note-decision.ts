@@ -1,3 +1,4 @@
+import { IN_FLIGHT_STATUSES } from "@/lib/jobs";
 import { formatDate, getString, getType, stripMarkdown, type Note } from "@/lib/notes";
 import {
   careerStatus,
@@ -32,7 +33,8 @@ export function noteDecisionMeta(note: Note) {
   const scheduledDate = scheduled.match(/\b20\d{2}-\d{2}-\d{2}\b/u)?.[0] ?? "";
   const overdue = scheduledDate !== "" && scheduledDate < localDateKey() && status !== "完了";
   const waiting = /(?:待ち|待機|等待|返信|回复|結果待)/u.test(`${nextAction} ${status}`);
-  const activeJob = getType(note) === "job-case" && careerStatus(status).tone === "active";
+  // 「選考が動いている」は lib/job-status.mjs の集合で判定（配色名で判定すると色表を変えた瞬間に壊れる）。
+  const activeJob = getType(note) === "job-case" && IN_FLIGHT_STATUSES.includes(careerStatus(status).label);
   let semantic: DecisionSemantic = "fact";
   if (overdue) semantic = "risk";
   else if (waiting) semantic = "waiting";

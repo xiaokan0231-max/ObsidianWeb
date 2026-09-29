@@ -2,6 +2,7 @@
 
 import { memo, useState } from "react";
 import { noteDecisionMeta } from "./note-decision";
+import { enumCodec, useUrlState } from "./use-url-state";
 import { todoStaleReason } from "@/lib/focus-action";
 import { jobSection } from "@/lib/jobs";
 import { getString, getType, type Note } from "@/lib/notes";
@@ -13,6 +14,16 @@ import {
   TODO_PRIORITY,
   TODO_STATUS,
 } from "@/lib/memory-atlas-data";
+
+/**
+ * 「未完成」＝完了以外（未着手・進行中・保留）。首页的「N 件待办」数的就是它，
+ * 从首页点过来要落在同一批上——落在「全部」的话，屏幕上的条数和刚才点的数字对不上。
+ */
+export const OPEN_TAB = "open";
+
+// 标签与「行动／系统维护」放进 URL：刷新或从原笔记返回后仍停在刚才的筛选上。
+const TAB_CODEC = enumCodec(["all", OPEN_TAB, ...TODO_STATUS]);
+const AUDIENCE_CODEC = enumCodec(["user", "system"] as const);
 
 function TodoView({
   notes,
@@ -26,8 +37,8 @@ function TodoView({
   onOpen: (note: Note) => void;
   onStatus: (note: Note, status: string, expectedMtime?: number) => Promise<string | null>;
 }) {
-  const [tab, setTab] = useState<string>("all");
-  const [audience, setAudience] = useState<"user" | "system">("user");
+  const [tab, setTab] = useUrlState<string>("tab", "all", TAB_CODEC);
+  const [audience, setAudience] = useUrlState<"user" | "system">("who", "user", AUDIENCE_CODEC);
   const [busyPath, setBusyPath] = useState("");
   const [writeError, setWriteError] = useState("");
 
@@ -50,7 +61,7 @@ function TodoView({
   const scopedTodos = todos.filter((note) => todoAudience(note) === audience);
   const open = scopedTodos.filter((n) => todoStatus(n) !== "完了");
   const visible =
-    tab === "all" ? scopedTodos : scopedTodos.filter((n) => todoStatus(n) === tab);
+    tab === "all" ? scopedTodos : tab === OPEN_TAB ? open : scopedTodos.filter((n) => todoStatus(n) === tab);
   const statuses = TODO_STATUS.filter((st) => scopedTodos.some((n) => todoStatus(n) === st));
   const systemCount = todos.filter((note) => todoAudience(note) === "system" && todoStatus(note) !== "完了").length;
   const highPriorityOpen = open.filter((note) => todoPriority(note) === "high").length;
@@ -74,6 +85,9 @@ function TodoView({
       <div className="todo-toolbar">
         <div className="jobs-controls" role="group" aria-label="行动状态筛选">
           <button className={tab === "all" ? "active" : ""} onClick={() => setTab("all")}>全部 <small>{scopedTodos.length}</small></button>
+          {scopedTodos.length > 0 && (
+            <button className={tab === OPEN_TAB ? "active" : ""} onClick={() => setTab(OPEN_TAB)}>未完成 <small>{open.length}</small></button>
+          )}
           {statuses.map((st) => (
             <button key={st} className={tab === st ? "active" : ""} onClick={() => setTab(st)}>
               {st} <small>{scopedTodos.filter((n) => todoStatus(n) === st).length}</small>

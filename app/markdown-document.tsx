@@ -15,6 +15,8 @@ function renderInline(text: string, onWikiLink: (target: string, section?: strin
     .filter(Boolean);
   return pieces.map((piece, index) => {
     const mdLink = piece.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
+    // vault 里的 [题](url) 直接变成 <a href>：只放行 http(s)・mailto・obsidian，javascript: 之类原样当文本。
+    if (mdLink && !/^(https?:|mailto:|obsidian:)/i.test(mdLink[2])) return <span key={index}>{piece}</span>;
     if (mdLink) {
       return (
         <a className="md-link" key={index} href={mdLink[2]} target="_blank" rel="noreferrer">

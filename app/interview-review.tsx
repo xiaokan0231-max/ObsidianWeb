@@ -1,6 +1,11 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ClientApiError, postJson } from "@/lib/client-api";
+import ScopeLoading from "./scope-loading";
+import { isTypingTarget } from "@/lib/keyboard";
+import { annotationCountLabel, INTERVIEW_LIST_BACK_LABEL } from "@/lib/ui-labels";
+import { enumCodec, useUrlState, type UrlStateCodec } from "./use-url-state";
 import {
   computeStats,
   latestListeningMarks,
@@ -80,6 +85,24 @@ type Filter =
   | "open"
   | "err"
   | "go";
+
+// 详情页的筛选放进 URL（review= 由外壳管）：打开原笔记再回来、或刷新后，仍停在刚才筛的那一类句子上。
+const FILTER_CODEC = enumCodec<Filter>([
+  "all", "pending", "transcript", "learner-decision", "speaker-decision", "noted", "open", "err", "go",
+]);
+const PATTERN_CODEC: UrlStateCodec<string | null> = {
+  parse: (raw) => raw || null,
+  serialize: (value) => value ?? "",
+};
+
+// 回到一覧后，等一覧的卡片重新铺满再定位（太早滚，页面还不够高就被夹到底部附近）。
+// 不用 rAF：面板在后台时 rAF 会停住，滚动就丢了。
+function restoreWindowScroll(top: number) {
+  const jump = () => window.scrollTo({ top, behavior: "instant" });
+  jump();
+  window.setTimeout(jump, 0);
+  window.setTimeout(jump, 150);
+}
 
 // 阅读模式跟侧栏折叠态一个做法：存 localStorage、useSyncExternalStore 读，
 // 避免「effect 里 setState」的水合抖动。
@@ -193,16 +216,13 @@ async function postReviewWrite<T extends WriteResponse = WriteResponse>(
   body: unknown,
   failureLabel: string,
 ): Promise<T> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const payload = (await response.json()) as T;
-  if (!response.ok || !payload.ok) {
-    throw new Error(payload.error ?? `${failureLabel}（${response.status}）`);
+  try {
+    // 復盤の生成は長い（Codex 経由）。共通の postJson に載せ、上限だけこちらで広げる。
+    return await postJson<T>(url, body, { timeoutMs: 600_000 });
+  } catch (error) {
+    if (error instanceof ClientApiError) throw new Error(error.message || `${failureLabel}（${error.status}）`);
+    throw error;
   }
-  return payload;
 }
 
 function InterviewReview({
@@ -211,8 +231,11 @@ function InterviewReview({
   onNoteWritten,
   initialSelectedKey = null,
   onSelectionChange,
+  loading = false,
 }: {
   notes: Note[];
+  /** この視図の scope がまだ届いていない：「还没有整理稿」ではなく読取中を出す。 */
+  loading?: boolean;
   onVaultChanged: () => void | Promise<void>;
   /** 追記系の書込は応答の note を1件差し替えるだけでよい。復盤の再生成だけ全量再取得に残す。 */
   onNoteWritten?: (note: Note) => void;
@@ -225,8 +248,10 @@ function InterviewReview({
   const mode = useSyncExternalStore(subscribeMode, readMode, () => "study" as Mode);
   const novelLang = useSyncExternalStore(subscribeMode, readNovelLanguage, () => "ja" as NovelLanguage);
   const previousMode = useRef<"study" | "compare">("study");
-  const [filter, setFilter] = useState<Filter>("all");
-  const [patternFilter, setPatternFilter] = useState<string | null>(null);
+  const [filter, setFilter] = useUrlState<Filter>("filter", "all", FILTER_CODEC);
+  const [patternParam, setPatternFilter] = useUrlState<string | null>("pattern", null, PATTERN_CODEC);
+  // 打开详情时一覧滚到了哪里。返回时回到原处，不必从头再找下一场；未知时（刷新后直接进详情）回顶部。
+  const listScrollTop = useRef<number | null>(null);
   const [openBlocks, setOpenBlocks] = useState<Set<string>>(new Set());
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [errOpen, setErrOpen] = useState<Set<string>>(new Set());
@@ -297,6 +322,18 @@ function InterviewReview({
    */
   const resetAnnotationDraft = () => setAnnotationDraft(null);
 
+  // 回一覧的入口有好几个（顶栏按钮・连读模式的返回），滚动恢复与筛选清理集中在这里。
+  // 筛选只对详情有意义；留在 URL 上会让一覧页的链接带着看不见的条件。
+  const backToList = () => {
+    setSelectedKey(null);
+    onSelectionChange?.(null);
+    setFilter("all");
+    setPatternFilter(null);
+    focusDeepReview(null);
+    resetAnnotationDraft();
+    restoreWindowScroll(listScrollTop.current ?? 0);
+  };
+
   const doc = docs.find((item) => item.key === selectedKey) ?? null;
 
   useEffect(() => {
@@ -314,8 +351,7 @@ function InterviewReview({
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      if (isTypingTarget(event.target)) return;
       const next = byKey[event.key];
       if (!next) return;
       event.preventDefault();
@@ -324,7 +360,8 @@ function InterviewReview({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [doc, mode]);
+    // 两个 setter 都是 useUrlState 交出的 useState setter，引用不变，列进来只为满足规则。
+  }, [doc, mode, setFilter, setPatternFilter]);
 
   /** 同一个 key 也用于「重试前先清掉上一次的失败」：成功了就不会再被写回去。 */
   const dismissWriteAlert = useCallback((key: string) => {
@@ -480,11 +517,12 @@ function InterviewReview({
   );
 
   if (!doc) {
-    // 退回一覧页也不丢失败提示：写入还没回来时按了「← 面接一覧」就看不到理由的话，
+    // 退回一覧页也不丢失败提示：写入还没回来时按了「← 面试一览」就看不到理由的话，
     // 那又多出一个「看不见的条件」，正是这次要消掉的东西。
     return (
       <>
         <ReviewIndex
+          loading={loading}
           docs={docs}
           onSelect={(key, reviewBlockId) => {
             setSelectedKey(key);
@@ -499,6 +537,8 @@ function InterviewReview({
             focusDeepReview(reviewBlockId ?? null);
             if (reviewBlockId) switchMode("study");
             resetAnnotationDraft();
+            listScrollTop.current = window.scrollY;
+            // 进详情只回顶一次：带 reviewBlockId 进来时深度报告随后要自己滚到那一问，补跳会把它拽回顶部。
             window.scrollTo({ top: 0 });
           }}
         />
@@ -521,13 +561,7 @@ function InterviewReview({
           language={novelLang}
           onLanguageChange={switchNovelLang}
           onExit={() => switchMode(previousMode.current)}
-          onBack={() => {
-            setSelectedKey(null);
-            onSelectionChange?.(null);
-            focusDeepReview(null);
-            resetAnnotationDraft();
-            window.scrollTo({ top: 0 });
-          }}
+          onBack={backToList}
         />
         <ReviewWriteAlerts alerts={writeAlerts} onDismiss={dismissWriteAlert} />
       </>
@@ -535,6 +569,8 @@ function InterviewReview({
   }
 
   const unresolvedDecisionTasks = doc.decisionTasks.filter((task) => !task.resolvedBy);
+  // URL 带来的错误型在这一场里不存在（换场・重新生成后）时视为未筛选，免得整页句卡被筛空。
+  const patternFilter = patternParam && doc.stats.patterns.has(patternParam) ? patternParam : null;
   const resolvedDecisionCount = doc.decisionTasks.length - unresolvedDecisionTasks.length;
   const pendingSentenceIds = new Set(unresolvedDecisionTasks.map((task) => task.sentenceId));
   const transcriptDecisionTasks = doc.decisionTasks.filter(
@@ -643,14 +679,8 @@ function InterviewReview({
       <header className="rv-toolbar">
         <button
           className="rv-back"
-          onClick={() => {
-            setSelectedKey(null);
-            onSelectionChange?.(null);
-            focusDeepReview(null);
-            resetAnnotationDraft();
-            window.scrollTo({ top: 0 });
-          }}
-        >← 面接一覧</button>
+          onClick={backToList}
+        >{INTERVIEW_LIST_BACK_LABEL}</button>
         <div className="rv-title">
           <h1>{doc.company}</h1>
           <span>{doc.round} · {doc.date}{doc.result ? ` · ${doc.result}` : ""}</span>
@@ -872,7 +902,7 @@ function InterviewReview({
       )}
 
       {!doc.annotationExists && (
-        <p className="rv-message">这场面接还没有批注文件（{doc.annotationPath}）。先在 vault 里建好再批注。</p>
+        <p className="rv-message">这场面试还没有批注文件（{doc.annotationPath}）。先在 vault 里建好再批注。</p>
       )}
       {/* 写入失败不再走这里（由 .rv-write-alerts 接住），剩下的只有成功和找不到证据句的通知，
           所以不再挂 error 样式 —— 红底配「已加入重练队列」会把成功读成失败。 */}
@@ -1521,9 +1551,12 @@ function DeepReviewPanel({
 function ReviewIndex({
   docs,
   onSelect,
+  loading = false,
 }: {
   docs: ReviewDoc[];
   onSelect: (key: string, reviewBlockId?: string) => void;
+  /** 面接 scope がまだ届いていない：「还没有整理稿」ではなく読取中を出す。 */
+  loading?: boolean;
 }) {
   const [selectedTrend, setSelectedTrend] = useState<AnswerStrategyTag | null>(null);
   const aggregate = useMemo(() => {
@@ -1687,11 +1720,13 @@ function ReviewIndex({
         </section>
       )}
 
-      {docs.length === 0 ? (
+      {docs.length === 0 && loading ? (
+        <ScopeLoading label="整理稿与复盘" />
+      ) : docs.length === 0 ? (
         <div className="rv-empty">
           <h2>还没有整理稿</h2>
           <p>
-            把面接逐字稿交给 Claude 按 <code>_整理稿スペック</code> 生成
+            把面试逐字稿交给 Claude 按 <code>_整理稿スペック</code> 生成
             <code>YYYY-MM-DD_〈回〉_整理稿.md</code> 后，这里会自动出现。
           </p>
         </div>
@@ -1736,7 +1771,7 @@ function ReviewIndex({
                   <div><dt>文</dt><dd>{doc.stats.sentenceTotal}</dd></div>
                   <div><dt>我的错误</dt><dd className="warn">{doc.stats.learnerErrors}</dd></div>
                   <div><dt>待裁定</dt><dd className="pending">{unresolvedSentences}句 · {unresolvedTasks.length}点</dd></div>
-                  <div><dt>批注</dt><dd>{open > 0 ? `${open} open` : doc.annotations.length}</dd></div>
+                  <div><dt>批注</dt><dd>{annotationCountLabel(open, doc.annotations.length)}</dd></div>
                 </dl>
                 <span className="rv-card-open">打开复盘 <i aria-hidden="true">→</i></span>
               </button>
@@ -1948,7 +1983,7 @@ function SentenceCard({
                     </em>
                   ) : (
                     <>
-                      <button disabled={busy} onClick={() => onSubmit("裁定", "話者裁定：この文は面接官の発言", "speaker")}>面接官</button>
+                      <button disabled={busy} onClick={() => onSubmit("裁定", "話者裁定：この文は面接官の発言", "speaker")}>面试官</button>
                       <button disabled={busy} onClick={() => onSubmit("裁定", "話者裁定：この文は自分の発言", "speaker")}>我自己</button>
                     </>
                   )}

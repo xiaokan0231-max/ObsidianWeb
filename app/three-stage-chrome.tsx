@@ -14,15 +14,10 @@ import {
   useRef,
   useState,
 } from "react";
+import { isTypingTarget } from "@/lib/keyboard";
 
-export function isEditableTarget(target: EventTarget | null) {
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
-  );
-}
+// 3D 舞台の単键快捷键も同じ「入力中か」判定を使う（lib/keyboard.ts）。名前は既存 import 先に合わせて残す。
+export const isEditableTarget = isTypingTarget;
 
 export function useStageFullscreen(stageRef: RefObject<HTMLDivElement | null>) {
   const [fullscreen, setFullscreen] = useState(false);

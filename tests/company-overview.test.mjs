@@ -47,6 +47,119 @@ function fixture() {
   return { dossier, context, report, candidate, prep, notes: [dossier, context, report, candidate, prep] };
 }
 
+function addCompanySummary(data) {
+  const summary = note("80_AI分析/公司研究.md", {
+    type: "ai-report", report_kind: "company-summary", schema_version: 1,
+    company_dossier: "[[20_求職/测试/_公司]]", assessed_on: "2026-09-20", ai_author: "Codex",
+    coverage_period: "2023～2026年", sources: [source(), { label: "公司卷宗", wiki: "[[20_求職/测试/_公司]]" }],
+  }, "# 株式会社テスト 公司研究\n\n## 公司总结\n\n公司以**业务软件**为主要业务，服务已有客户。\n\n[技术博客](https://example.com/tech)披露了系统改造。\n这一变化需要结合公开范围理解。\n\n管理者表达了提高交付效率的方向，这属于公司自述。\n\n据此推测招聘可能用于补齐工程能力，具体职责仍待面谈确认。\n\n## 资料与边界\n\n完整财务资料尚未公开，不能单凭招聘推断收入增长。\n");
+  data.dossier.frontmatter.company_summary = "[[80_AI分析/公司研究]]";
+  data.notes.push(summary);
+  return summary;
+}
+
+test("旧公司资料没有总结仍可用，不从未引用报告或契合短评猜测公司正文", () => {
+  const data = fixture();
+  const original = resolveCompanyOverview(data.notes, data.context);
+  assert.equal(original.summary, null);
+  assert.equal(original.summaryStatus, "missing");
+  addCompanySummary(data);
+  delete data.dossier.frontmatter.company_summary;
+  const entry = resolveCompanyOverview(data.notes, data.context);
+  assert.equal(entry.summary, null);
+  assert.equal(entry.profileStatus, "available");
+  assert.equal(entry.assessment.summary, original.assessment.summary);
+  assert.deepEqual(validateCompanyOverviewNotes(data.notes), []);
+});
+
+test("公司总结跨岗位共享显式引用，只提取自然段正文并保留加粗、链接和来源", () => {
+  const data = fixture();
+  const report = addCompanySummary(data);
+  data.notes.push(note("20_求職/测试/另一个岗位.md", { ...data.context.frontmatter, fit_assessment: undefined }));
+  const entries = buildCompanyOverviews(data.notes);
+  assert.deepEqual(validateCompanyOverviewNotes(data.notes), []);
+  for (const entry of entries) {
+    assert.equal(entry.summaryStatus, "available");
+    assert.equal(entry.summary.note.path, report.path);
+    assert.equal(entry.summary.assessedOn, "2026-09-20");
+    assert.equal(entry.summary.coveragePeriod, "2023～2026年");
+    assert.equal(entry.summary.paragraphs.length, 4, "段内换行不会变成额外自然段");
+    assert.equal(entry.summary.sources.length, 2);
+    assert.ok(entry.summary.paragraphs[0].some((node) => node.kind === "strong"));
+    assert.ok(entry.summary.paragraphs[1].some((node) => node.kind === "link" && node.href === "https://example.com/tech"));
+    assert.doesNotMatch(JSON.stringify(entry.summary.paragraphs), /完整财务资料/);
+  }
+  assert.deepEqual(entries[0].summary, entries[1].summary);
+  assert.notEqual(entries[0].key, entries[1].key);
+  assert.equal(entries[1].assessment, null);
+  delete data.dossier.frontmatter.company_profile;
+  assert.equal(resolveCompanyOverview(data.notes, data.context).summaryStatus, "available", "总结不依赖结构化事实卡是否已补齐");
+});
+
+test("报告 H1 与正文节同名时只提取唯一 H2，篇幅按证据允许一段或更多自然段", () => {
+  for (const title of ["公司总结", "资料与边界"]) {
+    for (const count of [1, 3, 7]) {
+      const data = fixture();
+      const summary = addCompanySummary(data);
+      const paragraphs = Array.from({ length: count }, (_, index) => `第${index + 1}段：公开信息所支持的公司现状。`);
+      summary.content = `# ${title}\n\n报告导语不进入正文。\n\n## 公司总结\n\n${paragraphs.join("\n\n")}\n\n## 资料与边界\n\n这里是研究边界，不进入公司总结。\n`;
+      assert.deepEqual(validateCompanyOverviewNotes(data.notes), [], `${title}: ${count}段`);
+      const entry = resolveCompanyOverview(data.notes, data.context);
+      assert.equal(entry.summaryStatus, "available");
+      assert.equal(entry.summary.paragraphs.length, count);
+      assert.doesNotMatch(JSON.stringify(entry.summary.paragraphs), /报告导语|研究边界/);
+    }
+  }
+});
+
+test("总结坏引用或错公司时单独失效，已有公司事实与岗位画像仍完整保留", () => {
+  for (const failure of ["missing", "ambiguous", "wrong-company"]) {
+    const data = fixture();
+    const summary = addCompanySummary(data);
+    if (failure === "missing") data.dossier.frontmatter.company_summary = "[[不存在的总结]]";
+    if (failure === "ambiguous") {
+      data.notes.push({ ...summary, path: "80_AI分析/旧版/公司研究.md" });
+      data.dossier.frontmatter.company_summary = "[[公司研究]]";
+    }
+    if (failure === "wrong-company") {
+      data.notes.push(note("20_求職/另一公司/_公司.md", { type: "company" }));
+      summary.frontmatter.company_dossier = "[[20_求職/另一公司/_公司]]";
+    }
+    const entry = resolveCompanyOverview(data.notes, data.context);
+    assert.equal(entry.summary, null, failure);
+    assert.equal(entry.summaryStatus, "invalid", failure);
+    assert.equal(entry.profileStatus, "available", failure);
+    assert.equal(entry.assessmentStatus, "available", failure);
+    assert.equal(entry.profile.facts[0].value, "约100人");
+    assert.match(validateCompanyOverviewNotes(data.notes).join("\n"), /company_summary/);
+  }
+});
+
+test("未引用的历史总结同样校验作者日期、来源与正文结构", () => {
+  const mutations = [
+    ["ai_author", (r) => { r.frontmatter.ai_author = "AI"; }],
+    ["assessed_on", (r) => { r.frontmatter.assessed_on = "2026-02-30"; }],
+    ["schema_version", (r) => { r.frontmatter.schema_version = 2; }],
+    ["coverage_period", (r) => { delete r.frontmatter.coverage_period; }],
+    ["有效来源", (r) => { r.frontmatter.sources = []; }],
+    ["http", (r) => { r.frontmatter.sources[0].url = "javascript:alert(1)"; }],
+    ["不存在", (r) => { r.frontmatter.sources[1].wiki = "[[丢失卷宗]]"; }],
+    ["自然段", (r) => { r.content = r.content.replace("公司以", "- 公司以"); }],
+    ["正文不能为空", (r) => { r.content = r.content.replace(/(## 公司总结)[\s\S]*?(## 资料与边界)/, "$1\n\n$2"); }],
+    ["唯一的二级标题", (r) => { r.content += "\n\n## 公司总结\n\n重复总结。\n"; }],
+    ["资料与边界", (r) => { r.content = r.content.split("## 资料与边界")[0]; }],
+    ["正文链接", (r) => { r.content = r.content.replace("https://example.com/tech", "javascript:unsafe"); }],
+  ];
+  for (const [expected, mutate] of mutations) {
+    const data = fixture();
+    const summary = addCompanySummary(data);
+    mutate(summary);
+    assert.equal(resolveCompanyOverview(data.notes, data.context).summaryStatus, "invalid", expected);
+    delete data.dossier.frontmatter.company_summary;
+    assert.match(validateCompanyOverviewNotes(data.notes).join("\n"), new RegExp(expected));
+  }
+});
+
 test("最新画像有明确来源和六维，旧准备读取最新正本且正文不变", () => {
   const { notes, prep, report } = fixture();
   const before = prep.content;
@@ -251,7 +364,10 @@ test("未调查/没找到资料允许无URL，不虚构平台页；不得附加�
 });
 
 test("vault-check实际读取结构化YAML，兼容两版评价口径且坏数据会阻断", async (t) => {
-  const { context, dossier, report, candidate } = fixture();
+  const data = fixture();
+  const { context, dossier, report, candidate } = data;
+  const summary = addCompanySummary(data);
+  summary.content = summary.content.replace(/^# .*\n/, "# 公司总结\n");
   context.frontmatter = { type: "todo", company: "株式会社テスト", category: "面接準備", status: "未着手", priority: "medium", audience: "user",
     action: "确认分工", company_dossier: "[[20_求職/测试/_公司]]", fit_assessment: "[[80_AI分析/契合评价]]" };
   report.frontmatter.meeting = report.frontmatter.case;
@@ -263,7 +379,7 @@ test("vault-check实际读取结构化YAML，兼容两版评价口径且坏数�
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, `---\n${dump(entry.frontmatter, { lineWidth: -1 })}---\n${entry.content}`);
   };
-  for (const entry of [context, dossier, report, candidate]) await persist(entry);
+  for (const entry of [context, dossier, report, candidate, summary]) await persist(entry);
   const check = () => spawnSync(process.execPath, ["scripts/vault-check.mjs"], { encoding: "utf8", env: { ...process.env, OBSIDIAN_VAULT_PATH: root } });
   let checked = check();
   assert.equal(checked.status, 0, `${checked.stdout}${checked.stderr}`);
@@ -276,4 +392,11 @@ test("vault-check实际读取结构化YAML，兼容两版评价口径且坏数�
   checked = check();
   assert.notEqual(checked.status, 0);
   assert.match(`${checked.stdout}${checked.stderr}`, /有分数时必须有证据/);
+  report.frontmatter.fit_assessment.dimensions.experience.evidence = [source()];
+  await persist(report);
+  summary.frontmatter.sources = [];
+  await persist(summary);
+  checked = check();
+  assert.notEqual(checked.status, 0);
+  assert.match(`${checked.stdout}${checked.stderr}`, /company-summary sources 至少需要一项有效来源/);
 });

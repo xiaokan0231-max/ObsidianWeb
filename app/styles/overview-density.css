@@ -9,6 +9,12 @@
 .overview-view .panel-heading button { flex: 0 0 auto; font-size: 12px; }
 .overview-view small,
 .overview-view time,
+/* 首页复盘提醒里的「已过但没有整理稿」清单：一行一场，右侧一键复制给 Claude 的指令。 */
+.overview-review-missing { list-style: none; margin: 4px 0 10px; padding: 0; display: grid; gap: 6px; }
+.overview-review-missing li { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.overview-review-missing li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overview-review-missing li > small { flex-shrink: 0; color: var(--orange); font-size: 11px; }
+.overview-review-missing li > button { flex-shrink: 0; margin-left: auto; border: 1px solid var(--line); border-radius: 4px; background: transparent; padding: 2px 8px; font-size: 11px; color: var(--muted); cursor: pointer; }
 .overview-view .pipeline-status,
 .overview-view .todo-pri,
 .overview-view .todo-status,
@@ -42,7 +48,12 @@
 .overview-stale-note { display: flex; align-items: center; gap: 12px; margin: 12px 0 0; padding: 0; border: 0; background: transparent; color: #d7dfd6; font-size: 12px; line-height: 1.6; text-align: left; cursor: pointer; }
 .overview-stale-note:hover { color: #fff; }
 .overview-current-stats { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-top: 16px; padding: 12px 0; border-top: 1px solid #ffffff24; }
-.overview-current-stats > div { display: flex; align-items: baseline; gap: 8px; }
+/* 四个数字是入口：点了落到「就是这些」的列表。外观仍是数字行，只在指向／聚焦时露出可点的样子。 */
+.overview-current-stats > button { display: flex; align-items: baseline; gap: 8px; margin: -4px -8px; padding: 4px 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.overview-current-stats > button:hover { background: #ffffff14; }
+.overview-current-stats > button:hover span { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+/* 深绿底上默认的 --interactive 描边看不清，换成浅色。 */
+.overview-current-stats > button:focus-visible { outline: 2px solid #f8f6ef; outline-offset: 2px; }
 .overview-current-stats strong { font-size: 20px; font-weight: 500; }
 .overview-current-stats span { color: #d1dbd2; font-size: 12px; }
 .overview-current-stats [data-zero="true"] { opacity: .75; }
@@ -123,10 +134,21 @@
   .overview-current-actions { gap: 8px; }
   .overview-current-actions .primary-action { width: 100%; }
   .overview-current-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
-  .overview-current-stats > div { gap: 6px; }
+  .overview-current-stats > button { gap: 6px; }
   .overview-current-stats span { font-size: 12px; }
   .overview-view .todo-preview-list > button { grid-template-columns: 30px minmax(0, 1fr); gap: 4px 10px; }
   .overview-view .todo-preview-list .todo-pri { align-self: start; }
   .overview-view .todo-preview-list .todo-status { grid-column: 2; justify-self: start; }
   .overview-view .todo-preview-list .todo-pri { min-width: 0; }
 }
+
+/* 等待区：一项＝案件按钮＋两个就地处理按钮；跟进日已过的项标橙（该催了）。 */
+.overview-waiting-item { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding: 10px 0; }
+.overview-waiting-item > button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; border: 0; padding: 0; background: transparent; text-align: left; cursor: pointer; }
+.overview-waiting-item > button > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.overview-waiting-item > button:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+.overview-waiting-item.overdue > button > small { color: var(--orange); font-weight: 600; }
+.overview-waiting-actions { display: flex; gap: 6px; }
+.overview-waiting-actions > button { border: 1px solid var(--line); border-radius: 4px; background: transparent; padding: 3px 9px; font-size: 11px; color: var(--muted); cursor: pointer; }
+.overview-waiting-actions > button:hover { color: var(--ink); border-color: var(--ink); }
+.overview-waiting-actions > button:disabled { opacity: .5; cursor: progress; }

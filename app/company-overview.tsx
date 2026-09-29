@@ -9,7 +9,9 @@ import {
   type CompanyOverview,
   type CompanyReview,
 } from "@/lib/company-overview";
+import { HARD_GATE_LABEL, JOB_FIT_AXES, JOB_FIT_SCORE_LABEL, UNRATED_V2_LABEL, toJobCard } from "@/lib/jobs";
 import { useDialogFocus } from "./use-dialog-focus";
+import { Inlines } from "./prep-doc-render";
 
 export const COMPANY_COMPARE_LIMIT = 3;
 const SCORE_LABELS = ["", "明确不合", "契合较弱", "基本适配", "明显契合", "高度契合"];
@@ -77,6 +79,13 @@ function Dimension({ dimension, label, id, onOpenWiki }: { dimension?: CompanyFi
   </details>;
 }
 
+/** 案件側の v2 採点。公司画像の六維（会社としての契合）とは別の軸なので、行を分けて併記する。面谈は案件を持たない。 */
+function CaseFit({ context }: { context: CompanyOverview }) {
+  const fit = context.kind === "case" ? toJobCard(context.note).fit : null;
+  if (!fit) return <span className="co-muted">{context.kind === "case" ? UNRATED_V2_LABEL : "面谈 · 无案件采点"}</span>;
+  return <div className="co-case-fit"><strong>Fit {fit.score}</strong> · Band {fit.band} · Gate {HARD_GATE_LABEL[fit.hardGate]}<ul>{JOB_FIT_AXES.map((key) => <li key={key}>{JOB_FIT_SCORE_LABEL[key].label} {fit.scores[key]}/{JOB_FIT_SCORE_LABEL[key].max}</li>)}</ul></div>;
+}
+
 function Reviews({ reviews, onOpenWiki }: { reviews: CompanyReview[]; onOpenWiki: (target: string) => void }) {
   if (!reviews.length) return <p className="co-muted">未调查 · 尚未收录可核对的外部评价。</p>;
   return <div className="co-reviews">{reviews.map((review, index) => <article key={`${review.platform}:${index}`}>
@@ -92,6 +101,7 @@ export default function CompanyOverviewContent({ context, onOpenWiki, historical
   const prefix = useId().replaceAll(":", "");
   const assessment = context?.assessment;
   const profile = context?.profile;
+  const companySummary = context?.summary;
   const criteriaVersion = assessment?.criteriaVersion ?? 2;
   const axes = companyFitDimensions(criteriaVersion);
   const facts = [...(profile?.facts ?? []), ...(assessment?.contextFacts ?? [])];
@@ -99,6 +109,14 @@ export default function CompanyOverviewContent({ context, onOpenWiki, historical
     <div className="co-dates"><span>公司资料 <b>{profile?.updatedOn || "尚未整理"}</b></span><span>契合评价 <b>{assessment?.assessedOn || "尚未评估"}</b>{assessment && <small> · {assessment.aiAuthor}</small>}</span><span className="co-latest">最新画像{historical ? " · 历史面谈正文保持原样" : ""}</span></div>
     {!context && <p className="co-notice">这份准备尚未关联可唯一识别的案件或面谈记录，公司画像待补齐。</p>}
     {!!context?.issues.length && <details className="co-notice"><summary>部分资料暂不可用</summary><ul>{context.issues.map((item) => <li key={item}>{item}</li>)}</ul></details>}
+    <section className="co-company-summary" aria-labelledby={`${prefix}-summary`}>
+      <header className="co-section-header"><h2 id={`${prefix}-summary`}>公司总结</h2>{companySummary && <button type="button" onClick={() => onOpenWiki(companySummary.note.path)}>研究笔记 ↗</button>}</header>
+      {companySummary ? <>
+        <p className="co-summary-meta"><span>资料截至 <time dateTime={companySummary.assessedOn}>{companySummary.assessedOn}</time></span><span>覆盖 {companySummary.coveragePeriod}</span><span>{companySummary.aiAuthor}</span></p>
+        <div className="co-summary-prose">{companySummary.paragraphs.map((paragraph, index) => <p key={index}><Inlines nodes={paragraph} refs={{ onOpenWiki: (target, section) => onOpenWiki(section ? `${target}#${section}` : target) }} /></p>)}</div>
+        <details className="co-summary-sources"><summary>研究来源 · {companySummary.sources.length} 项</summary><Evidence items={companySummary.sources} onOpenWiki={onOpenWiki} /></details>
+      </> : <p className="co-muted co-summary-empty">{context?.summaryStatus === "invalid" ? "公司总结暂不可用，请核对研究笔记的引用与内容。" : "公司总结待整理。补齐研究后，将在这里连贯说明公司的现状、发展变化与招聘背景。"}</p>}
+    </section>
     <section className="co-company-facts" aria-labelledby={`${prefix}-facts`}><header className="co-section-header"><span>01</span><h2 id={`${prefix}-facts`}>公司与岗位</h2>{context?.dossier && <button type="button" onClick={() => onOpenWiki(context.dossier!.path)}>公司卷宗 ↗</button>}</header>
       {facts.length ? <dl className="co-fact-grid">{facts.map((fact, index) => <div key={`${fact.id}:${index}`}><dt>{fact.label}</dt><dd><Fact fact={fact} onOpenWiki={onOpenWiki} /></dd></div>)}</dl> : <p className="co-muted">公司规模、业务、岗位条件等资料待整理；已存在的案件和面谈记录仍可查看。</p>}
     </section>
@@ -161,6 +179,7 @@ export function CompanyCompare({ contexts, onClose, onDetail, onRemove, onOpenWi
     { label: "资料与评价日期", render: (context) => <>{context.profile?.updatedOn || "资料待补"}<br />{context.assessment?.assessedOn || "评价待补"}</> },
     { label: "评价口径", render: (context) => !context.assessment ? "尚未评估" : context.assessment.criteriaVersion === 1 ? "旧口径 · 待更新" : "面试前口径" },
     { label: "一句话判断", render: (context) => context.assessment?.summary || "尚未评估" },
+    { label: "案件 v2 採点", render: (context) => <CaseFit context={context} /> },
     ...[...facts].map(([id, label]) => ({ label, render: (context: CompanyOverview) => <Fact fact={[...(context.assessment?.contextFacts ?? []), ...(context.profile?.facts ?? [])].find((fact) => fact.id === id)} onOpenWiki={onOpenWiki} /> })),
     ...(mixedCriteria ? [] : axes.map((dimension) => ({ label: dimension.label, render: (context: CompanyOverview) => <Dimension label={dimension.label} dimension={context.assessment?.dimensions.find((item) => item.key === dimension.key)} onOpenWiki={onOpenWiki} /> }))),
     { label: "外部评价", render: (context) => <Reviews reviews={context.profile?.reviews ?? []} onOpenWiki={onOpenWiki} /> },

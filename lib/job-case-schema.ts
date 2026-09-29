@@ -11,6 +11,7 @@
  */
 import {
   CHANNEL_REQUIRED_FROM,
+  IN_PROGRESS_STATUSES,
   JOB_STATUSES,
   KNOWN_CHANNELS,
   normalizeJobStatus,
@@ -84,8 +85,8 @@ export const JOB_CASE_WEB_SECTIONS = [
   { heading: JOB_CASE_SECTION.materials, aliases: [] },
 ];
 
-/** 「選考が動いている」状態。ここに居るなら採点も原文核対も済んでいるはず。 */
-export const IN_PROGRESS_STATUSES = ["応募済", "書類通過", "面接中", "内定"];
+/** 「選考が動いている」状態。正本は job-status.mjs；ここからも輸出するのは既存 import 先のため。 */
+export { IN_PROGRESS_STATUSES };
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_TIME = /^(\d{4}-\d{2}-\d{2})(?: ([01]\d|2[0-3]):([0-5]\d))?$/;
@@ -421,8 +422,17 @@ export function auditJobCaseCompleteness(
   if (!IN_PROGRESS_STATUSES.includes(base)) return warnings;
 
   const rating = Number(fm.rating);
-  if (fm.rating === undefined || fm.rating === "" || !Number.isFinite(rating) || rating === 0) {
+  // RA 広撒網（ra-batch）は書類通過まで採点しない約束なので、応募済のうちは rating 無しが正常。
+  const ratingDeferred = String(fm.origin ?? "") === "ra-batch" && base === "応募済";
+  if (!ratingDeferred && (fm.rating === undefined || fm.rating === "" || !Number.isFinite(rating) || rating === 0)) {
     warnings.push(`status が「${base}」なのに rating が無い（Web で 0/10 と表示される）`);
+  }
+
+  // 応募日は applied_on か、応募済の括弧内の日付にしか残らない。どちらも無いと台帳の追記分にも
+  // 月別応募数にも載らず、「N日経過」も出ない——status_updated は後で拒否日に上書きされる。
+  const appliedOn = String(fm.applied_on ?? "").trim();
+  if (!DATE.test(appliedOn) && !/\b20\d{2}-\d{2}-\d{2}\b/.test(String(fm.status ?? ""))) {
+    warnings.push("応募日が無い（applied_on: YYYY-MM-DD を書く。Web で応募済にすると自動で入る）");
   }
 
   const found = headings(content);

@@ -1,4 +1,5 @@
 import { tokyoParts } from "@/lib/dojo/utils";
+import { assertSameOrigin } from "@/lib/server/api";
 import { errorResponse } from "@/lib/server/api";
 import { invokeCodex } from "@/lib/server/codex-bridge";
 import { loadDojoState } from "@/lib/server/dojo-store";
@@ -13,8 +14,10 @@ import {
 import { supersedeCurrentArtifacts } from "@/lib/server/generated-artifact";
 import { readAllNotes, uniquePath, writeNote } from "@/lib/server/obsidian";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
+    // 同源でない呼び出し（他サイト・非ブラウザ）は vault を書かせない。403 は errorResponse が返す。
+    assertSameOrigin(request);
     const notes = await readAllNotes();
     const source = buildLanguageSourceContext(notes);
     if (!source.sourceCount) throw new Error("Vault 中没有可用于训练库的资料。");

@@ -21,8 +21,12 @@ import {
   type SafeRewriteCard,
 } from "@/lib/language-expression-course";
 import { parseInline } from "@/lib/interview-prep-doc";
+import { postJson } from "@/lib/client-api";
+import ScopeLoading from "./scope-loading";
+import { isTypingTarget as isEditableTarget } from "@/lib/keyboard";
 import type { Note } from "@/lib/notes";
 import { Inlines } from "./prep-doc-render";
+import { textCodec, useUrlState } from "./use-url-state";
 
 type PracticeMode =
   | "recall"
@@ -227,14 +231,6 @@ function updateStudyState(
   for (const listener of studyStateListeners) listener();
 }
 
-function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.isContentEditable ||
-    ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
-  );
-}
-
 function allowsRevealShortcut(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return true;
   const interactive = target.closest("button, a, [role='button']");
@@ -296,17 +292,7 @@ async function postProgress(input: {
   exercise: LanguageExpressionExercise;
   action: "completed" | "reopened";
 }) {
-  const response = await fetch("/api/language/topics/progress", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-    body: JSON.stringify({ eventId: makeEventId(), ...input }),
-  });
-  const body = await response.json() as ProgressResponse & { error?: string };
-  if (!response.ok) {
-    throw new Error(body.error || `保存失败 (${response.status})`);
-  }
-  return body;
+  return postJson<ProgressResponse & { ok?: boolean; error?: string }>("/api/language/topics/progress", { eventId: makeEventId(), ...input });
 }
 
 function courseProgress(course: LanguageExpressionCourse, notes: Note[]): ProgressState {
@@ -387,14 +373,18 @@ function LanguageExpressionCourses({
   notes,
   onVaultChanged,
   onNoteWritten,
+  loading = false,
 }: {
   notes: Note[];
+  /** この視図の scope がまだ届いていない：空状態ではなく読取中を出す。 */
+  loading?: boolean;
   onVaultChanged: () => Promise<void>;
   /** 進捗保存の応答に載る更新後ノートを1件差し替える。全量再取得（onVaultChanged）の代替。 */
   onNoteWritten?: (note: Note) => void;
 }) {
   const courses = useMemo(() => findLanguageExpressionCourses(notes), [notes]);
-  const [selectedCourseId, setSelectedCourseId] = useState("");
+  // 选中的课程放进 URL，便于刷新后停在原处；各课程的练习位置仍由本机的 study state 记住。
+  const [selectedCourseId, setSelectedCourseId] = useUrlState("course", "", textCodec);
   const storedStudyState = useSyncExternalStore(
     subscribeStudyState,
     getStudyStateSnapshot,
@@ -423,16 +413,14 @@ function LanguageExpressionCourses({
     }));
   };
 
+  // URL 里的课程已下架（改名・删除）时，不当成「选中了一个不存在的课」，依次落回上次学习的课与第一门。
   const selected =
-    courses.find(
-      (course) =>
-        course.courseId === (
-          selectedCourseId ||
-          storedStudyState?.activeCourseId
-        ),
-    ) ?? courses[0];
+    courses.find((course) => course.courseId === selectedCourseId) ??
+    courses.find((course) => course.courseId === storedStudyState?.activeCourseId) ??
+    courses[0];
 
   if (!selected) {
+    if (loading) return <div className="expression-courses-view"><ScopeLoading label="专项课程" /></div>;
     return (
       <div className="expression-courses-view">
         <section className="expression-empty">

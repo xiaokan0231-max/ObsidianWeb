@@ -44,6 +44,13 @@ Next(vinext/Cloudflare Workers) 前端，**读 Obsidian vault 作为唯一数据
 在留資格・希望条件这类事实同时写在多个外部站点上，各站点位置不同，
 **改一个就要改全部**。具体落点表和各站点的坑在 `AGENTS.local.md`（本机私有）。
 
+### 日程与待办分开（2026-09-26 本人指示）
+
+- 日历和「近期／最近安排」只显示真实约定的面试、面谈等日程。准备任务、准备稿制作日、同步记录日不能生成面试占用。
+- 等待企业回复与跟进日期不进日历，保留在等待区；准备任务和行动期限留在待办。不要为清理日历删除原始等待或历史场次。
+- schedule 统一日本时间（JST）。先核对原始通知／预约页时区再入库：上海时间转日本时间加 1 小时，已是日本时间则不转换；原始时间与时区保留在证据正文，不能让前端再按本机时区二次换算。
+- 字段与投影契约见 vault `99_系统/_数据字典.md`「日程投影规则」。同步 skill 必须遵循同一正本。
+
 ## 🔴 生成区块：不许手改
 
 笔记里被下面这对标记包住的内容，**人和 AI 都不许手写**：
@@ -113,7 +120,7 @@ npm run lint
 | `npm run dev` 启动 | 你要看页面时 | 所有人 | 只 warning，不阻塞 |
 | vault 仓库 pre-commit | `git commit` 时 | 所有人（含 Codex／手改） | 不一致则**拒绝提交** |
 
-- Stop hook：`scripts/stop-hook-vault-verify.sh`，配置在 `.claude/settings.local.json`。
+- Stop hook：`scripts/stop-hook-vault-verify.sh`，配置在仓库跟踪的 `.claude/settings.json`（别再往 `settings.local.json` 复制一份，否则每轮跑两次）。
   必须检查 stdin 的 `stop_hook_active`，否则「拦住→再应答→又拦」会无限循环。
 - pre-commit：`<vault>/.git/hooks/pre-commit`（不在本仓库，git 不跟踪）。
   应急放行 `git commit --no-verify`。

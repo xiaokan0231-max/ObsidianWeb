@@ -11,6 +11,7 @@ import {
   type LanguageExpressionProgressEvent,
 } from "@/lib/language-expression-course";
 import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
+import { assertSameOrigin, errorResponse } from "@/lib/server/api";
 import { upsertAppendNote } from "@/lib/server/note-append";
 import { readAllNotes } from "@/lib/server/obsidian";
 import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
@@ -44,6 +45,8 @@ function supportsExercise(itemId: string, exercise: LanguageExpressionExercise) 
 }
 
 export async function POST(request: Request) {
+  // 同源でない呼び出しは 403。
+  try { assertSameOrigin(request); } catch (error) { return errorResponse(error, "拒绝请求"); }
   let body: Body;
   try {
     body = (await request.json()) as Body;

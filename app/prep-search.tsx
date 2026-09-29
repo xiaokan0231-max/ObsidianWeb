@@ -2,18 +2,9 @@
 
 import { useEffect, type ChangeEvent, type KeyboardEvent, type RefObject } from "react";
 
-/**
- * ショートカットを握りつぶしてよいか＝いま文字を打っている最中か。
- *
- * 各画面が自前で書くと `instanceof HTMLInputElement` 止まりの弱い版になり、
- * contentEditable や <select> の上で数字キーやスラッシュを奪ってしまう。
- * 判定は強い方に一本化する——弱い側に合わせると、直したはずの画面がまた壊れる。
- */
-export function isTypingTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
-}
+// 判定本体は lib/keyboard.ts（全画面共用）。ここから再輸出するのは既存 import 先を壊さないため。
+import { isTypingTarget } from "@/lib/keyboard";
+export { isTypingTarget };
 
 /**
  * 「/」で検索欄へ飛ぶ。1節ずつしか描画しない画面ではブラウザの Ctrl+F が使えないので、

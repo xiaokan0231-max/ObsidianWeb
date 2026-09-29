@@ -3,6 +3,7 @@ import {
   type ReviewFeedbackKind,
 } from "@/lib/review-feedback";
 import { getString as text, noteBasename as basename } from "@/lib/notes";
+import { assertSameOrigin, errorResponse } from "@/lib/server/api";
 import { parseInterviewAnswerReview } from "@/lib/review-deep";
 import { isReviewNotePath, reviewSiblingPath } from "@/lib/review-paths";
 import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
@@ -26,6 +27,8 @@ function todayInTokyo() {
 }
 
 export async function POST(request: Request) {
+  // 同源でない呼び出しは 403。
+  try { assertSameOrigin(request); } catch (error) { return errorResponse(error, "拒绝请求"); }
   let body: Body;
   try {
     body = (await request.json()) as Body;

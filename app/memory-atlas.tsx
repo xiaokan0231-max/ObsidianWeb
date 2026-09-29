@@ -29,7 +29,7 @@ import SceneNoteReader from "./scene-note-reader";
 import Overview from "./overview-view";
 import SearchPalette from "./search-palette";
 import TimelineView from "./timeline-view";
-import TodoView from "./todo-view";
+import TodoView, { OPEN_TAB } from "./todo-view";
 import {
   appViewFromPathname,
   appViewHref,
@@ -38,35 +38,44 @@ import {
   companyOverviewSearch,
   type AppView,
 } from "./app-route";
-import type {
-} from "./knowledge-graph-three";
 import {
-} from "@/lib/timeline-scene";
-import {
-} from "@/lib/review-deep";
+  MOBILE_PRIMARY_NAV_IDS,
+  NAVIGATION,
+  SECONDARY_NAVIGATION,
+  TOP_BAR_SECTION_IDS,
+  type NavIconName,
+} from "./navigation";
+import { useUndoFlash, UndoFlashBar } from "./undo-flash";
+import { notifyUrlChange, SHELL_URL_KEYS } from "./use-url-state";
+import { describeConnectionError } from "@/lib/connection-error";
+import { ConflictError, postJson } from "@/lib/client-api";
+import { mergeScopedNotes } from "@/lib/vault-merge";
+import ViewErrorBoundary from "./view-error-boundary";
 import {
   isRoundSpecificAsset,
   type SharedAssetTarget,
 } from "@/lib/interview-shared-assets";
 import {
+  getType,
   noteBasename,
   type Note,
 } from "@/lib/notes";
 import {
-} from "@/lib/knowledge-graph";
-import {
   buildDerivedData,
+  calendarEventTime,
   countdownLabel,
   GROUPS,
   localDateKey,
   mergePendingWrites,
+  todoStatus,
   type PendingWrite,
   type Commitment,
   type GroupKey,
 } from "@/lib/memory-atlas-data";
-import { vaultScopeForView, type VaultScope } from "@/lib/vault-scope";
+import { scopesToReloadAfterStats, vaultScopeForView, type VaultScope } from "@/lib/vault-scope";
 import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { resolveNoteLink } from "@/lib/wiki-target";
+import { changedToLabel } from "@/lib/ui-labels";
 
 
 export type { Note };
@@ -77,125 +86,11 @@ type VaultResponse = {
   error?: string;
   notes: Note[];
   scope?: VaultScope;
+  /** 該 scope に現存する全パス。無い（旧サーバ）なら削除同期はしない。 */
+  paths?: string[];
 };
 
 type View = AppView;
-type PrimaryNavId =
-  | "overview"
-  | "actions"
-  | "career"
-  | "interview"
-  | "training"
-  | "resources";
-type NavIconName = "home" | "actions" | "career" | "interview" | "training" | "resources";
-
-type PrimaryNavigationItem = {
-  id: PrimaryNavId;
-  label: string;
-  mobileLabel: string;
-  glyph: NavIconName;
-  target: View;
-  views: View[];
-};
-
-type SecondaryNavigationItem = {
-  id: View;
-  label: string;
-  // 二级菜单是「章节标签」：汉字印章负责一眼辨认，拉丁小字负责分层，两者都不是装饰的可选项。
-  glyph: string;
-  caption: string;
-};
-
-
-// 一级菜单表达用户目标，不再逐页暴露实现视图。顺序先处理已在进行的案件，再寻找新机会。
-const NAVIGATION: PrimaryNavigationItem[] = [
-  {
-    id: "overview",
-    label: "总览",
-    mobileLabel: "总览",
-    glyph: "home",
-    target: "overview",
-    views: ["overview"],
-  },
-  {
-    id: "actions",
-    label: "行动",
-    mobileLabel: "行动",
-    glyph: "actions",
-    target: "calendar",
-    views: ["calendar", "todo"],
-  },
-  {
-    id: "career",
-    label: "求职",
-    mobileLabel: "求职",
-    glyph: "career",
-    target: "jobs",
-    views: ["jobs", "analytics"],
-  },
-  {
-    id: "interview",
-    label: "面试作战",
-    mobileLabel: "面试",
-    glyph: "interview",
-    target: "session",
-    views: ["session", "prep", "review", "practice"],
-  },
-  {
-    id: "training",
-    label: "训练中心",
-    mobileLabel: "训练",
-    glyph: "training",
-    target: "language",
-    views: ["language", "topics"],
-  },
-  {
-    id: "resources",
-    label: "资料库",
-    mobileLabel: "资料",
-    glyph: "resources",
-    target: "library",
-    views: ["library", "timeline", "graph"],
-  },
-];
-
-const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigationItem[]>> = {
-  actions: [
-    { id: "calendar", label: "日历", glyph: "暦", caption: "COMMITMENTS" },
-    { id: "todo", label: "行动清单", glyph: "行", caption: "ACTIONS" },
-  ],
-  career: [
-    { id: "jobs", label: "岗位机会", glyph: "機", caption: "OPPORTUNITIES" },
-    { id: "analytics", label: "选考与分析", glyph: "選", caption: "PIPELINE" },
-  ],
-  interview: [
-    { id: "session", label: "本场面试", glyph: "場", caption: "SESSION" },
-    { id: "prep", label: "通用准备", glyph: "備", caption: "PLAYBOOK" },
-    { id: "review", label: "面试复盘", glyph: "復", caption: "REVIEW" },
-    { id: "practice", label: "回答重练", glyph: "練", caption: "PRACTICE" },
-  ],
-  training: [
-    { id: "language", label: "日语训练", glyph: "話", caption: "NIHONGO" },
-    { id: "topics", label: "专项训练", glyph: "専", caption: "FOCUS" },
-  ],
-  resources: [
-    { id: "library", label: "全部资料", glyph: "庫", caption: "ARCHIVE" },
-    { id: "timeline", label: "时间线", glyph: "歴", caption: "TIMELINE" },
-    { id: "graph", label: "关系图", glyph: "網", caption: "GRAPH" },
-  ],
-};
-
-/**
- * 二级导航住在哪：
- * 资料库的三项是**同一批笔记的三种看法**（列表・时序・关系），切换是浏览时的常态动作，
- * 值得在内容区顶部常驻一条章节标签带。
- * 面试作战・训练中心的子项是三件**不同的事**，内容互不相干，切换属于换任务——
- * 那种跳转归左栏。而且这两个分区的页面自己已经有一层切换（当前面试的 6 章节导航、
- * 专项训练的 5 种练法），再压一条带子就是三层标签叠在 150px 里。
- *
- * 移动端没有左栏，所以那两个分区的带子在 820px 以下会回来（CSS 按 data-placement 切）。
- */
-const TOP_BAR_SECTION_IDS = new Set<PrimaryNavId>(["actions", "career", "resources"]);
 
 function NavigationIcon({ name }: { name: NavIconName }) {
   return (
@@ -210,15 +105,36 @@ function NavigationIcon({ name }: { name: NavIconName }) {
   );
 }
 
-/** 单键快捷键（R）在输入场景必须让路，否则在搜索框里打 r 就会触发重读。 */
 
+/** 写回后是否自动重算派生统计（vault:stats）。本机偏好，存在 localStorage。 */
+const AUTO_STATS_KEY = "echo:auto-stats";
+const AUTO_STATS_EVENT = "echo:autostatschange";
+// 私密窗口等拿不到 localStorage 时，只在本次会话里记住。
+let autoStatsFallback = true;
 
-const MOBILE_PRIMARY_NAV_IDS = new Set<PrimaryNavId>([
-  "overview",
-  "actions",
-  "career",
-  "interview",
-]);
+function readAutoStats() {
+  try {
+    const stored = window.localStorage.getItem(AUTO_STATS_KEY);
+    return stored === null ? autoStatsFallback : stored !== "off";
+  } catch {
+    return autoStatsFallback;
+  }
+}
+
+function writeAutoStats(next: boolean) {
+  autoStatsFallback = next;
+  try { window.localStorage.setItem(AUTO_STATS_KEY, next ? "on" : "off"); } catch { /* 见 autoStatsFallback */ }
+  window.dispatchEvent(new Event(AUTO_STATS_EVENT));
+}
+
+function subscribeAutoStats(onChange: () => void) {
+  window.addEventListener(AUTO_STATS_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(AUTO_STATS_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
 
 /**
  * 侧栏折叠态存在 `<html data-rail>` 上而不是 React state：
@@ -410,11 +326,47 @@ function SharedAssetOverlay({
   );
 }
 
+/*
+ * 只认外壳的键（哪一场、哪份稿）。视图自己放进 URL 的筛选・模式（filter / pattern / prepMode …）
+ * 走 replaceState，不经过这里；把它们算进来的话，关掉原笔记 drawer 回退时键就对不上，
+ * 整页重挂，正在写的批注草稿随之丢失。
+ */
+const INTERVIEW_ENTRY_KEYS: ReadonlySet<string> = new Set(
+  SHELL_URL_KEYS.filter((key) => key !== "note" && key !== "section"),
+);
+
 function interviewNavigationKey(view: AppView, search: string) {
-  const params = new URLSearchParams(search);
-  params.delete("note");
-  params.delete("section");
+  const params = new URLSearchParams();
+  for (const [key, value] of new URLSearchParams(search)) {
+    if (INTERVIEW_ENTRY_KEYS.has(key)) params.append(key, value);
+  }
   return appViewHref(view, params);
+}
+
+
+type DerivedState = "fresh" | "stale" | "rebuilding";
+type TodoStatusResponse = {
+  ok?: boolean;
+  error?: string;
+  note?: Note;
+  /** 已经是这个值，没有写入。 */
+  unchanged?: boolean;
+  /** 写入前的状态，撤销时写回它。 */
+  previousStatus?: string;
+};
+/** これらを書き換えると台帳・数据字典・面接傾向の generated 区块が古くなる（vault:stats の入力）。 */
+const DERIVED_SOURCE_TYPES = new Set(["job-case", "job-queue", "interview-answer-review", "transcript-study", "study-annotation"]);
+
+function historyEntryId(state: unknown): string | null {
+  const id = state && typeof state === "object" ? (state as { __echoEntry?: unknown }).__echoEntry : undefined;
+  return typeof id === "string" ? id : null;
+}
+
+let historyEntrySequence = 0;
+/** 历史条目 id。只要在本标签页内唯一：时间戳防刷新后重号，序号防同一毫秒内连点。 */
+function newHistoryEntryId() {
+  historyEntrySequence += 1;
+  return `${Date.now().toString(36)}-${historyEntrySequence}`;
 }
 
 function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
@@ -432,6 +384,15 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const [sharedAssetOrigin, setSharedAssetOrigin] = useState({ x: 0, y: 0 });
   // 求職分析から「進行中 N 件をすべて見る」で飛んできた時だけ、求人一覧に状態フィルタを引き継ぐ。
   const [jobsInitialFilters, setJobsInitialFilters] = useState<JobsInitialFilters | null>(null);
+  // 派生統計（台帳・数据字典・面接傾向の generated 区块）が手元の事実に追いついているか。
+  // 書込ルートは stale を返すだけで再計算できない（workerd）ので、殻が本機 bridge に頼む。
+  const [derivedState, setDerivedState] = useState<DerivedState>("fresh");
+  const [statsError, setStatsError] = useState("");
+  // 服务端与首帧一律按「自动」渲染，挂载后再读本机偏好——在 useState 初始化里直接读 localStorage，
+  // 本机设成手动时首帧文字与服务端不一致，React 会丢掉整棵服务端 HTML 重画。
+  const autoStats = useSyncExternalStore(subscribeAutoStats, readAutoStats, () => true);
+  const statsTimer = useRef<number | null>(null);
+  // 写回后的「已改为 X · 撤销」全壳只有一条；各页拿到的是稳定的 show。
   const [selectedPath, setSelectedPath] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("note"),
   );
@@ -463,12 +424,57 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [writeError, setWriteError] = useState("");
+  // 撤销失败而它的提示已被新的一次写入顶掉时，理由落到全局的写入错误横幅上（见 useUndoFlash）。
+  const reportStaleUndoFailure = useCallback((message: string) => setWriteError(`撤销没有完成：${message}`), []);
+  const undoFlash = useUndoFlash({ onStaleFailure: reportStaleUndoFailure });
+  const { show: showFlash } = undoFlash;
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
-  const [interviewScopeReady, setInterviewScopeReady] = useState(false);
+  // どの scope が手元に揃ったか。視図はこれで「まだ来ていない」と「本当に無い」を分ける（假空态の根）。
+  const [readyScopes, setReadyScopes] = useState<ReadonlySet<VaultScope>>(() => new Set());
+  const interviewScopeReady = readyScopes.has("all") || readyScopes.has("interview");
+  const scopeReady = readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
 
-  // 模块间切换不继承上一页的滚动位置，否则新页面会从标题或工具栏中段开始。
+  // 浏览器后退／前进回到某一页时要回到的纵向位置。
+  const pendingScrollRestore = useRef<number | null>(null);
+  const currentView = useRef<View>(initialView);
+  // 每条历史条目一个 id（history.state.__echoEntry），滚动时持续记下「这一条目当前滚到哪」。
+  // 只在点导航离开时盖章是不够的：用后退／前进离开的那一页从没盖过章，回来时要么回到顶部，要么回到更早的旧位置。
+  const scrollByEntry = useRef(new Map<string, number>());
+  // 正在显示的那一条目。popstate 触发时 history.state 已经换成目的地，要靠它知道「刚离开的是谁」。
+  const currentEntry = useRef<string | null>(null);
+
   useEffect(() => {
-    window.scrollTo({ left: 0, top: 0 });
+    if (!historyEntryId(window.history.state)) {
+      window.history.replaceState({ ...(window.history.state ?? {}), __echoEntry: newHistoryEntryId() }, "");
+    }
+    currentEntry.current = historyEntryId(window.history.state);
+    const record = () => {
+      const id = historyEntryId(window.history.state);
+      if (id) scrollByEntry.current.set(id, window.scrollY);
+    };
+    window.addEventListener("scroll", record, { passive: true });
+    return () => window.removeEventListener("scroll", record);
+  }, []);
+
+  // 往前走（点导航）时新页面从顶部开始，否则会从标题或工具栏中段开始；
+  // 用后退回到刚才那页时则回到离开时的位置——看完一条案件想回列表接着往下看，不该每次从头翻。
+  useEffect(() => {
+    currentView.current = view;
+    const restoreY = pendingScrollRestore.current;
+    pendingScrollRestore.current = null;
+    if (restoreY === null) {
+      window.scrollTo({ left: 0, top: 0 });
+      return;
+    }
+    const restore = () => window.scrollTo({ left: 0, top: restoreY });
+    // rAF 在后台／隐藏的面板里不跑。先立刻定一次，等列表按新 view 排完版（数据已在手）再补一次。
+    restore();
+    const early = window.setTimeout(restore, 0);
+    const late = window.setTimeout(restore, 150);
+    return () => {
+      window.clearTimeout(early);
+      window.clearTimeout(late);
+    };
   }, [view]);
 
   // 次の深夜0時ちょうどに一度だけ起こす（常駐タイマーを置かないため）。
@@ -514,6 +520,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   const pendingWrites = useRef(new Map<string, PendingWrite>());
   const loadedScopes = useRef(new Set<VaultScope>());
   const loadingScopes = useRef(new Set<VaultScope>());
+  // scope ごとの ETag。焦点が戻った時の照合で 304 なら十数 MB の JSON を受け取らない。
+  const scopeEtags = useRef(new Map<VaultScope, string>());
 
   const applyPendingWrites = useCallback((incoming: Note[]) => {
     const { notes: merged, settled } = mergePendingWrites(incoming, pendingWrites.current);
@@ -536,26 +544,38 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       const params = new URLSearchParams({ scope });
       if (options?.fresh) params.set("refresh", "1");
       const url = `/api/vault?${params.toString()}`;
-      const response = await fetch(url, { cache: "no-store" });
+      const knownEtag = options?.fresh ? null : scopeEtags.current.get(scope);
+      const response = await fetch(url, {
+        cache: "no-store",
+        headers: knownEtag ? { "If-None-Match": knownEtag } : {},
+        // Obsidian 側が黙ると「正在读取」が永遠に続く。読み取りは 20 秒で諦めて再試行に回す。
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (response.status === 304) {
+        // 路径集合も最新 mtime も変わっていない：手元のままでよい。
+        loadedScopes.current.add(scope);
+        setReadyScopes((current) => (current.has(scope) ? current : new Set(current).add(scope)));
+        setFetchedAt(Date.now());
+        return;
+      }
       const payload = (await response.json()) as VaultResponse;
       if (!response.ok || !payload.connected) {
         throw new Error(payload.error || "无法连接 Obsidian");
       }
+      const etag = response.headers.get("ETag");
+      if (etag) scopeEtags.current.set(scope, etag);
       const incoming = applyPendingWrites(payload.notes);
-      setNotes((current) => {
-        if (scope === "all" || current.length === 0) return incoming;
-        const merged = new Map(current.map((note) => [note.path, note]));
-        incoming.forEach((note) => merged.set(note.path, note));
-        return [...merged.values()].sort((left, right) => right.stat.mtime - left.stat.mtime);
-      });
+      // 該 scope で消えた／改名したノートは paths に無い → 落とす（lib/vault-merge.ts）。
+      setNotes((current) => mergeScopedNotes(current, incoming, scope, payload.paths));
       loadedScopes.current.add(scope);
-      if (scope === "all" || scope === "interview") setInterviewScopeReady(true);
+      setReadyScopes((current) => (current.has(scope) ? current : new Set(current).add(scope)));
       setFetchedAt(payload.fetchedAt ?? Date.now());
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "无法连接 Obsidian");
     } finally {
       loadingScopes.current.delete(scope);
-      setLoading(false);
+      // 複数 scope を並行で取っている時、先に終わった方が全体の loading を落としてはいけない。
+      setLoading(loadingScopes.current.size > 0);
     }
   }, [applyPendingWrites]);
 
@@ -580,6 +600,33 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
    * 以前每次写入都 loadVault() 整库重拉（服务端 300 个 GET + 6MB JSON），
    * spinner 还要按住整条链路——为了换一条已经在手里的数据。
    */
+  const rebuildStats = useCallback(async () => {
+    if (statsTimer.current) { window.clearTimeout(statsTimer.current); statsTimer.current = null; }
+    setDerivedState("rebuilding");
+    setStatsError("");
+    try {
+      // vault:stats は数秒かかる（bridge 側の上限 90 秒）。
+      await postJson("/api/vault/stats", {}, { timeoutMs: 100_000 });
+      setDerivedState("fresh");
+      // generated 区块は複数の scope に散っている（台帳・応募日台帳は jobs、面接傾向は interview、数据字典は all だけ）。
+      // 手元に載っている scope を全部取り直す——変わっていない scope は ETag で 304 になるので安い。
+      await Promise.all(scopesToReloadAfterStats(loadedScopes.current).map((scope) => loadVault({ scope })));
+    } catch (rebuildError) {
+      setDerivedState("stale");
+      setStatsError(rebuildError instanceof Error ? rebuildError.message : "重算派生统计失败");
+    }
+  }, [loadVault]);
+
+  // 事実を書いた直後に呼ぶ。自動なら 3 秒待って（連打をまとめて）再計算、手動なら「待重算」の印だけ出す。
+  const markDerivedStale = useCallback(() => {
+    setDerivedState((current) => (current === "rebuilding" ? current : "stale"));
+    if (!autoStats) return;
+    if (statsTimer.current) window.clearTimeout(statsTimer.current);
+    statsTimer.current = window.setTimeout(() => void rebuildStats(), 3_000);
+  }, [autoStats, rebuildStats]);
+
+  const toggleAutoStats = useCallback(() => writeAutoStats(!readAutoStats()), []);
+
   const patchNote = useCallback((note: Note) => {
     // 在途の全量取得が写前スナップショットを持って着地しても潰されないよう、台帳にも残す。
     // 時刻を持たせるのは期限切れの判定用（食い違ったまま永久に貼り続けないため）。
@@ -591,35 +638,53 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       next[index] = note;
       return next;
     });
-  }, []);
+    if (DERIVED_SOURCE_TYPES.has(getType(note))) markDerivedStale();
+  }, [markDerivedStale]);
 
   const updateTodoStatus = useCallback(async (note: Note, status: string, expectedMtime?: number) => {
+    // 路由若回了写前的值就用它；旧路由没有时退回调用方手里那条笔记的值。
+    const statusBefore = todoStatus(note);
     try {
-      const response = await fetch("/api/todos/status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          path: note.path,
-          status,
-          ...(expectedMtime !== undefined ? { expectedMtime } : {}),
-        }),
+      const payload = await postJson<TodoStatusResponse>("/api/todos/status", {
+        path: note.path,
+        status,
+        ...(expectedMtime !== undefined ? { expectedMtime } : {}),
       });
-      const payload = (await response.json()) as { error?: string; note?: Note };
-      if (!response.ok || !payload.note) {
-        if (response.status === 409) {
-          await loadVault();
-        }
-        throw new Error(payload.error || "更新行动状态失败");
-      }
+      if (!payload.note) throw new Error(payload.error || "更新行动状态失败");
       patchNote(payload.note);
       setWriteError("");
+      const previous = payload.previousStatus || statusBefore;
+      // 本来就是这个值时什么也没写，给「撤销」反而会把别处的改动改回去。
+      if (!payload.unchanged && previous !== status) {
+        const written = payload.note;
+        showFlash(changedToLabel(status), async () => {
+          try {
+            // 带上刚写入的 mtime：撤销前若别处又改过，宁可失败也不覆盖那次改动。
+            const reverted = await postJson<TodoStatusResponse>("/api/todos/status", {
+              path: written.path,
+              status: previous,
+              expectedMtime: written.stat.mtime,
+            });
+            if (!reverted.note) return reverted.error || "撤销失败";
+            patchNote(reverted.note);
+            return null;
+          } catch (cause) {
+            if (cause instanceof ConflictError) {
+              void loadVault();
+              return "已在别处更新，无法撤销";
+            }
+            return cause instanceof Error ? cause.message : "撤销失败";
+          }
+        });
+      }
       return null;
     } catch (cause) {
+      if (cause instanceof ConflictError) await loadVault();
       const message = cause instanceof Error ? cause.message : "更新行动状态失败";
       setWriteError(message);
       return message;
     }
-  }, [loadVault, patchNote]);
+  }, [loadVault, patchNote, showFlash]);
 
   const openPrepCard = useCallback((cardId: string) => {
     // setState→overlay の effect を待つと、focus と overflow の変更後の座標を
@@ -780,6 +845,23 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     };
     const onPopState = (event: PopStateEvent) => {
       syncOverlays(event.state);
+      // 只认浏览器真正的后退／前进（isTrusted）：日历补齐场次时自己派发的 popstate 不是「回来」。
+      // 同一页内的回退（关 drawer・关回答库浮层）由各自的逻辑复位，这里不插手。
+      const routedView = appViewFromPathname(window.location.pathname);
+      // 先取「这一条目最后滚到的位置」；刷新过页面（内存里的表空了）才退回离开时盖的章。
+      const entryId = historyEntryId(event.state);
+      const stamped = event.state && typeof event.state === "object"
+        ? (event.state as { __echoScrollY?: unknown }).__echoScrollY
+        : undefined;
+      // 滚动事件按帧派发：刚滚完就后退时，最后那次滚动可能还没记进表里。离开的这一刻再补记一次。
+      if (currentEntry.current) scrollByEntry.current.set(currentEntry.current, window.scrollY);
+      currentEntry.current = entryId;
+      const scrollY = (entryId ? scrollByEntry.current.get(entryId) : undefined) ?? stamped;
+      if (event.isTrusted && routedView && routedView !== currentView.current && typeof scrollY === "number") {
+        pendingScrollRestore.current = scrollY;
+      }
+      // 看板的「带筛选跳转」种子只属于那一次点击；从历史回到 /jobs 时以地址栏为准，不再套旧种子。
+      setJobsInitialFilters(null);
       syncRoute();
     };
     syncOverlays(window.history.state);
@@ -813,6 +895,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
         !event.metaKey &&
         !event.ctrlKey &&
         !event.altKey &&
+        // 3D 舞台の R（視点リセット）が先に preventDefault している時は全庫再読込を重ねない。
+        !event.defaultPrevented &&
         !isTypingTarget(event.target)
       ) {
         event.preventDefault();
@@ -985,21 +1069,28 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     ["job-case", "todo"].includes(String(note.frontmatter.type)) && Boolean(note.frontmatter.company),
   );
 
-  // 顶栏「下一件」与首页、日历共用同一承诺投影，避免 TODO 截止与外部跟进消失。
+  // 最近安排只表示实际约定；行动期限和外部跟进留在待办与等待区。
   const nextEvent = useMemo(
     () =>
-      derived.commitments
+      derived.calendarEvents
         .filter((event) => event.phase === "upcoming")
         .toSorted((left, right) =>
           `${left.date} ${left.time}`.localeCompare(`${right.date} ${right.time}`),
         )[0] ?? null,
-    [derived.commitments],
+    [derived.calendarEvents],
   );
 
+  // ?note= が指すノートが今の scope に無い（他ページのリンクや共有 URL）：黙って開かないのではなく、全量を一度取りに行く。
+  useEffect(() => {
+    if (!selectedPath || selectedNote || loadedScopes.current.has("all") || loadingScopes.current.has("all")) return;
+    void loadVault({ scope: "all" });
+  }, [selectedPath, selectedNote, loadVault]);
+
   const sourceLabel = error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接";
-  const sourceDetail = fetchedAt
+  const syncedAt = fetchedAt
     ? `${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(fetchedAt)} 同步`
     : "本地数据源";
+  const sourceDetail = derivedState === "rebuilding" ? "正在重算统计…" : derivedState === "stale" ? "统计待重算" : syncedAt;
 
   const navigateToView = useCallback((
     nextView: View,
@@ -1014,8 +1105,15 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     setSelectedPath(null);
     setSelectedSection(null);
     setMobileMoreOpen(false);
-    window.history.pushState({ __echoAppView: nextView }, "", appViewHref(nextView, search));
+    // 离开前把当前位置也盖在这一条历史上：刷新后内存里的表没了，还能靠它回到大致位置。
+    window.history.replaceState({ ...(window.history.state ?? {}), __echoScrollY: window.scrollY }, "");
+    if (currentEntry.current) scrollByEntry.current.set(currentEntry.current, window.scrollY);
+    const entry = newHistoryEntryId();
+    window.history.pushState({ __echoAppView: nextView, __echoEntry: entry }, "", appViewHref(nextView, search));
+    currentEntry.current = entry;
     setView(nextView);
+    // 同一页上再点一次导航时，页内放进 URL 的状态要跟着新地址回到默认（pushState 不触发 popstate）。
+    notifyUrlChange();
   }, []);
 
   // 以下の遷移系コールバックは全部 useCallback：視圖側は React.memo で包んであり、
@@ -1034,11 +1132,31 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     navigateToView("review", params);
   }, [navigateToView]);
 
+  // 首页から案件へ：看板の抽屉（跟進フォーム付き）を直接開く。原笔记の drawer は読むだけで何も変えられない。
+  const openCase = useCallback((note: Note) => {
+    setJobsInitialFilters(null);
+    navigateToView("jobs", new URLSearchParams({ status: "all", case: note.path }), true);
+  }, [navigateToView]);
+
+  // 首页の等待区から一手で片付ける：「已跟进 · +7 天」「改为等本人」。書込ルートは看板と同じ /api/jobs/follow-up。
+  const followUpCase = useCallback(async (note: Note, values: { waitingFor?: string | null; followUpAt?: string | null }) => {
+    try {
+      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/jobs/follow-up", { path: note.path, ...values, expectedMtime: note.stat.mtime });
+      if (!payload.note) return payload.error || "更新案件跟进失败";
+      patchNote(payload.note);
+      return null;
+    } catch (writeError) {
+      return writeError instanceof Error ? writeError.message : "更新案件跟进失败";
+    }
+  }, [patchNote]);
+
   const viewJobsWithFilters = useCallback((filters?: JobsInitialFilters) => {
     setJobsInitialFilters(filters ?? null);
     const params = new URLSearchParams();
     if (filters?.statuses?.length) params.set("status", filters.statuses.join(","));
     if (filters?.ratings?.length) params.set("rating", filters.ratings.join(","));
+    if (filters?.touch?.length) params.set("touch", filters.touch.join(","));
+    if (filters?.waiting) params.set("waiting", "1");
     navigateToView("jobs", params, true);
   }, [navigateToView]);
 
@@ -1047,6 +1165,16 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     if (target) navigateToView(target.view, calendarInterviewSearch(target));
     else openNote(commitment.note);
   }, [interviewTargets, navigateToView, openNote]);
+
+  // 顶栏「最近安排」直达那场面试的准备页；认不出对应面试的日程才退回日历。
+  const openNextEvent = useCallback(() => {
+    const target = nextEvent ? interviewTargets.get(nextEvent.id) : undefined;
+    if (target) navigateToView(target.view, calendarInterviewSearch(target));
+    else navigateToView("calendar");
+  }, [interviewTargets, navigateToView, nextEvent]);
+
+  const openAnswerLibrary = useCallback(() => navigateToView("prep"), [navigateToView]);
+  const openOpenTodos = useCallback(() => navigateToView("todo", new URLSearchParams({ tab: OPEN_TAB })), [navigateToView]);
 
   const syncInterviewSelection = useCallback((company: string, prepPath: string) => {
     const params = new URLSearchParams();
@@ -1071,7 +1199,11 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   }, []);
 
   const syncReviewSelection = useCallback((key: string | null) => {
-    const params = new URLSearchParams();
+    // 复盘页自己的筛选（filter / pattern）原样留着，外壳只重写自己的键。
+    // 换了一场（或回到一览）时，panel / block / sentence 指的是上一场里的位置；
+    // 日历带来的 event / date / round 也不再成立，留着会让「回到一览」被当成那场的入口而显示等待页。
+    const params = new URLSearchParams(window.location.search);
+    for (const owned of SHELL_URL_KEYS) params.delete(owned);
     if (key) params.set("review", key);
     window.history.replaceState(
       { ...(window.history.state ?? {}), __echoAppView: "review" }, "", appViewHref("review", params),
@@ -1220,11 +1352,11 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
           {nextEvent && view !== "session" && (
             <button
               className="topbar-next"
-              onClick={() => navigateToView(nextEvent.phase === "upcoming" ? "calendar" : "calendar")}
-              title={`${nextEvent.date}${nextEvent.time ? ` ${nextEvent.time}` : ""} ${nextEvent.label}`}
+              onClick={openNextEvent}
+              title={`${nextEvent.date}${nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST ${nextEvent.label}`}
             >
               <small>最近安排</small>
-              <em>{countdownLabel(nextEvent.date)}{nextEvent.time ? ` ${nextEvent.time}` : ""}</em>
+              <em>{countdownLabel(nextEvent.date)}{nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST</em>
               <strong>{nextEvent.company}</strong>
               <i aria-hidden="true">→</i>
             </button>
@@ -1242,6 +1374,15 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               <small>{sourceDetail}</small>
             </span>
           </button>
+          {/* 派生統計の再計算：自動（既定）／手動。手動で待重算のときは押せば今すぐ再計算。 */}
+          <button
+            className={`topbar-stats state-${derivedState}`}
+            onClick={derivedState === "stale" ? () => void rebuildStats() : toggleAutoStats}
+            disabled={derivedState === "rebuilding"}
+            title={statsError || (derivedState === "stale" ? "点击立即重算派生统计" : autoStats ? "写入后自动重算派生统计（点击改为手动）" : "派生统计手动重算（点击改为自动）")}
+          >
+            {derivedState === "stale" ? "重算统计" : derivedState === "rebuilding" ? "重算中…" : autoStats ? "统计 · 自动" : "统计 · 手动"}
+          </button>
 
           <div className="topbar-keys">
             <button onClick={() => setSearchOpen(true)} aria-label="搜索与命令"><kbd>⌘K</kbd>搜索</button>
@@ -1254,7 +1395,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
         ) : loading && notes.length === 0 ? (
           <LoadingState />
         ) : (
-          <>
+          <ViewErrorBoundary key={view} label={view}>
             {error && notes.length > 0 && (
               <div className="stale-data-banner" role="status">
                 <span>同步中断，正在显示 {sourceDetail} 的可用快照。</span>
@@ -1301,6 +1442,11 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   today={today}
                   onOpen={openNote}
                   onView={navigateToView}
+                  onViewJobs={viewJobsWithFilters}
+                  onOpenCase={openCase}
+                  onOpenSchedule={openCalendarInterview}
+                  onViewOpenTodos={openOpenTodos}
+                  onFollowUp={followUpCase}
                   onQuery={runSavedQuery}
                   onOpenReview={openReview}
                   onTodoStatus={updateTodoStatus}
@@ -1318,6 +1464,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "review" && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && calendarInterview.path)) && (
                 <InterviewReview
+                  loading={!scopeReady}
                   key={interviewRouteVersion}
                   notes={notes}
                   onVaultChanged={loadVault}
@@ -1342,6 +1489,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   onOpenWiki={openWikiLink}
                   onOpenCard={openPrepCard}
                   onOpenAsset={openSharedAsset}
+                  onOpenLibrary={openAnswerLibrary}
                   initialCompany={interviewParams.get("company") ?? ""}
                   initialPath={prepInitialPath}
                   initialContextPath={companyContextPath}
@@ -1352,8 +1500,10 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "prep" && (
                 <InterviewPrep
+                  loading={!scopeReady}
                   notes={notes}
                   onOpen={openNote}
+                  syncUrl
                 />
               )}
               {view === "language" && (
@@ -1361,6 +1511,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "topics" && (
                 <LanguageExpressionCourses
+                  loading={!scopeReady}
                   notes={notes}
                   onVaultChanged={loadVault}
                   onNoteWritten={patchNote}
@@ -1369,17 +1520,24 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               {view === "jobs" && (
                 <JobsView
                   notes={notes}
+                  today={today}
                   onOpen={openNote}
                   onVaultChanged={loadVault}
                   onNoteWritten={patchNote}
                   initialFilters={jobsInitialFilters}
+                  onFlash={showFlash}
                 />
               )}
               {view === "analytics" && (
                 <JobsAnalytics
+                  loading={!scopeReady}
                   notes={notes}
                   onOpen={openNote}
+                  onOpenCase={openCase}
                   onViewJobs={viewJobsWithFilters}
+                  derivedState={derivedState}
+                  statsError={statsError}
+                  onRebuildStats={rebuildStats}
                 />
               )}
               {view === "todo" && (
@@ -1400,7 +1558,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "calendar" && (
                 <CalendarView
-                  events={derived.commitments}
+                  events={derived.calendarEvents}
                   today={today}
                   onOpen={openNote}
                   interviewTargets={interviewTargets}
@@ -1417,6 +1575,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               )}
               {view === "library" && (
                 <LibraryView
+                  loading={!scopeReady}
                   notes={notes}
                   filter={groupFilter}
                   query={libraryQuery}
@@ -1426,7 +1585,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                 />
               )}
             </div>
-          </>
+          </ViewErrorBoundary>
         )}
       </main>
 
@@ -1462,12 +1621,14 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               className={item.views.includes(view) ? "active" : ""}
               onClick={() => navigateToView(item.target)}
             >
-              <span aria-hidden="true">{item.glyph}</span>
+              <span aria-hidden="true"><NavigationIcon name={item.glyph} /></span>
               {item.label}
             </button>
           ))}
         </nav>
       )}
+
+      <UndoFlashBar state={undoFlash} />
 
       {searchOpen && (
         <SearchPalette
@@ -1536,11 +1697,12 @@ function LoadingState() {
 }
 
 function ConnectionError({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const detail = describeConnectionError(error);
   return (
     <div className="connection-error">
       <span className="error-code">LOCAL / OFFLINE</span>
-      <h1>还差一步，才能读到记忆库。</h1>
-      <p>网页本身已经就绪，但本地服务没有拿到 Obsidian 的访问凭证。确认 Obsidian 正在运行后，使用项目提供的本地启动脚本即可。</p>
+      <h1>{detail.title}</h1>
+      <p>{detail.hint}</p>
       <code>{error}</code>
       <button onClick={onRetry}>重新连接 <span>↻</span></button>
     </div>

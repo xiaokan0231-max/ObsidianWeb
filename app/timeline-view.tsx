@@ -30,6 +30,7 @@ import {
   timelineMonths,
   type TimelineEntry,
 } from "@/lib/timeline-browser";
+import { enumCodec, textCodec, useUrlState, type UrlStateCodec } from "./use-url-state";
 
 const ThreeTimeCorridor = lazy(() => import("./timeline-three"));
 
@@ -152,17 +153,28 @@ function monthLabel(key: string) {
   return `${year} 年 ${Number(month)} 月`;
 }
 
+// 列表的筛选放进 URL：从笔记 drawer 返回或刷新后，仍停在刚才看的月份与日期。
+// 手改 URL 写错的值落回默认（自动月份・全部），不让列表因为一个坏参数整页变空。
+const KIND_CODEC = enumCodec(["all", "note", "event"] as const);
+const GROUP_CODEC = enumCodec(["all", ...Object.keys(GROUPS)]);
+// null＝「还没选过月份」，按最近的日期自动定位；URL 里不出现。
+const MONTH_CODEC: UrlStateCodec<string | null> = {
+  parse: (raw) => (raw === "all" || raw === "undated" || /^\d{4}-\d{2}$/.test(raw) ? raw : null),
+  serialize: (value) => value ?? "",
+};
+const DAY_CODEC: UrlStateCodec<string> = { parse: (raw) => (/^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null) };
+
 function TimelineListView({ today, items, events, onOpen }: {
   today: string;
   items: { note: Note; date: string }[];
   events: CalendarEvent[];
   onOpen: (note: Note) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [group, setGroup] = useState("all");
-  const [kind, setKind] = useState<"all" | "note" | "event">("all");
-  const [monthChoice, setMonthChoice] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState("");
+  const [query, setQuery] = useUrlState("tq", "", textCodec);
+  const [group, setGroup] = useUrlState("topic", "all", GROUP_CODEC);
+  const [kind, setKind] = useUrlState<"all" | "note" | "event">("kind", "all", KIND_CODEC);
+  const [monthChoice, setMonthChoice] = useUrlState<string | null>("month", null, MONTH_CODEC);
+  const [selectedDate, setSelectedDate] = useUrlState("day", "", DAY_CODEC);
   const [oldestFirst, setOldestFirst] = useState(false);
   const [visibleDays, setVisibleDays] = useState(14);
   const searchRef = useRef<HTMLInputElement>(null);

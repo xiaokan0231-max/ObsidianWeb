@@ -56,13 +56,11 @@
   border-radius: var(--radius-control);
 }
 
-.module-stat-strip.analytics-head-glance > div,
 .module-stat-strip.jobs-stat > div,
 .module-stat-strip.focus-language-glance > div {
   padding: 10px 14px;
 }
 
-.module-stat-strip.analytics-head-glance dd,
 .module-stat-strip.focus-language-glance dd,
 .module-stat-strip.jobs-stat strong {
   font-size: 22px;
@@ -285,32 +283,6 @@
   background: rgba(255, 255, 255, .32);
   font-size: 11px;
   text-align: center;
-}
-
-.analytics > .analytics-command {
-  margin-top: 0;
-}
-
-.analytics-command + .analytics-head-glance {
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.analytics-command + .analytics-head-glance > div {
-  min-height: 76px;
-  border-radius: var(--radius-control);
-  box-shadow: none;
-}
-
-.analytics-command + .analytics-head-glance dt small,
-.analytics-command + .analytics-head-glance div > span {
-  display: none;
-}
-
-.analytics-command + .analytics-head-glance dd {
-  grid-column: 2;
-  align-self: center;
-  margin: 0;
 }
 
 @media (min-width: 821px) {

@@ -20,6 +20,7 @@ import {
   validateJobCaseFrontmatter,
 } from "../lib/job-case-schema.ts";
 import { listEmbeds, listHeadings, sliceSection, stripFrontmatter } from "../lib/interview-prep-embed.mjs";
+import { TODO_PRIORITIES, TODO_STATUSES } from "../lib/todo-status.mjs";
 import {
   companyMotivationIssues,
   interviewPrepStructureIssues,
@@ -40,8 +41,6 @@ import { validateCompanyOverviewNotes } from "../lib/company-overview.ts";
 
 const PREP_REQUIRED = ["company", "round", "format", "interviewers"];
 const PREP_SESSION_STATUSES = ["preparing", "scheduled", "completed", "cancelled"];
-const TODO_STATUSES = ["未着手", "進行中", "保留", "完了"];
-const TODO_PRIORITIES = ["high", "medium", "low"];
 const TODO_AUDIENCES = ["user", "system"];
 const SYSTEM_TODO_CATEGORIES = ["台帳整合", "観測基盤"];
 const VERSIONED_ARTIFACT_TYPES = new Set(["language-bank", "language-curriculum"]);
@@ -60,6 +59,8 @@ const problems = [];
 const warnings = [];
 const notes = await readJobCases();
 const caseIds = new Map();
+// case_id → 案件の next_event_at。面談らしい todo に日時が無い時、案件側にもあるかを見る。
+const caseNextEvent = new Map();
 
 const today = new Date().toLocaleDateString("sv-SE");
 
@@ -78,6 +79,7 @@ for (const note of notes) {
   }
 
   if (fm.case_id) {
+    caseNextEvent.set(String(fm.case_id), String(fm.next_event_at ?? "").trim());
     const files = caseIds.get(fm.case_id) ?? [];
     files.push(note.name);
     caseIds.set(fm.case_id, files);
@@ -155,8 +157,8 @@ const graphNotes = files.map((path) => {
   let frontmatter = parseFrontmatter(content);
   // 旧校验器只读顶层标量；新画像含嵌套对象，须与 Obsidian 的 YAML 读取一致。
   // 只扩展新结构，避免改变历史笔记既有校验口径。JSON_SCHEMA 不把日期变成 Date。
-  if (frontmatter.company_profile !== undefined ||
-    String(frontmatter.report_kind ?? "").replace(/^["']|["']$/g, "") === "company-fit") {
+  if (frontmatter.company_profile !== undefined || frontmatter.company_summary !== undefined ||
+    ["company-fit", "company-summary"].includes(String(frontmatter.report_kind ?? "").replace(/^["']|["']$/g, ""))) {
     const raw = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? "";
     try {
       const parsed = loadYaml(raw, { schema: JSON_SCHEMA });
@@ -233,8 +235,8 @@ for (const path of files) {
       if (!curriculum) problems.push(`${relativePath}: language-curriculum JSON 区块が読めない`);
     }
   }
-  // company-fit 的版本与作者／日期／证据规则由画像校验负责，不套用分析归档的 schema v2。
-  if (ANALYSIS_TYPES.has(type) && frontmatter.report_kind !== "company-fit") {
+  // 公司研究的版本与作者／日期／证据规则由画像校验负责，不套用分析归档的 schema v2。
+  if (ANALYSIS_TYPES.has(type) && !["company-fit", "company-summary"].includes(frontmatter.report_kind)) {
     const lifecycle = String(frontmatter.lifecycle ?? "");
     if (!GENERATED_LIFECYCLES.includes(lifecycle)) {
       problems.push(`${relativePath}: ${type} lifecycle は ${GENERATED_LIFECYCLES.join(" / ")} のいずれかが必須`);
@@ -343,6 +345,18 @@ for (const path of files) {
     }
     if (frontmatter.case_id && !caseIds.has(String(frontmatter.case_id))) {
       problems.push(`${relativePath}: case_id「${frontmatter.case_id}」に対応する job-case が無い`);
+    }
+    // 面談らしい todo（分類・ファイル名に面談/面接/説明会）に日時が無く、紐づく案件にも無い：
+    // 日历・首页・公司画像ヘッダーの三か所で同時に見えなくなる。日付がファイル名にしか無い形が実際に 2 件あった。
+    // 止めない（警告）——日時が本当に未定の面談もある。
+    if (
+      /面談|面接|説明会|面谈|面试/.test(`${category} ${relativePath}`) &&
+      frontmatter.company &&
+      !String(frontmatter.next_event_at ?? "").trim() &&
+      !["完了", "保留"].includes(status) &&
+      !(frontmatter.case_id && caseNextEvent.get(String(frontmatter.case_id)))
+    ) {
+      warnings.push(`${relativePath}: 面談らしい todo に next_event_at が無い（案件 ${frontmatter.case_id || "未紐付け"} にも無い）→ 日历・首页・画像ヘッダーに出ない`);
     }
 
     const action = String(frontmatter.action ?? "").trim();

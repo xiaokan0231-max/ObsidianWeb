@@ -6,7 +6,7 @@
 由它实时构建案件看板、日历、面试准备、时间线、3D 知识图谱和学习闭环。
 Next.js (vinext) / React 19 / TypeScript，部署到 Cloudflare Workers。
 
-![ObsidianWeb](public/og.png)
+![ObsidianWeb](public/og.jpg)
 
 - 🇯🇵 [日本語](README.md) ・ 🇬🇧 [English](README.en.md)
 

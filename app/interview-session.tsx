@@ -30,8 +30,9 @@ import {
   calendarCompanyIdentity,
   countdownLabel,
 } from "@/lib/memory-atlas-data";
-import { formatDate, getType, type Note } from "@/lib/notes";
+import { formatDate, getString, getType, type Note } from "@/lib/notes";
 import { REVIEW_DIMENSION_META } from "@/lib/review-deep";
+import { OPEN_NOTE_LABEL } from "@/lib/ui-labels";
 import {
   buildCardCoverage,
   buildInterviewTrends,
@@ -44,8 +45,12 @@ import {
 import { Blocks, Inlines } from "./prep-doc-render";
 import PrepMaterialReader from "./prep-material-reader";
 import InterviewSessionV2 from "./interview-session-v2";
-import { buildCompanyOverviews, resolveCompanyOverview, type CompanyOverview } from "@/lib/company-overview";
+import { buildCompanyOverviews, resolveCompanyOverview, resolveCompanyOverviewFrom, type CompanyOverview } from "@/lib/company-overview";
 import CompanyOverviewContent, { COMPANY_COMPARE_LIMIT, CompanyCompare, CompanyCompareButton, CompanyCompareSelector, CompanyCompareTray, toggleCompanyComparison } from "./company-overview";
+import ContextPicker from "./context-picker";
+import CompanyHeroCard from "./company-hero";
+import { buildContextPickerGroups } from "@/lib/context-picker";
+import { companyHeroTone } from "@/lib/company-hero";
 import { copySelectionWithoutRuby } from "./ruby-copy";
 import { isTypingTarget, PrepSearchBox, useSlashFocus } from "./prep-search";
 
@@ -188,19 +193,46 @@ function subsectionTabLabel(title: string) {
  * 索引だけ（どの節を見ろ）では7回ジャンプすることになるので、
  * 問い・読み上げる答案・なぜそう答えるかを1枚に並べる。答案は各所の正本からの参照。
  */
+/** 「言えた」の記憶は localStorage（本人の端末だけの進捗で、vault に書く事実ではない）。 */
+function readSaidQuestions(storageKey: string): ReadonlySet<string> {
+  try {
+    const raw = window.localStorage.getItem(`echo:said:${storageKey}`);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+function writeSaidQuestions(storageKey: string, done: ReadonlySet<string>) {
+  try {
+    window.localStorage.setItem(`echo:said:${storageKey}`, JSON.stringify([...done]));
+  } catch {
+    // 私密窗口等拿不到 localStorage：只影响本次会话
+  }
+}
+
 function KillMapPage({
   questions,
+  storageKey,
   onOpenCard,
   onOpenWiki,
   query,
 }: {
   questions: PrepKillQuestion[];
+  /** 「言えた」を憶えておく鍵（準備稿のパス）。以前はモードを切り替えるたびに全部消えていた。 */
+  storageKey: string;
   onOpenCard: (cardId: string) => void;
   onOpenWiki: (target: string, section?: string) => void;
   query: string;
 }) {
   // 当日の使い方：一問ずつ声に出す。読み終えたら「言えた」を押して次へ。
-  const [done, setDone] = useState<ReadonlySet<string>>(new Set());
+  const [done, setDoneState] = useState<ReadonlySet<string>>(() => readSaidQuestions(storageKey));
+  const setDone = (next: ReadonlySet<string> | ((current: ReadonlySet<string>) => ReadonlySet<string>)) => {
+    setDoneState((current) => {
+      const resolved = typeof next === "function" ? next(current) : next;
+      writeSaidQuestions(storageKey, resolved);
+      return resolved;
+    });
+  };
   const [openWhy, setOpenWhy] = useState<ReadonlySet<string>>(new Set());
   const refs = { onOpenCard, onOpenWiki, query };
   const toggle = (set: ReadonlySet<string>, id: string) => {
@@ -881,6 +913,7 @@ function DocReader({
           {isKillMap ? (
             <KillMapPage
               questions={killQuestions}
+              storageKey={doc.note.path}
               onOpenCard={onOpenCard}
               onOpenWiki={onOpenWiki}
               query={keyword}
@@ -978,10 +1011,12 @@ function SessionAssets({
   motivationAsset,
   onOpenCard,
   onOpenAsset,
+  onOpenLibrary,
 }: {
   motivationAsset: SharedAssetTarget | null;
   onOpenCard: (cardId: string) => void;
   onOpenAsset: (asset: SharedAssetTarget) => void;
+  onOpenLibrary?: () => void;
 }) {
   return (
     <section className="session-assets" aria-label="本轮专属与全局共用的面试话术">
@@ -1021,7 +1056,8 @@ function SessionAssets({
           {asset.label}
         </button>
       ))}
-      <button type="button" className="to-library" onClick={() => onOpenCard("p01")}>
+      {/* 「回答库 →」说的是整个库：去通用准备页翻，而不是只弹出 p01 那一张。 */}
+      <button type="button" className="to-library" onClick={() => (onOpenLibrary ? onOpenLibrary() : onOpenCard("p01"))}>
         回答库 →
       </button>
     </section>
@@ -1035,6 +1071,7 @@ function InterviewSession({
   onOpenWiki,
   onOpenCard,
   onOpenAsset,
+  onOpenLibrary,
   initialCompany = "",
   initialPath = "",
   initialContextPath = "",
@@ -1047,6 +1084,8 @@ function InterviewSession({
   onOpenWiki: (target: string, section?: string) => void;
   onOpenCard: (cardId: string) => void;
   onOpenAsset: (asset: SharedAssetTarget) => void;
+  /** 打开完整回答库（通用准备页）。缺省时退回在浮层里打开 p01。 */
+  onOpenLibrary?: () => void;
   initialCompany?: string;
   initialPath?: string;
   initialContextPath?: string;
@@ -1062,7 +1101,8 @@ function InterviewSession({
   const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
   const digest = useMemo(() => buildDigest(notes), [notes]);
   const contexts = useMemo(() => buildCompanyOverviews(notes), [notes]);
-  const docContexts = useMemo(() => new Map(docs.map((doc) => [doc.note.path, resolveCompanyOverview(notes, doc.note)])), [docs, notes]);
+  const docContexts = useMemo(() => new Map(docs.map((doc) => [doc.note.path, resolveCompanyOverviewFrom(contexts, notes, doc.note)])), [contexts, docs, notes]);
+  const pickerGroups = useMemo(() => buildContextPickerGroups({ contexts, series, docs, docContexts, today }), [contexts, series, docs, docContexts, today]);
   const [selection, setSelection] = useState<{ prepPath: string | null; contextPath: string | null }>(() => {
     const exact = initialPath ? docs.find((doc) => doc.note.path === initialPath) ?? null : null;
     if (exact) return { prepPath: exact.note.path, contextPath: docContexts.get(exact.note.path)?.note.path ?? null };
@@ -1082,6 +1122,12 @@ function InterviewSession({
   });
   const selected = docs.find((doc) => doc.note.path === selection.prepPath) ?? null;
   const context = selected ? docContexts.get(selected.note.path) ?? null : contexts.find((item) => item.note.path === selection.contextPath) ?? null;
+  // 头部「准备稿 N 轮」说的是这个案件／面谈名下的全部轮次——日历判定本场无稿时它们仍然存在，只是不借来当本场的稿。
+  const contextRounds = useMemo(() => (context ? docs.filter((doc) => docContexts.get(doc.note.path)?.key === context.key) : []), [context, docs, docContexts]);
+  // 面谈 todo 自己没写日時时，头部借同 case_id 案件的 next_event_at——日历就是这么合并的，两处不能一个有日期一个「未定」。
+  const linkedCase = useMemo(() => (context?.kind === "meeting" && context.caseId
+    ? notes.find((note) => getType(note) === "job-case" && getString(note.frontmatter.case_id) === context.caseId) ?? null
+    : null), [context, notes]);
   const [legacyPrepPath, setLegacyPrepPath] = useState<string | null>(null);
   const [comparePaths, setComparePaths] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -1115,15 +1161,11 @@ function InterviewSession({
     if (compared.some((item) => item.key === context.key)) removeCompare(context.note.path);
     else setComparePaths((current) => toggleCompanyComparison(current, context.note.path));
   }} /></div>;
-  const contextPicker = <label className="co-context-picker">公司／岗位或面谈<select aria-label="切换公司、案件或面谈" value={context ? `context:${context.note.path}` : selectedSeriesKey()} onChange={(event) => {
-    const value = event.target.value;
+  // 选项 id 与旧 select 的 option value 同形（context:<path> / series:<key>），切换逻辑照旧。
+  const contextPicker = <ContextPicker groups={pickerGroups} today={today} selectedId={context ? `context:${context.note.path}` : selectedSeriesKey()} onSelect={(value) => {
     if (value.startsWith("context:")) { const next = contexts.find((item) => item.note.path === value.slice(8)); if (next) selectContext(next); }
     else { const item = series.find((item) => `series:${item.key}` === value); const next = item && selectRelevantInterviewPrepDoc(item.rounds, today); if (next) selectDoc(next); }
-  }}>
-    {!context && !selected && <option value="">请选择公司／岗位或面谈</option>}
-    {[...contexts].sort((left, right) => Number(!!right.assessment) - Number(!!left.assessment) || left.company.localeCompare(right.company)).map((item) => <option key={item.key} value={`context:${item.note.path}`}>{item.company}｜{item.title}{item.assessment ? " · 已评估" : ""}</option>)}
-    {series.filter((item) => !item.rounds.some((doc) => docContexts.get(doc.note.path))).map((item) => <option key={item.key} value={`series:${item.key}`}>{item.company}｜{item.caseLink || item.meetingLink || "历史准备"}（{item.rounds.length}轮）</option>)}
-  </select></label>;
+  }} />;
   function selectedSeriesKey() { const item = selected ? interviewPrepSeriesForDoc(series, selected) : null; return item ? `series:${item.key}` : ""; }
   const companyContent = <CompanyOverviewContent context={context} historical={!!selected && ["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today))} onOpenWiki={onOpenWiki} />;
   const compareUI = <><CompanyCompareTray contexts={compared} onRemove={removeCompare} onClear={() => { setComparePaths([]); setCompareOpen(false); }} onOpen={() => setCompareOpen(true)} />
@@ -1142,10 +1184,21 @@ function InterviewSession({
   const [sessionModeChoice, setSessionModeChoice] = useState<{
     path: string | null;
     mode: SessionMode;
-  }>(() => ({
-    path: selected?.note.path ?? null,
-    mode: selected ? defaultSessionMode(selected, today, briefing !== null) : "deep",
-  }));
+  }>(() => {
+    // URL の ?prepMode= が既定を上書きする（刷新しても同じモードに戻る）。殻の ?mode= は看板の表示形式用なので別名。
+    const fromUrl = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("prepMode");
+    const urlMode = SESSION_MODES.find((mode) => mode.id === fromUrl)?.id ?? null;
+    return {
+      path: selected?.note.path ?? null,
+      mode: urlMode ?? (selected ? defaultSessionMode(selected, today, briefing !== null) : "deep"),
+    };
+  });
+  const chooseSessionMode = (path: string, mode: SessionMode) => {
+    setSessionModeChoice({ path, mode });
+    const params = new URLSearchParams(window.location.search);
+    params.set("prepMode", mode);
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}?${params}`);
+  };
   const chosenMode =
     selected && sessionModeChoice.path === selected.note.path
       ? sessionModeChoice.mode
@@ -1165,13 +1218,6 @@ function InterviewSession({
         ? [selected]
         : [];
   const externalLinks = mergePrepExternalLinks(sourceDocs);
-  const duplicateCompanyNames = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of series) {
-      counts.set(item.company, (counts.get(item.company) ?? 0) + 1);
-    }
-    return counts;
-  }, [series]);
   const motivationAsset = selected
     ? companyMotivationAssetTarget(selected)
     : null;
@@ -1224,11 +1270,12 @@ function InterviewSession({
   if (selected?.prepVersion === 2) {
     return <><InterviewSessionV2 key={selected.note.path} doc={selected} series={series} selectedSeries={selectedSeries}
       sources={externalLinks} today={today} onSelect={selectDoc} onOpen={onOpen} onOpenWiki={onOpenWiki}
-      onOpenCard={onOpenCard} onOpenAsset={onOpenAsset} companyOverview={companyContent} contextPicker={contextPicker} companyAction={companyAction} />{compareUI}</>;
+      onOpenCard={onOpenCard} onOpenAsset={onOpenAsset} companyOverview={companyContent} contextPicker={contextPicker} companyAction={companyAction} briefing={digestBand} />{compareUI}</>;
   }
 
   if (!selected || legacyPrepPath !== selected.note.path) {
-    return <><div className="co-shell"><header className="co-shell-head"><div><p className="co-kicker">公司画像{context?.kind === "meeting" ? " · 面谈" : ""}</p><h1>{context?.company || selected?.company || initialCompany || "公司总览"}</h1><p className="co-context-title">{context?.title || selected?.round || "选择一个真实案件或面谈，查看公司与岗位的最新资料。"}</p></div><div className="co-shell-controls">{contextPicker}{companyAction}</div></header>
+    // 顶部色条跟随案件状态（面接中橙・不採用灰…），与头部胶囊同一张色表。
+    return <><div className={`co-shell${context ? ` tone-${companyHeroTone(context, today)}` : ""}`}><header className="co-shell-head"><CompanyHeroCard context={context} rounds={contextRounds} today={today} linkedCase={linkedCase} fallbackCompany={selected?.company || initialCompany} fallbackTitle={selected?.round ?? ""} onOpen={onOpen} /><div className="co-shell-controls">{contextPicker}{companyAction}</div></header>
       <nav className="co-legacy-tabs" aria-label="公司与面谈视图"><button type="button" aria-pressed="true">公司总览</button><button type="button" disabled={!selected} aria-pressed="false" onClick={() => selected && setLegacyPrepPath(selected.note.path)}>面谈准备</button>{!selected && <span className="co-prep-unavailable">本场尚无准备稿</span>}</nav>
       {companyContent}{context && <button type="button" className="co-compare-toggle" onClick={() => onOpen(context.note)}>{context.kind === "meeting" ? "打开面谈记录" : "打开案件记录"} ↗</button>}
     </div>{compareUI}</>;
@@ -1264,34 +1311,8 @@ function InterviewSession({
               <h1>{selected.company || selected.title}</h1>
             </div>
             <div className="session-hero-side">
-              {series.length > 1 && (
-                <label className="session-company-switch">
-                  <span>公司／案件或面谈</span>
-                  <select
-                    aria-label="切换公司、案件或面谈"
-                    value={selectedSeries?.key ?? ""}
-                    onChange={(event) => {
-                      const nextSeries = series.find(
-                        (item) => item.key === event.target.value,
-                      );
-                      const next = nextSeries
-                        ? selectRelevantInterviewPrepDoc(nextSeries.rounds, today)
-                        : null;
-                      if (next) selectDoc(next);
-                    }}
-                  >
-                    {series.map((item) => (
-                      <option key={item.key} value={item.key}>
-                        {item.company}
-                        {duplicateCompanyNames.get(item.company)! > 1 && (item.caseLink || item.meetingLink)
-                          ? `｜${item.caseLink || item.meetingLink}`
-                          : ""}
-                        {`（${item.rounds.length}轮）`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              {/* 同じ画面に切換器が二つ（ContextPicker と原生 select）あった。公司総覧側と同じ面板を使う。 */}
+              {series.length > 1 && contextPicker}
               {(selectedSeries?.rounds.length ?? 0) > 1 && (
                 <label className="session-company-switch session-round-switch">
                   <span>面试轮次</span>
@@ -1316,7 +1337,7 @@ function InterviewSession({
                 <summary>更多</summary>
                 <div>
                   <button type="button" onClick={() => onOpen(selected.note)}>
-                    打开 Obsidian 原笔记 ↗
+                    {OPEN_NOTE_LABEL} ↗
                   </button>
                   {(selected.caseLink || selected.meetingLink) && (
                     <button type="button" onClick={() => onOpenWiki(selected.caseLink || selected.meetingLink)}>
@@ -1355,7 +1376,7 @@ function InterviewSession({
                   type="button"
                   className={sessionMode === mode.id ? "active" : ""}
                   aria-current={sessionMode === mode.id ? "page" : undefined}
-                  onClick={() => setSessionModeChoice({ path: selected.note.path, mode: mode.id })}
+                  onClick={() => chooseSessionMode(selected.note.path, mode.id)}
                 >
                   <span>{mode.duration}</span>
                   <strong>{mode.label}</strong>
@@ -1409,6 +1430,7 @@ function InterviewSession({
                 motivationAsset={motivationAsset}
                 onOpenCard={onOpenCard}
                 onOpenAsset={onOpenAsset}
+                onOpenLibrary={onOpenLibrary}
               />
             </div>
           </details>

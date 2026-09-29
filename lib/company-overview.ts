@@ -1,4 +1,6 @@
-import { getString, getTitle, getType, type Note } from "./notes.ts";
+import { getString, getTitle, getType, stripFrontmatter, type Note } from "./notes.ts";
+import { parseBlocks, parseInline, prepInlineText, type PrepInline } from "./interview-prep-doc.ts";
+import { sliceSection, stripComments } from "./interview-prep-embed.mjs";
 
 export const LEGACY_COMPANY_FIT_DIMENSIONS = [
   { key: "experience", label: "经验发挥" },
@@ -55,6 +57,15 @@ export type CompanyProfile = {
   facts: CompanyFact[];
   reviews: CompanyReview[];
 };
+export type CompanySummary = {
+  note: Note;
+  schemaVersion: 1;
+  assessedOn: string;
+  aiAuthor: string;
+  coveragePeriod: string;
+  paragraphs: PrepInline[][];
+  sources: CompanyEvidence[];
+};
 export type CompanyFitDimension = {
   key: CompanyFitDimensionKey;
   label: string;
@@ -85,8 +96,10 @@ export type CompanyOverview = {
   caseId: string;
   dossier: Note | null;
   profile: CompanyProfile | null;
+  summary: CompanySummary | null;
   assessment: CompanyFitAssessment | null;
   profileStatus: CompanyOverviewStatus;
+  summaryStatus: CompanyOverviewStatus;
   assessmentStatus: CompanyOverviewStatus;
   issues: string[];
 };
@@ -201,6 +214,74 @@ function facts(value: unknown, field: string, issues: string[], notes: Note[]): 
     if (!sources.length) issues.push(`${name} 缺少事实来源`);
     return { id, label, value, asOf, scope, sources };
   });
+}
+
+function summaryInlineIssues(nodes: PrepInline[], notes: Note[], issues: string[]) {
+  for (const node of nodes) {
+    if (node.kind === "link") {
+      if (!validUrl(node.href)) issues.push("company-summary 正文链接必须是完整 http(s) 地址");
+      summaryInlineIssues(node.children, notes, issues);
+    } else if (node.kind === "strong") summaryInlineIssues(node.children, notes, issues);
+    else if (node.kind === "ref") explicitReference(notes, `[[${node.target}]]`, "company-summary 正文引用", issues);
+  }
+}
+
+function summarySection(body: string, title: string) {
+  // 同名 H1 是报告标题，不能让通用切节器先匹配它而丢掉真正的 H2 正文。
+  const headings = [...body.matchAll(/^##[ \t]+([^\r\n]+)$/gm)].filter((match) => match[1].trim() === title);
+  return headings.length === 1 ? sliceSection(body.slice(headings[0].index), title) : null;
+}
+
+function parseSummary(note: Note, notes: Note[]): Parsed<CompanySummary> & { dossier: Note | null } {
+  const issues: string[] = [];
+  const fm = note.frontmatter;
+  if (getType(note) !== "ai-report" || text(fm.report_kind) !== "company-summary") issues.push("company_summary 须引用 type: ai-report / report_kind: company-summary");
+  if (text(fm.schema_version) !== "1") issues.push("company-summary schema_version 必须为 1");
+  const assessedOn = date(fm.assessed_on);
+  const aiAuthor = text(fm.ai_author);
+  const coveragePeriod = text(fm.coverage_period);
+  if (!assessedOn) issues.push("company-summary assessed_on 必须是真实 YYYY-MM-DD 日期");
+  if (typeof fm.ai_author !== "string" || !aiAuthor || /^(ai|人工智能|unknown|不明|未记录)$/i.test(aiAuthor)) issues.push("company-summary 必须有具体 ai_author 署名");
+  if (typeof fm.coverage_period !== "string" || !coveragePeriod) issues.push("company-summary coverage_period 必须是非空文本");
+  const dossier = explicitReference(notes, fm.company_dossier, "company_dossier", issues);
+  if (dossier && getType(dossier) !== "company") issues.push("company_dossier 必须指向 type: company");
+  const sources = evidence(fm.sources, "company-summary sources", issues, notes);
+  if (!sources.length) issues.push("company-summary sources 至少需要一项有效来源");
+
+  // 研究边界留在完整报告；页面只取指定正文，避免把附录或旧版本一起带入。
+  const body = stripComments(stripFrontmatter(note.content.replace(/\r\n/g, "\n")));
+  const section = summarySection(body, "公司总结");
+  const boundaries = summarySection(body, "资料与边界");
+  if (!section) issues.push("company-summary 须有唯一的二级标题「公司总结」");
+  if (!boundaries?.body.trim()) issues.push("company-summary 须有唯一且非空的二级标题「资料与边界」");
+  const chunks: string[] = section?.body.trim() ? section.body.trim().split(/\n\s*\n/) : [];
+  if (!chunks.length) issues.push("company-summary 公司总结正文不能为空");
+  const paragraphs = chunks.map((chunk) => {
+    const blocks = parseBlocks(chunk);
+    if (!blocks.length || blocks.some((block) => block.kind !== "paragraph") || /!\[/.test(chunk)) issues.push("company-summary 公司总结只支持自然段，可使用 Markdown 加粗与链接");
+    const inline = parseInline(chunk.replace(/\s*\n\s*/g, " "));
+    if (!prepInlineText(inline).trim()) issues.push("company-summary 公司总结不可含空段落");
+    summaryInlineIssues(inline, notes, issues);
+    return inline;
+  });
+  return { dossier, issues, value: issues.length ? null : {
+    note, schemaVersion: 1, assessedOn, aiAuthor, coveragePeriod, paragraphs, sources,
+  } };
+}
+
+function summaryForDossier(dossier: Note, notes: Note[]): Parsed<CompanySummary> & { status: CompanyOverviewStatus } {
+  if (dossier.frontmatter.company_summary === undefined) return { value: null, status: "missing", issues: [] };
+  const issues: string[] = [];
+  if (getType(dossier) !== "company") issues.push("company_summary 只能保存在 type: company 卷宗");
+  const report = explicitReference(notes, dossier.frontmatter.company_summary, "company_summary", issues);
+  let value: CompanySummary | null = null;
+  if (report) {
+    const parsed = parseSummary(report, notes);
+    issues.push(...parsed.issues.map((issue) => `${report.path}: ${issue}`));
+    if (parsed.dossier?.path !== dossier.path) issues.push("company_summary 的 company_dossier 与当前公司卷宗不符");
+    value = parsed.value;
+  }
+  return { value: issues.length ? null : value, status: issues.length ? "invalid" : "available", issues };
 }
 
 function parseProfile(note: Note, notes: Note[]): Parsed<CompanyProfile> {
@@ -370,6 +451,8 @@ export function buildCompanyOverviews(notes: Note[]): CompanyOverview[] {
       profileStatus = profile ? "available" : "invalid";
       issues.push(...parsed.issues.map((issue) => `${dossier.path}: ${issue}`));
     }
+    const companySummary = dossier ? summaryForDossier(dossier, notes) : null;
+    if (companySummary) issues.push(...companySummary.issues.map((issue) => `${dossier!.path}: ${issue}`));
     let assessment: CompanyFitAssessment | null = null;
     let assessmentStatus: CompanyOverviewStatus = "missing";
     if (note.frontmatter.fit_assessment !== undefined) {
@@ -389,16 +472,24 @@ export function buildCompanyOverviews(notes: Note[]): CompanyOverview[] {
     }
     return [{ key: `${kind}:${note.path}`, kind, note, company: text(note.frontmatter.company) || text(dossier?.frontmatter.company) || getTitle(note),
       title: contextTitle(note), caseId: text(note.frontmatter.case_id), dossier, profile, assessment,
+      summary: companySummary?.value ?? null, summaryStatus: companySummary?.status ?? "missing",
       profileStatus, assessmentStatus, issues }];
   });
 }
 
 /** source 可为真实正本或准备稿；同公司不同岗位永不通过公司名合并。 */
 export function resolveCompanyOverview(notes: Note[], source: Note | string): CompanyOverview | null {
+  return resolveCompanyOverviewFrom(buildCompanyOverviews(notes), notes, source);
+}
+
+/**
+ * 同上，但复用已算好的画像列表。本场面试页对每份准备稿各解析一遍全部画像（含 markdown），
+ * 准备稿 × 案件数的平方级重算；页面已经持有 contexts，就不要再建一次。
+ */
+export function resolveCompanyOverviewFrom(contexts: CompanyOverview[], notes: Note[], source: Note | string): CompanyOverview | null {
   const note = typeof source === "string" ? resolveCompanyReference(notes, source) : source;
   if (!note) return null;
   const direct = contextKind(note);
-  const contexts = buildCompanyOverviews(notes);
   if (direct) return contexts.find((entry) => entry.note.path === note.path) ?? null;
   const fields = (["case", "meeting"] as const).filter((field) => note.frontmatter[field] !== undefined);
   if (fields.length !== 1) return null;
@@ -417,6 +508,12 @@ export function validateCompanyOverviewNotes(notes: Note[]): string[] {
     }
     if (text(note.frontmatter.report_kind) === "company-fit") {
       issues.push(...parseAssessment(note, notes).issues.map((issue) => `${note.path}: ${issue}`));
+    }
+    if (text(note.frontmatter.report_kind) === "company-summary") {
+      issues.push(...parseSummary(note, notes).issues.map((issue) => `${note.path}: ${issue}`));
+    }
+    if (note.frontmatter.company_summary !== undefined) {
+      issues.push(...summaryForDossier(note, notes).issues.map((issue) => `${note.path}: ${issue}`));
     }
   }
   for (const entry of buildCompanyOverviews(notes)) {

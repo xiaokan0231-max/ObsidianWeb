@@ -33,6 +33,8 @@ async function request(path: string, init: RequestInit = {}) {
   const response = await fetch(`${OBSIDIAN_URL}${path}`, {
     ...init,
     cache: "no-store",
+    // Obsidian 卡住时没有超时就是无限等待：页面停在「正在读取」，什么提示都不给。
+    signal: init.signal ?? AbortSignal.timeout(15_000),
     headers: {
       ...headers(),
       ...(init.headers ?? {}),

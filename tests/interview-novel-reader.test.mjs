@@ -1,25 +1,12 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import ts from "typescript";
 import * as review from "../lib/review.ts";
+import { loadAppModule } from "./helpers/render-tsx.mjs";
 
 // 用真实组件渲染验证正文和注释的边界，不依赖开发服务器或源码字符串断言。
-const source = await readFile(new URL("../app/interview-novel-reader.tsx", import.meta.url), "utf8");
-const compiled = ts.transpileModule(source, {
-  compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-});
-const require = createRequire(import.meta.url);
-const componentExports = {};
-runInNewContext(compiled.outputText, {
-  exports: componentExports,
-  require: (specifier) => specifier === "@/lib/review" ? review : require(specifier),
-});
-const InterviewNovelReader = componentExports.default;
+const { default: InterviewNovelReader } = await loadAppModule("app/interview-novel-reader.tsx");
 
 const parsed = review.parseSeirikou(`## q01 技術経験
 - 概:: 技術経験を確認する。

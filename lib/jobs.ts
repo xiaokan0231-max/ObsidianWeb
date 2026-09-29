@@ -1,19 +1,27 @@
-import { getString, getTitle, stripMarkdown, type Note } from "./notes";
-import { jobSectionBody } from "./job-sections";
-import { intakeSortKey } from "./job-intake";
+import { getString, getTitle, stripMarkdown, type Note } from "./notes.ts";
+import { jobSectionBody } from "./job-sections.ts";
+import { daysBetween, intakeSortKey, jobIntake, type JobIntake } from "./job-intake.ts";
 import {
   DEFAULT_JOB_STATUS,
+  IN_PROGRESS_STATUSES,
   jobStatusNote,
   normalizeJobStatus,
-} from "./job-status";
+} from "./job-status.ts";
 import { JOB_CASE_TYPE } from "./vault-boundary.mjs";
-import { JOB_CASE_SECTION, detectVerification } from "./job-case-schema";
+import {
+  ACCESS_STATE_VALUES, FIT_BANDS, HARD_GATE_VALUES, JOB_CASE_SECTION, PRIMARY_COHORT_VALUES, ROLE_FAMILY_VALUES,
+  SALARY_RANGE_CLASS_VALUES, detectVerification,
+} from "./job-case-schema.ts";
 
 export {
   composeJobStatus,
   DEFAULT_JOB_STATUS,
+  IN_FLIGHT_STATUSES,
+  IN_PROGRESS_STATUSES,
   isJobStatus,
   JOB_STATUSES,
+  SELECTION_STATUSES,
+  TERMINAL_STATUSES,
   JOB_STATUS_NOTE_MAX,
   jobStatusNote,
   jobStatusNoteError,
@@ -21,7 +29,7 @@ export {
   normalizeJobStatus,
   statusRequiresChannel,
   type JobStatus,
-} from "./job-status";
+} from "./job-status.ts";
 
 export {
   daysBetween,
@@ -31,7 +39,7 @@ export {
   JOB_INTAKES,
   normalizeDay,
   type JobIntake,
-} from "./job-intake";
+} from "./job-intake.ts";
 
 /** 応募案件は発見経路に関係なく 20_求職 配下に置く。 */
 export const JOB_CASE_ROOT = "20_求職/";
@@ -175,6 +183,14 @@ export function parseSalary(raw: string): SalaryRange {
   return { min: Math.min(min, max), max: Math.max(min, max), estimated: monthly };
 }
 
+/** v2 の salary_min / salary_max（万円）。両方揃って順序が正しい時だけ採用する。 */
+function structuredSalary(note: Note): SalaryRange | null {
+  const min = Number(note.frontmatter.salary_min);
+  const max = Number(note.frontmatter.salary_max);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max < min) return null;
+  return { min, max, estimated: false };
+}
+
 /** 从 `東京都港区三田・一部在宅` 里取出「東京都」这类可筛选的行政区划。 */
 export function jobRegions(location: string): string[] {
   const matches = Array.from(location.matchAll(/([^\s／/・（(]{2,4}?[都道府県])/g), (match) => match[1]);
@@ -214,9 +230,13 @@ export function jobVerification(note: Note): JobVerification {
   return detectVerification(note.content) as JobVerification;
 }
 
+/**
+ * 画面の中文層に出す短い語。旧表記「原文確認済／要確認」は日本語と中文が一枚の札に混ざっていた。
+ * 語が短いぶん「何を核对したのか」が落ちるので、カード・一覧の札には title で「求人原文：」を添える。
+ */
 export const VERIFICATION_LABEL: Record<JobVerification, string> = {
-  verified: "原文確認済",
-  warned: "要確認",
+  verified: "已核对",
+  warned: "需确认",
   unchecked: "未核对",
 };
 
@@ -264,6 +284,91 @@ export function jobAppliedOn(note: Note, statusText: string): string {
   return statusText.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1] ?? "";
 }
 
+/** v2 採点（rating_version: v2）の六軸と Gate。vault:check が交差検証している値を画面でも使う。 */
+export type JobFit = {
+  /** 六軸合計（0–100）。 */
+  score: number;
+  /** cap 適用後の最終 Band（A–D）。 */
+  band: string;
+  /** 各 Gate の最悪値：pass / hold / reject。 */
+  hardGate: string;
+  gates: Record<"employmentVisa" | "salary" | "english" | "roleCenter" | "japaneseClient" | "original", string>;
+  scores: Record<"technicalValue" | "documentMatch" | "transferability" | "orgLegibility" | "clientDeployability" | "roleCoherence", number>;
+  /** 企業への到達摩擦（Fit とは別軸）。 */
+  accessState: string;
+  salaryRangeClass: string;
+  roleFamily: string;
+  primaryCohort: string;
+};
+
+export const JOB_FIT_SCORE_LABEL: Record<keyof JobFit["scores"], { label: string; max: number }> = {
+  technicalValue: { label: "技術価値", max: 25 },
+  documentMatch: { label: "書類一致", max: 10 },
+  transferability: { label: "転用性", max: 15 },
+  orgLegibility: { label: "組織可読性", max: 20 },
+  clientDeployability: { label: "客先配置", max: 20 },
+  roleCoherence: { label: "役割整合", max: 10 },
+};
+/** 六軸の表示順（skill の採点表と同じ）。 */
+export const JOB_FIT_AXES: readonly (keyof JobFit["scores"])[] = ["technicalValue", "documentMatch", "transferability", "orgLegibility", "clientDeployability", "roleCoherence"];
+export const JOB_FIT_GATE_LABEL: Record<keyof JobFit["gates"], string> = {
+  employmentVisa: "在留資格", salary: "年収", english: "英語", roleCenter: "役割中心", japaneseClient: "日本客先", original: "原文",
+};
+export const HARD_GATE_LABEL: Record<string, string> = { pass: "通过", hold: "保留", reject: "拒否" };
+/** rating_version が v2 でない、または六軸が揃わない案件の表示。0 と区別するため文言で出す。 */
+export const UNRATED_V2_LABEL = "未採点（v2）";
+export const ACCESS_STATE_LABEL: Record<string, string> = {
+  company_selected: "企业已筛选", direct: "直投", company_received: "企业已收", not_sent: "未发送", agent_only: "仅代理",
+};
+
+const oneOf = (value: unknown, allowed: readonly string[]) => (allowed.includes(String(value ?? "")) ? String(value) : "");
+/** 空欄は「未記入」であって 0 点ではない——Number("") が 0 になる罠を先に塞ぐ。 */
+const intIn = (value: unknown, max: number) => {
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 && number <= max ? number : null;
+};
+
+/**
+ * v2 の採点欄を読む。rating_version が v2 でない、または六軸のどれかが欠ける／範囲外なら null——
+ * 「未採点（v2）」と「0 点」は別物で、片方だけ数字にすると絞り込みが嘘をつく。
+ */
+export function jobFit(note: Note): JobFit | null {
+  const fm = note.frontmatter;
+  if (getString(fm.rating_version) !== "v2") return null;
+  const scores = {
+    technicalValue: intIn(fm.score_technical_value, 25),
+    documentMatch: intIn(fm.score_document_match, 10),
+    transferability: intIn(fm.score_transferability, 15),
+    orgLegibility: intIn(fm.score_org_legibility, 20),
+    clientDeployability: intIn(fm.score_client_deployability, 20),
+    roleCoherence: intIn(fm.score_role_coherence, 10),
+  };
+  if (Object.values(scores).some((value) => value === null)) return null;
+  const filled = scores as JobFit["scores"];
+  const band = oneOf(fm.fit_band_final, FIT_BANDS) || oneOf(fm.fit_band, FIT_BANDS);
+  const hardGate = oneOf(fm.hard_gate, HARD_GATE_VALUES);
+  if (!band || !hardGate) return null;
+  return {
+    score: intIn(fm.fit_score_100, 100) ?? Object.values(filled).reduce((sum, value) => sum + value, 0),
+    band,
+    hardGate,
+    gates: {
+      employmentVisa: oneOf(fm.gate_employment_visa, HARD_GATE_VALUES),
+      salary: oneOf(fm.gate_salary, HARD_GATE_VALUES),
+      english: oneOf(fm.gate_english, HARD_GATE_VALUES),
+      roleCenter: oneOf(fm.gate_role_center, HARD_GATE_VALUES),
+      japaneseClient: oneOf(fm.gate_japanese_client, HARD_GATE_VALUES),
+      original: oneOf(fm.gate_original, HARD_GATE_VALUES),
+    },
+    scores: filled,
+    accessState: oneOf(fm.access_state, ACCESS_STATE_VALUES),
+    salaryRangeClass: oneOf(fm.salary_range_class, SALARY_RANGE_CLASS_VALUES),
+    roleFamily: oneOf(fm.role_family, ROLE_FAMILY_VALUES),
+    primaryCohort: oneOf(fm.primary_cohort, PRIMARY_COHORT_VALUES),
+  };
+}
+
 /** 卡片、抽屉、对比都用这一份派生数据，避免每处各解析一遍。 */
 export type JobCard = {
   note: Note;
@@ -292,7 +397,10 @@ export type JobCard = {
   followUpAt: string;
   nextEventAt: string;
   salaryText: string;
+  /** v2 の salary_min/max が揃っていればそれ（vault:check が range_class と突き合わせ済み）、無ければ自由文 salary の解析。 */
   salary: SalaryRange;
+  /** v2 採点。無ければ null（「未採点（v2）」であって 0 ではない）。 */
+  fit: JobFit | null;
   location: string;
   regions: string[];
   remote: boolean;
@@ -316,7 +424,19 @@ export type JobCard = {
   haystack: string;
 };
 
+// 看板・分析・首页・画像ヘッダーが同じノートを各自 toJobCard していた（stripMarkdown 全文込み）。
+// Note オブジェクトは差し替え式（書込後は新しいオブジェクト）なので、オブジェクト単位で憶えれば古い値は残らない。
+const cardCache = new WeakMap<Note, JobCard>();
+
 export function toJobCard(note: Note): JobCard {
+  const cached = cardCache.get(note);
+  if (cached) return cached;
+  const card = buildJobCard(note);
+  cardCache.set(note, card);
+  return card;
+}
+
+function buildJobCard(note: Note): JobCard {
   const company = getString(note.frontmatter.company) || getTitle(note).split(/\s[—–-]\s/)[0].trim();
   const position = jobPosition(note);
   const salaryText = getString(note.frontmatter.salary);
@@ -346,7 +466,8 @@ export function toJobCard(note: Note): JobCard {
     followUpAt: getString(note.frontmatter.follow_up_at),
     nextEventAt: getString(note.frontmatter.next_event_at),
     salaryText,
-    salary: parseSalary(salaryText),
+    salary: structuredSalary(note) ?? parseSalary(salaryText),
+    fit: jobFit(note),
     location,
     regions: jobRegions(location),
     remote: jobRemote(note),
@@ -371,10 +492,11 @@ export function toJobCard(note: Note): JobCard {
   };
 }
 
-export type JobSort = "rating" | "salary" | "date" | "applied" | "updated" | "company";
+export type JobSort = "rating" | "fit" | "salary" | "date" | "applied" | "updated" | "company";
 
 export const JOB_SORTS: { id: JobSort; label: string }[] = [
   { id: "rating", label: "応募优先度" },
+  { id: "fit", label: "v2 採点（Fit）" },
   { id: "salary", label: "年収上限" },
   { id: "date", label: "入库时间" },
   { id: "applied", label: "応募日（古い順）" },
@@ -383,7 +505,11 @@ export const JOB_SORTS: { id: JobSort; label: string }[] = [
 ];
 
 export function compareJobs(left: JobCard, right: JobCard, sort: JobSort) {
-  if (sort === "salary") {
+  if (sort === "fit") {
+    // 未採点（null）は最下位。0 点扱いにすると D バンドの案件と混ざる。
+    const diff = (right.fit?.score ?? -1) - (left.fit?.score ?? -1);
+    if (diff !== 0) return diff;
+  } else if (sort === "salary") {
     const diff = (right.salary.max ?? -1) - (left.salary.max ?? -1);
     if (diff !== 0) return diff;
   } else if (sort === "date") {
@@ -417,4 +543,271 @@ export function jobMatchesQuery(job: JobCard, rawQuery: string) {
   const query = rawQuery.trim().toLowerCase();
   if (!query) return true;
   return query.split(/\s+/).every((token) => job.haystack.includes(token));
+}
+
+/*
+ * 下面几个是看板与公司画像头部共用的显示格式。原来只在 app/jobs-view.tsx 里，
+ * 头部要用时复制了一份 shortDay——两份规则迟早漂移，所以搬到这里让两处 import 同一个。
+ */
+
+/** `800〜1200万` / `800万〜` / `…（月給換算）`。解析不出区间时退回笔记原文。 */
+export function salaryLabel(job: Pick<JobCard, "salary" | "salaryText">) {
+  const { min, max, estimated } = job.salary;
+  if (min === null) return job.salaryText || "薪资未记录";
+  const range = max !== null && max !== min ? `${min}〜${max}万` : `${min}万〜`;
+  return estimated ? `${range}（月給換算）` : range;
+}
+
+/** バッジに出す文字。未採点は 0 ではなく「—」——「読んでいない」と「見込みなし」は別。 */
+export function rateText(job: { rating: number; rated: boolean }) {
+  return job.rated ? String(job.rating) : "—";
+}
+
+/** 応募优先度色阶：9+ 橙 / 7+ 绿 / 5+ 琥珀 / 其余灰。 */
+export function rateTone(rating: number) {
+  if (rating >= 9) return "high";
+  if (rating >= 7) return "good";
+  if (rating >= 5) return "mid";
+  return "low";
+}
+
+/**
+ * `2026-07-20` → `7/20`。年は今の運用（数か月単位）では邪魔なだけなので落とす。
+ * 先頭が日付なら後ろに時刻が付いていてもよい（`2026-07-20 10:00` → `7/20`）。
+ * 読めない時は `fallback`（既定＝原文）を返す——表では「—」、本文では原文をそのまま出したい。
+ */
+export function shortDay(day: string, fallback?: string) {
+  const match = day.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\b|$)/);
+  return match ? `${Number(match[2])}/${Number(match[3])}` : fallback ?? day;
+}
+
+/** 文中用の月日：`2026-08-02` → `8月2日`。表は shortDay、文は monthDay——書式は二つでも実装は一つずつ。 */
+export function monthDay(day: string, fallback?: string) {
+  const match = day.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\b|$)/);
+  return match ? `${Number(match[2])}月${Number(match[3])}日` : fallback ?? day;
+}
+
+/** `target` まであと何日（未来が正、過去が負）。daysBetween の向きを逆にしただけ。 */
+export function daysUntil(target: string, today: string): number | null {
+  const days = daysBetween(target, today);
+  return days === null ? null : -days;
+}
+
+/** 応募案件の状態→配色。7 状態と自定义値をこの 1 箇所で色に落とし、看板・首页・切換面板・画像ヘッダーが同じ表を読む。 */
+export type JobStatusTone = "interview" | "progress" | "offer" | "pending" | "reject" | "neutral" | "meeting";
+
+export function statusTone(status: string): JobStatusTone {
+  if (status === "面接中") return "interview";
+  if (status === "応募済" || status === "書類通過") return "progress";
+  if (status === "内定") return "offer";
+  if (status === "未応募") return "pending";
+  if (status === "不採用") return "reject";
+  return "neutral";
+}
+
+/**
+ * 「已经动过手，但还没形成応募」的机会。
+ *
+ * Findy 的「いいかも」、媒体上的スカウト回信这类动作，本人做完了但企业没回应，
+ * 求人票也没提交出去——按 7 枚举只能是 `未応募`。可是它和「还没看过的推荐」
+ * 完全不是一回事：前者球在对方手里，本人现在做不了任何事。
+ * 看板和首页都要用同一条规则把两者分开，否则「待判断」的数字两处对不上。
+ */
+export function awaitingCounterpart(job: Pick<JobCard, "status" | "waitingFor">) {
+  return job.status === "未応募" && Boolean(job.waitingFor) && job.waitingFor !== "self";
+}
+
+/**
+ * 球在对方手里的案件：记了等待对象且不是本人，案件还活着（选考中・内定），或未応募但已经动过手。
+ * 首页「等待回复」和看板「只看等对方」共用这一条——各写一份的话，首页的「全部 N 项」点进去就对不上
+ * （曾经就是这样：首页数了未応募＋等对方，跳过去却按进行中状态筛，漏掉它、又混进没在等的案件）。
+ */
+export function waitsOnCounterpart(status: string, waitingFor: string) {
+  if (!waitingFor || waitingFor === "self") return false;
+  return IN_PROGRESS_STATUSES.includes(status) || status === "未応募";
+}
+
+export function jobWaitsOnCounterpart(job: Pick<JobCard, "status" | "waitingFor">) {
+  return waitsOnCounterpart(job.status, job.waitingFor);
+}
+
+/**
+ * 応募からの経過。**「何日待っているか」は催促の判断に直結する**ので、
+ * 相対表示だけにして絶対日付は title に回す（一覧をスキャンしている時に効くのは日数のほう）。
+ */
+export function elapsedLabel(appliedOn: string, today: string) {
+  const days = daysBetween(appliedOn, today);
+  if (days === null) return "";
+  if (days <= 0) return "今日";
+  return `${days}日経過`;
+}
+
+/** 案件如何进入 vault 的显示词。看板卡片、详情抽屉、公司画像头部共用，别再各写一份。 */
+export const JOB_ORIGIN_LABEL: Record<string, string> = {
+  "ai-reco": "AI 发现",
+  manual: "本人录入",
+  agent: "中介推荐",
+  scout: "Scout",
+  legacy: "历史导入",
+  "ra-batch": "RA 批量投递",
+};
+
+/** waiting_for 的显示词（球在谁手里）。看板的下拉选项与公司画像头部共用。 */
+export const WAITING_FOR_LABEL: Record<string, string> = {
+  self: "本人",
+  company: "企业",
+  agent: "中介",
+  platform: "平台",
+};
+
+/**
+ * 「动手状态」：未応募 の中を「未着手」と「已动手·等对方」に分ける軸（awaitingCounterpart と同じ規則）。
+ * 応募済以降の案件には値が無い——応募したかどうかは status の方で既に言えていて、
+ * ここに「未着手」と出すと「応募済なのに未着手」という読めない組み合わせになる。
+ */
+export type JobTouch = "untouched" | "awaiting";
+
+export const JOB_TOUCHES: { id: JobTouch; label: string; hint: string }[] = [
+  { id: "untouched", label: "未着手", hint: "未応募，本人还没动过手" },
+  { id: "awaiting", label: "已动手·等对方", hint: "未応募，但已点过いいかも／回过スカウト，球在对方手里" },
+];
+
+export function jobTouch(job: Pick<JobCard, "status" | "waitingFor">): JobTouch | null {
+  if (job.status !== "未応募") return null;
+  return awaitingCounterpart(job) ? "awaiting" : "untouched";
+}
+
+/*
+ * 看板的筛选条件。放在 lib 而不是 jobs-view.tsx 里，是为了让「统计格的数字 = 点开后的条数」
+ * 能被 node 测试直接证明：两边若各写一份判定，迟早一边改了另一边没改，数字就开始说谎。
+ */
+
+/** v2 採点の擬似値「未採点」。frontmatter には無い——採点待ちの案件を拾えるようにするために置く。 */
+export const UNRATED_FIT = "none";
+export const jobFitGate = (job: Pick<JobCard, "fit">) => job.fit?.hardGate ?? UNRATED_FIT;
+export const jobFitBand = (job: Pick<JobCard, "fit">) => job.fit?.band ?? UNRATED_FIT;
+export const jobFitAccess = (job: Pick<JobCard, "fit">) => job.fit?.accessState || UNRATED_FIT;
+
+export type JobBoardFilters = {
+  statuses: string[];
+  ratings: JobRatingBand[];
+  minSalary: number;
+  stacks: string[];
+  regions: string[];
+  sources: string[];
+  verifications: JobVerification[];
+  intakes: JobIntake[];
+  /** 动手状态。値を持つのは未応募だけなので、選んでいる間は応募済以降が全部外れる。 */
+  touches: JobTouch[];
+  /** v2 採点：hard_gate / fit_band_final / access_state の値、または UNRATED_FIT。 */
+  gates: string[];
+  bands: string[];
+  accesses: string[];
+  remoteOnly: boolean;
+  /** 只看球在对方手里的案件（jobWaitsOnCounterpart）。首页「等待回复 · 全部 N 项」的落点。 */
+  waitingOnly: boolean;
+};
+
+export const EMPTY_JOB_FILTERS: JobBoardFilters = {
+  statuses: [],
+  ratings: [],
+  minSalary: 0,
+  stacks: [],
+  regions: [],
+  sources: [],
+  verifications: [],
+  intakes: [],
+  touches: [],
+  gates: [],
+  bands: [],
+  accesses: [],
+  remoteOnly: false,
+  waitingOnly: false,
+};
+
+/** 一个筛选维度。算联动 facet 计数时用它指出「这一组先不算」。 */
+export type JobFilterKey =
+  | "query"
+  | "statuses"
+  | "rating"
+  | "salary"
+  | "stacks"
+  | "regions"
+  | "sources"
+  | "verifications"
+  | "intakes"
+  | "touches"
+  | "gates"
+  | "bands"
+  | "accesses"
+  | "remote"
+  | "waiting";
+
+/** 看板一条岗位是否通过全部筛选。`except` 指定的那一组不参与判定（facet 联动计数用）。 */
+export function jobMatchesFilters(
+  job: JobCard,
+  filters: JobBoardFilters,
+  { query = "", today, except }: { query?: string; today: string; except?: JobFilterKey },
+) {
+  const keep = (key: JobFilterKey, predicate: () => boolean) => key === except || predicate();
+  return (
+    keep("query", () => jobMatchesQuery(job, query)) &&
+    keep("statuses", () => filters.statuses.length === 0 || filters.statuses.includes(job.status)) &&
+    keep("rating", () => jobMatchesRatingBands(job.rating, filters.ratings)) &&
+    keep("salary", () => filters.minSalary === 0 || (job.salary.max ?? 0) >= filters.minSalary) &&
+    keep("stacks", () => filters.stacks.length === 0 || job.stack.some((tag) => filters.stacks.includes(tag))) &&
+    keep("regions", () => filters.regions.length === 0 || job.regions.some((region) => filters.regions.includes(region))) &&
+    keep("sources", () => filters.sources.length === 0 || filters.sources.includes(job.sourceGroup)) &&
+    keep("verifications", () => filters.verifications.length === 0 || filters.verifications.includes(job.verification)) &&
+    keep("intakes", () => filters.intakes.length === 0 || filters.intakes.includes(jobIntake(job.date, today))) &&
+    keep("touches", () => {
+      if (filters.touches.length === 0) return true;
+      const touch = jobTouch(job);
+      return touch !== null && filters.touches.includes(touch);
+    }) &&
+    keep("gates", () => filters.gates.length === 0 || filters.gates.includes(jobFitGate(job))) &&
+    keep("bands", () => filters.bands.length === 0 || filters.bands.includes(jobFitBand(job))) &&
+    keep("accesses", () => filters.accesses.length === 0 || filters.accesses.includes(jobFitAccess(job))) &&
+    keep("remote", () => !filters.remoteOnly || job.remote) &&
+    keep("waiting", () => !filters.waitingOnly || jobWaitsOnCounterpart(job))
+  );
+}
+
+/** 看板顶部的统计格。每格的数字是「点开后列表的条数」的承诺，filters 与 count 必须同口径。 */
+export type JobStatTileId = "untouched" | "awaiting" | "ready" | "recent" | "verified";
+
+export const JOB_STAT_TILES: {
+  id: JobStatTileId;
+  label: string;
+  filters: Partial<JobBoardFilters>;
+}[] = [
+  { id: "untouched", label: "未着手", filters: { statuses: ["未応募"], touches: ["untouched"] } },
+  { id: "awaiting", label: "已动手 · 等对方", filters: { statuses: ["未応募"], touches: ["awaiting"] } },
+  // 「7 分以上」は 7plus（しきい値）で表す。7/8/9 の排他帯を3つ並べても件数は同じだが、1つの方が chip で読める。
+  { id: "ready", label: "7 分以上待判断", filters: { statuses: ["未応募"], touches: ["untouched"], ratings: ["7plus"] } },
+  { id: "recent", label: "7 日内新增", filters: { statuses: ["未応募"], intakes: ["today", "d3", "d7"] } },
+  { id: "verified", label: "原文已核对", filters: { statuses: ["未応募"], verifications: ["verified"] } },
+];
+
+/** 统计格点开后的完整筛选：其余条件全部清空，免得旧条件把数字悄悄削小。 */
+export function jobStatTileFilters(id: JobStatTileId): JobBoardFilters {
+  const tile = JOB_STAT_TILES.find((item) => item.id === id);
+  return { ...EMPTY_JOB_FILTERS, ...(tile?.filters ?? {}) };
+}
+
+/**
+ * 统计格的母集合。**从全部案件算，不看当前筛选**——统计格是「现在手里有什么」的总览，
+ * 跟着筛选变的话，点完一格其余四格也跟着塌，就没法再从这里换到别的格。
+ * 判定故意按业务口径直写（而不是调 jobMatchesFilters），测试才能证明两套写法数到同一个数。
+ */
+export function jobStatTilePools<T extends JobCard>(jobs: T[], today: string): Record<JobStatTileId, T[]> {
+  const notApplied = jobs.filter((job) => job.status === "未応募");
+  const untouched = notApplied.filter((job) => !awaitingCounterpart(job));
+  return {
+    untouched,
+    awaiting: notApplied.filter(awaitingCounterpart),
+    ready: untouched.filter((job) => job.rating >= 7),
+    recent: notApplied.filter((job) => ["today", "d3", "d7"].includes(jobIntake(job.date, today))),
+    verified: notApplied.filter((job) => job.verification === "verified"),
+  };
 }

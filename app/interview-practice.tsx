@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useMemo, useState } from "react";
+import { postJson } from "@/lib/client-api";
 import { getString, getType, type Note } from "@/lib/notes";
 import {
   interviewPracticeKey,
@@ -8,6 +9,8 @@ import {
   type InterviewPracticeAction,
   type InterviewPracticeRating,
 } from "@/lib/review-practice";
+import { textCodec, useUrlState } from "./use-url-state";
+import { practiceStatusLabel } from "@/lib/ui-labels";
 
 type PracticeItem = ReturnType<typeof parseInterviewPractice>[number] & {
   key: string;
@@ -33,7 +36,8 @@ function InterviewPractice({
   onNoteWritten: (note: Note) => void;
 }) {
   const [showCompleted, setShowCompleted] = useState(false);
-  const [selectedKey, setSelectedKey] = useState("");
+  // 选中的题放进 URL：去原笔记查完再回来，仍停在这一题。已完成／过期的键找不到时落回队首，不会空白。
+  const [selectedKey, setSelectedKey] = useUrlState("item", "", textCodec);
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -75,18 +79,13 @@ function InterviewPractice({
     setError("");
     setMessage("");
     try {
-      const response = await fetch("/api/review/practice/action", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          practicePath: selected.practicePath,
-          blockId: selected.blockId,
-          action,
-          rating,
-        }),
+      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note; dueAt?: string }>("/api/review/practice/action", {
+        practicePath: selected.practicePath,
+        blockId: selected.blockId,
+        action,
+        rating,
       });
-      const payload = (await response.json()) as { error?: string; note?: Note; dueAt?: string };
-      if (!response.ok || !payload.note) throw new Error(payload.error || "记录练习失败");
+      if (!payload.note) throw new Error(payload.error || "记录练习失败");
       onNoteWritten(payload.note);
       if (action === "attempt") setMessage(`已记录：${rating ? RATING_LABEL[rating] : "本次练习"}`);
       if (action === "complete") { setMessage("已完成，正在切换下一题。"); setRevealed(false); setSelectedKey(""); }
@@ -121,7 +120,7 @@ function InterviewPractice({
                 className={item.key === selected?.key ? "active" : ""}
                 onClick={() => selectItem(item.key)}
               >
-                <small>{String(index + 1).padStart(2, "0")} · {item.status}</small>
+                <small>{String(index + 1).padStart(2, "0")} · {practiceStatusLabel(item.status)}</small>
                 <strong>{item.questionTitle || item.blockId}</strong>
                 <span>{item.company}{item.round ? ` · ${item.round}` : ""}</span>
               </button>

@@ -15,7 +15,7 @@ const [ui, atlas, timelineView, graphView, graph, stage, chrome, sceneLib, css] 
   readAppCss(),
 ]);
 
-test("时之航道接入时间线视图：lazy 加载、纯数据映射、双渲染切换与降级", () => {
+test("时之航道接入时间线视图：lazy 加载、纯数据映射、双渲染切换与降级", async () => {
   // 视图从 memory-atlas 拆出到 timeline-view.tsx，契约不变、落点变了。
   assert.ok(timelineView.includes('lazy(() => import("./timeline-three"))'), "航道必须走 lazy 边界");
   assert.ok(timelineView.includes("buildTimelineScene("), "场景数据在视图侧映射为纯数据");
@@ -27,9 +27,10 @@ test("时之航道接入时间线视图：lazy 加载、纯数据映射、双渲
   assert.ok(timelineView.includes("<TimelineListView"), "2D 列表作为简洁模式保留");
   assert.ok(timelineView.includes("onFallback={fallBackToList}"), "WebGL 失败退回列表");
   assert.ok(atlas.includes('events={derived.calendarEvents}'), "日程事件要传进时间线");
-  // 导航顺序保持：时间线在关系图之前。
+  // 导航顺序保持：时间线在关系图之前。导航表已从外壳移到 app/navigation.ts。
+  const navigation = await readFile("app/navigation.ts", "utf8");
   assert.ok(
-    atlas.indexOf('id: "timeline"') < atlas.indexOf('id: "graph"'),
+    navigation.indexOf('id: "timeline"') < navigation.indexOf('id: "graph"'),
     "SECONDARY_NAVIGATION 顺序不应被改动",
   );
 });

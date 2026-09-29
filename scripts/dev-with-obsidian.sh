@@ -18,10 +18,15 @@ fi
 # vault の整合性を起動時に一度だけ見る。ページを実際に見ようとしている瞬間なので、
 # ここでズレを知らせるのが一番役に立つ。ただし起動は止めない（Codex や手編集の
 # 取りこぼしを拾うための保険であって、開発を妨げるためのものではない）。
-if ! node "$(dirname -- "$0")/vault-check.mjs" >/dev/null 2>&1 ||
-   ! node "$(dirname -- "$0")/vault-stats.mjs" --check >/dev/null 2>&1; then
-  echo "⚠️  vault のデータに不整合がある。詳細: npm run vault:verify" >&2
-fi
+# 結果の末尾数行だけ見せる：黙って /dev/null に捨てると「何が」ズレているかを誰も知らない。
+check_log="$(node "$(dirname -- "$0")/vault-check.mjs" 2>&1)" || {
+  echo "⚠️  vault:check に問題がある（詳細: npm run vault:verify）:" >&2
+  printf '%s\n' "$check_log" | tail -n 6 >&2
+}
+stats_log="$(node "$(dirname -- "$0")/vault-stats.mjs" --check 2>&1)" || {
+  echo "⚠️  派生統計が古い（npm run vault:stats で再計算）:" >&2
+  printf '%s\n' "$stats_log" | tail -n 4 >&2
+}
 
 # 手勢用の wasm・モデルを public/mediapipe/ に用意（揃っていれば何もしない、
 # 失敗しても起動は止めない——クライアントが CDN へフォールバックする）

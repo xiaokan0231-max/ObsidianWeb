@@ -2,13 +2,18 @@
 
 import { memo, useMemo, useState, useSyncExternalStore } from "react";
 import { type AppView } from "./app-route";
+import type { JobsInitialFilters } from "./jobs-view";
 import { buildFocusBrief, focusDateLabel } from "@/lib/focus-action";
-import { compareJobs, toJobCard } from "@/lib/jobs";
+import { IN_FLIGHT_STATUSES, awaitingCounterpart, compareJobs, toJobCard } from "@/lib/jobs";
+import { isInterviewEvent } from "@/lib/calendar-interview";
+import { joinReviewNotes } from "@/lib/review-join";
 import { parseInterviewPractice } from "@/lib/review-practice";
 import { formatDate, getString, getTitle, getType, type Note } from "@/lib/notes";
 import {
+  calendarCompanyIdentity,
   ACTIVE_JOB_STATUSES,
   buildReviewPreview,
+  calendarEventTime,
   careerStatus,
   getLatestNoteDate,
   localDateKey,
@@ -17,6 +22,7 @@ import {
   todoPriority,
   todoStatus,
   TODO_PRIORITY,
+  type CalendarEvent,
   type DerivedData,
 } from "@/lib/memory-atlas-data";
 
@@ -52,6 +58,11 @@ function Overview({
   today,
   onOpen,
   onView,
+  onViewJobs,
+  onOpenCase,
+  onOpenSchedule,
+  onViewOpenTodos,
+  onFollowUp,
   onOpenReview,
   onTodoStatus,
 }: {
@@ -61,6 +72,16 @@ function Overview({
   today: string;
   onOpen: (note: Note) => void;
   onView: (view: View) => void;
+  /** 带状态筛选跳到看板（分析页同款）。 */
+  onViewJobs?: (filters?: JobsInitialFilters) => void;
+  /** 打开看板里这条案件的抽屉（有跟进表单），而不是只读的原笔记。 */
+  onOpenCase?: (note: Note) => void;
+  /** 近期安排直达那场面试的准备页／复盘页；认不出对应面试时由外壳退回原笔记。 */
+  onOpenSchedule?: (event: CalendarEvent) => void;
+  /** 打开行动清单的「未完成」标签（首页数的就是未完成）。 */
+  onViewOpenTodos?: () => void;
+  /** 等待区就地处理：改跟进日或改为等本人。返回错误文案，成功为 null。 */
+  onFollowUp?: (note: Note, values: { waitingFor?: string | null; followUpAt?: string | null }) => Promise<string | null>;
   onQuery: (query: string) => void;
   onOpenReview: (key?: string) => void;
   onTodoStatus: (note: Note, status: string, expectedMtime?: number) => Promise<string | null>;
@@ -88,8 +109,9 @@ function Overview({
   const focusBrief = useMemo(() => buildFocusBrief(notes, today), [notes, today]);
   const primaryFocus = focusBrief.primary;
 
+  // 「已经动过手、等对方回应」的未応募不算待判断——看板同一条规则（awaitingCounterpart），否则首页数字虚高。
   const openJobs = useMemo(() => jobs
-    .filter((job) => job.status === "未応募")
+    .filter((job) => job.status === "未応募" && !awaitingCounterpart(job))
     .sort((left, right) => compareJobs(left, right, "rating")), [jobs]);
   const topSalary = openJobs
     .map((job) => job.salary.max ?? 0)
@@ -130,13 +152,48 @@ function Overview({
 
   const [year, month, day] = today.split("-").map(Number);
   const horizon = localDateKey(new Date(year, month - 1, day + 6));
-  const upcoming = derived.commitments.filter((event) => event.phase === "upcoming" && event.date <= horizon);
+  const upcoming = derived.calendarEvents.filter((event) => event.phase === "upcoming" && event.date <= horizon);
+  // 已过的面试如果没有整理稿，复盘链路从起点就断了、而且没人提醒（整理稿是 joinReviewNotes 的起点）。
+  // 只看最近 14 天：更早的要么已经复盘，要么本人决定不复盘了。
+  const missingTranscripts = useMemo(() => {
+    const floor = localDateKey(new Date(year, month - 1, day - 14));
+    const joined = joinReviewNotes(notes);
+    const covered = (event: { company: string; date: string }) => joined.some((doc) =>
+      doc.date === event.date && calendarCompanyIdentity(doc.company) === calendarCompanyIdentity(event.company));
+    return derived.calendarEvents
+      // 只提醒真正的面试・面谈：说明会・研讨会也在日历上，但没有可复盘的问答。判定与日历进复盘页的入口同一条。
+      .filter((event) => event.phase === "past" && event.date >= floor && event.date < today && isInterviewEvent(event) && !covered(event))
+      .slice(0, 5);
+  }, [derived.calendarEvents, notes, today, year, month, day]);
+  const [copiedTranscript, setCopiedTranscript] = useState("");
+  const copyTranscriptRequest = async (event: { id: string; company: string; date: string; label: string }) => {
+    const text = `${event.company} ${event.date} ${event.label}：请生成面试整理稿，然后用 /review-interview-answers 复盘`;
+    try { await navigator.clipboard.writeText(text); setCopiedTranscript(event.id); } catch { setCopiedTranscript(""); }
+  };
   const actionReviewDoc = reviewPreview.actionDoc;
   const primaryTodoStatus = primaryFocus?.source === "todo" ? todoStatus(primaryFocus.note) : "";
+  const openCase = (note: Note) => (onOpenCase ? onOpenCase(note) : onOpen(note));
+  // 「N 件待办」「全部 N 项」数的是未完成；落在行动清单的「未完成」标签上，条数才对得上。
+  const viewOpenTodos = () => (onViewOpenTodos ? onViewOpenTodos() : onView("todo"));
+  const openSchedule = (event: CalendarEvent) => (onOpenSchedule ? onOpenSchedule(event) : onOpen(event.note));
+  // 顶部四个数字各自落到「就是这些」的那一页：点了之后看到的件数要和这里一致，否则数字就没法信。
+  const viewJobs = (filters: JobsInitialFilters) => (onViewJobs ? onViewJobs(filters) : onView("jobs"));
+  const [followUpBusy, setFollowUpBusy] = useState("");
+  const [followUpError, setFollowUpError] = useState("");
+  const runFollowUp = async (note: Note, values: { waitingFor?: string | null; followUpAt?: string | null }) => {
+    if (!onFollowUp) return;
+    setFollowUpBusy(note.path);
+    setFollowUpError("");
+    const error = await onFollowUp(note, values);
+    setFollowUpBusy("");
+    if (error) setFollowUpError(error);
+  };
+  const plusDays = (days: number) => localDateKey(new Date(year, month - 1, day + days));
   const runPrimaryAction = async () => {
     if (!primaryFocus) return;
     if (primaryFocus.source !== "todo") {
-      onOpen(primaryFocus.note);
+      // 跟進は案件の抽屉で片付ける（跟進フォームはそこにしかない）。
+      openCase(primaryFocus.note);
       return;
     }
     setFocusBusy(true);
@@ -160,7 +217,7 @@ function Overview({
 
   const todosPanel = (
     <article className="panel todo-preview-panel" key="todos" data-overview-panel="todos">
-      <PanelHeading title="行动清单" action={`全部 ${openTodos.length} 项`} onAction={() => onView("todo")} />
+      <PanelHeading title="行动清单" action={`全部 ${openTodos.length} 项`} onAction={viewOpenTodos} />
       <div className="todo-preview-list">
         {openTodos.length === 0 ? <p className="panel-empty">当前没有需要推进的行动。</p> : openTodos.slice(0, 5).map((note) => (
           <button key={note.path} onClick={() => onOpen(note)}>
@@ -183,8 +240,8 @@ function Overview({
           const status = careerStatus(job.status);
           const date = job.statusUpdated || job.date || getLatestNoteDate(job.note);
           return (
-            <button key={job.path} onClick={() => onOpen(job.note)}>
-              <span className={`pipeline-status status-${status.tone}`}>{status.label}</span>
+            <button key={job.path} onClick={() => openCase(job.note)}>
+              <span className={`pipeline-status tone-${status.tone}`}>{status.label}</span>
               <span className="pipeline-company">
                 <span className="pipeline-company-head"><strong>{job.company}</strong><time dateTime={date}>{formatDate(date)}</time></span>
                 <small>{job.nextAction || job.position || "案件详情"}</small>
@@ -201,8 +258,8 @@ function Overview({
             {recentChanges.map((job) => {
               const status = careerStatus(job.status);
               const date = job.statusUpdated || job.date || getLatestNoteDate(job.note);
-              return <button key={job.path} onClick={() => onOpen(job.note)}>
-                <span className={`pipeline-status status-${status.tone}`}>{status.label}</span>
+              return <button key={job.path} onClick={() => openCase(job.note)}>
+                <span className={`pipeline-status tone-${status.tone}`}>{status.label}</span>
                 <strong>{job.company}</strong><time dateTime={date}>{formatDate(date)}</time>
               </button>;
             })}
@@ -221,7 +278,7 @@ function Overview({
       </div>
       <div className="jobs-preview-list">
         {openJobs.slice(0, 4).map((job) => (
-          <button key={job.path} onClick={() => onOpen(job.note)}>
+          <button key={job.path} onClick={() => openCase(job.note)}>
             <span className={`jobs-preview-rating rating-${job.rating}`}>{job.rating}</span>
             <span className="jobs-preview-body"><strong>{job.company}</strong><small>{job.position || job.location}</small></span>
             <span className="jobs-preview-salary">{job.salary.max ? `${job.salary.max}万` : ""}</span>
@@ -233,41 +290,75 @@ function Overview({
   const schedulePanel = upcoming.length > 0 ? (
     <article className="panel overview-schedule" key="schedule" data-overview-panel="schedule">
       <PanelHeading title="近期安排" action="打开日历" onAction={() => onView("calendar")} />
-      <p className="overview-panel-meta">未来 7 天 · {upcoming.length} 项</p>
+      <p className="overview-panel-meta">未来 7 天 · {upcoming.length} 项 · 日本时间（JST）</p>
       <div className="overview-schedule-list">
         {upcoming.slice(0, 5).map((event) => (
-          <button className={`kind-${event.kind}`} key={event.id} onClick={() => onOpen(event.note)}>
-            <span><time dateTime={event.date}>{focusDateLabel(event.date)}{event.time && ` ${event.time}`}</time><small>{event.label}</small></span>
+          <button className={`kind-${event.kind}`} key={event.id} onClick={() => openSchedule(event)}>
+            <span><time dateTime={event.date}>{focusDateLabel(event.date)}{event.time && ` ${calendarEventTime(event)}`}</time><small>{event.label}</small></span>
             <strong>{event.company}</strong>
           </button>
         ))}
       </div>
     </article>
   ) : null;
+  const overdueCount = focusBrief.waiting.filter((item) => item.overdue).length;
   const waitingPanel = focusBrief.waiting.length > 0 ? (
     <article className="panel overview-waiting" key="waiting" data-overview-panel="waiting">
-      <PanelHeading title="等待回复" action={`全部 ${focusBrief.waiting.length} 项`} onAction={() => onView("analytics")} />
+      <PanelHeading
+        title={overdueCount > 0 ? `等待回复 · ${overdueCount} 项已到跟进日` : "等待回复"}
+        action={`全部 ${focusBrief.waiting.length} 项`}
+        // 落在「只看等对方」：与这张列表同一个判定，条数一致（按进行中状态筛会漏掉未応募＋等对方、又混进没在等的）。
+        onAction={() => (onViewJobs ? onViewJobs({ waiting: true }) : onView("jobs"))}
+      />
+      {followUpError && <p className="overview-focus-error" role="alert">{followUpError}</p>}
       <div className="overview-waiting-list">
-        {focusBrief.waiting.slice(0, 3).map((item) => (
-          <button key={item.note.path} onClick={() => onOpen(item.note)}>
-            <strong>{item.company || item.waitingFor}</strong>
-            <span>{item.label}</span>
-            {item.followUpAt && <small>{focusDateLabel(item.followUpAt)}后未回复则跟进</small>}
-          </button>
+        {focusBrief.waiting.slice(0, 5).map((item) => (
+          <div key={item.note.path} className={`overview-waiting-item${item.overdue ? " overdue" : ""}`}>
+            <button onClick={() => openCase(item.note)}>
+              <strong>{item.company || item.waitingFor}</strong>
+              <span>{item.label}</span>
+              {item.followUpAt && (
+                <small>{item.overdue
+                  ? `跟进日 ${focusDateLabel(item.followUpAt)} 已过，该催了`
+                  : `${focusDateLabel(item.followUpAt)}后未回复则跟进`}</small>
+              )}
+            </button>
+            {onFollowUp && (
+              <span className="overview-waiting-actions">
+                <button type="button" disabled={followUpBusy === item.note.path} onClick={() => void runFollowUp(item.note, { followUpAt: plusDays(7) })} title="记为已跟进，7 天后再提醒">已跟进 · +7 天</button>
+                <button type="button" disabled={followUpBusy === item.note.path} onClick={() => void runFollowUp(item.note, { waitingFor: "self", followUpAt: null })} title="球回到自己手里，不再催">改为等本人</button>
+              </span>
+            )}
+          </div>
         ))}
       </div>
     </article>
   ) : null;
-  const reviewPanel = reviewPreview.pendingDecisions > 0 || reviewPreview.readyCount > 0 ? (
+  const reviewPanel = reviewPreview.pendingDecisions > 0 || reviewPreview.readyCount > 0 || missingTranscripts.length > 0 ? (
     <article className="panel overview-review" key="review" data-overview-panel="review">
       <PanelHeading title="复盘提醒" action="全部复盘" onAction={() => onOpenReview()} />
-      <p className="overview-review-counts">
-        {reviewPreview.pendingDecisions > 0 && <span><strong>{reviewPreview.pendingDecisions}</strong> 个待裁定</span>}
-        {reviewPreview.readyCount > 0 && <span><strong>{reviewPreview.readyCount}</strong> 场可生成复盘</span>}
-      </p>
-      <button className="overview-review-action" onClick={() => onOpenReview(actionReviewDoc?.key)}>
-        {actionReviewDoc?.pendingDecisions ? "继续裁定" : "打开复盘"}<span aria-hidden="true">→</span>
-      </button>
+      {(reviewPreview.pendingDecisions > 0 || reviewPreview.readyCount > 0) && (
+        <p className="overview-review-counts">
+          {reviewPreview.pendingDecisions > 0 && <span><strong>{reviewPreview.pendingDecisions}</strong> 个待裁定</span>}
+          {reviewPreview.readyCount > 0 && <span><strong>{reviewPreview.readyCount}</strong> 场可生成复盘</span>}
+        </p>
+      )}
+      {missingTranscripts.length > 0 && (
+        <ul className="overview-review-missing" aria-label="已过但还没有整理稿的面试">
+          {missingTranscripts.map((event) => (
+            <li key={event.id}>
+              <span><strong>{event.company}</strong> · {focusDateLabel(event.date)} {event.label}</span>
+              <small>还没有整理稿</small>
+              <button type="button" onClick={() => void copyTranscriptRequest(event)}>{copiedTranscript === event.id ? "已复制" : "复制指令"}</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {(reviewPreview.pendingDecisions > 0 || reviewPreview.readyCount > 0) && (
+        <button className="overview-review-action" onClick={() => onOpenReview(actionReviewDoc?.key)}>
+          {actionReviewDoc?.pendingDecisions ? "继续裁定" : "打开复盘"}<span aria-hidden="true">→</span>
+        </button>
+      )}
     </article>
   ) : null;
   const practicePanel = drillTarget ? (
@@ -324,10 +415,12 @@ function Overview({
           </button>
         )}
         <div className="overview-current-stats">
-          <Stat value={openTodos.length} label="件待办" />
-          <Stat value={currentCases.length} label="个进行中案件" />
-          <Stat value={openJobs.length} label="条待应募岗位" />
-          <Stat value={reviewPreview.pendingDecisions} label="个复盘点待裁定" />
+          <Stat value={openTodos.length} label="件待办" onClick={viewOpenTodos} />
+          {/* currentCases 用的 ACTIVE_JOB_STATUSES 就是 IN_FLIGHT_STATUSES，看板筛出来的件数与这里一致。 */}
+          <Stat value={currentCases.length} label="个进行中案件" onClick={() => viewJobs({ statuses: IN_FLIGHT_STATUSES })} />
+          {/* openJobs = 未応募 且没在等对方，正是看板的「未动手」。 */}
+          <Stat value={openJobs.length} label="条待应募岗位" onClick={() => viewJobs({ statuses: ["未応募"], touch: ["untouched"] })} />
+          <Stat value={reviewPreview.pendingDecisions} label="个复盘点待裁定" onClick={() => onOpenReview()} />
         </div>
       </section>
       {narrow ? (
@@ -344,8 +437,8 @@ function Overview({
   );
 }
 
-function Stat({ value, label }: { value: number; label: string }) {
-  return <div data-zero={value === 0}><strong>{value}</strong><span>{label}</span></div>;
+function Stat({ value, label, onClick }: { value: number; label: string; onClick: () => void }) {
+  return <button type="button" data-zero={value === 0} onClick={onClick}><strong>{value}</strong><span>{label}</span></button>;
 }
 
 function PanelHeading({ title, action, onAction }: { title: string; action: string; onAction: () => void }) {

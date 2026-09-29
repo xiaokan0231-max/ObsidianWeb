@@ -25,16 +25,39 @@ function referencePath(value: string) {
     .trim().replace(/\.md$/i, "").normalize("NFKC");
 }
 
+// 每篇笔记的关联解析都要扫一遍全部笔记（日历为每篇算 interviewContext → O(N×M)）。
+// notes 数组在两次刷新之间是同一个引用，按数组建一次索引即可；数组换了索引自然作废。
+type ReferenceIndex = { byPath: Map<string, Note[]>; byBasename: Map<string, Note[]> };
+const referenceIndexes = new WeakMap<Note[], ReferenceIndex>();
+
+function referenceIndex(notes: Note[]): ReferenceIndex {
+  const cached = referenceIndexes.get(notes);
+  if (cached) return cached;
+  const byPath = new Map<string, Note[]>();
+  const byBasename = new Map<string, Note[]>();
+  for (const note of notes) {
+    const path = referencePath(note.path);
+    byPath.set(path, [...(byPath.get(path) ?? []), note]);
+    const basename = path.slice(path.lastIndexOf("/") + 1);
+    byBasename.set(basename, [...(byBasename.get(basename) ?? []), note]);
+  }
+  const index = { byPath, byBasename };
+  referenceIndexes.set(notes, index);
+  return index;
+}
+
 function resolveReference(value: string, notes: Note[]) {
   const reference = referencePath(value);
-  const exact = notes.filter((note) => referencePath(note.path) === reference);
-  const matches = exact.length ? exact : notes.filter((note) =>
+  const index = referenceIndex(notes);
+  const exact = index.byPath.get(reference) ?? [];
+  const basename = reference.slice(reference.lastIndexOf("/") + 1);
+  const matches = exact.length ? exact : (index.byBasename.get(basename) ?? []).filter((note) =>
     referencePath(note.path).endsWith(`/${reference}`),
   );
   return { note: matches.length === 1 ? matches[0] : null, ambiguous: matches.length > 1 };
 }
 
-function interviewContext(note: Note, notes: Note[], source = false): InterviewContext {
+export function interviewContext(note: Note, notes: Note[], source = false): InterviewContext {
   const context: InterviewContext = {
     caseId: getString(note.frontmatter.case_id), ownerKind: "", owner: "", invalid: false,
   };
@@ -100,7 +123,7 @@ function normalizedTime(value: string) {
   return match ? `${match[1].padStart(2, "0")}:${match[2]}` : "";
 }
 
-function noteTime(note: Note, date: string) {
+export function interviewNoteTime(note: Note, date: string) {
   for (const key of ["time", "start_time", "starts_at", "next_event_at"]) {
     const value = getString(note.frontmatter[key]);
     const embeddedDate = value.match(/\d{4}-\d{2}-\d{2}/)?.[0];
@@ -131,7 +154,7 @@ function matchingNotes(event: Commitment, notes: Note[]): MatchingNote[] {
     if (context === null) continue;
     const round = interviewRound(getString(note.frontmatter.round));
     if (round && expectedRound && round !== expectedRound) continue;
-    const time = noteTime(note, event.date);
+    const time = interviewNoteTime(note, event.date);
     if (time && expectedTime && time !== expectedTime) continue;
     matches.push({
       note,
@@ -150,6 +173,11 @@ function selectMatchingNote(candidates: MatchingNote[], type: string): Note | nu
     ? matches[0].note : null;
 }
 
+/** 旧复盘没有案件关联时，只能由唯一匹配的场次补足，不能按公司猜案件。 */
+export function matchingInterviewPrep(event: Commitment, notes: Note[]): Note | null {
+  return selectMatchingNote(matchingNotes(event, notes), "interview-prep");
+}
+
 function conflictingInterviews(candidates: MatchingNote[], notes: Note[], date: string) {
   const rounds = new Set<string>();
   const times = new Set<string>();
@@ -158,7 +186,7 @@ function conflictingInterviews(candidates: MatchingNote[], notes: Note[], date: 
   const owners = new Set<string>();
   for (const { note } of candidates) {
     const round = interviewRound(getString(note.frontmatter.round));
-    const time = noteTime(note, date);
+    const time = interviewNoteTime(note, date);
     const context = interviewContext(note, notes);
     if (round) rounds.add(round);
     if (time) times.add(time);
@@ -169,9 +197,17 @@ function conflictingInterviews(candidates: MatchingNote[], notes: Note[], date: 
   return [rounds, times, cases, ownerKinds, owners].some((values) => values.size > 1);
 }
 
+/**
+ * 日历上的这一项是不是一场面试・面谈（有问答、值得准备与复盘）。说明会・研讨会也会进日历，但不是。
+ * 日历进准备稿／复盘页的入口、首页「待整理稿」提醒共用这一条。
+ */
+export function isInterviewEvent(event: Pick<Commitment, "kind" | "label">) {
+  if (event.kind !== "event" || /说明会|説明会|說明會|セミナー|seminar/i.test(event.label)) return false;
+  return /面试|面試|面接|面谈|面談|interview|meeting/i.test(event.label);
+}
+
 export function resolveCalendarInterview(event: Commitment, notes: Note[]): CalendarInterviewTarget | null {
-  if (event.kind !== "event" || /说明会|説明会|說明會|セミナー|seminar/.test(event.label)) return null;
-  if (!/面试|面試|面接|面谈|面談|interview|meeting/i.test(event.label)) return null;
+  if (!isInterviewEvent(event)) return null;
   const matches = matchingNotes(event, notes);
   const strongest = matches.filter((candidate) => candidate.score === matches[0]?.score);
   // 必须跨资料种类一起消歧：两轮准备稿 + 一轮逐字稿，不能因逐字稿只有一份就认定本场已结束。

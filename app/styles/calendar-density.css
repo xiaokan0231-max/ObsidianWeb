@@ -11,6 +11,19 @@
   font-size: 22px;
 }
 
+.calendar-timezone {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.calendar-event .calendar-event-meta {
+  flex-wrap: wrap;
+}
+
 .calendar-toolbar .calendar-legend {
   flex: 1 1 auto;
   gap: 8px 12px;

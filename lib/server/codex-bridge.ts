@@ -84,7 +84,9 @@ export async function invokeCodex<T>(
     | "expand_language_category"
     | "coach_language_output"
     | "grade_language_exam"
-    | "review_interview_answers",
+    | "review_interview_answers"
+    // LLM を使わない本機タスク：派生統計の再計算（workerd からは本機スクリプトを起動できない）。
+    | "vault_stats",
   payload: Record<string, unknown>,
 ) {
   const result = await bridgeFetch("/invoke", {

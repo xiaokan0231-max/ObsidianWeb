@@ -59,7 +59,7 @@ test("keeps the Obsidian credential server-side", async () => {
     readFile(new URL("../lib/server/obsidian.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/memory-atlas.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readFile(new URL("../public/og.png", import.meta.url)),
+    readFile(new URL("../public/og.jpg", import.meta.url)),
   ]);
 
   assert.doesNotMatch(apiRoute, /NEXT_PUBLIC|window\./);
@@ -67,5 +67,5 @@ test("keeps the Obsidian credential server-side", async () => {
   assert.match(vaultClient, /Authorization: `Bearer/);
   assert.doesNotMatch(client, /OBSIDIAN_API_KEY|Authorization: `Bearer/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
-  assert.deepEqual([...socialCard.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.deepEqual([...socialCard.subarray(0, 3)], [255, 216, 255]);
 });

@@ -1,6 +1,10 @@
 import {
   CHANNEL_REQUIRED_FROM,
   DEFAULT_JOB_STATUS,
+  IN_FLIGHT_STATUSES as RAW_IN_FLIGHT,
+  IN_PROGRESS_STATUSES as RAW_IN_PROGRESS,
+  SELECTION_STATUSES as RAW_SELECTION,
+  TERMINAL_STATUSES as RAW_TERMINAL,
   JOB_STATUSES as RAW_JOB_STATUSES,
   JOB_STATUS_NOTE_MAX,
   KNOWN_CHANNELS,
@@ -39,6 +43,12 @@ export const JOB_STATUSES = RAW_JOB_STATUSES as unknown as readonly [
 ];
 
 export type JobStatus = (typeof JOB_STATUSES)[number];
+
+// 部分集合の型付き再輸出。正本は job-status.mjs（scripts と app が同じ配列を読むため）。
+export const IN_PROGRESS_STATUSES = RAW_IN_PROGRESS as readonly string[];
+export const IN_FLIGHT_STATUSES = RAW_IN_FLIGHT as readonly string[];
+export const SELECTION_STATUSES = RAW_SELECTION as readonly string[];
+export const TERMINAL_STATUSES = RAW_TERMINAL as readonly string[];
 
 export function isJobStatus(value: string): value is JobStatus {
   return rawIsJobStatus(value);

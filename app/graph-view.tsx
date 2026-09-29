@@ -29,6 +29,17 @@ import {
   typeLabel,
   type GroupKey,
 } from "@/lib/memory-atlas-data";
+import { enumCodec, useUrlState, type UrlStateCodec } from "./use-url-state";
+
+// 关系范围・节点类型・中心节点放进 URL：打开笔记再返回、或刷新后，局部图仍围着同一个中心。
+// 分区与检索词归外壳（q / group），这里不碰。
+const MODE_CODEC = enumCodec<GraphViewMode>(["semantic", "all"]);
+const KIND_CODEC = enumCodec<GraphNodeKind | "all">(["all", "note", "company", "skill"]);
+// null＝还没选中心。中心 id 已不在图里（笔记改名・删除）时，focusedNode 为 null，自然回到「先选一个对象」。
+const FOCUS_CODEC: UrlStateCodec<string | null> = {
+  parse: (raw) => raw || null,
+  serialize: (value) => value ?? "",
+};
 
 const ThreeKnowledgeGraph = lazy(() => import("./knowledge-graph-three"));
 
@@ -124,9 +135,9 @@ function GraphView({
       ? "space"
       : "map",
   );
-  const [mode, setMode] = useState<GraphViewMode>("semantic");
-  const [kind, setKind] = useState<GraphNodeKind | "all">("all");
-  const [focusId, setFocusId] = useState<string | null>(null);
+  const [mode, setMode] = useUrlState<GraphViewMode>("mode", "semantic", MODE_CODEC);
+  const [kind, setKind] = useUrlState<GraphNodeKind | "all">("kind", "all", KIND_CODEC);
+  const [focusId, setFocusId] = useUrlState<string | null>("focus", null, FOCUS_CODEC);
   const [graphQuery, setGraphQuery] = useState("");
   useEffect(() => window.localStorage.setItem("echo.graph.renderer", renderer), [renderer]);
   const graph = useMemo(() => buildKnowledgeGraph(notes), [notes]);

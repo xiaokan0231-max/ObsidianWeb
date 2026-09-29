@@ -63,16 +63,29 @@
   background: rgba(255, 255, 255, .46);
 }
 
-.jobs-stat div {
+.jobs-stat > button {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
-  padding: 14px 15px;
+  /* 与 .module-stat-strip.jobs-stat > div 的内距一致：格子从 div 换成 button 后外观不该变。 */
+  padding: 10px 14px;
+  border: 0;
   border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.jobs-stat div:last-child { border-right: 0; }
+.jobs-stat > button:last-child { border-right: 0; }
+
+/* 格子可点：点下去＝替换全部筛选，只看这个数字里的岗位。 */
+.jobs-stat > button:hover { background: rgba(255, 255, 255, .7); }
+.jobs-stat > button:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+.jobs-stat > button[aria-pressed="true"] { background: rgba(255, 255, 255, .85); box-shadow: inset 0 -2px 0 var(--green); }
 
 .jobs-stat strong {
   grid-column: 2;
@@ -83,7 +96,7 @@
   line-height: 1;
   white-space: nowrap;
 }
-.jobs-stat div:nth-child(2) strong { color: var(--orange); }
+.jobs-stat > :nth-child(2) strong { color: var(--orange); }
 
 .jobs-stat span {
   grid-column: 1;
@@ -1123,93 +1136,51 @@
 
 .job-week-md {
   margin-top: 6px;
-  font-size: 13px;
+}
+
+/*
+ * 周复盘面板里用的是原笔记 drawer 同一个 MarkdownDocument。drawer 的尺寸是按整页阅读定的
+ * （h2 24px、上边距 38px），塞进看板里的一块面板会显得喧宾夺主，这里只把字号和间距收小。
+ */
+.job-week-md .markdown-document h2 {
+  margin: 18px 0 8px;
+  padding-bottom: 6px;
+  font-size: 16px;
+}
+
+.job-week-md .markdown-document h3 {
+  margin: 14px 0 6px;
+  font-size: 14px;
+}
+
+.job-week-md .markdown-document h4 {
+  margin: 12px 0 4px;
+  font-size: 12.5px;
+}
+
+.job-week-md .markdown-document > :first-child {
+  margin-top: 4px;
+}
+
+.job-week-md .markdown-document p,
+.job-week-md .md-list-item {
+  margin: 5px 0;
+  font-size: 12.5px;
   line-height: 1.75;
 }
 
-.job-week-md h3 {
-  font-size: 14.5px;
-  margin: 18px 0 6px;
+.job-week-md .md-list-item > i {
+  margin-top: 9px;
 }
 
-.job-week-md h4 {
-  font-size: 13.5px;
-  margin: 14px 0 4px;
-}
-
-.job-week-md h5 {
-  font-size: 12.5px;
-  margin: 12px 0 4px;
-  color: var(--muted);
-}
-
-.job-week-md p {
-  margin: 6px 0;
-}
-
-.job-week-md ul {
-  margin: 6px 0;
-  padding-left: 18px;
-}
-
-.job-week-md li {
-  margin: 3px 0;
-}
-
-.job-week-md blockquote {
+.job-week-md .markdown-document blockquote {
   margin: 10px 0;
   padding: 8px 14px;
-  border-left: 3px solid #d8d3c6;
-  background: #f4f1ea;
-  color: var(--muted);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
-.job-week-md blockquote p {
-  margin: 3px 0;
-}
-
-.job-week-md table {
-  width: 100%;
-  border-collapse: collapse;
+.job-week-md .md-table {
   margin: 10px 0;
-  font-size: 12.5px;
-}
-
-.job-week-md th,
-.job-week-md td {
-  border: 1px solid #e0dcd2;
-  padding: 6px 9px;
-  text-align: left;
-  vertical-align: top;
-}
-
-.job-week-md th {
-  background: #f4f1ea;
-  font-weight: 600;
-}
-
-.job-week-md code {
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 11.5px;
-  background: #f0ede4;
-  padding: 1px 5px;
-  border-radius: 3px;
-}
-
-.job-week-wiki {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--green);
-  cursor: pointer;
-  font-size: inherit;
-  font-family: inherit;
-  text-decoration: underline dotted;
-}
-
-.job-week-wiki:hover {
-  color: var(--orange);
 }
 
 .job-week-focus .panel-empty {
@@ -1302,7 +1273,7 @@
 @media (max-width: 760px) {
   .jobs-intro h1 { font-size: clamp(30px, 8vw, 44px); }
   .jobs-intro { gap: 18px; padding: 0 0 20px; }
-  .jobs-stat div {
+  .jobs-stat > button {
     grid-template-columns: 1fr;
     gap: 5px;
     padding: 11px 10px;
@@ -2291,3 +2262,29 @@
   .job-detail-facts { grid-template-columns: 1fr; }
   .job-compare-backdrop { padding: 12px; }
 }
+
+/* v2 採点（六軸）。応募优先度の丸バッジとは別軸なので形も変える：角丸の小さな札。
+   Gate は hold が既定で情報量が薄く、reject の時だけ橙で知らせる。 */
+.job-card-marks { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.job-fit-chip { display: inline-flex; align-items: baseline; gap: 3px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 2px; font-size: 11px; color: var(--muted); }
+.job-fit-chip b { font-weight: 600; color: inherit; }
+.job-fit-chip.band-A, .job-fit-band.band-A { color: var(--green); border-color: var(--green); }
+.job-fit-chip.band-B, .job-fit-band.band-B { color: var(--green); }
+.job-fit-chip.gate-reject, .job-fit-gate.gate-reject, .job-fit-gates .gate-reject { color: var(--orange); border-color: var(--orange); }
+.job-fit-gates .gate-hold { color: var(--gold); }
+
+.job-fit-panel { margin: 14px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 4px; }
+.job-fit-panel.job-fit-unrated { color: var(--muted); font-size: 12px; }
+.job-fit-panel header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+.job-fit-panel header strong { font-family: "Songti SC", "Noto Serif CJK SC", serif; font-size: 18px; }
+.job-fit-panel header strong small { margin-left: 2px; font-size: 11px; color: var(--muted); }
+.job-fit-panel header em { font-style: normal; padding: 1px 6px; border: 1px solid var(--line); border-radius: 2px; }
+.job-fit-access { color: var(--muted); }
+.job-fit-axes { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 18px; font-size: 12px; }
+.job-fit-axes li { display: grid; grid-template-columns: 5em minmax(0, 1fr) 3.4em; align-items: center; gap: 8px; }
+.job-fit-axes i { display: block; height: 6px; border-radius: 3px; background: rgba(47, 107, 89, 0.12); overflow: hidden; }
+.job-fit-axes b { display: block; height: 100%; background: var(--green); }
+.job-fit-axes small { text-align: right; color: var(--muted); }
+.job-fit-gates { margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--muted); }
+.job-fit-gates span { padding: 1px 6px; border: 1px solid var(--line); border-radius: 2px; }
+.job-compare-unrated { color: var(--muted); }

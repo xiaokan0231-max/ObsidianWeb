@@ -17,6 +17,9 @@ export default function CalendarInterviewState({ target, loading, onOpenSource, 
           <p>{target.view === "session"
             ? "还没有找到与本场日期、轮次对应的准备稿。补充后可从日历直接进入。"
             : "还没有找到与本场日期、轮次对应的面试整理稿。补充后可在这里阅读与复盘。"}</p>
+          {target.view === "review" && (
+            <p className="interview-route-hint">下一步：把这场的录音／记录做成整理稿（{target.company} · {target.date} · {target.label}），再用 /review-interview-answers 复盘。</p>
+          )}
           <div className="interview-route-actions">
             {onOpenSource && <button onClick={onOpenSource}>查看原始记录</button>}
             <button onClick={onShowAll}>查看全部{label}</button>

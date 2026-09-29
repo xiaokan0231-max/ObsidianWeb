@@ -4,7 +4,8 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   DEDUCTION_SEVERITY_BANDS,
@@ -32,6 +33,9 @@ if (!TOKEN || TOKEN.length < 24) {
 }
 
 const taskConfig = {
+  // model: null ＝ LLM を使わない本機タスク。Web（workerd）は本機スクリプトを起動できないので、
+  // 派生統計の再計算だけこの bridge（宿主 Node）に頼む。checkRuntime（Codex ログイン）は不要。
+  vault_stats: { model: null, timeoutMs: 90_000 },
   rebuild_language_bank: { model: SOL_MODEL, timeoutMs: 480_000 },
   expand_language_category: { model: SOL_MODEL, timeoutMs: 360_000 },
   coach_language_output: { model: TERRA_MODEL, timeoutMs: 120_000 },
@@ -505,9 +509,28 @@ async function checkRuntime() {
   }
 }
 
+const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+
+async function runLocalTask(task, config) {
+  if (task !== "vault_stats") throw new Error(`未知的本地任务：${task}`);
+  try {
+    const result = await runProcess(process.execPath, [join(REPO_ROOT, "scripts/vault-stats.mjs")], {
+      cwd: REPO_ROOT,
+      timeoutMs: config.timeoutMs,
+    });
+    const summary = result.stdout.trim().split("\n").slice(-8).join("\n");
+    return { output: { ok: true, summary }, model: null };
+  } catch (error) {
+    // runProcess の文言は Codex 前提なので、ここでは vault:stats の失敗として伝え直す。
+    const detail = error instanceof Error ? error.message.replace(/^Codex 运行失败（退出码 \d+）。?/, "") : String(error);
+    throw new Error(`vault:stats 失败：${detail || "未知错误"}。请在终端运行 npm run vault:verify 查看详情。`);
+  }
+}
+
 async function executeTask(task, payload) {
-  if (!(await checkRuntime())) throw new Error(lastError);
   const config = taskConfig[task];
+  if (config.model === null) return runLocalTask(task, config);
+  if (!(await checkRuntime())) throw new Error(lastError);
   const directory = await mkdtemp(join(tmpdir(), "obsidian-dojo-"));
   try {
     const schemaPath = join(directory, "output.schema.json");

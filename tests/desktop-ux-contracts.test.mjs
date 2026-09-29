@@ -4,6 +4,7 @@ import test from "node:test";
 
 const memoryAtlas = readFileSync(new URL("../app/memory-atlas.tsx", import.meta.url), "utf8");
 const searchPalette = readFileSync(new URL("../app/search-palette.tsx", import.meta.url), "utf8");
+const navigation = readFileSync(new URL("../app/navigation.ts", import.meta.url), "utf8");
 const dialogFocus = readFileSync(new URL("../app/use-dialog-focus.ts", import.meta.url), "utf8");
 const graphView = readFileSync(new URL("../app/graph-view.tsx", import.meta.url), "utf8");
 const jobsView = readFileSync(new URL("../app/jobs-view.tsx", import.meta.url), "utf8");
@@ -26,7 +27,9 @@ test("command palette supports keyboard selection and page commands", () => {
   assert.match(searchPalette, /event\.key === "ArrowDown"/);
   assert.match(searchPalette, /event\.key === "ArrowUp"/);
   assert.match(searchPalette, /event\.key === "Enter"/);
-  assert.match(searchPalette, /view: "practice", label: "回答重练"/);
+  // 命令表从导航表派生（app/navigation.ts），名字与左栏一致；覆盖面由 tests/navigation.test.mjs 检查。
+  assert.match(searchPalette, /import \{[^}]*PAGE_COMMANDS[^}]*\} from "\.\/navigation"/);
+  assert.match(navigation, /id: "practice", label: "回答重练"/);
 });
 
 test("relationship map starts from search or a local neighborhood", () => {

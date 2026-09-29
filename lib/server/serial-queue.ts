@@ -70,6 +70,8 @@ export function createKeyedSerialQueue(ttlMs = 120_000): KeyedSerialQueue {
         if (latest === current) tails.delete(key);
         clearCleanup(key);
       }, Math.max(1_000, ttlMs));
+      // 只是清理用的计时器：别让它把 node 进程（脚本・测试）多拖住两分钟。workerd 的 setTimeout 返回数字，没有 unref。
+      (timer as { unref?: () => void }).unref?.();
       cleanup.set(key, timer);
     }
   };
