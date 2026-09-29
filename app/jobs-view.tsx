@@ -29,6 +29,7 @@ import {
   jobStatTileFilters,
   jobStatTilePools,
   jobTouch,
+  jobWaitsOnCounterpart,
   EMPTY_JOB_FILTERS,
   JOB_STAT_TILES,
   JOB_TOUCHES,
@@ -149,6 +150,8 @@ export type JobsInitialFilters = {
   ratings?: readonly JobRatingBand[];
   /** 动手状态（URL では `touch`）。「未着手」「已动手·等对方」は status だけでは表せない。 */
   touch?: readonly JobTouch[];
+  /** 只看等对方（URL では `waiting=1`）。首页「等待回复」と同じ判定。 */
+  waiting?: boolean;
 };
 
 type JobsUrlState = {
@@ -171,7 +174,7 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
   const params = typeof window === "undefined"
     ? new URLSearchParams()
     : new URLSearchParams(window.location.search);
-  const seeded = initialFilters?.statuses?.length || initialFilters?.ratings?.length || initialFilters?.touch?.length;
+  const seeded = initialFilters?.statuses?.length || initialFilters?.ratings?.length || initialFilters?.touch?.length || initialFilters?.waiting;
   const statusParam = params.get("status");
   const baseFilters = seeded
     ? {
@@ -179,6 +182,7 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
         statuses: [...(initialFilters?.statuses ?? [])],
         ratings: [...(initialFilters?.ratings ?? [])],
         touches: (initialFilters?.touch ?? []).filter((value) => TOUCH_VALUES.includes(value)),
+        waitingOnly: Boolean(initialFilters?.waiting),
       }
     : DEFAULT_OPPORTUNITY_FILTERS;
   const hasUrlFilters = [
@@ -195,6 +199,7 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
     "band",
     "access",
     "remote",
+    "waiting",
   ].some((key) => params.has(key));
   const ratings = csvParam(params, "rating").filter((value): value is JobRatingBand =>
     JOB_RATING_BANDS.some((band) => band.id === value),
@@ -232,6 +237,7 @@ function readJobsUrlState(initialFilters?: JobsInitialFilters | null): JobsUrlSt
           bands: csvParam(params, "band").filter((value) => BAND_FILTER_VALUES.includes(value)),
           accesses: csvParam(params, "access").filter((value) => ACCESS_FILTER_VALUES.includes(value)),
           remoteOnly: params.get("remote") === "1",
+          waitingOnly: params.get("waiting") === "1",
         }
       : baseFilters,
     viewMode: VIEW_MODES.some((mode) => mode.id === modeParam) ? modeParam as ViewMode : "decision",
@@ -254,7 +260,8 @@ function isDefaultOpportunityFilters(filters: Filters) {
     filters.gates.length === 0 &&
     filters.bands.length === 0 &&
     filters.accesses.length === 0 &&
-    !filters.remoteOnly;
+    !filters.remoteOnly &&
+    !filters.waitingOnly;
 }
 
 function toggle<T>(list: T[], value: T): T[] {
@@ -617,6 +624,7 @@ function JobsView({
       ratingPool: narrow("rating"),
       salaryPool: narrow("salary"),
       remote: narrow("remote").filter((job) => job.remote).length,
+      waiting: narrow("waiting").filter(jobWaitsOnCounterpart).length,
     };
   }, [narrow, today]);
 
@@ -747,7 +755,8 @@ function JobsView({
     filters.accesses.length +
     filters.ratings.length +
     (filters.minSalary > 0 ? 1 : 0) +
-    (filters.remoteOnly ? 1 : 0);
+    (filters.remoteOnly ? 1 : 0) +
+    (filters.waitingOnly ? 1 : 0);
 
   const resetFilters = () => {
     setFilters(DEFAULT_OPPORTUNITY_FILTERS);
@@ -953,6 +962,7 @@ function JobsView({
       if (filters.bands.length) params.set("band", filters.bands.join(","));
       if (filters.accesses.length) params.set("access", filters.accesses.join(","));
       if (filters.remoteOnly) params.set("remote", "1");
+      if (filters.waitingOnly) params.set("waiting", "1");
     }
     if (sort !== "rating") params.set("sort", sort);
     if (viewMode !== "decision") params.set("mode", viewMode);
@@ -1095,6 +1105,24 @@ function JobsView({
                   setFilters((current) => ({ ...current, touches: toggle(current.touches, value as JobTouch) }))
                 }
               />
+
+              {/* 首页「等待回复 · 全部 N 项」落在这里：判定与首页同一个函数（jobWaitsOnCounterpart），条数一致。 */}
+              {(facets.waiting > 0 || filters.waitingOnly) && (
+                <div className="job-filter-row">
+                  <span className="job-filter-label">等待</span>
+                  <div className="job-chips">
+                    <button
+                      type="button"
+                      className={`job-chip${filters.waitingOnly ? " active" : ""}`}
+                      aria-pressed={filters.waitingOnly}
+                      title="已记等待对象、且不是本人的案件（选考中・内定，或未応募但已动手）"
+                      onClick={() => setFilters((current) => ({ ...current, waitingOnly: !current.waitingOnly }))}
+                    >
+                      <span>只看等对方</span> <small>{facets.waiting}</small>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* 顺序固定按「新→旧」，不像 facetOptions 那样按计数排 —— 时间轴重排了就读不成时间轴了。 */}
               <FilterChips

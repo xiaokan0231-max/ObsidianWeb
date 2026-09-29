@@ -40,6 +40,15 @@ export function noteInVaultScope(note: Note, scope: VaultScope) {
   return TRAINING_TYPES.has(type) || type === "self";
 }
 
+/**
+ * vault:stats 重算之后要取回的 scope。生成区块散在多处（台帳・応募日台帳は jobs、面接傾向は interview、
+ * 数据字典は all にしか入らない）ので、手元に載っているものを全部。all があればそれ一つで足りる。
+ */
+export function scopesToReloadAfterStats(loaded: Iterable<VaultScope>): VaultScope[] {
+  const scopes = [...new Set(loaded)];
+  return scopes.includes("all") ? ["all"] : scopes;
+}
+
 export function vaultScopeForView(view: string): VaultScope {
   if (view === "overview") return "overview";
   if (view === "todo" || view === "calendar") return "actions";

@@ -4,7 +4,8 @@ import { memo, useMemo, useState, useSyncExternalStore } from "react";
 import { type AppView } from "./app-route";
 import type { JobsInitialFilters } from "./jobs-view";
 import { buildFocusBrief, focusDateLabel } from "@/lib/focus-action";
-import { IN_FLIGHT_STATUSES, IN_PROGRESS_STATUSES, awaitingCounterpart, compareJobs, toJobCard } from "@/lib/jobs";
+import { IN_FLIGHT_STATUSES, awaitingCounterpart, compareJobs, toJobCard } from "@/lib/jobs";
+import { isInterviewEvent } from "@/lib/calendar-interview";
 import { joinReviewNotes } from "@/lib/review-join";
 import { parseInterviewPractice } from "@/lib/review-practice";
 import { formatDate, getString, getTitle, getType, type Note } from "@/lib/notes";
@@ -160,7 +161,8 @@ function Overview({
     const covered = (event: { company: string; date: string }) => joined.some((doc) =>
       doc.date === event.date && calendarCompanyIdentity(doc.company) === calendarCompanyIdentity(event.company));
     return derived.calendarEvents
-      .filter((event) => event.phase === "past" && event.date >= floor && event.date < today && !covered(event))
+      // 只提醒真正的面试・面谈：说明会・研讨会也在日历上，但没有可复盘的问答。判定与日历进复盘页的入口同一条。
+      .filter((event) => event.phase === "past" && event.date >= floor && event.date < today && isInterviewEvent(event) && !covered(event))
       .slice(0, 5);
   }, [derived.calendarEvents, notes, today, year, month, day]);
   const [copiedTranscript, setCopiedTranscript] = useState("");
@@ -305,7 +307,8 @@ function Overview({
       <PanelHeading
         title={overdueCount > 0 ? `等待回复 · ${overdueCount} 项已到跟进日` : "等待回复"}
         action={`全部 ${focusBrief.waiting.length} 项`}
-        onAction={() => (onViewJobs ? onViewJobs({ statuses: IN_PROGRESS_STATUSES }) : onView("jobs"))}
+        // 落在「只看等对方」：与这张列表同一个判定，条数一致（按进行中状态筛会漏掉未応募＋等对方、又混进没在等的）。
+        onAction={() => (onViewJobs ? onViewJobs({ waiting: true }) : onView("jobs"))}
       />
       {followUpError && <p className="overview-focus-error" role="alert">{followUpError}</p>}
       <div className="overview-waiting-list">

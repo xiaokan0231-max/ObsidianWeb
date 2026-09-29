@@ -36,3 +36,11 @@ test("面试加载公司契合与总结报告，不引入无关AI报告", () => 
   }
   assert.equal(noteInVaultScope(note("ai-report"), "interview"), false);
 });
+
+test("vault:stats 重算后取回手上已载入的全部 scope：面接傾向在 interview、台帳在 jobs；载入过 all 就只取 all", async () => {
+  const { scopesToReloadAfterStats } = await import("../lib/vault-scope.ts");
+  assert.deepEqual(scopesToReloadAfterStats(new Set(["jobs", "interview"])), ["jobs", "interview"], "只取 jobs 会让面接傾向停在重算前");
+  assert.deepEqual(scopesToReloadAfterStats(new Set(["overview", "jobs", "all"])), ["all"]);
+  assert.deepEqual(scopesToReloadAfterStats(["jobs", "jobs"]), ["jobs"], "不重复取");
+  assert.deepEqual(scopesToReloadAfterStats([]), []);
+});

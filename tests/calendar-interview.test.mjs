@@ -158,3 +158,22 @@ test("全角、法人格和分隔符差异使用共享公司归一化", () => {
   const prep = material("准备.md", "interview-prep", { company: "Sample_Test" });
   assert.equal(resolveCalendarInterview(event({ company: "株式会社Ｓａｍｐｌｅ Ｔｅｓｔ" }), [prep]).path, prep.path);
 });
+
+test("isInterviewEvent：面试・面谈算，说明会・研讨会不算，行动与跟进不算——日历进复盘与首页「待整理稿」同一条", async () => {
+  const { isInterviewEvent } = await import("../lib/calendar-interview.ts");
+  for (const label of ["第一次面试", "最终面试", "面试", "面谈", "轻松面谈", "猎头面谈", "一次面接", "Online interview"]) {
+    assert.equal(isInterviewEvent({ kind: "event", label }), true, label);
+  }
+  for (const label of ["招聘说明会", "会社説明会", "オンラインセミナー", "Tech seminar"]) {
+    assert.equal(isInterviewEvent({ kind: "event", label }), false, label);
+  }
+  assert.equal(isInterviewEvent({ kind: "action", label: "面试准备" }), false, "行动不是日程");
+  // 标签是从原文归一化来的：日文・繁体・英文写法的说明会都要先归成「招聘说明会」，否则落到默认的「面谈」。
+  const { calendarEventLabel } = await import("../lib/memory-atlas-data.ts");
+  for (const text of ["会社説明会に参加", "企業說明會", "Company seminar", "オンラインセミナー", "招聘说明会"]) {
+    assert.equal(calendarEventLabel(text), "招聘说明会", text);
+    assert.equal(isInterviewEvent({ kind: "event", label: calendarEventLabel(text) }), false, text);
+  }
+  assert.equal(calendarEventLabel("一次面接"), "第一次面试", "面试的归类不受影响");
+  assert.equal(isInterviewEvent({ kind: "follow-up", label: "面谈后跟进" }), false, "跟进不是日程");
+});

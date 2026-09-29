@@ -1,5 +1,5 @@
 import { normalizeJobStatus } from "./job-status.ts";
-import { IN_PROGRESS_STATUSES, WAITING_FOR_LABEL, daysUntil, monthDay } from "./jobs.ts";
+import { WAITING_FOR_LABEL, daysUntil, jobStatus, monthDay, waitsOnCounterpart } from "./jobs.ts";
 import { OPEN_TODO_STATUSES } from "./todo-status.mjs";
 import {
   getString,
@@ -61,10 +61,9 @@ const TODO_STATUSES = new Set(OPEN_TODO_STATUSES);
  * 未応募でも本人がいいかも／スカウト返信を済ませて企業の反応を待っている案件。
  * 以前は 応募済・書類通過・面接中 だけで、未応募＋等对方と内定は跟進日が来ても永遠に出なかった。
  */
-function waitsOnCounterpart(note: Note, status: string) {
-  const waitingFor = getString(note.frontmatter.waiting_for);
-  if (!waitingFor || waitingFor === "self") return false;
-  return IN_PROGRESS_STATUSES.includes(status) || status === "未応募";
+// 判定本体在 lib/jobs.ts（看板「只看等对方」也用它，两边条数才一致）。
+function noteWaitsOnCounterpart(note: Note, status: string) {
+  return waitsOnCounterpart(status, getString(note.frontmatter.waiting_for));
 }
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
@@ -236,8 +235,10 @@ function todoAction(note: Note, today: string): FocusAction | null {
 
 function followUpAction(note: Note, today: string): FocusAction | null {
   if (getType(note) !== "job-case") return null;
-  const status = normalizeJobStatus(getString(note.frontmatter.status)) ?? "";
-  if (!waitsOnCounterpart(note, status)) return null;
+  // 看板（toJobCard）と同じ jobStatus で読む：status 欠落を片方は「無し」、片方は「未応募」と読むと
+  // 「等待回复 · 全部 N 项」と「只看等对方」の件数がずれる。
+  const status = jobStatus(note);
+  if (!noteWaitsOnCounterpart(note, status)) return null;
 
   const waitingFor = getString(note.frontmatter.waiting_for);
   const followUpAt = validDate(getString(note.frontmatter.follow_up_at));
@@ -268,8 +269,10 @@ function followUpAction(note: Note, today: string): FocusAction | null {
 
 function waitingItem(note: Note, today: string): FocusWaitingItem | null {
   if (getType(note) !== "job-case") return null;
-  const status = normalizeJobStatus(getString(note.frontmatter.status)) ?? "";
-  if (!waitsOnCounterpart(note, status)) return null;
+  // 看板（toJobCard）と同じ jobStatus で読む：status 欠落を片方は「無し」、片方は「未応募」と読むと
+  // 「等待回复 · 全部 N 项」と「只看等对方」の件数がずれる。
+  const status = jobStatus(note);
+  if (!noteWaitsOnCounterpart(note, status)) return null;
 
   const waitingFor = getString(note.frontmatter.waiting_for);
   const company = getString(note.frontmatter.company);

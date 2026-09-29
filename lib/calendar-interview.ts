@@ -197,9 +197,17 @@ function conflictingInterviews(candidates: MatchingNote[], notes: Note[], date: 
   return [rounds, times, cases, ownerKinds, owners].some((values) => values.size > 1);
 }
 
+/**
+ * 日历上的这一项是不是一场面试・面谈（有问答、值得准备与复盘）。说明会・研讨会也会进日历，但不是。
+ * 日历进准备稿／复盘页的入口、首页「待整理稿」提醒共用这一条。
+ */
+export function isInterviewEvent(event: Pick<Commitment, "kind" | "label">) {
+  if (event.kind !== "event" || /说明会|説明会|說明會|セミナー|seminar/i.test(event.label)) return false;
+  return /面试|面試|面接|面谈|面談|interview|meeting/i.test(event.label);
+}
+
 export function resolveCalendarInterview(event: Commitment, notes: Note[]): CalendarInterviewTarget | null {
-  if (event.kind !== "event" || /说明会|説明会|說明會|セミナー|seminar/.test(event.label)) return null;
-  if (!/面试|面試|面接|面谈|面談|interview|meeting/i.test(event.label)) return null;
+  if (!isInterviewEvent(event)) return null;
   const matches = matchingNotes(event, notes);
   const strongest = matches.filter((candidate) => candidate.score === matches[0]?.score);
   // 必须跨资料种类一起消歧：两轮准备稿 + 一轮逐字稿，不能因逐字稿只有一份就认定本场已结束。

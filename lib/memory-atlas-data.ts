@@ -442,7 +442,9 @@ function detectEventLabel(text: string): string | null {
   if (/最終面接|最终面试/.test(text)) return "最终面试";
   if (/一次面接|一面/.test(text)) return "第一次面试";
   if (/二次面接|二面/.test(text)) return "第二次面试";
-  if (/セミナー|说明会/.test(text)) return "招聘说明会";
+  // 日文「説明会」・繁体「說明會」・英文 seminar も同じ種別。漏れると既定の「面谈」に化けて、
+  // 面试扱い（日历の準備稿入口・首页「待整理稿」）になる（isInterviewEvent の除外表と揃える）。
+  if (/セミナー|说明会|説明会|說明會|seminar/i.test(text)) return "招聘说明会";
   if (/面接|面试/.test(text)) return "面试";
   return null;
 }

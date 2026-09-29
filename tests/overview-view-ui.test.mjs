@@ -82,3 +82,26 @@ test("空 vault 渲染空态而不抛错，四个数字都是 0", () => {
   assert.match(html, /class="overview-columns is-single"/);
   assert.deepEqual(statTiles(html).map((tile) => [tile.value, tile.zero]), [[0, true], [0, true], [0, true], [0, true]]);
 });
+
+test("「待整理稿」只提醒已过的面试・面谈；说明会也在日历上，但不该让人去生成整理稿", () => {
+  const list = [
+    jobCase("株式会社テスト", { status: "面接中", channel: "Green", status_updated: "2026-09-24", next_event_at: "2026-09-24 10:00", next_action: "一次面接" }),
+    // 日文写法、不带「セミナー」：标签若退回默认的「面谈」，就会被当成面试提醒。
+    jobCase("株式会社サンプル", { status: "未応募", next_event_at: "2026-09-25 15:00", next_action: "会社説明会に参加" }),
+    jobCase("株式会社ダミー", { status: "未応募", next_event_at: "2026-09-23 11:00", next_action: "Company seminar" }),
+  ];
+  const html = render(list);
+  const missing = html.match(/<ul class="overview-review-missing"[^>]*>([\s\S]*?)<\/ul>/)?.[1] ?? "";
+  assert.match(missing, /株式会社テスト<\/strong>/, "面试要提醒");
+  assert.doesNotMatch(missing, /株式会社サンプル/, "日文「説明会」不提醒");
+  assert.doesNotMatch(missing, /株式会社ダミー/, "seminar 不提醒");
+});
+
+test("等待面板「全部 N 项」落在看板的「只看等对方」，不按进行中状态筛", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../app/overview-view.tsx", import.meta.url), "utf8");
+  assert.match(source, /onViewJobs\(\{ waiting: true \}\)/);
+  assert.doesNotMatch(source, /onViewJobs\(\{ statuses: IN_PROGRESS_STATUSES \}\)/);
+  const shell = await readFile(new URL("../app/memory-atlas.tsx", import.meta.url), "utf8");
+  assert.match(shell, /if \(filters\?\.waiting\) params\.set\("waiting", "1"\)/, "外壳把它写进 URL");
+});

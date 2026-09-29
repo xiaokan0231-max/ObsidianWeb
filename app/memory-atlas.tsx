@@ -72,7 +72,7 @@ import {
   type Commitment,
   type GroupKey,
 } from "@/lib/memory-atlas-data";
-import { vaultScopeForView, type VaultScope } from "@/lib/vault-scope";
+import { scopesToReloadAfterStats, vaultScopeForView, type VaultScope } from "@/lib/vault-scope";
 import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { resolveNoteLink } from "@/lib/wiki-target";
 import { changedToLabel } from "@/lib/ui-labels";
@@ -608,8 +608,9 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       // vault:stats は数秒かかる（bridge 側の上限 90 秒）。
       await postJson("/api/vault/stats", {}, { timeoutMs: 100_000 });
       setDerivedState("fresh");
-      // 台帳・数据字典は jobs scope、面接傾向は interview scope。書き換わった generated 区块を取り直す。
-      await loadVault({ scope: "jobs" });
+      // generated 区块は複数の scope に散っている（台帳・応募日台帳は jobs、面接傾向は interview、数据字典は all だけ）。
+      // 手元に載っている scope を全部取り直す——変わっていない scope は ETag で 304 になるので安い。
+      await Promise.all(scopesToReloadAfterStats(loadedScopes.current).map((scope) => loadVault({ scope })));
     } catch (rebuildError) {
       setDerivedState("stale");
       setStatsError(rebuildError instanceof Error ? rebuildError.message : "重算派生统计失败");
@@ -1155,6 +1156,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     if (filters?.statuses?.length) params.set("status", filters.statuses.join(","));
     if (filters?.ratings?.length) params.set("rating", filters.ratings.join(","));
     if (filters?.touch?.length) params.set("touch", filters.touch.join(","));
+    if (filters?.waiting) params.set("waiting", "1");
     navigateToView("jobs", params, true);
   }, [navigateToView]);
 

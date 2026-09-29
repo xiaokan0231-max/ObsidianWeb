@@ -3,6 +3,7 @@ import { jobSectionBody } from "./job-sections.ts";
 import { daysBetween, intakeSortKey, jobIntake, type JobIntake } from "./job-intake.ts";
 import {
   DEFAULT_JOB_STATUS,
+  IN_PROGRESS_STATUSES,
   jobStatusNote,
   normalizeJobStatus,
 } from "./job-status.ts";
@@ -617,6 +618,20 @@ export function awaitingCounterpart(job: Pick<JobCard, "status" | "waitingFor">)
 }
 
 /**
+ * 球在对方手里的案件：记了等待对象且不是本人，案件还活着（选考中・内定），或未応募但已经动过手。
+ * 首页「等待回复」和看板「只看等对方」共用这一条——各写一份的话，首页的「全部 N 项」点进去就对不上
+ * （曾经就是这样：首页数了未応募＋等对方，跳过去却按进行中状态筛，漏掉它、又混进没在等的案件）。
+ */
+export function waitsOnCounterpart(status: string, waitingFor: string) {
+  if (!waitingFor || waitingFor === "self") return false;
+  return IN_PROGRESS_STATUSES.includes(status) || status === "未応募";
+}
+
+export function jobWaitsOnCounterpart(job: Pick<JobCard, "status" | "waitingFor">) {
+  return waitsOnCounterpart(job.status, job.waitingFor);
+}
+
+/**
  * 応募からの経過。**「何日待っているか」は催促の判断に直結する**ので、
  * 相対表示だけにして絶対日付は title に回す（一覧をスキャンしている時に効くのは日数のほう）。
  */
@@ -689,6 +704,8 @@ export type JobBoardFilters = {
   bands: string[];
   accesses: string[];
   remoteOnly: boolean;
+  /** 只看球在对方手里的案件（jobWaitsOnCounterpart）。首页「等待回复 · 全部 N 项」的落点。 */
+  waitingOnly: boolean;
 };
 
 export const EMPTY_JOB_FILTERS: JobBoardFilters = {
@@ -705,6 +722,7 @@ export const EMPTY_JOB_FILTERS: JobBoardFilters = {
   bands: [],
   accesses: [],
   remoteOnly: false,
+  waitingOnly: false,
 };
 
 /** 一个筛选维度。算联动 facet 计数时用它指出「这一组先不算」。 */
@@ -722,7 +740,8 @@ export type JobFilterKey =
   | "gates"
   | "bands"
   | "accesses"
-  | "remote";
+  | "remote"
+  | "waiting";
 
 /** 看板一条岗位是否通过全部筛选。`except` 指定的那一组不参与判定（facet 联动计数用）。 */
 export function jobMatchesFilters(
@@ -749,7 +768,8 @@ export function jobMatchesFilters(
     keep("gates", () => filters.gates.length === 0 || filters.gates.includes(jobFitGate(job))) &&
     keep("bands", () => filters.bands.length === 0 || filters.bands.includes(jobFitBand(job))) &&
     keep("accesses", () => filters.accesses.length === 0 || filters.accesses.includes(jobFitAccess(job))) &&
-    keep("remote", () => !filters.remoteOnly || job.remote)
+    keep("remote", () => !filters.remoteOnly || job.remote) &&
+    keep("waiting", () => !filters.waitingOnly || jobWaitsOnCounterpart(job))
   );
 }
 
