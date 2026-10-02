@@ -8,7 +8,7 @@
 .overview-view .panel-heading h2 { margin: 0; font-size: 20px; line-height: 1.4; }
 .overview-view .panel-heading button { flex: 0 0 auto; font-size: 12px; }
 .overview-view small,
-.overview-view time,
+.overview-view time { font-size: 12px; }
 /* 首页复盘提醒里的「已过但没有整理稿」清单：一行一场，右侧一键复制给 Claude 的指令。 */
 .overview-review-missing { list-style: none; margin: 4px 0 10px; padding: 0; display: grid; gap: 6px; }
 .overview-review-missing li { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
@@ -16,56 +16,27 @@
 .overview-review-missing li > small { flex-shrink: 0; color: var(--orange); font-size: 11px; }
 .overview-review-missing li > button { flex-shrink: 0; margin-left: auto; border: 1px solid var(--line); border-radius: 4px; background: transparent; padding: 2px 8px; font-size: 11px; color: var(--muted); cursor: pointer; }
 .overview-view .pipeline-status,
-.overview-view .todo-pri,
-.overview-view .todo-status,
 .overview-view .jobs-preview-stats span { font-size: 12px; }
 .overview-view .panel-empty { padding: 4px 0; font-size: 14px; }
 
-.overview-current {
-  min-width: 0;
-  overflow: hidden;
-  padding: 20px 24px 0;
-  border: 1px solid #34483d;
-  border-radius: var(--radius-card);
-  background: linear-gradient(110deg, #192c23, #2a4235);
-  color: #f8f6ef;
-}
-.overview-current-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; color: #d7dfd6; font-size: 12px; }
-.overview-current-heading > span { display: flex; align-items: center; gap: 8px; font-weight: 650; }
-.overview-current-heading > span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #f18b64; }
-.overview-current-body { display: flex; align-items: center; justify-content: space-between; gap: 20px 32px; }
-.overview-current-copy { flex: 1; min-width: 0; }
-.overview-current h1 { margin: 0; font-family: inherit; font-size: clamp(20px, 2vw, 26px); font-weight: 650; line-height: 1.5; overflow-wrap: anywhere; }
-.overview-current-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin-top: 8px; color: #d7dfd6; font-size: 12px; }
-.overview-current-meta b { color: #f6c7ae; font-weight: 500; }
-.overview-current-copy p { margin: 8px 0 0; color: #c8d3c9; font-size: 14px; line-height: 1.6; }
-.overview-current-actions { flex: 0 0 250px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.overview-current-actions button { min-height: 38px; border: 1px solid #718476; border-radius: var(--radius-control); background: transparent; color: #eef2ea; padding: 8px 12px; font-size: 12px; cursor: pointer; }
-.overview-current-actions button:hover { background: #ffffff12; }
-.overview-current-actions button:disabled { cursor: wait; opacity: .65; }
-.overview-current-actions .primary-action { width: 100%; display: flex; justify-content: space-between; gap: 16px; border-color: #e66d45; background: #e66d45; color: #fff; font-size: 14px; font-weight: 650; }
-.overview-current-actions .primary-action:hover { background: #cf5a34; }
-.overview-stale-note { display: flex; align-items: center; gap: 12px; margin: 12px 0 0; padding: 0; border: 0; background: transparent; color: #d7dfd6; font-size: 12px; line-height: 1.6; text-align: left; cursor: pointer; }
-.overview-stale-note:hover { color: #fff; }
-.overview-current-stats { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-top: 16px; padding: 12px 0; border-top: 1px solid #ffffff24; }
-/* 四个数字是入口：点了落到「就是这些」的列表。外观仍是数字行，只在指向／聚焦时露出可点的样子。 */
-.overview-current-stats > button { display: flex; align-items: baseline; gap: 8px; margin: -4px -8px; padding: 4px 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; text-align: left; cursor: pointer; }
-.overview-current-stats > button:hover { background: #ffffff14; }
-.overview-current-stats > button:hover span { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
-/* 深绿底上默认的 --interactive 描边看不清，换成浅色。 */
-.overview-current-stats > button:focus-visible { outline: 2px solid #f8f6ef; outline-offset: 2px; }
-.overview-current-stats strong { font-size: 20px; font-weight: 500; }
-.overview-current-stats span { color: #d1dbd2; font-size: 12px; }
-.overview-current-stats [data-zero="true"] { opacity: .75; }
+/* 标题与三个统计保持紧凑，把主要空间留给真实日程。 */
+.overview-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.overview-heading { display: flex; align-items: baseline; gap: 16px; }
+.overview-heading h1 { margin: 0; font-size: 26px; font-weight: 650; line-height: 1.4; }
+.overview-heading time { color: var(--text-tertiary); }
+.overview-stats { display: flex; flex-wrap: wrap; gap: 10px 20px; }
+.overview-stats > button { display: flex; align-items: baseline; gap: 8px; border: 0; border-radius: var(--radius-control); padding: 6px 8px; background: transparent; text-align: left; cursor: pointer; }
+.overview-stats > button:hover { background: var(--paper); }
+.overview-stats > button:hover span { text-decoration: underline; text-underline-offset: 3px; }
+.overview-stats strong { color: var(--ink); font-size: 20px; font-weight: 600; }
+.overview-stats span { color: var(--text-secondary); font-size: 12px; }
+.overview-stats [data-zero="true"] { opacity: .75; }
 
-.overview-view .todo-preview-list > button,
 .overview-view .jobs-preview-list > button,
 .overview-view .pipeline-list > button { min-height: 0; padding: 12px 0; gap: 10px; }
-.overview-view .todo-preview-list > button:last-child,
 .overview-view .jobs-preview-list > button:last-child,
 .overview-view .pipeline-list > button:last-child { padding-bottom: 0; border-bottom: 0; }
 .overview-view .pipeline-list > button:first-child { border-top: 0; }
-.overview-view .todo-preview-body strong,
 .overview-view .jobs-preview-body strong,
 .overview-view .pipeline-company strong,
 .overview-view .pipeline-company small,
@@ -79,7 +50,6 @@
   font-size: 14px;
   line-height: 1.5;
 }
-.overview-view .todo-preview-body small,
 .overview-view .jobs-preview-body small,
 .overview-view .pipeline-company small { color: var(--text-secondary); }
 .overview-view .pipeline-company small { margin-top: 3px; font-size: 12px; }
@@ -94,7 +64,7 @@
 .overview-view .pipeline-recent { margin-top: 8px; padding-top: 0; border: 0; }
 .overview-view .pipeline-recent strong { font-size: 14px; }
 .overview-panel-meta { margin: -4px 0 12px; font-size: 12px; color: var(--text-tertiary); }
-.overview-schedule-list,
+.overview-schedule-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .overview-waiting-list { display: flex; flex-direction: column; gap: 8px; }
 .overview-schedule-list > button { display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0; padding: 10px 12px; border: 0; border-left: 3px solid var(--commitment-ink); border-radius: 0 6px 6px 0; background: var(--commitment-fill); text-align: left; cursor: pointer; }
 .overview-schedule .kind-event { --commitment-ink: #246b58; --commitment-fill: #e4f2eb; }
@@ -122,24 +92,6 @@
 
 @media (max-width: 1100px) {
   .overview-columns { grid-template-columns: minmax(0, 1fr); }
-  .overview-current-body { flex-direction: column; align-items: stretch; gap: 16px; }
-  .overview-current-actions { flex-basis: auto; }
-  .overview-current-actions .primary-action { width: auto; min-width: 170px; }
-}
-@media (max-width: 580px) {
-  .overview-view,
-  .overview-stack { gap: 16px; }
-  .overview-view .panel { padding: 16px; }
-  .overview-current { padding: 16px 16px 0; }
-  .overview-current-actions { gap: 8px; }
-  .overview-current-actions .primary-action { width: 100%; }
-  .overview-current-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
-  .overview-current-stats > button { gap: 6px; }
-  .overview-current-stats span { font-size: 12px; }
-  .overview-view .todo-preview-list > button { grid-template-columns: 30px minmax(0, 1fr); gap: 4px 10px; }
-  .overview-view .todo-preview-list .todo-pri { align-self: start; }
-  .overview-view .todo-preview-list .todo-status { grid-column: 2; justify-self: start; }
-  .overview-view .todo-preview-list .todo-pri { min-width: 0; }
 }
 
 /* 等待区：一项＝案件按钮＋两个就地处理按钮；跟进日已过的项标橙（该催了）。 */

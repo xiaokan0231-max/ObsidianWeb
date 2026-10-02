@@ -1,14 +1,14 @@
 "use client";
 
-import { memo, useMemo, useState, useSyncExternalStore } from "react";
+import { memo, useMemo, useState } from "react";
 import { type AppView } from "./app-route";
 import type { JobsInitialFilters } from "./jobs-view";
-import { buildFocusBrief, focusDateLabel } from "@/lib/focus-action";
+import { buildWaitingItems, focusDateLabel } from "@/lib/focus-action";
 import { IN_FLIGHT_STATUSES, awaitingCounterpart, compareJobs, toJobCard } from "@/lib/jobs";
 import { isInterviewEvent } from "@/lib/calendar-interview";
 import { joinReviewNotes } from "@/lib/review-join";
 import { parseInterviewPractice } from "@/lib/review-practice";
-import { formatDate, getString, getTitle, getType, type Note } from "@/lib/notes";
+import { formatDate, getString, getType, type Note } from "@/lib/notes";
 import {
   calendarCompanyIdentity,
   ACTIVE_JOB_STATUSES,
@@ -17,39 +17,13 @@ import {
   careerStatus,
   getLatestNoteDate,
   localDateKey,
-  todoAction,
-  todoAudience,
-  todoPriority,
-  todoStatus,
-  TODO_PRIORITY,
   type CalendarEvent,
   type DerivedData,
 } from "@/lib/memory-atlas-data";
 
 type View = AppView;
 
-/**
- * 収尾入口に出す待办の名前。action の長文（88字）を切ると案件名に見えてしまうので H1 を使う。
- * 会社名の接頭辞は落とさない——H1 は「◯◯ 最終面接準備」、frontmatter は
- * 「株式会社◯◯」と表記が揺れており、前綴照合は当てにならない。
- * 「最終面接準備」まで見えないと、どの待办の話か分からないので、切らずに収まる長さを取る。
- */
-function staleTitle(note: Note) {
-  const title = getTitle(note).replace(/^\d{4}-\d{2}-\d{2}[_\s]*/, "").trim();
-  return title.length > 30 ? `${title.slice(0, 29)}…` : title;
-}
-
-// 進行中案件の並び順：面接に近いほど上。定数なのでコンポーネントの外に置く。
-// 改变实际 DOM 顺序，确保窄屏阅读和键盘顺序一致。
-const narrowQuery = "(max-width: 1100px)";
-function subscribeLayout(callback: () => void) {
-  const query = window.matchMedia(narrowQuery);
-  query.addEventListener("change", callback);
-  return () => query.removeEventListener("change", callback);
-}
-const isNarrowLayout = () => window.matchMedia(narrowQuery).matches;
-const serverLayout = () => false;
-
+// 进行中案件按选考进度排列，面试中的案件优先。
 const currentStageRank: Record<string, number> = { 面接中: 0, 書類通過: 1, 応募済: 2 };
 
 function Overview({
@@ -61,10 +35,8 @@ function Overview({
   onViewJobs,
   onOpenCase,
   onOpenSchedule,
-  onViewOpenTodos,
   onFollowUp,
   onOpenReview,
-  onTodoStatus,
 }: {
   notes: Note[];
   derived: DerivedData;
@@ -78,21 +50,13 @@ function Overview({
   onOpenCase?: (note: Note) => void;
   /** 近期安排直达那场面试的准备页／复盘页；认不出对应面试时由外壳退回原笔记。 */
   onOpenSchedule?: (event: CalendarEvent) => void;
-  /** 打开行动清单的「未完成」标签（首页数的就是未完成）。 */
-  onViewOpenTodos?: () => void;
   /** 等待区就地处理：改跟进日或改为等本人。返回错误文案，成功为 null。 */
   onFollowUp?: (note: Note, values: { waitingFor?: string | null; followUpAt?: string | null }) => Promise<string | null>;
-  onQuery: (query: string) => void;
   onOpenReview: (key?: string) => void;
-  onTodoStatus: (note: Note, status: string, expectedMtime?: number) => Promise<string | null>;
 }) {
-  const narrow = useSyncExternalStore(subscribeLayout, isNarrowLayout, serverLayout);
-  const [focusBusy, setFocusBusy] = useState(false);
-  const [focusError, setFocusError] = useState("");
   const jobs = useMemo(() => derived.cases.map(toJobCard), [derived.cases]);
   const reviewPreview = useMemo(() => buildReviewPreview(notes), [notes]);
-  // 四组列表原来是裸表达式：外壳任何 state 变化（⌘K・overlay）都会整段重排。
-  // 同函数里 jobs/reviewPreview/focusBrief 都已经 useMemo，只有这四组漏了。
+  // 缓存案件列表，避免外壳切换搜索框或抽屉时重新排序。
   const currentCases = useMemo(() => jobs
     .filter((job) => ACTIVE_JOB_STATUSES.has(job.status))
     .sort(
@@ -103,11 +67,8 @@ function Overview({
   const recentChanges = useMemo(() => jobs
     .filter((job) => !ACTIVE_JOB_STATUSES.has(job.status) && job.status !== "未応募")
     .slice(0, 3), [jobs]);
-  // today を渡し、依存にも入れる。入れないと日付を跨いでも focusBrief が昨日の判定のまま
-  // 凍り、expires_at をまたいだ待办が hero に居座り続ける——H5 で直したのと同型の穴を
-  // stale 机制で作り直すところだった。
-  const focusBrief = useMemo(() => buildFocusBrief(notes, today), [notes, today]);
-  const primaryFocus = focusBrief.primary;
+  // 跟进日随 today 重算，跨日后等待区的逾期提示也会更新。
+  const waiting = useMemo(() => buildWaitingItems(notes, today), [notes, today]);
 
   // 「已经动过手、等对方回应」的未応募不算待判断——看板同一条规则（awaitingCounterpart），否则首页数字虚高。
   const openJobs = useMemo(() => jobs
@@ -117,19 +78,6 @@ function Overview({
     .map((job) => job.salary.max ?? 0)
     .filter((value) => value > 0)
     .sort((left, right) => right - left)[0];
-  // openTodos 的比较器会对 todo 笔记全文扫日期正则（getLatestNoteDate），更不该每次渲染重跑。
-  const openTodos = useMemo(() => notes
-    .filter(
-      (note) =>
-        getType(note) === "todo" &&
-        todoAudience(note) === "user" &&
-        todoStatus(note) !== "完了",
-    )
-    .sort(
-      (left, right) =>
-        (TODO_PRIORITY[todoPriority(left)]?.rank ?? 9) - (TODO_PRIORITY[todoPriority(right)]?.rank ?? 9) ||
-        getLatestNoteDate(right).localeCompare(getLatestNoteDate(left)),
-    ), [notes]);
   const practiceQueue = useMemo(() =>
     notes
       .filter((note) => getType(note) === "interview-answer-practice")
@@ -171,12 +119,9 @@ function Overview({
     try { await navigator.clipboard.writeText(text); setCopiedTranscript(event.id); } catch { setCopiedTranscript(""); }
   };
   const actionReviewDoc = reviewPreview.actionDoc;
-  const primaryTodoStatus = primaryFocus?.source === "todo" ? todoStatus(primaryFocus.note) : "";
   const openCase = (note: Note) => (onOpenCase ? onOpenCase(note) : onOpen(note));
-  // 「N 件待办」「全部 N 项」数的是未完成；落在行动清单的「未完成」标签上，条数才对得上。
-  const viewOpenTodos = () => (onViewOpenTodos ? onViewOpenTodos() : onView("todo"));
   const openSchedule = (event: CalendarEvent) => (onOpenSchedule ? onOpenSchedule(event) : onOpen(event.note));
-  // 顶部四个数字各自落到「就是这些」的那一页：点了之后看到的件数要和这里一致，否则数字就没法信。
+  // 顶部三个数字各自落到「就是这些」的那一页：点了之后看到的件数要和这里一致，否则数字就没法信。
   const viewJobs = (filters: JobsInitialFilters) => (onViewJobs ? onViewJobs(filters) : onView("jobs"));
   const [followUpBusy, setFollowUpBusy] = useState("");
   const [followUpError, setFollowUpError] = useState("");
@@ -189,49 +134,6 @@ function Overview({
     if (error) setFollowUpError(error);
   };
   const plusDays = (days: number) => localDateKey(new Date(year, month - 1, day + days));
-  const runPrimaryAction = async () => {
-    if (!primaryFocus) return;
-    if (primaryFocus.source !== "todo") {
-      // 跟進は案件の抽屉で片付ける（跟進フォームはそこにしかない）。
-      openCase(primaryFocus.note);
-      return;
-    }
-    setFocusBusy(true);
-    setFocusError("");
-    const error = await onTodoStatus(
-      primaryFocus.note,
-      primaryTodoStatus === "進行中" ? "完了" : "進行中",
-      primaryFocus.note.stat.mtime,
-    );
-    if (error) setFocusError(error);
-    setFocusBusy(false);
-  };
-  const holdPrimaryAction = async () => {
-    if (!primaryFocus || primaryFocus.source !== "todo") return;
-    setFocusBusy(true);
-    setFocusError("");
-    const error = await onTodoStatus(primaryFocus.note, "保留", primaryFocus.note.stat.mtime);
-    if (error) setFocusError(error);
-    setFocusBusy(false);
-  };
-
-  const todosPanel = (
-    <article className="panel todo-preview-panel" key="todos" data-overview-panel="todos">
-      <PanelHeading title="行动清单" action={`全部 ${openTodos.length} 项`} onAction={viewOpenTodos} />
-      <div className="todo-preview-list">
-        {openTodos.length === 0 ? <p className="panel-empty">当前没有需要推进的行动。</p> : openTodos.slice(0, 5).map((note) => (
-          <button key={note.path} onClick={() => onOpen(note)}>
-            <span className={`todo-pri pri-${todoPriority(note)}`}>{TODO_PRIORITY[todoPriority(note)]?.label ?? todoPriority(note)}</span>
-            <span className="todo-preview-body">
-              <strong>{todoAction(note)}</strong>
-              <small>{getString(note.frontmatter.category)}</small>
-            </span>
-            <span className={`todo-status st-${todoStatus(note)}`}>{todoStatus(note)}</span>
-          </button>
-        ))}
-      </div>
-    </article>
-  );
   const casesPanel = (currentCases.length > 0 || recentChanges.length > 0) ? (
     <article className="panel pipeline-panel" key="cases" data-overview-panel="cases">
       <PanelHeading title="进行中案件" action="查看选考" onAction={() => onView("analytics")} />
@@ -287,32 +189,32 @@ function Overview({
       </div>
     </article>
   ) : null;
-  const schedulePanel = upcoming.length > 0 ? (
+  const schedulePanel = (
     <article className="panel overview-schedule" key="schedule" data-overview-panel="schedule">
       <PanelHeading title="近期安排" action="打开日历" onAction={() => onView("calendar")} />
       <p className="overview-panel-meta">未来 7 天 · {upcoming.length} 项 · 日本时间（JST）</p>
-      <div className="overview-schedule-list">
+      {upcoming.length === 0 ? <p className="panel-empty">未来 7 天没有已确认的安排。</p> : <div className="overview-schedule-list">
         {upcoming.slice(0, 5).map((event) => (
           <button className={`kind-${event.kind}`} key={event.id} onClick={() => openSchedule(event)}>
             <span><time dateTime={event.date}>{focusDateLabel(event.date)}{event.time && ` ${calendarEventTime(event)}`}</time><small>{event.label}</small></span>
             <strong>{event.company}</strong>
           </button>
         ))}
-      </div>
+      </div>}
     </article>
-  ) : null;
-  const overdueCount = focusBrief.waiting.filter((item) => item.overdue).length;
-  const waitingPanel = focusBrief.waiting.length > 0 ? (
+  );
+  const overdueCount = waiting.filter((item) => item.overdue).length;
+  const waitingPanel = waiting.length > 0 ? (
     <article className="panel overview-waiting" key="waiting" data-overview-panel="waiting">
       <PanelHeading
         title={overdueCount > 0 ? `等待回复 · ${overdueCount} 项已到跟进日` : "等待回复"}
-        action={`全部 ${focusBrief.waiting.length} 项`}
+        action={`全部 ${waiting.length} 项`}
         // 落在「只看等对方」：与这张列表同一个判定，条数一致（按进行中状态筛会漏掉未応募＋等对方、又混进没在等的）。
         onAction={() => (onViewJobs ? onViewJobs({ waiting: true }) : onView("jobs"))}
       />
-      {followUpError && <p className="overview-focus-error" role="alert">{followUpError}</p>}
+      {followUpError && <p className="inline-write-error" role="alert">{followUpError}</p>}
       <div className="overview-waiting-list">
-        {focusBrief.waiting.slice(0, 5).map((item) => (
+        {waiting.slice(0, 5).map((item) => (
           <div key={item.note.path} className={`overview-waiting-item${item.overdue ? " overdue" : ""}`}>
             <button onClick={() => openCase(item.note)}>
               <strong>{item.company || item.waitingFor}</strong>
@@ -370,66 +272,24 @@ function Overview({
       </button>
     </article>
   ) : null;
-  const secondaryPanels = [schedulePanel, waitingPanel, reviewPanel, practicePanel].filter(Boolean);
+  const primaryPanels = [casesPanel, jobsPanel].filter(Boolean);
+  const secondaryPanels = [waitingPanel, reviewPanel, practicePanel].filter(Boolean);
 
   return (
     <div className="overview-view">
-      <section className="overview-current" aria-label="当前行动">
-        <div className="overview-current-heading"><span>当前行动</span><time dateTime={today}>{formatDate(today)}</time></div>
-        <div className="overview-current-body">
-          <div className="overview-current-copy">
-            <h1>{primaryFocus?.action ?? "当前没有待执行的重点行动"}</h1>
-            {primaryFocus && <div className="overview-current-meta">
-              <span>{primaryFocus.context}</span><span>{primaryFocus.reason}</span><b>{primaryFocus.status}</b>
-            </div>}
-            {primaryFocus?.detail && <p>{primaryFocus.detail}</p>}
-          </div>
-          <div className="overview-current-actions">
-            {primaryFocus && <button className="primary-action" onClick={() => void runPrimaryAction()} disabled={focusBusy}>
-              {focusBusy ? "写入中…" : primaryFocus.source === "todo" ? primaryTodoStatus === "進行中" ? "完成这件事" : "开始这件事" : primaryFocus.cta}<span aria-hidden="true">→</span>
-            </button>}
-            {primaryFocus && <button onClick={() => onOpen(primaryFocus.note)}>查看背景</button>}
-            {primaryFocus?.source === "todo" && <button onClick={() => void holdPrimaryAction()} disabled={focusBusy}>保留</button>}
-            <button onClick={() => onView("todo")}>全部行动</button>
-          </div>
-        </div>
-        {focusError && <div className="inline-write-error" role="alert">{focusError}</div>}
-        {focusBrief.stale.length > 0 && (
-          // 失効した待办は催促しない。静かな一行で「収尾」を促すだけ。
-          // 🔴 文言は必ず「待办を閉じる話」と読めること——最初は「事件已过去」と
-          // だけ書いて、本人に「案件が終わったのか？」と誤読された。案件は
-          // 「等待对方」側で生きている。理由（日付が過ぎた／案件が終わった）も
-          // 言い分けないと、同じ一行が両方の意味に読める。
-          <button type="button" className="overview-stale-note" onClick={() => onOpen(focusBrief.stale[0].note)}>
-            {focusBrief.stale.length === 1 ? (
-              <>
-                待办「{staleTitle(focusBrief.stale[0].note)}」
-                {focusBrief.stale[0].staleReason === "case-closed"
-                  ? "所属的案件已结束，可以关掉"
-                  : "的日子已经过了，可以关掉"}
-              </>
-            ) : (
-              `${focusBrief.stale.length} 件待办已经不用做了，逐一关掉`
-            )}
-            <span aria-hidden="true">→</span>
-          </button>
-        )}
-        <div className="overview-current-stats">
-          <Stat value={openTodos.length} label="件待办" onClick={viewOpenTodos} />
-          {/* currentCases 用的 ACTIVE_JOB_STATUSES 就是 IN_FLIGHT_STATUSES，看板筛出来的件数与这里一致。 */}
+      <header className="overview-header">
+        <div className="overview-heading"><h1>概览</h1><time dateTime={today}>{formatDate(today)}</time></div>
+        <div className="overview-stats">
+          {/* 与看板使用同一筛选规则，点击数字后看到的案件数才能一致。 */}
           <Stat value={currentCases.length} label="个进行中案件" onClick={() => viewJobs({ statuses: IN_FLIGHT_STATUSES })} />
-          {/* openJobs = 未応募 且没在等对方，正是看板的「未动手」。 */}
           <Stat value={openJobs.length} label="条待应募岗位" onClick={() => viewJobs({ statuses: ["未応募"], touch: ["untouched"] })} />
           <Stat value={reviewPreview.pendingDecisions} label="个复盘点待裁定" onClick={() => onOpenReview()} />
         </div>
-      </section>
-      {narrow ? (
-        <div className="overview-stack overview-mobile-stack">
-          {schedulePanel}{todosPanel}{waitingPanel}{casesPanel}{jobsPanel}{reviewPanel}{practicePanel}
-        </div>
-      ) : (
-        <div className={`overview-columns${secondaryPanels.length ? "" : " is-single"}`}>
-          <div className="overview-stack overview-primary-stack">{todosPanel}{casesPanel}{jobsPanel}</div>
+      </header>
+      {schedulePanel}
+      {(primaryPanels.length > 0 || secondaryPanels.length > 0) && (
+        <div className={`overview-columns${primaryPanels.length > 0 && secondaryPanels.length > 0 ? "" : " is-single"}`}>
+          {primaryPanels.length > 0 && <div className="overview-stack overview-primary-stack">{primaryPanels}</div>}
           {secondaryPanels.length > 0 && <div className="overview-stack overview-secondary-stack">{secondaryPanels}</div>}
         </div>
       )}

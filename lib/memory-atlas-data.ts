@@ -11,7 +11,6 @@ import {
   getTitle,
   getType,
   noteBasename,
-  stripFrontmatter,
   stripMarkdown,
   stripNonLinkRegions,
   type Note,
@@ -19,7 +18,8 @@ import {
 import { joinReviewNotes } from "./review-join.ts";
 import { parseInterviewAnswerReview, type InterviewAnswerReview } from "./review-deep.ts";
 import { JOB_CASE_TYPE } from "./vault-boundary.mjs";
-import { interviewContext, interviewNoteTime, matchingInterviewPrep } from "./calendar-interview.ts";
+import { interviewContext, interviewNoteTime, matchingInterviewPrep, matchingInterviewContext, resolveCalendarRoundBadge } from "./calendar-interview.ts";
+import { calendarRoundBadge, interviewRound } from "./interview-round.ts";
 
 export type GroupKey = GraphGroup;
 export type LibraryScope = "all" | "evidence" | "action" | "interview" | "language" | "analysis";
@@ -437,15 +437,15 @@ export function buildReviewPreview(notes: Note[]): ReviewPreview {
  * 常に「面谈」に化けて、しかもそれが正しい判定に見えてしまう。
  */
 function detectEventLabel(text: string): string | null {
-  if (/エージェント面談|猎头面谈/.test(text)) return "猎头面谈";
-  if (/カジュアル面談|轻松面谈/.test(text)) return "轻松面谈";
-  if (/最終面接|最终面试/.test(text)) return "最终面试";
-  if (/一次面接|一面/.test(text)) return "第一次面试";
-  if (/二次面接|二面/.test(text)) return "第二次面试";
+  const normalized = text.normalize("NFKC");
   // 日文「説明会」・繁体「說明會」・英文 seminar も同じ種別。漏れると既定の「面谈」に化けて、
   // 面试扱い（日历の準備稿入口・首页「待整理稿」）になる（isInterviewEvent の除外表と揃える）。
-  if (/セミナー|说明会|説明会|說明會|seminar/i.test(text)) return "招聘说明会";
-  if (/面接|面试/.test(text)) return "面试";
+  if (/セミナー|说明会|説明会|說明會|seminar/i.test(normalized)) return "招聘说明会";
+  if (interviewRound(normalized) === "agent") return "猎头面谈";
+  const round = calendarRoundBadge(normalized);
+  if (round) return round.label;
+  if (/面接|面试|面試|\binterview\b/i.test(normalized)) return "面试";
+  if (/面談|面谈|面談|\bmeeting\b/i.test(normalized)) return "面谈";
   return null;
 }
 
@@ -484,167 +484,114 @@ function calendarCompanyDisplayScore(company: string) {
     Math.min(normalized.length, 40) / 100;
 }
 
+function validCalendarDate(date: string) {
+  if (!/^20\d{2}-\d{2}-\d{2}$/.test(date)) return false;
+  const timestamp = Date.parse(`${date}T00:00:00Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === date;
+}
+
 export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEvent[] {
   const today = localDateKey(now);
-  const events = new Map<string, CalendarEvent>();
   const contexts = new Map(notes.map((note) => [note.path, interviewContext(note, notes, true)]));
   const eligiblePrep = (note: Note) => getType(note) === "interview-prep" &&
     !contexts.get(note.path)?.invalid &&
     ["", "scheduled", "completed"].includes(getString(note.frontmatter.session_status ?? note.frontmatter.schedule_status));
   const matchingNotes = notes.filter((note) => getType(note) !== "interview-prep" || eligiblePrep(note));
-  const prepByCaseDate = new Map<string, string>();
-  for (const note of notes.filter(eligiblePrep)) {
-    const caseId = contexts.get(note.path)?.caseId;
-    if (caseId) prepByCaseDate.set(`${caseId}|${getString(note.frontmatter.date)}`, note.path);
-  }
+  type Candidate = CalendarEvent & { priority: number; identity: string };
+  const candidates: Candidate[] = [];
 
-  const addEvent = (note: Note, date: string, source: string, priority: number, endTime?: string) => {
+  const addEvent = (note: Note, date: string, time: string, label: string, priority: number, endTime?: string) => {
+    if (!validCalendarDate(date) || contexts.get(note.path)?.invalid) return;
     const company = getString(note.frontmatter.company) || getTitle(note);
-    // 種別は「勝った出所」ではなくノート全体から決める。next_event_at は書式が
-    // 純粋な `YYYY-MM-DD HH:MM` なので単体では種別を判定できず、しかも priority 4 で
-    // next_action(3) を上書きするため、規約どおり構造化した予定ほど
-    // ラベルが「面谈」へ退化していた（2026-08-04 実証：一次面接が確定している案件が
-    // 日历上「面谈」としか出ず、面接が消えたように見えた）。
-    // source から読めた時はそれを優先し、読めない時だけ next_action を種別の手掛かりにする。
-    const label =
-      detectEventLabel(source) ??
-      detectEventLabel(getString(note.frontmatter.next_action)) ??
-      calendarEventLabel(getTitle(note));
-    const time = source.match(/(?:^|\D)((?:[01]?\d|2[0-3]):[0-5]\d)(?:\D|$)/)?.[1] ?? "";
-    const identity = calendarCompanyIdentity(company) || company.toLocaleLowerCase("ja-JP");
-    const caseId = contexts.get(note.path)?.caseId ?? getString(note.frontmatter.case_id);
-    let key = `${caseId || identity}|${date}`;
-    const candidate: CalendarEvent & { priority: number } = {
-      id: `${key}|${note.path}`,
-      note,
-      kind: "event",
-      date,
-      time,
-      ...(endTime ? { endTime } : {}),
-      company,
-      label,
-      phase: date >= today ? "upcoming" : "past",
-      caseId,
-      prepPath: getType(note) === "interview-prep" ? note.path : caseId
-        ? prepByCaseDate.get(`${caseId}|${date}`) ?? prepByCaseDate.get(`${caseId}|`) ?? ""
-        : "",
-      priority,
-    };
     const context = contexts.get(note.path);
-    if (!caseId && !context?.ownerKind && !context?.invalid && ["review", "transcript"].includes(getType(note))) {
-      // 补入准备稿后，旧复盘的公司键和场次的案件键必须对齐，否则重读完整资料会出现两张卡片。
-      const prep = matchingInterviewPrep(candidate, matchingNotes);
-      const matchedCaseId = prep && contexts.get(prep.path)?.caseId;
-      if (matchedCaseId) {
-        key = `${matchedCaseId}|${date}`;
-        candidate.id = `${key}|${note.path}`;
-        candidate.caseId = matchedCaseId;
-        candidate.prepPath = prep.path;
-      }
+    const candidate: Candidate = {
+      id: "", note, kind: "event", date, time, company, label,
+      ...(endTime ? { endTime } : {}),
+      phase: date >= today ? "upcoming" : "past",
+      caseId: context?.caseId ?? "", prepPath: "", priority, identity: "",
+    };
+    // 旧稿只能由唯一匹配的场次补足关联；不同职位或独立面谈不能按公司名称混在一起。
+    const prep = getType(note) === "interview-prep" ? note : matchingInterviewPrep(candidate, matchingNotes);
+    if (prep) {
+      candidate.caseId ||= contexts.get(prep.path)?.caseId ?? "";
+      candidate.prepPath = prep.path;
+    } else if (candidate.caseId) {
+      const undated = matchingNotes.filter((item) => eligiblePrep(item) &&
+        contexts.get(item.path)?.caseId === candidate.caseId && !getString(item.frontmatter.date));
+      if (undated.length === 1) candidate.prepPath = undated[0].path;
     }
-    const current = events.get(key) as (CalendarEvent & { priority?: number }) | undefined;
-    if (!current) {
-      events.set(key, candidate);
-      return;
-    }
-    const winner = (current.priority ?? 0) < priority ? candidate : current;
-    const other = winner === candidate ? current : candidate;
-    const displayCompany = calendarCompanyDisplayScore(company) > calendarCompanyDisplayScore(current.company)
-      ? company
-      : current.company;
-    events.set(key, {
-      ...winner,
-      company: displayCompany,
-      time: winner.time || other.time,
-      ...(winner.endTime || (winner.time === other.time && other.endTime)
-        ? { endTime: winner.endTime || other.endTime }
-        : {}),
-      label: winner.label === "面谈" ? other.label : winner.label,
-    });
+    const ownerContext = prep ? contexts.get(prep.path) :
+      !context?.ownerKind && !context?.caseId ? matchingInterviewContext(candidate, matchingNotes) ?? context : context;
+    candidate.caseId ||= ownerContext?.caseId ?? "";
+    candidate.identity = candidate.caseId ? `case:${candidate.caseId}` :
+      ownerContext?.ownerKind === "meeting" && ownerContext.owner ? `meeting:${ownerContext.owner}` :
+      `company:${calendarCompanyIdentity(company) || company.toLocaleLowerCase("ja-JP")}`;
+    const round = resolveCalendarRoundBadge(candidate, matchingNotes);
+    if (round) candidate.label = round.label;
+    candidate.id = `${candidate.identity}|${date}|${time}|${note.path}`;
+    candidates.push(candidate);
   };
 
-  notes.forEach((note) => {
+  for (const note of notes) {
     const type = getType(note);
-    const frontmatterDate = getString(note.frontmatter.date);
-    // next_event_at 会随选考推进清除或改写；场次记录才是历史面谈的持续来源。
-    // 只读场次的结构化日期、时间和轮次，不能借用笔记更新时间或案件的当前行动。
-    if (type === "interview-prep") {
-      const timestamp = Date.parse(`${frontmatterDate}T00:00:00Z`);
-      if (eligiblePrep(note) && /^20\d{2}-\d{2}-\d{2}$/.test(frontmatterDate) &&
-        Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === frontmatterDate) {
-        const source = `${interviewNoteTime(note, frontmatterDate)} ${getString(note.frontmatter.round) || getTitle(note)}`;
-        addEvent(note, frontmatterDate, source, 3);
-      }
-      return;
+    const date = getString(note.frontmatter.date);
+    if (type === "interview-prep" || type === "review" || type === "transcript") {
+      if (type === "interview-prep" && !eligiblePrep(note)) continue;
+      const stage = getString(note.frontmatter.round) || getString(note.frontmatter.kind) || getTitle(note);
+      const label = detectEventLabel(stage);
+      // review 还用于邮件审阅、跟进结果，日期不一定是场次日期。必须明确记载面试／面谈。
+      if (!label && type !== "interview-prep") continue;
+      const time = interviewNoteTime(note, date);
+      const end = getString(note.frontmatter.end_time);
+      addEvent(note, date, time, label ?? "面谈", type === "review" ? 4 : 3,
+        /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(end) && time && end > time ? end : undefined);
+      continue;
     }
-    if (["review", "transcript"].includes(type) && /^20\d{2}-\d{2}-\d{2}$/.test(frontmatterDate)) {
-      const source = `${interviewNoteTime(note, frontmatterDate)} ${getString(note.frontmatter.round) || getTitle(note)}`;
-      addEvent(note, frontmatterDate, source, type === "review" ? 4 : 3);
-    }
-
-    // エージェント面談・説明会など単一案件に紐づかない予定は todo の next_event_at が正本。
-    // 旧 next_action は移行中の互換入力としてだけ残す。
-    //（2026-07-24 ワークポート面談が job-case 側に存在せず日历から漏れた実証）。
-    // todo 本文は経緯メモが多く誤検出するので frontmatter しか読まない。完了済みは予定ではない。
-    if (type === "todo" && todoStatus(note) !== "完了") {
-      const line =
-        getString(note.frontmatter.next_event_at) ||
-        getString(note.frontmatter.next_action);
-      const date = line.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
-      if (date) addEvent(note, date, line, 3, scheduledEndTime(note));
-      return;
-    }
-
-    // 確定日程は next_event_at を正本にする。自由文 next_action の日付を正本扱いすると、
-    // 「7/29 に返信済み」のような履歴日を未来の締切・面接日に誤認するため。
-    // company 本文を再走査すると、同じ面接が証拠記述と案件で二重表示される。
-    if (type !== JOB_CASE_TYPE) return;
-    // next_event_at は「確定日程しか書かない」構造化フィールドで、job-inbox-sync が
-    // 指示する書式は純粋な YYYY-MM-DD HH:MM。ここに面接などの語を要求すると、
-    // 書式どおりに書いた予定が日历から丸ごと消える。todo 側も job-progress 側も
-    // 語を要求していないので、案件側の日历だけが黙って落ちていた。
+    if (type !== JOB_CASE_TYPE && (type !== "todo" || todoStatus(note) === "完了")) continue;
+    // 只投影结构化的确约。正文、next_action、通知及返信时间都不能推测为新场次。
     const scheduled = getString(note.frontmatter.next_event_at);
-    const scheduledDate = scheduled.match(/\b(20\d{2}-\d{2}-\d{2})\b/u)?.[1];
-    if (scheduledDate) addEvent(note, scheduledDate, scheduled, 4, scheduledEndTime(note));
+    const match = scheduled.match(/^(20\d{2}-\d{2}-\d{2})(?:[ T]((?:[01]?\d|2[0-3]):[0-5]\d))?(?:\s+([^\d].*))?$/u);
+    if (!match) continue;
+    const time = match[2]?.padStart(5, "0") ?? "";
+    // 当前行动可能谈的是下一轮或复盘，只由本场资料补轮次，不借它给历史场次贴标签。
+    const label = detectEventLabel(getString(note.frontmatter.next_event_label)) ?? detectEventLabel(match[3] ?? "") ??
+      (type === "todo" ? detectEventLabel(getTitle(note)) : null) ?? "面谈";
+    addEvent(note, match[1], time, label, type === JOB_CASE_TYPE ? 4 : 3, scheduledEndTime(note));
+  }
 
-    const sources = [
-      { line: getString(note.frontmatter.next_action), priority: 3, trusted: true },
-      ...stripFrontmatter(note.content)
-        .split("\n")
-        .map((line) => ({ line, priority: 2, trusted: false })),
-    ];
-    sources.forEach(({ line, priority, trusted }) => {
-      const plainLine = line.replace(/\[\[[^\]]*\]\]/g, "");
-      // 准备和同步记录的日期不是实际约定；next_action 也不能把它们升级成面试。
-      if (/(?:準備|准备|同期|同步)/.test(plainLine)) return;
-      // 🔴 本文からの推測は「予定」より「叙述」を拾いやすい。実測した誤検出3型：
-      //   ①`[[ワークポート面談対応]] の 2026-08-08 追記に集約した`＝**ノート名**の中の「面談」
-      //   ②`| 2026-07-24 | ワークポート面談実施 → …`＝表の**履歴行**
-      //   ③`…2026-07-24…＝面談の前に謝絶`＝「面談に至らなかった」という叙述
-      // いずれも予定ではないのに、会社名つきで日历へ出る（＝約束していない面談が現れる）。
-      // 予定は next_event_at が正本なので、ここは**取りこぼしの兜底**に徹して厳しく絞る。
-      if (!trusted) {
-        // 表の行は履歴・照合表であって予定ではない（引用ブロック `> |` の中にもある）。
-        if (/^\s*>?\s*\|/.test(line)) return;
-        // 語の判定から [[wikilink]] の中身を除く。ノート名は予定の根拠にならない。
-        if (!/(?:面接|面談|面试|面谈|カジュアル|セミナー|说明会)/.test(plainLine)) {
-          return;
-        }
-      }
-      if (!/(?:面接|面談|面试|面谈|カジュアル|セミナー|说明会)/.test(line)) return;
-      // 「拒」は中文表記の拒否（书类拒 等）。拒否の叙述行に他社の日付が混ざり、
-      // 別会社の予定として出ていた実例がある（NTXコンサル に NTXソフトウェア の日付）。
-      if (!trusted && /(?:通知|リマインド|案内|お礼|準備|証拠|応募|スカウト|不採用|結果|拒)/.test(plainLine)) return;
-      const date = line.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
-      if (date) addEvent(note, date, line, priority);
-    });
-  });
-
-  return Array.from(events.values()).sort((left, right) => {
-    const byDate = left.date.localeCompare(right.date);
-    if (byDate) return byDate;
-    return left.time.localeCompare(right.time);
-  });
+  const roundOf = (event: CalendarEvent) => interviewRound(event.label);
+  const compatible = (left: Candidate, right: Candidate) => left.identity === right.identity && left.date === right.date &&
+    !(left.time && right.time && left.time !== right.time) &&
+    !((left.label === "招聘说明会") !== (right.label === "招聘说明会")) &&
+    !(roundOf(left) && roundOf(right) && roundOf(left) !== roundOf(right));
+  // 先处理有明确时间／轮次的来源。缺字段的旧稿仅在候选唯一时补入，避免顺序改变结果。
+  candidates.sort((left, right) =>
+    (Number(Boolean(right.time)) * 2 + Number(Boolean(roundOf(right)))) -
+      (Number(Boolean(left.time)) * 2 + Number(Boolean(roundOf(left)))) ||
+    right.priority - left.priority || left.note.path.localeCompare(right.note.path));
+  const events: Candidate[] = [];
+  for (const candidate of candidates) {
+    const matches = events.filter((event) => compatible(event, candidate));
+    if (matches.length !== 1) {
+      events.push(candidate);
+      continue;
+    }
+    const current = matches[0];
+    const winner = current.priority < candidate.priority ? candidate : current;
+    const other = winner === candidate ? current : candidate;
+    events[events.indexOf(current)] = {
+      ...winner,
+      company: calendarCompanyDisplayScore(current.company) >= calendarCompanyDisplayScore(candidate.company)
+        ? current.company : candidate.company,
+      time: winner.time || other.time,
+      ...(winner.endTime || ((!winner.time || winner.time === other.time) && other.endTime)
+        ? { endTime: winner.endTime || other.endTime } : {}),
+      label: roundOf(winner) ? winner.label : roundOf(other) ? other.label : winner.label,
+      prepPath: winner.prepPath || other.prepPath,
+    };
+  }
+  return events.sort((left, right) => left.date.localeCompare(right.date) ||
+    left.time.localeCompare(right.time) || left.id.localeCompare(right.id));
 }
 
 /** 待ち相手の文言は lib/jobs.ts の WAITING_FOR_LABEL から組む（首页・画像ヘッダーと同じ語）。 */

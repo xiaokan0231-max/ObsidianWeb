@@ -1,5 +1,6 @@
 import type { Commitment } from "./memory-atlas-data.ts";
 import { companyIdentity, getString, getType, type Note } from "./notes.ts";
+import { calendarRoundBadge, interviewRound, type CalendarRoundBadge } from "./interview-round.ts";
 
 export type CalendarInterviewTarget = {
   view: "session" | "review";
@@ -93,6 +94,36 @@ export function interviewContext(note: Note, notes: Note[], source = false): Int
   return context;
 }
 
+/** 进展只从明确关联的正本读取；同公司的另一岗位不能替这场面谈给出结果。 */
+export function resolveInterviewOwner(note: Note, notes: Note[], eventCaseId = ""): Note | null {
+  const context = interviewContext(note, notes, true);
+  if (context.invalid || (context.caseId && eventCaseId && context.caseId !== eventCaseId)) return null;
+  const caseId = context.caseId || eventCaseId;
+  if (context.ownerKind === "case" && context.owner) {
+    const resolved = resolveReference(context.owner, notes);
+    if (resolved.ambiguous) return null;
+    const owner = resolved.note ?? (getType(note) === "job-case" &&
+      referencePath(note.path) === context.owner ? note : null);
+    if (!owner || getType(owner) !== "job-case") return null;
+    const ownerId = getString(owner.frontmatter.case_id);
+    return caseId && ownerId && caseId !== ownerId ? null : owner;
+  }
+  if (caseId) {
+    const owners = notes.filter((candidate) => getType(candidate) === "job-case" &&
+      getString(candidate.frontmatter.case_id) === caseId);
+    // 明确挂着案件、但正本缺失时，不降级读取 TODO 上的独立面谈状态。
+    return owners.length === 1 ? owners[0] : null;
+  }
+  if (context.ownerKind === "meeting" && context.owner) {
+    const resolved = resolveReference(context.owner, notes);
+    if (resolved.ambiguous) return null;
+    const owner = resolved.note ?? (getType(note) === "todo" &&
+      referencePath(note.path) === context.owner ? note : null);
+    return owner && getType(owner) === "todo" ? owner : null;
+  }
+  return null;
+}
+
 function contextScore(candidate: InterviewContext, expected: InterviewContext): number | null {
   if (candidate.invalid || expected.invalid) return null;
   if (candidate.caseId && expected.caseId && candidate.caseId !== expected.caseId) return null;
@@ -104,18 +135,6 @@ function contextScore(candidate: InterviewContext, expected: InterviewContext): 
     candidate.owner !== expected.owner) return null;
   return (candidate.caseId && candidate.caseId === expected.caseId ? 8 : 0) +
     (candidate.owner && candidate.owner === expected.owner ? 8 : 0);
-}
-
-function interviewRound(value: string) {
-  const normalized = value.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, "");
-  if (/最終|最终|終面|终面|final|役員/.test(normalized)) return "final";
-  if (/エージェント|猎头|獵頭|recruiter/.test(normalized)) return "agent";
-  if (/カジュアル|轻松|輕鬆|casual/.test(normalized)) return "casual";
-  const number = normalized.match(/(?:第)?([一二三四五六1-6])(?:次|回|輪|轮)?(?:面接|面试|面試|面談|面谈|面)/)?.[1];
-  if (number) return `round-${({ 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 } as Record<string, number>)[number] ?? number}`;
-  const ordinal = normalized.match(/first|second|third|fourth|fifth|sixth/)?.[0];
-  if (ordinal) return `round-${["first", "second", "third", "fourth", "fifth", "sixth"].indexOf(ordinal) + 1}`;
-  return "";
 }
 
 function normalizedTime(value: string) {
@@ -149,9 +168,10 @@ function matchingNotes(event: Commitment, notes: Note[]): MatchingNote[] {
     if (!["interview-prep", "transcript-study", "transcript"].includes(getType(note)) ||
       getString(note.frontmatter.date) !== event.date) continue;
     const company = getString(note.frontmatter.company);
-    if (expectedCompany ? companyIdentity(company) !== expectedCompany : company !== event.company) continue;
     const context = contextScore(interviewContext(note, notes), expectedContext);
     if (context === null) continue;
+    // 明确的同一案件关联优先于公司别名；无关联时仍须严格匹配公司。
+    if (!context && (expectedCompany ? companyIdentity(company) !== expectedCompany : company !== event.company)) continue;
     const round = interviewRound(getString(note.frontmatter.round));
     if (round && expectedRound && round !== expectedRound) continue;
     const time = interviewNoteTime(note, event.date);
@@ -178,6 +198,16 @@ export function matchingInterviewPrep(event: Commitment, notes: Note[]): Note | 
   return selectMatchingNote(matchingNotes(event, notes), "interview-prep");
 }
 
+/** 多份准备稿可能属于同一场；稿件版本有歧义，不等于所属案件也有歧义。 */
+export function matchingInterviewContext(event: Commitment, notes: Note[]): InterviewContext | null {
+  const contexts = matchingNotes(event, notes)
+    .filter(({ note }) => getType(note) === "interview-prep")
+    .map(({ note }) => interviewContext(note, notes));
+  if (!contexts.length || contexts.some((context) => context.invalid || !context.ownerKind)) return null;
+  const identities = new Set(contexts.map((context) => `${context.caseId}|${context.ownerKind}|${context.owner}`));
+  return identities.size === 1 ? contexts[0] : null;
+}
+
 function conflictingInterviews(candidates: MatchingNote[], notes: Note[], date: string) {
   const rounds = new Set<string>();
   const times = new Set<string>();
@@ -197,6 +227,15 @@ function conflictingInterviews(candidates: MatchingNote[], notes: Note[], date: 
   return [rounds, times, cases, ownerKinds, owners].some((values) => values.size > 1);
 }
 
+function compatibleInterviewNotes(event: Commitment, notes: Note[]): MatchingNote[] {
+  const matches = matchingNotes(event, notes);
+  const strongest = matches.filter((candidate) => candidate.score === matches[0]?.score);
+  // 必须跨资料种类一起消歧：两轮准备稿 + 一轮逐字稿，不能因逐字稿只有一份就认定本场已结束。
+  return conflictingInterviews(strongest, notes, event.date) ? [] : matches.filter((candidate) =>
+    !conflictingInterviews([...strongest, candidate], notes, event.date),
+  );
+}
+
 /**
  * 日历上的这一项是不是一场面试・面谈（有问答、值得准备与复盘）。说明会・研讨会也会进日历，但不是。
  * 日历进准备稿／复盘页的入口、首页「待整理稿」提醒共用这一条。
@@ -206,14 +245,36 @@ export function isInterviewEvent(event: Pick<Commitment, "kind" | "label">) {
   return /面试|面試|面接|面谈|面談|interview|meeting/i.test(event.label);
 }
 
+/** 泛称标签可能盖过当轮资料的明确阶段；只补这一场，不从公司历史或当前行动推算。 */
+export function resolveCalendarRoundBadge(event: Commitment, notes: Note[]): CalendarRoundBadge | null {
+  if (!isInterviewEvent(event) || interviewRound(event.label) === "agent") return null;
+  const labeled = calendarRoundBadge(event.label);
+  if (labeled) return labeled;
+  const context = interviewContext(event.note, notes, true);
+  if (context.invalid || (context.caseId && event.caseId && context.caseId !== event.caseId)) return null;
+  context.caseId ||= event.caseId;
+  const eventTime = normalizedTime(event.time);
+  if (["interview-prep", "review", "transcript", "transcript-study"].includes(getType(event.note)) &&
+    getString(event.note.frontmatter.date) === event.date) {
+    const sourceTime = interviewNoteTime(event.note, event.date);
+    if (sourceTime && eventTime && sourceTime !== eventTime) return null;
+    const sourceRound = getString(event.note.frontmatter.round);
+    if (interviewRound(sourceRound)) return calendarRoundBadge(sourceRound);
+  }
+  const candidates = compatibleInterviewNotes(event, notes).filter(({ note }) => {
+    // 公司与日期相同不足以证明是同一场；旧稿无关联或缺少已知时刻时不借数字。
+    if ((contextScore(interviewContext(note, notes), context) ?? 0) <= 0) return false;
+    return !eventTime || interviewNoteTime(note, event.date) === eventTime;
+  });
+  // 多份同轮资料仍可说明阶段，但同分资料的时间、案件或轮次冲突必须保留未知。
+  if (conflictingInterviews(candidates, notes, event.date)) return null;
+  const rounds = candidates.map(({ note }) => getString(note.frontmatter.round)).filter((round) => interviewRound(round));
+  return rounds.length ? calendarRoundBadge(rounds[0]) : null;
+}
+
 export function resolveCalendarInterview(event: Commitment, notes: Note[]): CalendarInterviewTarget | null {
   if (!isInterviewEvent(event)) return null;
-  const matches = matchingNotes(event, notes);
-  const strongest = matches.filter((candidate) => candidate.score === matches[0]?.score);
-  // 必须跨资料种类一起消歧：两轮准备稿 + 一轮逐字稿，不能因逐字稿只有一份就认定本场已结束。
-  const compatible = conflictingInterviews(strongest, notes, event.date) ? [] : matches.filter((candidate) =>
-    !conflictingInterviews([...strongest, candidate], notes, event.date),
-  );
+  const compatible = compatibleInterviewNotes(event, notes);
   const prep = selectMatchingNote(compatible, "interview-prep");
   const review = selectMatchingNote(compatible, "transcript-study");
   const transcript = selectMatchingNote(compatible, "transcript");

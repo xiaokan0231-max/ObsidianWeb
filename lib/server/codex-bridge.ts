@@ -31,31 +31,31 @@ function bridgeHeaders() {
  * 自動保存・退出時の保存はブロックされない（app/api/language/v2/batch/complete）。
  */
 async function bridgeFetch(path: string, init: RequestInit) {
+  const headers = { ...bridgeHeaders(), ...(init.headers ?? {}) };
+  let response: Response;
   try {
-    const response = await fetch(`${BRIDGE_URL}${path}`, {
+    response = await fetch(`${BRIDGE_URL}${path}`, {
       ...init,
-      headers: { ...bridgeHeaders(), ...(init.headers ?? {}) },
+      headers,
       cache: "no-store",
     });
-    const result = (await response.json()) as {
-      error?: string;
-      output?: unknown;
-      model?: string;
-    };
-    if (!response.ok) {
-      throw new Error(result.error || `Codex Bridge 返回 ${response.status}`);
-    }
-    return result;
   } catch (error) {
-    if (error instanceof Error && /Bridge|Codex|登录|API key/.test(error.message)) {
-      throw error;
-    }
     throw new Error(
       `无法连接本地 Codex Bridge。请使用 npm run dev:obsidian 启动。${
         error instanceof Error ? ` ${error.message}` : ""
       }`,
     );
   }
+  // 收到服务器响应后，任务错误应原样展示，不能被改写成连接失败。
+  const result = (await response.json()) as {
+    error?: string;
+    output?: unknown;
+    model?: string;
+  };
+  if (!response.ok) {
+    throw new Error(result.error || `Codex Bridge 返回 ${response.status}`);
+  }
+  return result;
 }
 
 export async function getCodexRuntime(): Promise<CodexRuntimeStatus> {

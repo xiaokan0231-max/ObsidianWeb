@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildFocusBrief } from "../lib/focus-action.ts";
+import { buildWaitingItems } from "../lib/focus-action.ts";
 import { EMPTY_JOB_FILTERS, jobMatchesFilters, jobWaitsOnCounterpart, toJobCard } from "../lib/jobs.ts";
 
 // 首页「等待回复 · 全部 N 项」点进看板后，「只看等对方」的条数必须就是 N。
@@ -29,7 +29,7 @@ const notes = [
 ];
 
 test("「只看等对方」的结果与首页等待列表是同一批案件", () => {
-  const waiting = buildFocusBrief(notes, TODAY).waiting.map((item) => item.note.path).sort();
+  const waiting = buildWaitingItems(notes, TODAY).map((item) => item.note.path).sort();
   const filtered = notes.map(toJobCard)
     .filter((card) => jobMatchesFilters(card, { ...EMPTY_JOB_FILTERS, waitingOnly: true }, { today: TODAY }))
     .map((card) => card.path)

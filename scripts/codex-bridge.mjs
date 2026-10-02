@@ -6,6 +6,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveCodexExecutable } from "./codex-executable.mjs";
 
 import {
   ADVISORY_OUTPUT_SCHEMA,
@@ -25,9 +26,6 @@ import {
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.CODEX_BRIDGE_PORT || 43127);
 const TOKEN = process.env.CODEX_BRIDGE_TOKEN;
-const CODEX_PATH =
-  process.env.CODEX_BRIDGE_CODEX_PATH ||
-  "codex";
 const SOL_MODEL = process.env.CODEX_BRIDGE_SOL_MODEL || "gpt-5.6-sol";
 const TERRA_MODEL = process.env.CODEX_BRIDGE_TERRA_MODEL || "gpt-5.6-terra";
 const MAX_BODY = 8 * 1024 * 1024;
@@ -493,12 +491,24 @@ let lastError;
 let active = false;
 let queueDepth = 0;
 let queue = Promise.resolve();
+let runtimeCheck;
 
-async function checkRuntime() {
+function checkRuntime() {
+  // 页面状态轮询和任务启动会重叠；共用一次检查，避免后返回的失败留下旧认证。
+  runtimeCheck ??= inspectRuntime().finally(() => {
+    runtimeCheck = undefined;
+  });
+  return runtimeCheck;
+}
+
+async function inspectRuntime() {
+  version = undefined;
+  authentication = "unknown";
   try {
+    const codexPath = resolveCodexExecutable();
     const [versionResult, loginResult] = await Promise.all([
-      runProcess(CODEX_PATH, ["--version"], { timeoutMs: 10_000 }),
-      runProcess(CODEX_PATH, ["login", "status"], { timeoutMs: 15_000 }),
+      runProcess(codexPath, ["--version"], { timeoutMs: 10_000 }),
+      runProcess(codexPath, ["login", "status"], { timeoutMs: 15_000 }),
     ]);
     version = versionResult.stdout.trim() || versionResult.stderr.trim();
     const login = `${loginResult.stdout}\n${loginResult.stderr}`;
@@ -513,7 +523,7 @@ async function checkRuntime() {
       );
     }
     lastError = undefined;
-    return true;
+    return codexPath;
   } catch (error) {
     lastError = error instanceof Error ? error.message : String(error);
     return false;
@@ -541,13 +551,14 @@ async function runLocalTask(task, config) {
 async function executeTask(task, payload) {
   const config = taskConfig[task];
   if (config.model === null) return runLocalTask(task, config);
-  if (!(await checkRuntime())) throw new Error(lastError);
+  const codexPath = await checkRuntime();
+  if (!codexPath) throw new Error(lastError);
   const directory = await mkdtemp(join(tmpdir(), "obsidian-dojo-"));
   try {
     const schemaPath = join(directory, "output.schema.json");
     await writeFile(schemaPath, JSON.stringify(schemas[task]), "utf8");
     const result = await runProcess(
-      CODEX_PATH,
+      codexPath,
       [
         "--ask-for-approval",
         "never",

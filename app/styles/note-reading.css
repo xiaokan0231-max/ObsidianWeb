@@ -987,7 +987,6 @@
   .sidebar { padding-inline: 16px; }
   .view-container { padding-inline: 24px; }
   .topbar { padding-inline: 24px; }
-  .hero-layout { grid-template-columns: minmax(0, 1.45fr) minmax(260px, .8fr); }
   .note-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .graph-preview-panel { grid-template-columns: 1fr; }
   .mini-graph { position: absolute; inset: 0 0 0 42%; opacity: 0.8; }
@@ -1030,12 +1029,6 @@
   .topbar-next small { display: none; }
   .topbar-next strong { max-width: 96px; }
   .view-container { padding: 22px 16px 92px; }
-  .memory-hero { padding: 26px 26px 0; }
-  .hero-layout { grid-template-columns: 1fr; padding-top: 22px; }
-  .hero-primary, .hero-watch { min-height: 0; }
-  .hero-watch { margin-bottom: 7px; }
-  .hero-stats { margin-inline: -26px; }
-  .overview-grid { grid-template-columns: 1fr; }
   .graph-preview-panel { min-height: 360px; }
   .graph-preview-copy { width: 52%; }
   .graph-layout { grid-template-columns: minmax(0, 1fr); }
@@ -1143,17 +1136,6 @@
   /* 窄到这里，同步文案要让位给「下一件」——状态只留那颗点，详情在 title 里。 */
   .topbar-source-copy { display: none; }
   .topbar-next strong { max-width: 130px; }
-  .memory-hero { min-height: 0; }
-  .hero-primary { padding: 23px 20px 21px; }
-  .hero-primary h1 { font-size: 28px; }
-  .hero-primary-topline { align-items: flex-start; flex-direction: column; gap: 5px; }
-  .hero-primary-topline > small { max-width: 100%; }
-  .hero-primary-actions { align-items: stretch; flex-direction: column; }
-  .hero-primary-actions button { justify-content: space-between; width: 100%; }
-  .hero-watch { padding-inline: 20px; }
-  .hero-stats { grid-template-columns: repeat(2, 1fr); }
-  .stat { min-height: 68px; border-bottom: 1px solid rgba(255,255,255,.13); }
-  .overview-grid { gap: 12px; }
   .panel { padding: 22px 19px; }
   .learning-visual { grid-template-columns: 112px minmax(0, 1fr); gap: 18px; }
   .learning-ring { width: 108px; height: 108px; }

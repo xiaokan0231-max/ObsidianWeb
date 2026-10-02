@@ -9,7 +9,7 @@ test("route scopes keep only the notes each module needs", () => {
   assert.equal(noteInVaultScope(note("todo"), "jobs"), false);
   assert.equal(noteInVaultScope(note("job-case"), "training"), false);
   assert.equal(noteInVaultScope(note("job-case"), "overview"), true);
-  assert.equal(noteInVaultScope(note("transcript"), "overview"), false);
+  assert.equal(noteInVaultScope(note("transcript"), "overview"), true);
   // 首页の复盘提醒は整理稿を起点に数える。落とすと冷启动で「待裁定 0」が出続ける。
   assert.equal(noteInVaultScope(note("transcript-study"), "overview"), true);
   assert.equal(noteInVaultScope(note("study-annotation"), "overview"), true);

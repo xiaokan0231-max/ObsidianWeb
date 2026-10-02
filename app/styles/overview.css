@@ -2,10 +2,6 @@
 
 /* ===== 总览 · 求职优先的面板 ===== */
 
-.overview-grid > .panel.wide {
-  grid-column: 1 / -1;
-}
-
 .review-preview-panel {
   background:
     linear-gradient(145deg, rgba(116, 102, 169, 0.055), transparent 48%),
@@ -302,14 +298,12 @@
   font-size: 11px;
 }
 
-.jobs-preview-list,
-.todo-preview-list {
+.jobs-preview-list {
   display: flex;
   flex-direction: column;
 }
 
-.jobs-preview-list > button,
-.todo-preview-list > button {
+.jobs-preview-list > button {
   display: grid;
   align-items: center;
   gap: 12px;
@@ -325,12 +319,7 @@
   grid-template-columns: 34px minmax(0, 1fr) auto;
 }
 
-.todo-preview-list > button {
-  grid-template-columns: 40px minmax(0, 1fr) auto;
-}
-
-.jobs-preview-list > button:first-of-type,
-.todo-preview-list > button:first-of-type {
+.jobs-preview-list > button:first-of-type {
   border-top: 0;
 }
 
@@ -359,16 +348,14 @@
   color: var(--green);
 }
 
-.jobs-preview-body,
-.todo-preview-body {
+.jobs-preview-body {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 2px;
 }
 
-.jobs-preview-body strong,
-.todo-preview-body strong {
+.jobs-preview-body strong {
   overflow: hidden;
   font-size: 14px;
   font-weight: 600;
@@ -376,8 +363,7 @@
   white-space: nowrap;
 }
 
-.jobs-preview-body small,
-.todo-preview-body small {
+.jobs-preview-body small {
   overflow: hidden;
   color: var(--muted);
   font-size: 11.5px;
@@ -392,8 +378,7 @@
   white-space: nowrap;
 }
 
-.jobs-preview-list > button:hover strong,
-.todo-preview-list > button:hover strong {
+.jobs-preview-list > button:hover strong {
   color: var(--orange);
 }
 

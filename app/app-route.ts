@@ -11,14 +11,13 @@ export type AppView =
   | "topics"
   | "jobs"
   | "analytics"
-  | "todo"
   | "graph"
   | "calendar"
   | "timeline"
   | "library";
 
 const VIEW_PATHS: Record<AppView, string> = {
-  overview: "/",
+  overview: "/overview",
   analytics: "/progress",
   jobs: "/jobs",
   calendar: "/calendar",
@@ -32,7 +31,6 @@ const VIEW_PATHS: Record<AppView, string> = {
   library: "/library",
   timeline: "/timeline",
   graph: "/graph",
-  todo: "/actions",
 };
 
 /** 全部视图。导航表与 ⌘K 的覆盖测试以它为准，新增一页时漏配会被测试拦住。 */
@@ -54,6 +52,22 @@ export function appViewFromPathname(pathname: string): AppView | null {
 export function appViewHref(view: AppView, search?: URLSearchParams | string) {
   const query = typeof search === "string" ? search.replace(/^\?/, "") : search?.toString();
   return `${VIEW_PATHS[view]}${query ? `?${query}` : ""}`;
+}
+
+export type AppRouteSearchParams = Record<string, string | string[] | undefined>;
+
+/** 旧入口仍能打开原笔记，但行动清单的筛选条件不应带进日历。 */
+export function calendarRedirectHref(search: AppRouteSearchParams | URLSearchParams = {}) {
+  const params = new URLSearchParams(search instanceof URLSearchParams ? search : undefined);
+  if (!(search instanceof URLSearchParams)) {
+    for (const [key, value] of Object.entries(search)) {
+      if (value === undefined) continue;
+      for (const item of Array.isArray(value) ? value : [value]) params.append(key, item);
+    }
+  }
+  params.delete("tab");
+  params.delete("who");
+  return appViewHref("calendar", params);
 }
 
 /** 证据链接以完整整理稿路径定位；同日同轮、同号句子不能串到其他公司。 */

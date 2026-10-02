@@ -158,54 +158,25 @@
   align-items: start;
 }
 
-.jobs-view .job-card,
-.todo-view .todo-card {
+.jobs-view .job-card {
   min-width: 0;
   padding: 16px 20px;
   gap: 12px;
 }
 
-.jobs-view .job-card-titles h2,
-.todo-view .todo-titles h2 {
+.jobs-view .job-card-titles h2 {
   font-size: 16px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
-.jobs-view .job-block p,
-.todo-view .job-block p {
+.jobs-view .job-block p {
   font-size: 14px;
 }
 
-.jobs-view .job-card-foot,
-.todo-view .job-card-foot {
+.jobs-view .job-card-foot {
   margin-top: 0;
   padding-top: 0;
-}
-
-.todo-view {
-  gap: 16px;
-}
-
-.todo-view .todo-head {
-  flex-wrap: wrap;
-  gap: 8px 12px;
-}
-
-.todo-view .todo-titles {
-  min-width: 0;
-  flex: 1 1 240px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-}
-
-.todo-view .todo-stale-badge {
-  margin-left: 0;
-}
-
-.todo-view .todo-maintenance-entry > div {
-  flex-wrap: wrap;
 }
 
 .practice-queue small,
@@ -226,16 +197,7 @@
 .jobs-view .job-status-pill,
 .jobs-view .job-kanban-card small,
 .jobs-view .job-kanban-head span,
-.jobs-view .job-block-label,
-.todo-view .job-block-label,
-.todo-view .todo-pri,
-.todo-view .todo-status,
-.todo-view .todo-cat,
-.todo-view .todo-stale-badge,
-.todo-view .jobs-controls button small,
-.todo-view .todo-maintenance-entry,
-.todo-view .todo-maintenance-entry button,
-.todo-view .todo-maintenance-entry small {
+.jobs-view .job-block-label {
   font-size: 12px;
 }
 
@@ -249,21 +211,12 @@
 
   .practice-card,
   .jobs-decision-detail,
-  .jobs-view .job-card,
-  .todo-view .todo-card {
+  .jobs-view .job-card {
     padding: 16px;
   }
 
   .practice-answer {
     padding: 16px;
-  }
-
-  .todo-view .todo-head {
-    flex-direction: row;
-  }
-
-  .todo-view .todo-titles {
-    flex-basis: 100%;
   }
 }
 

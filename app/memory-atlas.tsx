@@ -31,7 +31,6 @@ import SceneNoteReader from "./scene-note-reader";
 import Overview from "./overview-view";
 import SearchPalette from "./search-palette";
 import TimelineView from "./timeline-view";
-import TodoView, { OPEN_TAB } from "./todo-view";
 import {
   appViewFromPathname,
   appViewHref,
@@ -51,7 +50,7 @@ import {
 import { useUndoFlash, UndoFlashBar } from "./undo-flash";
 import { notifyUrlChange, SHELL_URL_KEYS } from "./use-url-state";
 import { describeConnectionError } from "@/lib/connection-error";
-import { ConflictError, postJson } from "@/lib/client-api";
+import { postJson } from "@/lib/client-api";
 import { mergeScopedNotes } from "@/lib/vault-merge";
 import ViewErrorBoundary from "./view-error-boundary";
 import {
@@ -70,7 +69,6 @@ import {
   GROUPS,
   localDateKey,
   mergePendingWrites,
-  todoStatus,
   type PendingWrite,
   type Commitment,
   type GroupKey,
@@ -78,7 +76,6 @@ import {
 import { scopesToReloadAfterStats, vaultScopeForView, type VaultScope } from "@/lib/vault-scope";
 import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { resolveNoteLink } from "@/lib/wiki-target";
-import { changedToLabel } from "@/lib/ui-labels";
 
 
 export type { Note };
@@ -99,7 +96,7 @@ function NavigationIcon({ name }: { name: NavIconName }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" focusable="false">
       {name === "home" && <><path d="M3.5 11.3 12 4l8.5 7.3" /><path d="M5.7 10.4V20h12.6v-9.6M9.4 20v-5.8h5.2V20" /></>}
-      {name === "actions" && <><path d="m4 7 2 2 3.5-4" /><path d="M12 7h8M4 14l2 2 3.5-4M12 14h8M4 21l2 2 3.5-4M12 21h8" /></>}
+      {name === "actions" && <><rect x="4" y="5.5" width="16" height="15" rx="2" /><path d="M8 3.5v4M16 3.5v4M4 10.5h16M8 14h2M14 14h2M8 17h2" /></>}
       {name === "career" && <><path d="M4 8.5h16v10.8H4z" /><path d="M8.5 8.5V5.7h7v2.8M4 12.5c4.8 2 11.2 2 16 0M10.5 13.3h3" /></>}
       {name === "interview" && <><path d="M4 5.5h16v11H9l-5 3.2z" /><path d="M8 9.5h8M8 12.5h5" /></>}
       {name === "training" && <><path d="m3.5 7 8.5-3 8.5 3-8.5 3z" /><path d="M6.2 8.2v5.6c3.6 2.8 8 2.8 11.6 0V8.2M20.5 7v7" /></>}
@@ -348,15 +345,6 @@ function interviewNavigationKey(view: AppView, search: string) {
 
 
 type DerivedState = "fresh" | "stale" | "rebuilding";
-type TodoStatusResponse = {
-  ok?: boolean;
-  error?: string;
-  note?: Note;
-  /** 已经是这个值，没有写入。 */
-  unchanged?: boolean;
-  /** 写入前的状态，撤销时写回它。 */
-  previousStatus?: string;
-};
 /** これらを書き換えると台帳・数据字典・面接傾向の generated 区块が古くなる（vault:stats の入力）。 */
 const DERIVED_SOURCE_TYPES = new Set(["job-case", "job-queue", "interview-answer-review", "transcript-study", "study-annotation"]);
 
@@ -372,7 +360,7 @@ function newHistoryEntryId() {
   return `${Date.now().toString(36)}-${historyEntrySequence}`;
 }
 
-function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
+function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [view, setView] = useState<View>(initialView);
   const [interviewRouteSearch, setInterviewRouteSearch] = useState(() =>
@@ -643,51 +631,6 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
     });
     if (DERIVED_SOURCE_TYPES.has(getType(note))) markDerivedStale();
   }, [markDerivedStale]);
-
-  const updateTodoStatus = useCallback(async (note: Note, status: string, expectedMtime?: number) => {
-    // 路由若回了写前的值就用它；旧路由没有时退回调用方手里那条笔记的值。
-    const statusBefore = todoStatus(note);
-    try {
-      const payload = await postJson<TodoStatusResponse>("/api/todos/status", {
-        path: note.path,
-        status,
-        ...(expectedMtime !== undefined ? { expectedMtime } : {}),
-      });
-      if (!payload.note) throw new Error(payload.error || "更新行动状态失败");
-      patchNote(payload.note);
-      setWriteError("");
-      const previous = payload.previousStatus || statusBefore;
-      // 本来就是这个值时什么也没写，给「撤销」反而会把别处的改动改回去。
-      if (!payload.unchanged && previous !== status) {
-        const written = payload.note;
-        showFlash(changedToLabel(status), async () => {
-          try {
-            // 带上刚写入的 mtime：撤销前若别处又改过，宁可失败也不覆盖那次改动。
-            const reverted = await postJson<TodoStatusResponse>("/api/todos/status", {
-              path: written.path,
-              status: previous,
-              expectedMtime: written.stat.mtime,
-            });
-            if (!reverted.note) return reverted.error || "撤销失败";
-            patchNote(reverted.note);
-            return null;
-          } catch (cause) {
-            if (cause instanceof ConflictError) {
-              void loadVault();
-              return "已在别处更新，无法撤销";
-            }
-            return cause instanceof Error ? cause.message : "撤销失败";
-          }
-        });
-      }
-      return null;
-    } catch (cause) {
-      if (cause instanceof ConflictError) await loadVault();
-      const message = cause instanceof Error ? cause.message : "更新行动状态失败";
-      setWriteError(message);
-      return message;
-    }
-  }, [loadVault, patchNote, showFlash]);
 
   const openPrepCard = useCallback((cardId: string) => {
     // setState→overlay の effect を待つと、focus と overflow の変更後の座標を
@@ -1183,7 +1126,6 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
   }, [interviewTargets, navigateToView, nextEvent]);
 
   const openAnswerLibrary = useCallback(() => navigateToView("prep"), [navigateToView]);
-  const openOpenTodos = useCallback(() => navigateToView("todo", new URLSearchParams({ tab: OPEN_TAB })), [navigateToView]);
 
   const syncInterviewSelection = useCallback((company: string, prepPath: string) => {
     const params = new URLSearchParams();
@@ -1279,9 +1221,9 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
       <aside className="sidebar" aria-label="主导航">
         <a
           className="brand"
-          href={appViewHref("overview")}
-          onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView("overview"); } }}
-          aria-label="返回总览"
+          href={appViewHref("calendar")}
+          onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView("calendar"); } }}
+          aria-label="返回日历"
         >
           <span className="brand-mark">回</span>
           <span className="brand-copy">
@@ -1454,11 +1396,8 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   onViewJobs={viewJobsWithFilters}
                   onOpenCase={openCase}
                   onOpenSchedule={openCalendarInterview}
-                  onViewOpenTodos={openOpenTodos}
                   onFollowUp={followUpCase}
-                  onQuery={runSavedQuery}
                   onOpenReview={openReview}
-                  onTodoStatus={updateTodoStatus}
                 />
               )}
               {calendarInterview && (!interviewScopeReady || calendarInterview.view !== view || (!calendarInterview.path && !calendarCompanyContext)) && (
@@ -1557,14 +1496,6 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
                   onRebuildStats={rebuildStats}
                 />
               )}
-              {view === "todo" && (
-                <TodoView
-                  notes={notes}
-                  today={today}
-                  onOpen={openNote}
-                  onStatus={updateTodoStatus}
-                />
-              )}
               {view === "graph" && (
                 <GraphView
                   notes={notes}
@@ -1576,6 +1507,7 @@ function MemoryAtlas({ initialView = "overview" }: { initialView?: AppView }) {
               {view === "calendar" && (
                 <CalendarView
                   events={derived.calendarEvents}
+                  notes={notes}
                   today={today}
                   onOpen={openNote}
                   interviewTargets={interviewTargets}

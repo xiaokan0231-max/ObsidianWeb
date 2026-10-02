@@ -1243,7 +1243,9 @@
 
 /* 回顾页以日期和可读内容为主轴；密度条只承担快速定位，不承载正文。 */
 .timeline-view:not(.stage-immersive) { position: relative; }
-.timeline-view:not(.stage-immersive) .stage-toolbar { margin: -66px 0 30px; min-height: 40px; }
+/* 切换器别用负边距去借二级导航带的空位：导航带 sticky 且 z-index 更高，
+   会把「探索模式 · 3D」整颗盖住，列表模式下 3D 入口就等于消失了。 */
+.timeline-view:not(.stage-immersive) .stage-toolbar { margin: 0 0 18px; min-height: 40px; }
 .chronicle { --chronicle-muted: #59655e; }
 .chronicle button { cursor: pointer; }
 .chronicle-tools { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }

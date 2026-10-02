@@ -105,7 +105,6 @@
 .note-card,
 .job-card,
 .jobs-filter-panel,
-.todo-card,
 .prep-command,
 .rv-answer-trends,
 .rv-card,
@@ -138,7 +137,6 @@
 .library-facets,
 .note-card,
 .job-card,
-.todo-card,
 .prep-command,
 .rv-answer-trends,
 .rv-card,
@@ -176,7 +174,6 @@
   overflow: hidden;
 }
 
-.primary-action,
 .jobs-next-pick > button,
 .focus-language-now-action {
   min-height: 42px;
@@ -184,7 +181,6 @@
   box-shadow: 0 8px 18px rgba(24, 35, 30, .11);
 }
 
-.primary-action,
 .jobs-next-pick > button,
 .focus-language-now-action,
 .topbar-next,
@@ -197,7 +193,6 @@
     box-shadow 150ms ease;
 }
 
-.primary-action:hover,
 .jobs-next-pick > button:hover,
 .focus-language-now-action:hover {
   transform: translateY(-1px);
@@ -283,102 +278,6 @@
   background: rgba(255, 255, 255, .32);
   font-size: 11px;
   text-align: center;
-}
-
-@media (min-width: 821px) {
-  .overview-view .hero-layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-  }
-
-  .overview-view .hero-primary {
-    min-height: 194px;
-    padding: 22px 24px 20px;
-    background: rgba(248, 246, 237, .09);
-    box-shadow: inset 3px 0 0 rgba(230, 109, 69, .88);
-  }
-
-  .overview-view .hero-watch {
-    display: grid;
-    min-height: 62px;
-    grid-template-columns: minmax(145px, .34fr) minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 16px;
-    padding: 10px 14px;
-    background: rgba(248, 246, 237, .035);
-  }
-
-  .overview-view .hero-watch-head {
-    display: block;
-    padding: 0;
-    border: 0;
-  }
-
-  .overview-view .hero-watch-head small {
-    display: block;
-    margin-top: 4px;
-  }
-
-  .overview-view .hero-watch > button {
-    display: grid;
-    min-height: 38px;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 12px;
-    padding: 0 16px;
-    border-left: 1px solid rgba(255, 255, 255, .12);
-    border-right: 1px solid rgba(255, 255, 255, .12);
-  }
-
-  .overview-view .hero-watch > button strong {
-    display: block;
-    margin: 0;
-    overflow: hidden;
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 620;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .overview-view .hero-watch > button > span {
-    white-space: nowrap;
-  }
-
-  .overview-view .hero-watch-empty {
-    min-width: 0;
-    padding: 0 16px;
-    border-left: 1px solid rgba(255, 255, 255, .12);
-    border-right: 1px solid rgba(255, 255, 255, .12);
-  }
-
-  .overview-view .hero-watch-empty strong {
-    margin: 0;
-    font-family: inherit;
-    font-size: 12px;
-  }
-
-  .overview-view .hero-watch footer {
-    min-height: 0;
-    padding: 0;
-    border: 0;
-  }
-
-  .overview-view .hero-stats {
-    min-height: 48px;
-  }
-
-  .overview-view .stat {
-    min-height: 48px;
-  }
-
-  .overview-view .stat strong {
-    font-size: 19px;
-  }
-
-  .overview-view .stat span {
-    font-size: 10px;
-  }
 }
 
 /* ===== 跨页面语义：颜色只表达状态，不再只做装饰 ===== */
@@ -505,10 +404,6 @@
   align-items: center;
 }
 
-.todo-card[data-semantic] {
-  border-left-color: var(--semantic-tone);
-  background: linear-gradient(90deg, var(--semantic-wash), transparent 34%), var(--surface);
-}
 
 .agenda-list > button[data-semantic] {
   position: relative;

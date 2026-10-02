@@ -46,11 +46,11 @@ export const NAVIGATION: PrimaryNavigationItem[] = [
   },
   {
     id: "actions",
-    label: "行动",
-    mobileLabel: "行动",
+    label: "日历",
+    mobileLabel: "日历",
     glyph: "actions",
     target: "calendar",
-    views: ["calendar", "todo"],
+    views: ["calendar"],
   },
   {
     id: "career",
@@ -87,10 +87,6 @@ export const NAVIGATION: PrimaryNavigationItem[] = [
 ];
 
 export const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigationItem[]>> = {
-  actions: [
-    { id: "calendar", label: "日历", glyph: "暦", caption: "COMMITMENTS" },
-    { id: "todo", label: "行动清单", glyph: "行", caption: "ACTIONS" },
-  ],
   career: [
     { id: "jobs", label: "岗位机会", glyph: "機", caption: "OPPORTUNITIES" },
     { id: "analytics", label: "选考与分析", glyph: "選", caption: "PIPELINE" },
@@ -123,7 +119,7 @@ export const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigat
  *
  * 移动端没有左栏，所以那两个分区的带子在 820px 以下会回来（CSS 按 data-placement 切）。
  */
-export const TOP_BAR_SECTION_IDS: ReadonlySet<PrimaryNavId> = new Set<PrimaryNavId>(["actions", "career", "resources"]);
+export const TOP_BAR_SECTION_IDS: ReadonlySet<PrimaryNavId> = new Set<PrimaryNavId>(["career", "resources"]);
 
 export const MOBILE_PRIMARY_NAV_IDS: ReadonlySet<PrimaryNavId> = new Set<PrimaryNavId>([
   "overview",
@@ -145,9 +141,8 @@ export type PageCommand = {
  * 检索词混写中・日・英：本人会按当时脑子里的那个词去搜（「応募」「复盘」「calendar」都有）。
  */
 const PAGE_COMMAND_HINTS: Record<AppView, { description: string; keywords: string }> = {
-  overview: { description: "今天的重点、待办与近期安排", keywords: "总览 首页 概览 今天 home overview dashboard ダッシュボード 概要" },
+  overview: { description: "选考进展与近期安排", keywords: "总览 概览 overview dashboard ダッシュボード 概要" },
   calendar: { description: "已约定的面试与面谈日程", keywords: "日历 日程 安排 面试时间 calendar schedule 予定 カレンダー" },
-  todo: { description: "处理今天要做的事", keywords: "行动 清单 todo 开始 完成" },
   jobs: { description: "判断下一项応募", keywords: "岗位 机会 求职 応募 job" },
   analytics: { description: "选考进度、渠道与到达率", keywords: "选考 分析 进度 统计 漏斗 渠道 pipeline analytics progress 選考 応募状況" },
   session: { description: "当前这场面试的准备稿与话术", keywords: "本场 面试 当日 准备稿 session interview 面接 本番 志望動機 逆質問" },
@@ -182,4 +177,4 @@ export const PAGE_COMMANDS: readonly PageCommand[] = (() => {
  * 没输入关键词时只摆这几条：十四个按钮全摊开，搜索面板就先变成了第二个左栏，
  * 盖住下面的快捷查询。这三件是每天都会做的事。
  */
-export const DEFAULT_PAGE_COMMAND_VIEWS: readonly AppView[] = ["todo", "practice", "jobs"];
+export const DEFAULT_PAGE_COMMAND_VIEWS: readonly AppView[] = ["calendar", "session", "jobs"];

@@ -20,7 +20,7 @@ import {
   validateJobCaseFrontmatter,
 } from "../lib/job-case-schema.ts";
 import { listEmbeds, listHeadings, sliceSection, stripFrontmatter } from "../lib/interview-prep-embed.mjs";
-import { TODO_PRIORITIES, TODO_STATUSES } from "../lib/todo-status.mjs";
+import { MEETING_SELECTION_STATUSES, TODO_PRIORITIES, TODO_STATUSES } from "../lib/todo-status.mjs";
 import {
   companyMotivationIssues,
   interviewPrepStructureIssues,
@@ -302,6 +302,19 @@ for (const path of files) {
   }
   if (frontmatter.type === "policy-change" && frontmatter.owns) {
     problems.push(`${relativePath}: policy-change は規則IDを owns できない`);
+  }
+  if (frontmatter.selection_status !== undefined) {
+    const selectionStatus = String(frontmatter.selection_status).replace(/^["']|["']$/g, "");
+    if (!MEETING_SELECTION_STATUSES.includes(selectionStatus)) {
+      problems.push(`${relativePath}: selection_status "${selectionStatus}" は ${MEETING_SELECTION_STATUSES.join(" / ")} のいずれか`);
+    }
+    if (type !== "todo") {
+      problems.push(`${relativePath}: selection_status は独立面談を正本とする todo 専用`);
+    }
+    // 关联案件后由 job-case 持有选考状态，避免两份正本互相冲突。
+    if (String(frontmatter.case_id ?? "").replace(/^["']|["']$/g, "").trim()) {
+      problems.push(`${relativePath}: selection_status と case_id は併用不可。選考状態は job-case を正本とする`);
+    }
   }
   if (frontmatter.type === "todo") {
     const status = String(frontmatter.status ?? "");

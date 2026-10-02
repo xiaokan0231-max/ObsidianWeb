@@ -20,10 +20,6 @@
   font-weight: 500;
 }
 
-.calendar-event .calendar-event-meta {
-  flex-wrap: wrap;
-}
-
 .calendar-toolbar .calendar-legend {
   flex: 1 1 auto;
   gap: 8px 12px;
@@ -132,6 +128,105 @@
 
 .calendar-agenda .agenda-source:hover { color: var(--commitment-tone); }
 
+/* 颜色与形状共同表示进展，避免小尺寸下等待与结束难以分辨。 */
+.calendar-view .status-active { --calendar-status-color: #087f5b; }
+.calendar-view .status-waiting { --calendar-status-color: #2563eb; }
+.calendar-view .status-closed { --calendar-status-color: #c52e38; }
+.calendar-view .status-paused { --calendar-status-color: #686276; }
+.calendar-view .status-unknown { --calendar-status-color: #6b7280; }
+
+.calendar-view .calendar-status-dot {
+  display: inline-block;
+  position: relative;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--calendar-status-color);
+  overflow: visible;
+}
+
+.calendar-view .status-waiting .calendar-status-dot::before,
+.calendar-view .status-waiting .calendar-status-dot::after,
+.calendar-view .status-closed .calendar-status-dot::before {
+  content: "";
+  position: absolute;
+  border-radius: 1px;
+  background: #fff;
+}
+
+.calendar-view .status-waiting .calendar-status-dot::before {
+  top: 2px;
+  left: 5px;
+  width: 2px;
+  height: 5px;
+}
+
+.calendar-view .status-waiting .calendar-status-dot::after {
+  top: 5px;
+  left: 5px;
+  width: 4px;
+  height: 2px;
+}
+
+.calendar-view .status-paused .calendar-status-dot {
+  border-radius: 3px;
+}
+
+.calendar-view .status-paused .calendar-status-dot::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 6px;
+  height: 6px;
+  border-inline: 2px solid #fff;
+}
+
+.calendar-view .status-closed .calendar-status-dot { border-radius: 3px; }
+.calendar-view .status-closed .calendar-status-dot::before {
+  top: 5px;
+  left: 3px;
+  width: 6px;
+  height: 2px;
+}
+
+.calendar-view .status-unknown .calendar-status-dot {
+  border: 2px solid var(--calendar-status-color);
+  background: transparent;
+}
+
+.calendar-view .calendar-event {
+  position: relative;
+}
+
+.calendar-event > .calendar-status-dot {
+  position: absolute;
+  top: 11px;
+  right: 7px;
+}
+
+.calendar-agenda .agenda-main { grid-template-columns: 42px minmax(0, 1fr) 12px; }
+.agenda-main > .calendar-status-dot { align-self: start; margin-top: 3px; }
+.calendar-view .calendar-progress-legend { color: var(--text-secondary); }
+.calendar-view .calendar-progress-legend .calendar-legend-item { color: inherit; }
+
+.calendar-event.status-waiting > .calendar-status-dot,
+.agenda-item.status-waiting .calendar-status-dot {
+  animation: calendar-wait-pulse 2.8s ease-in-out infinite;
+}
+
+@keyframes calendar-wait-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--calendar-status-color) 18%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-event.status-waiting > .calendar-status-dot,
+  .agenda-item.status-waiting .calendar-status-dot { animation: none; }
+}
+
 .calendar-view .calendar-event:focus-visible,
 .calendar-agenda .agenda-main:focus-visible,
 .calendar-agenda .agenda-source:focus-visible {
@@ -141,4 +236,131 @@
 
 @media (max-width: 820px) {
   .calendar-agenda .agenda-source { min-height: 40px; }
+}
+
+/* 左侧徽标只表达当场轮次，右侧状态点继续表达当前进展。 */
+.calendar-view .calendar-round-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #aec7bb;
+  border-radius: 6px;
+  background: #f8fcf9;
+  color: #285442;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.calendar-view .calendar-round-badge.round-casual {
+  border-color: #c8ceca;
+  background: #f4f5f2;
+  color: #5d6b64;
+}
+
+.calendar-view .calendar-round-badge.round-unknown,
+.calendar-view .calendar-round-badge.round-agent {
+  border-color: #b6beb9;
+  background: transparent;
+  color: #56615b;
+}
+
+.calendar-view .calendar-round-badge.round-unknown { border-style: dashed; }
+.calendar-view .calendar-round-badge.round-agent { font-family: inherit; font-size: 12px; }
+
+.calendar-view .calendar-round-badge.round-final {
+  border-color: #a25033;
+  background: #a25033;
+  color: #fffaf3;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.calendar-round-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 75%, var(--paper));
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.calendar-round-legend-title {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.calendar-round-legend-item,
+.calendar-round-sequence {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.calendar-round-sequence { gap: 3px; }
+
+.calendar-round-legend .calendar-round-badge {
+  flex-basis: 20px;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.calendar-event .calendar-event-heading {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 22px;
+  padding-right: 16px;
+  margin-bottom: 2px;
+}
+
+.calendar-event .calendar-event-stage {
+  min-width: 0;
+  color: var(--commitment-tone);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.calendar-event .calendar-event-time {
+  max-width: 100%;
+  color: var(--commitment-tone);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.5;
+  letter-spacing: -.5px;
+  overflow-wrap: anywhere;
+}
+
+.agenda-event-meta {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-bottom: 5px;
+}
+
+.agenda-event-meta small {
+  min-width: 0;
+  margin-bottom: 0;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: keep-all;
+}
+
+.calendar-agenda .calendar-round-badge {
+  flex-basis: 20px;
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
 }

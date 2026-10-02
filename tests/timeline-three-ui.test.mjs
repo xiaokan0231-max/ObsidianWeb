@@ -26,6 +26,8 @@ test("时之航道接入时间线视图：lazy 加载、纯数据映射、双渲
   assert.match(timelineView, /:\s*"list"/, "默认列表，3D 只承担探索");
   assert.ok(timelineView.includes("<TimelineListView"), "2D 列表作为简洁模式保留");
   assert.ok(timelineView.includes("onFallback={fallBackToList}"), "WebGL 失败退回列表");
+  // 负的上边距会把切换器推进 sticky 二级导航底下，3D 入口被整颗盖住、点不到。
+  assert.doesNotMatch(css, /\.timeline-view[^{}]*\.stage-toolbar\s*\{[^}]*margin:\s*-/, "时间线切换器不能被二级导航盖住");
   assert.ok(atlas.includes('events={derived.calendarEvents}'), "日程事件要传进时间线");
   // 导航顺序保持：时间线在关系图之前。导航表已从外壳移到 app/navigation.ts。
   const navigation = await readFile("app/navigation.ts", "utf8");

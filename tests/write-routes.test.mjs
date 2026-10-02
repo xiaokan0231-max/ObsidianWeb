@@ -7,7 +7,7 @@ import * as guards from "../lib/server/write-guards.ts";
 import { validateJobStatusRestore } from "../lib/job-status-restore.ts";
 
 // 写路由的三道门是否装齐：每条 POST 都过同源校验（readJson 内置，或显式调用），
-// 带乐观锁的三条都用 mtime。源码断言而不是行为测试，因为路由靠 "@/" 别名，node 加载不了。
+// 案件状态与跟进都用 mtime。源码断言而不是行为测试，因为路由靠 "@/" 别名，node 加载不了。
 async function postRoutes(dir) {
   const out = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -30,8 +30,8 @@ test("每条 POST 路由都先过同源校验", async () => {
   }
 });
 
-test("案件状态・跟进・行动状态三条路由用 mtime 做乐观锁，写后回读磁盘 mtime", async () => {
-  for (const path of ["app/api/jobs/status/route.ts", "app/api/jobs/follow-up/route.ts", "app/api/todos/status/route.ts"]) {
+test("案件状态与跟进路由用 mtime 做乐观锁，写后回读磁盘 mtime", async () => {
+  for (const path of ["app/api/jobs/status/route.ts", "app/api/jobs/follow-up/route.ts"]) {
     const source = await readFile(path, "utf8");
     assert.match(source, /expectedMtime/, `${path} 没有 expectedMtime`);
     assert.match(source, /readNoteOrNull\(path\)/, `${path} 写后没有回读 mtime`);
@@ -41,16 +41,12 @@ test("案件状态・跟进・行动状态三条路由用 mtime 做乐观锁，�
   assert.match(api, /assertSameOrigin\(request\);\s*assertJsonContentType\(request\.headers\);/, "readJson 先验来源与 Content-Type");
 });
 
-test("撤销与 409 口径：状态撤销必须带 expectedMtime，行动状态走共用的 assertExpectedMtime", async () => {
+test("状态撤销必须带 expectedMtime，并返回可校验的撤销表", async () => {
   const jobs = await readFile("app/api/jobs/status/route.ts", "utf8");
   assert.match(jobs, /validateJobStatusRestore\(body\.restore\)/, "restore 表经过白名单校验");
   assert.match(jobs, /buildJobStatusUndo\(note\.frontmatter/, "撤销表取写入前的 frontmatter");
   assert.match(jobs, /if \(expectedMtime === undefined\)/, "撤销缺 expectedMtime 时拒绝，而不是放行");
   assert.match(jobs, /restore 与 status 不能同时提交/);
-  const todos = await readFile("app/api/todos/status/route.ts", "utf8");
-  assert.match(todos, /assertExpectedMtime\(expectedMtime, note\.stat\.mtime\)/);
-  assert.doesNotMatch(todos, /status = 409/, "不再各自拼 409");
-  assert.match(todos, /previousStatus/, "返回写入前的状态，前端才能撤销");
 });
 
 /** 断言 needles 在 source 里依次出现（每个都要找得到，且位置递增）。 */
@@ -84,8 +80,8 @@ test("状态撤销分支：先走白名单校验，缺 expectedMtime 就 400，�
   ], "restoreStatus");
 });
 
-test("跟进与行动状态路由在队列里、写入前用共用的 assertExpectedMtime，不自己拼比较", async () => {
-  for (const [path, queue] of [["app/api/jobs/follow-up/route.ts", "inFollowUpQueue"], ["app/api/todos/status/route.ts", "inTodoQueue"]]) {
+test("跟进路由在队列里、写入前用共用的 assertExpectedMtime，不自己拼比较", async () => {
+  for (const [path, queue] of [["app/api/jobs/follow-up/route.ts", "inFollowUpQueue"]]) {
     const source = await readFile(path, "utf8");
     assert.match(source, /import \{[^}]*\bassertExpectedMtime\b[^}]*\} from "@\/lib\/server\/api";/, `${path} 没有引入共用的 assertExpectedMtime`);
     assertInOrder(source, [

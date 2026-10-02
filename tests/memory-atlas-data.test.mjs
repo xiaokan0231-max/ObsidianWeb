@@ -47,9 +47,9 @@ test("日历：已确认的同日结束时间只补充显示，不改变开始�
       next_event_end_at: "2026-08-10 10:30",
     }, "- 2026-08-01 15:00 一次面接"),
   ], NOW);
-  assert.deepEqual(dates(events), ["2026-08-01 15:00", "2026-08-10 10:00", "2026-08-10 11:00"]);
-  assert.deepEqual(events.map((event) => event.endTime), [undefined, "10:30", "11:30"]);
-  assert.deepEqual(events.map(calendarEventTime), ["15:00", "10:00–10:30", "11:00–11:30"]);
+  assert.deepEqual(dates(events), ["2026-08-10 10:00", "2026-08-10 11:00"]);
+  assert.deepEqual(events.map((event) => event.endTime), ["10:30", "11:30"]);
+  assert.deepEqual(events.map(calendarEventTime), ["10:00–10:30", "11:00–11:30"]);
 });
 
 test("日历：缺失、跨日、无效或倒置的结束时间不推算范围", () => {
@@ -67,13 +67,14 @@ test("日历：缺失、跨日、无效或倒置的结束时间不推算范围",
 
 test("日历：合并同一场次时只在开始时刻一致时保留明确结束时间", () => {
   for (const reviewTime of ["10:00", "11:00"]) {
-    const [event] = buildCalendarEvents([
+    const events = buildCalendarEvents([
       note("面谈记录.md", "review", { company: "株式会社テスト", date: "2026-08-10", time: reviewTime }),
       note("案件.md", "job-case", {
         company: "株式会社テスト", next_event_at: "2026-08-10 10:00", next_event_end_at: "2026-08-10 10:30",
       }),
     ], NOW);
-    assert.equal(event.time, reviewTime);
+    assert.equal(events.length, reviewTime === "10:00" ? 1 : 2);
+    const event = events.find((item) => item.time === reviewTime);
     assert.equal(event.endTime, reviewTime === "10:00" ? "10:30" : undefined);
   }
 });
@@ -108,19 +109,15 @@ test("日历：job-case の next_event_at は面接などの語を含まなく�
   assert.equal(events[0].phase, "upcoming");
 });
 
-test("日历：next_event_at で確定した予定でも種別は next_action から復元する", () => {
+test("日历：当前行动不能替已确认日程推测轮次", () => {
   const events = buildCalendarEvents([
-    note("20_求職/Acme/Acme_Data.md", "job-case", {
-      company: "Acme",
-      next_event_at: "2026-08-05 17:30",
-      next_action: "一次面接（オンライン・Microsoft Teams）",
+    note("案件.md", "job-case", {
+      company: "株式会社テスト", next_event_at: "2026-08-05 17:30",
+      next_action: "一次面接の振り返りと最終面接の準備",
     }),
   ], NOW);
-  // next_event_at は priority 4 で next_action(3) を上書きするが、書式が純粋な日時なので
-  // 種別語を持たない。ラベルまで勝った出所だけで決めると「面谈」へ退化し、
-  // 規約どおり構造化したノートほど日历の表示が悪くなる（2026-08-04 実証）。
   assert.deepEqual(dates(events), ["2026-08-05 17:30"]);
-  assert.equal(events[0].label, "第一次面试");
+  assert.equal(events[0].label, "面谈");
 });
 
 test("日历：種別が読める出所が勝った時は next_action で上書きしない", () => {
@@ -136,7 +133,7 @@ test("日历：種別が読める出所が勝った時は next_action で上書�
   assert.equal(events[0].label, "最终面试");
 });
 
-test("日历：本文は面接行だけ拾い、お礼・通知・準備の行は予定にしない", () => {
+test("日历：正文只保留证据，不自动把提及的面试日期变成日程", () => {
   const events = buildCalendarEvents([
     note("20_求職/Acme/Acme_Data.md", "job-case", { company: "Acme" }, [
       "- 2026-08-12 一次面接（Teams）",
@@ -144,8 +141,7 @@ test("日历：本文は面接行だけ拾い、お礼・通知・準備の行�
       "- 2026-08-25 二次面接の準備をする",
     ].join("\n")),
   ], NOW);
-  assert.deepEqual(dates(events), ["2026-08-12"]);
-  assert.equal(events[0].label, "第一次面试");
+  assert.deepEqual(events, []);
 });
 
 test("日历：本文の叙述を予定として拾わない（約束していない面談を出さない）", () => {
@@ -177,8 +173,32 @@ test("日历：同步标题和准备行动不生成面试，实际约定仍保�
         next_action: "2026-08-07 一次面接の準備",
       }, body),
     ], NOW);
-    assert.deepEqual(dates(events), ["2026-08-10 14:30"]);
+    assert.deepEqual(dates(events), scheduled ? ["2026-08-10 14:30"] : []);
   }
+});
+
+test("日历：引用和标题里的更正、编辑、重评分日期不生成面试", () => {
+  const body = [
+    "> 🔴 **2026-08-20 訂正（この段落は履歴。書類・面接でそのまま使わない）**：",
+    "## 2026-08-21 更正：面试中的技术表述",
+    "> **2026-08-22 編集：面談で使う表現の注意点**",
+    "- 2026-08-23 再採点：技術面接官の参加は未確認",
+    "### 2026-08-24 重新评分：面试中的匹配证据",
+    "- 2026-08-12 14:30 一次面接（Teams）",
+  ].join("\n");
+  const owner = note("20_求職/株式会社テスト/案件.md", "job-case", {
+    company: "株式会社テスト",
+    next_action: "2026-08-25 面接用の説明を修正する",
+  }, body);
+  assert.deepEqual(buildCalendarEvents([owner], NOW), []);
+
+  // 更正记录与实际面谈同日时，只排除正文推测，保留已确认日程的结构化来源。
+  const scheduled = { ...owner, frontmatter: {
+    ...owner.frontmatter, next_event_at: "2026-08-20 10:00", next_action: "カジュアル面談",
+  } };
+  assert.deepEqual(dates(buildCalendarEvents([scheduled], NOW)), [
+    "2026-08-20 10:00",
+  ]);
 });
 
 test("日程与行动分开：准备期限和企业跟进只保留在承诺投影", () => {
@@ -194,16 +214,6 @@ test("日程与行动分开：准备期限和企业跟进只保留在承诺投�
   const derived = buildDerivedData(notes, NOW);
   assert.deepEqual(dates(derived.calendarEvents), ["2026-08-10 14:30"]);
   assert.deepEqual(derived.commitments.map((item) => item.kind), ["action", "follow-up", "event"]);
-});
-
-test("日历：本文の兜底は生かす（素の面接行は拾う）", () => {
-  // 上の絞り込みで、取りこぼし兜底そのものを殺していないことを確認する。
-  const events = buildCalendarEvents([
-    note("20_求職/Acme/Acme_Data.md", "job-case", { company: "Acme" },
-      "- 2026-08-12 一次面接（Teams）"),
-  ], NOW);
-  assert.deepEqual(dates(events), ["2026-08-12"]);
-  assert.equal(events[0].label, "第一次面试");
 });
 
 test("日历：同じ会社・同じ日は信頼度が高い出所だけを残す", () => {

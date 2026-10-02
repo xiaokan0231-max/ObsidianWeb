@@ -6,6 +6,7 @@ import {
   NAVIGATION,
   PAGE_COMMANDS,
   SECONDARY_NAVIGATION,
+  TOP_BAR_SECTION_IDS,
 } from "../app/navigation.ts";
 
 // 新增一页时只改了 app-route 而忘了导航表或 ⌘K，这页就只能靠手敲 URL 进去。
@@ -14,6 +15,18 @@ test("⌘K 页面命令对每个视图恰好一条", () => {
   const views = PAGE_COMMANDS.map((command) => command.view);
   assert.equal(new Set(views).size, views.length, "没有重复的视图");
   assert.deepEqual([...views].sort(), [...APP_VIEWS].sort());
+});
+
+test("日历直达且没有二级切换，默认命令围绕日程和本场面试", () => {
+  const calendar = NAVIGATION.find((item) => item.target === "calendar");
+  assert.ok(calendar);
+  assert.equal(calendar.label, "日历");
+  assert.deepEqual(calendar.views, ["calendar"]);
+  assert.deepEqual(SECONDARY_NAVIGATION[calendar.id] ?? [], []);
+  assert.equal(TOP_BAR_SECTION_IDS.has(calendar.id), false);
+  assert.deepEqual(DEFAULT_PAGE_COMMAND_VIEWS, ["calendar", "session", "jobs"]);
+  assert.equal(APP_VIEWS.includes("todo"), false);
+  assert.ok(PAGE_COMMANDS.every((command) => command.label !== "行动清单"));
 });
 
 test("每个视图都有一个真正能点到的入口", () => {

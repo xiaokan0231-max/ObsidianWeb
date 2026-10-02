@@ -1,5 +1,10 @@
-import MemoryAtlas from "./memory-atlas";
+import { redirect } from "next/navigation";
+import { calendarRedirectHref, type AppRouteSearchParams } from "./app-route";
 
-export default function Home() {
-  return <MemoryAtlas initialView="overview" />;
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<AppRouteSearchParams>;
+}) {
+  redirect(calendarRedirectHref(await searchParams));
 }

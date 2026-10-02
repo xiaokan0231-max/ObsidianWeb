@@ -6,7 +6,7 @@ import { IN_FLIGHT_STATUSES, awaitingCounterpart, toJobCard } from "../lib/jobs.
 import { buildDerivedData } from "../lib/memory-atlas-data.ts";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
-// 首页顶部四个数字各自是跳转入口：件数必须和点进去的那一页同一条规则，否则数字没法信。
+// 概览顶部三个数字各自是跳转入口：件数必须和点进去的那一页同一条规则，否则数字没法信。
 // derived 按外壳（app/memory-atlas.tsx）同样的方式从 notes 现算，不手搓 DerivedData。
 const { default: Overview } = await loadAppModule("app/overview-view.tsx");
 
@@ -34,20 +34,19 @@ const render = (list) => renderToStaticMarkup(createElement(Overview, {
   notes: list,
   derived: buildDerivedData(list, new Date(`${TODAY}T00:00:00`)),
   today: TODAY,
-  onOpen() {}, onView() {}, onQuery() {}, onOpenReview() {},
-  onTodoStatus: async () => null,
+  onOpen() {}, onView() {}, onOpenReview() {},
 }));
 
 /** 顶部统计条里的按钮：[数字, 标签]。 */
 const statTiles = (html) => {
-  const strip = html.match(/<div class="overview-current-stats">([\s\S]*?)<\/div>/)?.[1] ?? "";
+  const strip = html.match(/<div class="overview-stats">([\s\S]*?)<\/div>/)?.[1] ?? "";
   return [...strip.matchAll(/<button type="button" data-zero="(true|false)"><strong>(\d+)<\/strong><span>([^<]+)<\/span><\/button>/g)]
     .map(([, zero, value, label]) => ({ zero: zero === "true", value: Number(value), label }));
 };
 
-test("四个统计块都是 <button>，件数与各自的跳转规则一致", () => {
+test("三个统计块都是 <button>，件数与各自的跳转规则一致", () => {
   const tiles = statTiles(render(notes));
-  assert.deepEqual(tiles.map((tile) => tile.label), ["件待办", "个进行中案件", "条待应募岗位", "个复盘点待裁定"]);
+  assert.deepEqual(tiles.map((tile) => tile.label), ["个进行中案件", "条待应募岗位", "个复盘点待裁定"]);
 
   const cards = notes.filter((item) => item.frontmatter.type === "job-case").map(toJobCard);
   // 待应募＝未応募 且不在等对方（看板的「未动手」）；waiting_for: self 仍算自己手里的。
@@ -58,37 +57,46 @@ test("四个统计块都是 <button>，件数与各自的跳转规则一致", ()
   assert.equal(inFlight, 3, "fixture 自检：応募済・書類通過・面接中");
 
   assert.deepEqual(tiles, [
-    { zero: false, value: 2, label: "件待办" },
     { zero: false, value: inFlight, label: "个进行中案件" },
     { zero: false, value: untouched, label: "条待应募岗位" },
     { zero: true, value: 0, label: "个复盘点待裁定" },
   ]);
 });
 
-test("行动数只数本人的未完成项：系统维护与完了不计入", () => {
-  const html = render(notes);
-  assert.match(html, /全部 2 项/);
-  assert.match(html, /書類を準備する/);
-  assert.doesNotMatch(html, /台帳の補修/);
-  assert.doesNotMatch(html, /終わった件/);
+test("概览不展示待办、当前行动或收尾提醒，保留独立面谈的日程", () => {
+  const list = [...notes, todo("一次面談", { company: "株式会社面談テスト", status: "未着手", category: "面談・説明会", next_event_at: "2026-09-29 10:00" })];
+  const html = render(list);
+  assert.match(html, /概览<\/h1>/);
+  assert.match(html, /dateTime|datetime/);
+  assert.doesNotMatch(html, /当前行动|行动清单|件待办|全部行动|开始这件事|完成这件事|保留<\/button>|待办已经不用做了|data-overview-panel="todos"/);
+  for (const name of ["書類を準備する", "面談の日程を返信する", "終わった件", "台帳の補修"]) assert.doesNotMatch(html, new RegExp(name));
+  assert.match(html, /株式会社面談テスト/);
+  assert.match(html, /日本时间（JST）/);
+  assert.match(html, /10:00/);
 });
 
-test("空 vault 渲染空态而不抛错，四个数字都是 0", () => {
+test("近期安排是统计之后的首个面板，没有日程时明确展示空态", () => {
+  const html = render(notes);
+  const panels = [...html.matchAll(/data-overview-panel="([^"]+)"/g)].map(([, panel]) => panel);
+  assert.equal(panels[0], "schedule");
+  assert.match(html, /未来 7 天没有已确认的安排。/);
+});
+
+test("空 vault 渲染日历空态而不抛错，三个选考与复盘数字都是 0", () => {
   let html = "";
   assert.doesNotThrow(() => { html = render([]); });
-  assert.match(html, /当前没有待执行的重点行动/);
-  assert.match(html, /当前没有需要推进的行动。/);
-  assert.doesNotMatch(html, /data-overview-panel="(cases|jobs|schedule|waiting|review|practice)"/, "没有数据的面板整块不出");
-  assert.match(html, /class="overview-columns is-single"/);
-  assert.deepEqual(statTiles(html).map((tile) => [tile.value, tile.zero]), [[0, true], [0, true], [0, true], [0, true]]);
+  assert.match(html, /未来 7 天没有已确认的安排。/);
+  assert.doesNotMatch(html, /data-overview-panel="(cases|jobs|waiting|review|practice)"/, "没有数据的辅助面板整块不出");
+  assert.doesNotMatch(html, /class="overview-columns/, "没有辅助数据时不生成空列");
+  assert.deepEqual(statTiles(html).map((tile) => [tile.value, tile.zero]), [[0, true], [0, true], [0, true]]);
 });
 
 test("「待整理稿」只提醒已过的面试・面谈；说明会也在日历上，但不该让人去生成整理稿", () => {
   const list = [
-    jobCase("株式会社テスト", { status: "面接中", channel: "Green", status_updated: "2026-09-24", next_event_at: "2026-09-24 10:00", next_action: "一次面接" }),
+    jobCase("株式会社テスト", { status: "面接中", channel: "Green", status_updated: "2026-09-24", next_event_at: "2026-09-24 10:00", next_event_label: "一次面接" }),
     // 日文写法、不带「セミナー」：标签若退回默认的「面谈」，就会被当成面试提醒。
-    jobCase("株式会社サンプル", { status: "未応募", next_event_at: "2026-09-25 15:00", next_action: "会社説明会に参加" }),
-    jobCase("株式会社ダミー", { status: "未応募", next_event_at: "2026-09-23 11:00", next_action: "Company seminar" }),
+    jobCase("株式会社サンプル", { status: "未応募", next_event_at: "2026-09-25 15:00", next_event_label: "会社説明会" }),
+    jobCase("株式会社ダミー", { status: "未応募", next_event_at: "2026-09-23 11:00", next_event_label: "Company seminar" }),
   ];
   const html = render(list);
   const missing = html.match(/<ul class="overview-review-missing"[^>]*>([\s\S]*?)<\/ul>/)?.[1] ?? "";

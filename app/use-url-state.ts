@@ -35,7 +35,7 @@ export const SHELL_URL_KEYS = [
 
 /**
  * 外壳用 pushState 换地址时发的事件（pushState 本身不触发 popstate）。
- * 典型场景：在「行动清单」页再点一次左栏的「行动清单」——地址变回不带参数的 /actions，
+ * 典型场景：在「岗位机会」页再点一次左栏的「岗位机会」——地址变回不带参数的 /jobs，
  * 页面却还停在刚才的筛选上；刷新或复制链接时看到的就和屏幕上不一样。收到它就按新地址重读。
  */
 export const URL_CHANGE_EVENT = "echo:urlchange";

@@ -72,9 +72,9 @@ test("writeUrlParam 以 null 或空串删除键；删光后不留孤零零的 ?"
 });
 
 test("writeUrlParam 值没变时不调用 replaceState", () => {
-  withFakeWindow("/todo?tab=%E9%80%B2%E8%A1%8C%E4%B8%AD", (_fake, calls) => {
-    writeUrlParam("tab", "進行中");
-    writeUrlParam("who", null);
+  withFakeWindow("/graph?mode=all", (_fake, calls) => {
+    writeUrlParam("mode", "all");
+    writeUrlParam("focus", null);
     assert.equal(calls.length, 0);
   });
 });
