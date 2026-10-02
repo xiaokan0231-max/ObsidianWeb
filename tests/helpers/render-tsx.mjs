@@ -38,7 +38,7 @@ const EXTENSIONS = [".tsx", ".ts", ".mjs", ".js"];
 const DEFAULT_STUBS = { "./use-dialog-focus": { useDialogFocus() {} } };
 
 /**
- * @param {string} relPath 相对仓库根，例如 "app/overview-view.tsx"
+ * @param {string} relPath 相对仓库根，例如 "app/calendar-view.tsx"
  * @param {{
  *   stubs?: Record<string, unknown> | ((specifier: string, from: string) => unknown),
  *   globals?: Record<string, unknown>,

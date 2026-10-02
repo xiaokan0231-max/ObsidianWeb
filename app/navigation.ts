@@ -9,13 +9,12 @@ import type { AppView } from "./app-route.ts";
  */
 
 export type PrimaryNavId =
-  | "overview"
   | "actions"
   | "career"
   | "interview"
   | "training"
   | "resources";
-export type NavIconName = "home" | "actions" | "career" | "interview" | "training" | "resources";
+export type NavIconName = "actions" | "career" | "interview" | "training" | "resources";
 
 export type PrimaryNavigationItem = {
   id: PrimaryNavId;
@@ -34,16 +33,8 @@ export type SecondaryNavigationItem = {
   caption: string;
 };
 
-// 一级菜单表达用户目标，不再逐页暴露实现视图。顺序先处理已在进行的案件，再寻找新机会。
+// 日历作为首页，先查看已约定的日程，再进入对应的求职和面试材料。
 export const NAVIGATION: PrimaryNavigationItem[] = [
-  {
-    id: "overview",
-    label: "总览",
-    mobileLabel: "总览",
-    glyph: "home",
-    target: "overview",
-    views: ["overview"],
-  },
   {
     id: "actions",
     label: "日历",
@@ -122,7 +113,6 @@ export const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigat
 export const TOP_BAR_SECTION_IDS: ReadonlySet<PrimaryNavId> = new Set<PrimaryNavId>(["career", "resources"]);
 
 export const MOBILE_PRIMARY_NAV_IDS: ReadonlySet<PrimaryNavId> = new Set<PrimaryNavId>([
-  "overview",
   "actions",
   "career",
   "interview",
@@ -141,8 +131,7 @@ export type PageCommand = {
  * 检索词混写中・日・英：本人会按当时脑子里的那个词去搜（「応募」「复盘」「calendar」都有）。
  */
 const PAGE_COMMAND_HINTS: Record<AppView, { description: string; keywords: string }> = {
-  overview: { description: "选考进展与近期安排", keywords: "总览 概览 overview dashboard ダッシュボード 概要" },
-  calendar: { description: "已约定的面试与面谈日程", keywords: "日历 日程 安排 面试时间 calendar schedule 予定 カレンダー" },
+  calendar: { description: "已约定的面试与面谈日程", keywords: "日历 首页 日程 安排 面试时间 home calendar schedule 予定 カレンダー" },
   jobs: { description: "判断下一项応募", keywords: "岗位 机会 求职 応募 job" },
   analytics: { description: "选考进度、渠道与到达率", keywords: "选考 分析 进度 统计 漏斗 渠道 pipeline analytics progress 選考 応募状況" },
   session: { description: "当前这场面试的准备稿与话术", keywords: "本场 面试 当日 准备稿 session interview 面接 本番 志望動機 逆質問" },
@@ -174,7 +163,7 @@ export const PAGE_COMMANDS: readonly PageCommand[] = (() => {
 })();
 
 /**
- * 没输入关键词时只摆这几条：十四个按钮全摊开，搜索面板就先变成了第二个左栏，
+ * 没输入关键词时只摆这几条：全部页面按钮摊开，搜索面板就先变成了第二个左栏，
  * 盖住下面的快捷查询。这三件是每天都会做的事。
  */
 export const DEFAULT_PAGE_COMMAND_VIEWS: readonly AppView[] = ["calendar", "session", "jobs"];

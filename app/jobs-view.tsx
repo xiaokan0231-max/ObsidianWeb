@@ -150,7 +150,7 @@ export type JobsInitialFilters = {
   ratings?: readonly JobRatingBand[];
   /** 动手状态（URL では `touch`）。「未着手」「已动手·等对方」は status だけでは表せない。 */
   touch?: readonly JobTouch[];
-  /** 只看等对方（URL では `waiting=1`）。首页「等待回复」と同じ判定。 */
+  /** 只看等对方（URL では `waiting=1`），按 waiting_for 与案件状态筛选。 */
   waiting?: boolean;
 };
 
@@ -1106,7 +1106,7 @@ function JobsView({
                 }
               />
 
-              {/* 首页「等待回复 · 全部 N 项」落在这里：判定与首页同一个函数（jobWaitsOnCounterpart），条数一致。 */}
+              {/* 等待筛选沿用案件的等待方判定，保留在求职看板中处理跟进。 */}
               {(facets.waiting > 0 || filters.waitingOnly) && (
                 <div className="job-filter-row">
                   <span className="job-filter-label">等待</span>

@@ -28,7 +28,6 @@ import GraphView from "./graph-view";
 import LibraryView from "./library-view";
 import NoteDrawer from "./note-drawer";
 import SceneNoteReader from "./scene-note-reader";
-import Overview from "./overview-view";
 import SearchPalette from "./search-palette";
 import TimelineView from "./timeline-view";
 import {
@@ -95,7 +94,6 @@ type View = AppView;
 function NavigationIcon({ name }: { name: NavIconName }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" focusable="false">
-      {name === "home" && <><path d="M3.5 11.3 12 4l8.5 7.3" /><path d="M5.7 10.4V20h12.6v-9.6M9.4 20v-5.8h5.2V20" /></>}
       {name === "actions" && <><rect x="4" y="5.5" width="16" height="15" rx="2" /><path d="M8 3.5v4M16 3.5v4M4 10.5h16M8 14h2M14 14h2M8 17h2" /></>}
       {name === "career" && <><path d="M4 8.5h16v10.8H4z" /><path d="M8.5 8.5V5.7h7v2.8M4 12.5c4.8 2 11.2 2 16 0M10.5 13.3h3" /></>}
       {name === "interview" && <><path d="M4 5.5h16v11H9l-5 3.2z" /><path d="M8 9.5h8M8 12.5h5" /></>}
@@ -1084,23 +1082,11 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
 
   const openInterviewInsights = useCallback(() => navigateToView("insights"), [navigateToView]);
 
-  // 首页から案件へ：看板の抽屉（跟進フォーム付き）を直接開く。原笔记の drawer は読むだけで何も変えられない。
+  // 分析页直接打开看板案件抽屉，跟进操作仍使用案件本身的表单。
   const openCase = useCallback((note: Note) => {
     setJobsInitialFilters(null);
     navigateToView("jobs", new URLSearchParams({ status: "all", case: note.path }), true);
   }, [navigateToView]);
-
-  // 首页の等待区から一手で片付ける：「已跟进 · +7 天」「改为等本人」。書込ルートは看板と同じ /api/jobs/follow-up。
-  const followUpCase = useCallback(async (note: Note, values: { waitingFor?: string | null; followUpAt?: string | null }) => {
-    try {
-      const payload = await postJson<{ ok?: boolean; error?: string; note?: Note }>("/api/jobs/follow-up", { path: note.path, ...values, expectedMtime: note.stat.mtime });
-      if (!payload.note) return payload.error || "更新案件跟进失败";
-      patchNote(payload.note);
-      return null;
-    } catch (writeError) {
-      return writeError instanceof Error ? writeError.message : "更新案件跟进失败";
-    }
-  }, [patchNote]);
 
   const viewJobsWithFilters = useCallback((filters?: JobsInitialFilters) => {
     setJobsInitialFilters(filters ?? null);
@@ -1386,20 +1372,6 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
               </nav>
             )}
             <div className="view-container">
-              {view === "overview" && (
-                <Overview
-                  notes={notes}
-                  derived={derived}
-                  today={today}
-                  onOpen={openNote}
-                  onView={navigateToView}
-                  onViewJobs={viewJobsWithFilters}
-                  onOpenCase={openCase}
-                  onOpenSchedule={openCalendarInterview}
-                  onFollowUp={followUpCase}
-                  onOpenReview={openReview}
-                />
-              )}
               {calendarInterview && (!interviewScopeReady || calendarInterview.view !== view || (!calendarInterview.path && !calendarCompanyContext)) && (
                 <CalendarInterviewState
                   target={calendarInterview}

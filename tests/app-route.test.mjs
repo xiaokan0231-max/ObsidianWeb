@@ -3,11 +3,10 @@ import test from "node:test";
 import { appViewFromPathname, appViewHref, calendarRedirectHref } from "../app/app-route.ts";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
-test("总览拥有独立地址，根入口和旧行动入口不再是视图", () => {
-  assert.equal(appViewHref("overview"), "/overview");
-  assert.equal(appViewFromPathname("/overview/"), "overview");
+test("日历是首页视图，根入口和旧行动、总览入口由服务器跳转", () => {
+  assert.equal(appViewHref("calendar"), "/calendar");
   assert.equal(appViewFromPathname("/calendar/"), "calendar");
-  for (const pathname of ["/", "/actions", "/todo"]) {
+  for (const pathname of ["/", "/actions", "/overview", "/overview/", "/todo"]) {
     assert.equal(appViewFromPathname(pathname), null);
   }
 });
@@ -39,7 +38,7 @@ const navigation = {
   notFound() { throw new Error("not found"); },
 };
 
-test("根页面和旧行动页面执行服务器跳转并保留原笔记", async () => {
+test("根页面和旧行动、总览页面跳转日历并保留原笔记", async () => {
   const { default: Home } = await loadAppModule("app/page.tsx", { stubs: { "next/navigation": navigation } });
   const { default: Section } = await loadAppModule("app/[section]/[[...rest]]/page.tsx", {
     stubs: { "next/navigation": navigation, "../../memory-atlas": { default() {} } },
@@ -47,14 +46,14 @@ test("根页面和旧行动页面执行服务器跳转并保留原笔记", async
   const search = { tab: "open", who: "system", note: "记录.md", section: "确认" };
   const expected = calendarRedirectHref(search);
   await assert.rejects(Home({ searchParams: Promise.resolve(search) }), (error) => error.href === expected);
-  await assert.rejects(Section({
-    params: Promise.resolve({ section: "actions" }), searchParams: Promise.resolve(search),
-  }), (error) => error.href === expected);
-  const overview = await Section({ params: Promise.resolve({ section: "overview" }), searchParams: Promise.resolve({}) });
-  assert.equal(overview.props.initialView, "overview");
+  for (const section of ["actions", "overview"]) {
+    await assert.rejects(Section({
+      params: Promise.resolve({ section }), searchParams: Promise.resolve(search),
+    }), (error) => error.href === expected);
+    await assert.rejects(Section({
+      params: Promise.resolve({ section, rest: ["unknown"] }), searchParams: Promise.resolve({}),
+    }), /not found/);
+  }
   const calendar = await Section({ params: Promise.resolve({ section: "calendar" }), searchParams: Promise.resolve({}) });
   assert.equal(calendar.props.initialView, "calendar");
-  await assert.rejects(Section({
-    params: Promise.resolve({ section: "actions", rest: ["unknown"] }), searchParams: Promise.resolve({}),
-  }), /not found/);
 });

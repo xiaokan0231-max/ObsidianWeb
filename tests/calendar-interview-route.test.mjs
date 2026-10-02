@@ -99,7 +99,7 @@ test("缺少来源或日期、日期格式损坏时不建立日历上下文", ()
 
 test("其他页面不消费日历面试参数，准备和复盘各自只读自己的选中键", () => {
   const params = calendarInterviewSearch(target());
-  for (const view of ["overview", "prep", "practice", "language", "jobs", "calendar", "library"]) {
+  for (const view of ["prep", "practice", "language", "jobs", "calendar", "library"]) {
     assert.equal(calendarInterviewFromSearch(view, params.toString()), null, view);
   }
   assert.equal(calendarInterviewFromSearch("review", params.toString()).path, null);

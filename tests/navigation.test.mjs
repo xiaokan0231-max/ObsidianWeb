@@ -3,6 +3,7 @@ import test from "node:test";
 import { APP_VIEWS } from "../app/app-route.ts";
 import {
   DEFAULT_PAGE_COMMAND_VIEWS,
+  MOBILE_PRIMARY_NAV_IDS,
   NAVIGATION,
   PAGE_COMMANDS,
   SECONDARY_NAVIGATION,
@@ -17,16 +18,20 @@ test("⌘K 页面命令对每个视图恰好一条", () => {
   assert.deepEqual([...views].sort(), [...APP_VIEWS].sort());
 });
 
-test("日历直达且没有二级切换，默认命令围绕日程和本场面试", () => {
+test("日历是导航首项，没有总览或待办入口，默认命令围绕日程和本场面试", () => {
   const calendar = NAVIGATION.find((item) => item.target === "calendar");
   assert.ok(calendar);
+  assert.equal(NAVIGATION[0], calendar);
   assert.equal(calendar.label, "日历");
   assert.deepEqual(calendar.views, ["calendar"]);
   assert.deepEqual(SECONDARY_NAVIGATION[calendar.id] ?? [], []);
   assert.equal(TOP_BAR_SECTION_IDS.has(calendar.id), false);
   assert.deepEqual(DEFAULT_PAGE_COMMAND_VIEWS, ["calendar", "session", "jobs"]);
   assert.equal(APP_VIEWS.includes("todo"), false);
-  assert.ok(PAGE_COMMANDS.every((command) => command.label !== "行动清单"));
+  assert.equal(APP_VIEWS.includes("overview"), false);
+  assert.equal(MOBILE_PRIMARY_NAV_IDS.has("overview"), false);
+  assert.ok(NAVIGATION.every((item) => item.label !== "总览"));
+  assert.ok(PAGE_COMMANDS.every((command) => !["行动清单", "总览"].includes(command.label)));
 });
 
 test("每个视图都有一个真正能点到的入口", () => {

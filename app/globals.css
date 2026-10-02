@@ -10,7 +10,6 @@
 @import "./styles/timeline.css";
 @import "./styles/note-reading.css";
 @import "./styles/jobs.css";
-@import "./styles/overview.css";
 @import "./styles/interview-prep.css";
 @import "./styles/interview-review.css";
 @import "./styles/analytics.css";
@@ -22,7 +21,6 @@
 @import "./styles/library-density.css";
 @import "./styles/calendar-density.css";
 @import "./styles/analysis-training-density.css";
-@import "./styles/overview-density.css";
 @import "./styles/scene-reading-mode.css";
 @import "./styles/interview-session-v2.css";
 

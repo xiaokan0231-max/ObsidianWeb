@@ -1,9 +1,8 @@
 // 記憶星図の「ノート配列 → 画面が読む数字と一覧」層。React にも three にも依存しない。
-// ここに置く理由: 首页の健康度・日历・图书馆の絞り込みは全部ここで決まる派生値で、
-// tsx の中に居る限り単体テストが書けず、間違っても誰も気づけない。
+// 这里集中日历、资料库等视图的派生数据，独立于组件，便于校验投影规则。
 
 import { graphGroup, type GraphGroup } from "./knowledge-graph.ts";
-import { IN_FLIGHT_STATUSES, WAITING_FOR_LABEL, normalizeJobStatus, statusTone } from "./jobs.ts";
+import { WAITING_FOR_LABEL, normalizeJobStatus, statusTone } from "./jobs.ts";
 import { TODO_PRIORITY_META, TODO_STATUSES } from "./todo-status.mjs";
 import {
   companyIdentity,
@@ -15,8 +14,6 @@ import {
   stripNonLinkRegions,
   type Note,
 } from "./notes.ts";
-import { joinReviewNotes } from "./review-join.ts";
-import { parseInterviewAnswerReview, type InterviewAnswerReview } from "./review-deep.ts";
 import { JOB_CASE_TYPE } from "./vault-boundary.mjs";
 import { interviewContext, interviewNoteTime, matchingInterviewPrep, matchingInterviewContext, resolveCalendarRoundBadge } from "./calendar-interview.ts";
 import { calendarRoundBadge, interviewRound } from "./interview-round.ts";
@@ -52,25 +49,6 @@ export type Commitment = CalendarEvent | {
   waitingFor?: string;
 };
 
-export type ReviewPreviewDoc = {
-  key: string;
-  company: string;
-  date: string;
-  round: string;
-  decisionTotal: number;
-  pendingDecisions: number;
-  deepReview?: InterviewAnswerReview;
-};
-
-export type ReviewPreview = {
-  docs: ReviewPreviewDoc[];
-  reviewedCount: number;
-  pendingDecisions: number;
-  readyCount: number;
-  scoreDoc: ReviewPreviewDoc | null;
-  actionDoc: ReviewPreviewDoc | null;
-};
-
 export type DerivedData = {
   links: number;
   orphanCount: number;
@@ -102,8 +80,6 @@ export const GROUPS: Record<GroupKey, {
   analysis: { label: "AI 分析", short: "析", color: "#b5842f", tint: "#f3e6c8" },
   system: { label: "系统", short: "规", color: "#66706c", tint: "#e5e7e4" },
 };
-
-export const ACTIVE_JOB_STATUSES = new Set(IN_FLIGHT_STATUSES);
 
 // TODO の状態・優先度契約は lib/todo-status.mjs が正本（vault-check と同じ配列）。
 export const TODO_STATUS: readonly string[] = TODO_STATUSES;
@@ -222,7 +198,7 @@ export function libraryScopeMatches(note: Note, scope: LibraryScope) {
   ].includes(type);
 }
 
-/** 首页の状態胶囊。文字は七態に正規化、色は看板と同じ statusTone——以前は独自の active/rejected/idle で内定が灰になっていた。 */
+/** 状态文字与颜色遵循看板的统一规则，避免不同视图对同一状态显示不一致。 */
 export function careerStatus(status: string) {
   const base = normalizeJobStatus(status) ?? status.trim();
   return { label: base || "未分類", tone: statusTone(base) };
@@ -342,24 +318,6 @@ export function getNoteDate(note: Note) {
   return frontmatterDate || filenameDate || "";
 }
 
-export function getLatestNoteDate(note: Note) {
-  const contentDates = Array.from(
-    note.content.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g),
-    (match) => match[1],
-  );
-  const candidates = [
-    getString(note.frontmatter.updated),
-    getString(note.frontmatter.date),
-    ...contentDates,
-  ].filter((value) => /^20\d{2}-\d{2}-\d{2}$/.test(value));
-
-  if (candidates.length > 0) {
-    return candidates.sort((left, right) => right.localeCompare(left))[0];
-  }
-
-  return new Date(note.stat.mtime).toISOString().slice(0, 10);
-}
-
 export function localDateKey(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -405,32 +363,6 @@ export function todoAction(note: Note) {
   return getString(note.frontmatter.action) || getTitle(note);
 }
 
-export function buildReviewPreview(notes: Note[]): ReviewPreview {
-  // 照合規則そのものは lib/review-join.ts が持つ。ここは要約に必要な数だけを畳む。
-  const docs = joinReviewNotes(notes).map((joined): ReviewPreviewDoc => ({
-    key: joined.key,
-    company: joined.company,
-    date: joined.date,
-    round: joined.round,
-    decisionTotal: joined.decisionTasks.length,
-    pendingDecisions: joined.decisionTasks.filter((item) => !item.resolvedBy).length,
-    deepReview: joined.deepReviewNote
-      ? parseInterviewAnswerReview(joined.deepReviewNote.content) ?? undefined
-      : undefined,
-  }));
-  const reviewedCount = docs.filter((doc) => doc.deepReview).length;
-  const pendingDecisions = docs.reduce((total, doc) => total + doc.pendingDecisions, 0);
-  const readyCount = docs.filter((doc) => doc.pendingDecisions === 0 && !doc.deepReview).length;
-  const scoreDoc = docs.find((doc) => doc.deepReview) ?? null;
-  const actionDoc =
-    docs.find((doc) => doc.pendingDecisions > 0) ??
-    docs.find((doc) => !doc.deepReview) ??
-    scoreDoc ??
-    docs[0] ??
-    null;
-  return { docs, reviewedCount, pendingDecisions, readyCount, scoreDoc, actionDoc };
-}
-
 /**
  * 種別語が無ければ null を返す。「判定できなかった」と「面谈と判定した」を
  * 呼び出し側で区別するために要る——両者を潰すと、日時だけの構造化フィールドが
@@ -439,7 +371,7 @@ export function buildReviewPreview(notes: Note[]): ReviewPreview {
 function detectEventLabel(text: string): string | null {
   const normalized = text.normalize("NFKC");
   // 日文「説明会」・繁体「說明會」・英文 seminar も同じ種別。漏れると既定の「面谈」に化けて、
-  // 面试扱い（日历の準備稿入口・首页「待整理稿」）になる（isInterviewEvent の除外表と揃える）。
+  // 面试扱い（日历の準備稿入口）になる（isInterviewEvent の除外表と揃える）。
   if (/セミナー|说明会|説明会|說明會|seminar/i.test(normalized)) return "招聘说明会";
   if (interviewRound(normalized) === "agent") return "猎头面谈";
   const round = calendarRoundBadge(normalized);
@@ -594,13 +526,13 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
     left.time.localeCompare(right.time) || left.id.localeCompare(right.id));
 }
 
-/** 待ち相手の文言は lib/jobs.ts の WAITING_FOR_LABEL から組む（首页・画像ヘッダーと同じ語）。 */
+/** 待ち相手の文言は lib/jobs.ts の WAITING_FOR_LABEL から組む（画像ヘッダーと同じ語）。 */
 function waitingLabel(waitingFor: string) {
   if (waitingFor === "self") return "本人行动";
   return WAITING_FOR_LABEL[waitingFor] ? `等待${WAITING_FOR_LABEL[waitingFor]}` : "外部等待";
 }
 
-/** 首页、顶栏、日历共用的唯一承诺投影。 */
+/** 原始期限与真实约定共用的承诺投影；日历仅使用其中的日程。 */
 export function buildCommitments(
   notes: Note[],
   now = new Date(),

@@ -11,7 +11,6 @@ import {
   calendarEventTime,
   extractLinks,
   careerStatus,
-  getLatestNoteDate,
   libraryScopeMatches,
   mergePendingWrites,
   PENDING_WRITE_TTL_MS,
@@ -464,17 +463,6 @@ test("信頼層と応募状態のラベル付け", () => {
   assert.equal(careerStatus("").label, "未分類");
   assert.equal(typeLabel("job-case"), "应募案件");
   assert.equal(typeLabel("未知の型"), "未知の型");
-});
-
-test("最終更新日は frontmatter と本文の日付から一番新しいものを取る", () => {
-  assert.equal(
-    getLatestNoteDate(note("20_求職/記録.md", "material", { updated: "2026-07-01" }, "2026-07-15 に進展。")),
-    "2026-07-15",
-  );
-  assert.equal(
-    getLatestNoteDate(note("20_求職/日付なし.md", "material", {}, "日付は書いていない。")),
-    new Date(MTIME).toISOString().slice(0, 10),
-  );
 });
 
 test("検索の type: / status: / folder: 前置詞", () => {

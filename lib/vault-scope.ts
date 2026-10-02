@@ -52,7 +52,6 @@ export function scopesToReloadAfterStats(loaded: Iterable<VaultScope>): VaultSco
 }
 
 export function vaultScopeForView(view: string): VaultScope {
-  if (view === "overview") return "overview";
   if (view === "calendar") return "actions";
   if (view === "jobs" || view === "analytics") return "jobs";
   if (view === "session" || view === "prep" || view === "review" || view === "practice" || view === "insights") return "interview";

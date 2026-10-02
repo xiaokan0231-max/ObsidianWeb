@@ -10,7 +10,7 @@ export default async function AppSectionPage({
   searchParams: Promise<AppRouteSearchParams>;
 }) {
   const { section, rest = [] } = await params;
-  if (section === "actions" && rest.length === 0) {
+  if ((section === "actions" || section === "overview") && rest.length === 0) {
     redirect(calendarRedirectHref(await searchParams));
   }
   const initialView = appViewFromPathname(`/${[section, ...rest].join("/")}`);

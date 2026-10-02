@@ -1,7 +1,6 @@
 import type { CalendarInterviewTarget } from "../lib/calendar-interview.ts";
 
 export type AppView =
-  | "overview"
   | "session"
   | "prep"
   | "review"
@@ -17,7 +16,6 @@ export type AppView =
   | "library";
 
 const VIEW_PATHS: Record<AppView, string> = {
-  overview: "/overview",
   analytics: "/progress",
   jobs: "/jobs",
   calendar: "/calendar",

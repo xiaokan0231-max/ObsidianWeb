@@ -42,7 +42,6 @@ test("server-renders the Memory Atlas shell", async () => {
   assert.match(html, /搜索与命令/);
   assert.doesNotMatch(html, /搜索记忆、公司、日语错误/);
   for (const navigationLabel of [
-    "总览",
     "日历",
     "求职",
     "面试作战",
@@ -52,17 +51,18 @@ test("server-renders the Memory Atlas shell", async () => {
     assert.match(html, new RegExp(navigationLabel));
   }
   assert.doesNotMatch(html, /行动清单|全部行动|件待办/);
+  assert.doesNotMatch(html, /href="\/overview"|aria-label="总览"|近期安排|进行中案件|等待回复/);
   assert.match(html, /class="brand" href="\/calendar"/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
-test("旧入口重定向日历并保留笔记定位，概览有独立地址", async () => {
-  for (const path of ["/", "/actions", "/actions/"]) {
+test("根入口及旧行动、总览入口重定向日历并保留笔记定位", async () => {
+  for (const path of ["/", "/actions", "/actions/", "/overview", "/overview/"]) {
     let response = await render(`${path}?tab=open&who=system&note=test.md&section=background&tag=a&tag=b`);
-    if (path === "/actions/") {
+    if (path.length > 1 && path.endsWith("/")) {
       assert.equal(response.status, 308);
       const normalized = new URL(response.headers.get("location"), "http://localhost");
-      assert.equal(normalized.pathname, "/actions");
+      assert.equal(normalized.pathname, path.replace(/\/$/, ""));
       response = await render(`${normalized.pathname}${normalized.search}`);
     }
     assert.equal(response.status, 307);
@@ -74,9 +74,6 @@ test("旧入口重定向日历并保留笔记定位，概览有独立地址", as
     assert.equal(target.searchParams.has("tab"), false);
     assert.equal(target.searchParams.has("who"), false);
   }
-  const overview = await render("/overview");
-  assert.equal(overview.status, 200);
-  assert.match(await overview.text(), /href="\/overview"/);
 });
 
 test("移除的待办状态接口不再接受写入", async () => {

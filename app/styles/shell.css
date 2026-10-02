@@ -727,6 +727,13 @@
   padding: 28px;
 }
 
+.panel-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
 .panel-heading {
   display: flex;
   align-items: flex-start;
@@ -761,164 +768,6 @@
   color: var(--orange);
 }
 
-/* ===== 面试手感（BETWEEN ROUNDS）。旧「记忆健康度」の跡地 =====
-   金は首页でまだ使われていない色＝この面板の身分色（復盤 panel の violet 渐变と同じ手法）。
-   面板内の警戒はこれまで通り --orange。 */
-.drill-panel {
-  background:
-    linear-gradient(145deg, rgba(181, 132, 47, 0.055), transparent 48%),
-    var(--surface);
-}
-
-.drill-gap-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid #e2ded5;
-}
-
-.drill-gap {
-  display: flex;
-  align-items: baseline;
-  gap: 3px;
-  color: var(--muted);
-}
-
-.drill-gap strong {
-  font-family: "Songti SC", serif;
-  font-size: 45px;
-  font-weight: 560;
-  line-height: 1;
-  letter-spacing: -0.02em;
-}
-
-/* 空窗が3日を超えたら数字だけ温度を上げる——毎日ひとつ育つのがこの面板の鼓動 */
-.drill-gap.long { color: var(--orange); }
-
-.drill-gap span { font-size: 11px; }
-
-.drill-gap-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.drill-gap-copy p { margin: 0; font-size: 12.5px; font-weight: 640; }
-.drill-gap-copy small { color: var(--muted); font-size: 10px; }
-.drill-gap-copy .drill-gap-meta { color: var(--muted); font-size: 9.5px; }
-
-.drill-habits { padding: 6px 0 2px; }
-
-.drill-habits > button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  border: 0;
-  border-bottom: 1px solid #e9e5dc;
-  background: transparent;
-  padding: 9px 2px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.drill-habits > button strong {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: color 150ms ease;
-}
-
-.drill-habits > button:hover strong { color: var(--orange); }
-
-.drill-habits > button span {
-  color: var(--muted);
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 9.5px;
-  white-space: nowrap;
-}
-
-/* 直近の場でも出た癖の印。「まだ生きている」ことだけを静かに示す */
-.drill-habit-hot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--orange);
-}
-
-.drill-habits-guard {
-  margin: 10px 0;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.7;
-}
-
-.drill-habits-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin: 9px 0 0;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-/* 墨底の「今日素振り」。復盤 panel の黒帯と同じ振る舞い、身分だけ金の霞 */
-.drill-action {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  border: 0;
-  background: var(--ink);
-  color: #fff;
-  margin-top: 14px;
-  padding: 11px 14px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.drill-action > span { min-width: 0; display: flex; flex-direction: column; }
-.drill-action small { color: rgba(255, 255, 255, 0.55); font-size: 9.5px; }
-.drill-action strong {
-  overflow: hidden;
-  margin-top: 2px;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.drill-action b { color: #e5cf9d; transition: transform 160ms ease; }
-.drill-action:hover b { transform: translateX(4px); }
-
-.pipeline-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.pipeline-list > button {
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr) 20px;
-  align-items: center;
-  gap: 12px;
-  min-height: 61px;
-  border: 0;
-  border-top: 1px solid #e4e0d7;
-  background: transparent;
-  padding: 9px 0;
-  text-align: left;
-  cursor: pointer;
-}
-
-.pipeline-list > button:last-child {
-  border-bottom: 1px solid #e4e0d7;
-}
-
-.pipeline-list > button:hover .pipeline-company strong {
-  color: var(--orange);
-}
-
-/* 首页の状態胶囊。色は看板と同じ .tone-*（jobs.css）の変数を読む——以前は独自の active/rejected/idle 三色で内定が灰だった。 */
 /* 视图要的笔记还没到：骨架而不是「还没有 X」的假空态。 */
 .scope-loading { display: flex; align-items: center; gap: 12px; padding: 48px 24px; color: var(--muted); font-size: 14px; }
 .scope-loading p { margin: 0; }
@@ -946,62 +795,6 @@
 }
 .topbar-stats.state-stale { color: var(--orange); border-color: rgba(230, 109, 69, 0.45); background: rgba(230, 109, 69, 0.08); }
 .topbar-stats.state-rebuilding { opacity: 0.7; cursor: progress; }
-
-.pipeline-status {
-  width: 58px;
-  overflow: hidden;
-  padding: 4px 6px;
-  border: 1px solid var(--tone-line, transparent);
-  background: var(--tone-bg, #e7e5df);
-  color: var(--tone, #737a76);
-  font-size: 10px;
-  font-weight: 700;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pipeline-company {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.pipeline-company strong {
-  min-width: 0;
-  overflow: hidden;
-  font-size: 13px;
-  text-overflow: ellipsis;
-  transition: color 160ms ease;
-  white-space: nowrap;
-}
-
-.pipeline-company-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.pipeline-company time {
-  flex: 0 0 auto;
-  color: #929792;
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 10px;
-}
-
-.pipeline-company small {
-  overflow: hidden;
-  margin-top: 5px;
-  color: #858b87;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pipeline-arrow {
-  color: #969a97;
-}
 
 .learning-visual {
   display: grid;
