@@ -1,12 +1,14 @@
-# ObsidianWeb
+# 転職作戦室（ObsidianWeb）
 
-**Obsidian の Vault を唯一のデータソースにする、DB を持たないローカルファースト・ナレッジワークベンチ。**
+**Obsidian の Vault を唯一のデータソースにする、転職活動のためのローカルファースト・ワークベンチ。**
 
 Markdown ノート群（frontmatter・wikilink・見出し）をそのままドメインモデルとして扱い、
 案件ボード・カレンダー・面接準備・タイムライン・3D ナレッジグラフ・学習ループをリアルタイムに構築する。
 Next.js (vinext) / React 19 / TypeScript、デプロイ先は Cloudflare Workers。
 
-![ObsidianWeb](public/og.jpg)
+![転職作戦室](public/og.jpg)
+
+右上で中文／日本語を切り替えられます。ナビゲーション、検索コマンド、主なメニューが切り替わり、再読み込み後も選択が保持されます。ノートのタイトル・本文・業務データは原文のままです。
 
 - 🇬🇧 [English](README.en.md) ・ 🇨🇳 [中文](README.zh.md)
 

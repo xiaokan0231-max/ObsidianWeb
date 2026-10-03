@@ -1,12 +1,14 @@
-# ObsidianWeb
+# Career War Room (ObsidianWeb)
 
-**A local-first knowledge workbench with no database — an Obsidian vault is the single source of truth.**
+**A local-first job search workbench with no database — an Obsidian vault is the single source of truth.**
 
 A directory of Markdown notes (frontmatter, wikilinks, headings) *is* the domain model.
 From it the app builds a case board, calendar, interview prep, timeline, a 3D knowledge graph and a
 study loop in real time. Next.js (vinext) / React 19 / TypeScript, deployed to Cloudflare Workers.
 
-![ObsidianWeb](public/og.jpg)
+![Career War Room](public/og.jpg)
+
+Switch between Chinese and Japanese in the top-right corner. Navigation, search commands, and common menus follow the selected language, which persists across reloads. Note titles, article bodies, and business data retain their original text.
 
 - 🇯🇵 [日本語](README.md) ・ 🇨🇳 [中文](README.zh.md)
 

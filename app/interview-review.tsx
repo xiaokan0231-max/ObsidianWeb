@@ -1,5 +1,8 @@
 "use client";
 
+import { menuLabel } from "@/lib/ui-menu-labels";
+import { useUiLocale } from "./ui-locale";
+
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ClientApiError, postJson } from "@/lib/client-api";
 import ScopeLoading from "./scope-loading";
@@ -254,6 +257,8 @@ function InterviewReview({
   onOpenInsights: () => void;
   onSelectionChange?: (key: string | null) => void;
 }) {
+  const { locale } = useUiLocale();
+  const t = (label: string) => menuLabel(label, locale);
   const docs = useMemo(() => buildDocs(notes), [notes]);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(initialSelectedKey);
@@ -711,39 +716,39 @@ function InterviewReview({
         <button
           className="rv-back"
           onClick={backToList}
-        >{INTERVIEW_LIST_BACK_LABEL}</button>
+        >{t(INTERVIEW_LIST_BACK_LABEL)}</button>
         <div className="rv-title">
           <h1>{doc.company}</h1>
           <span>{doc.round} · {doc.date}{doc.result ? ` · ${doc.result}` : ""}</span>
         </div>
         <div className="rv-mode-wrap" hidden={panel !== "source"}>
-          <div className="rv-mode" role="tablist" aria-label="阅读模式">
+          <div className="rv-mode" role="tablist" aria-label={t("阅读模式")}>
             <button
               role="tab"
               aria-selected={mode === "study"}
               className={mode === "study" ? "active" : ""}
               onClick={() => switchMode("study")}
-            >学習<small>先猜后看</small></button>
+            >{t("学习")}<small>{t("先猜后看")}</small></button>
             <button
               role="tab"
               aria-selected={mode === "compare"}
               className={mode === "compare" ? "active" : ""}
               onClick={() => switchMode("compare")}
-            >対照<small>日中并排</small></button>
+            >{t("对照")}<small>{t("日中并排")}</small></button>
             <button
               role="tab"
               aria-selected={false}
               data-novel-entry
               onClick={() => switchMode("novel")}
-            >全文阅读<small>中文 / 日本語</small></button>
+            >{t("全文阅读")}<small>{t("中文 / 日本語")}</small></button>
           </div>
         </div>
       </header>
 
-      <nav className="rv-section-tabs" aria-label="面试复盘内容">
+      <nav className="rv-section-tabs" aria-label={t("面试复盘内容")}>
         {([['advisory', '顾问解读'], ['quality', '回答质量'], ['source', '原文与语言']] as const).map(([value, label]) => <button type="button" key={value}
-          aria-pressed={panel === value} onClick={() => { setPanel(value); if (value === "quality") setDeepOpen(true); if (value === "source" && mode === "novel") switchMode("study"); }}>{label}</button>)}
-        <button type="button" className="rv-cross-link" onClick={onOpenInsights}>横向对照 ↗</button>
+          aria-pressed={panel === value} onClick={() => { setPanel(value); if (value === "quality") setDeepOpen(true); if (value === "source" && mode === "novel") switchMode("study"); }}>{t(label)}</button>)}
+        <button type="button" className="rv-cross-link" onClick={onOpenInsights}>{t("横向对照 ↗")}</button>
       </nav>
 
       {doc.deepReview?.overviewZh && <section className="rv-review-introduction" aria-label="综合导读" hidden={panel === "source"}>
@@ -779,11 +784,11 @@ function InterviewReview({
               </button>
             ))}
             {patternFilter && (
-              <button className="rv-clear" onClick={() => setPatternFilter(null)}>清除筛选 ×</button>
+              <button className="rv-clear" onClick={() => setPatternFilter(null)}>{t("清除筛选 ×")}</button>
             )}
           </div>
         )}
-        <div className="rv-filters" role="tablist" aria-label="内容筛选">
+        <div className="rv-filters" role="tablist" aria-label={t("内容筛选")}>
           {FILTER_LABELS.map((item) => (
             <button
               key={item.id}
@@ -796,7 +801,7 @@ function InterviewReview({
               }}
             >
               <kbd>{item.shortcut}</kbd>
-              {item.label}
+              {t(item.label)}
               <b>{filterCounts[item.id]}</b>
             </button>
           ))}
@@ -961,9 +966,9 @@ function InterviewReview({
         </p>
         {!focused && visibleBlocks.length > 0 && (
           <div>
-                <button className="rv-enter-novel" onClick={() => switchMode("novel")}>全文阅读 · 中文 / 日本語</button>
-                <button onClick={() => setOpenBlocks(new Set(visibleBlockIds))}>展开全部</button>
-                <button onClick={() => setOpenBlocks(new Set())}>收起全部</button>
+                <button className="rv-enter-novel" onClick={() => switchMode("novel")}>{t("全文阅读 · 中文 / 日本語")}</button>
+                <button onClick={() => setOpenBlocks(new Set(visibleBlockIds))}>{t("展开全部")}</button>
+                <button onClick={() => setOpenBlocks(new Set())}>{t("收起全部")}</button>
           </div>
         )}
       </div>

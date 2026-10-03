@@ -28,7 +28,8 @@ test("command palette supports keyboard selection and page commands", () => {
   assert.match(searchPalette, /event\.key === "ArrowUp"/);
   assert.match(searchPalette, /event\.key === "Enter"/);
   // 命令表从导航表派生（app/navigation.ts），名字与左栏一致；覆盖面由 tests/navigation.test.mjs 检查。
-  assert.match(searchPalette, /import \{[^}]*PAGE_COMMANDS[^}]*\} from "\.\/navigation"/);
+  assert.match(searchPalette, /import \{[^}]*getPageCommands[^}]*\} from "\.\/navigation"/);
+  assert.match(searchPalette, /getPageCommands\(locale\)/);
   assert.match(navigation, /id: "practice", label: "回答重练"/);
 });
 
@@ -43,8 +44,8 @@ test("进入 3D 就把页面高度让给舞台，两个 3D 视图共用同一套
   // 页面标题只供读屏定位，列表和 3D 都直接从工具栏开始。
   assert.match(graphView, /renderer === "space" \? " stage-immersive" : ""/);
   assert.match(timelineView, /renderer === "corridor" \? " stage-immersive" : ""/);
-  assert.match(graphView, /<h1 className="sr-only">关系图<\/h1>/);
-  assert.match(timelineView, /<h1 className="sr-only">时间线<\/h1>/);
+  assert.match(graphView, /<h1 className="sr-only">\{copy\.graph\}<\/h1>/);
+  assert.match(timelineView, /<h1 className="sr-only">\{copy\.timeline\}<\/h1>/);
   // 顶部 sticky 区的高度只允许写一次：横幅出现时靠 --stage-offset 联动。
   assert.match(uxRefreshCss, /min-height: calc\(100dvh - var\(--stage-offset\)\)/);
   assert.match(uxRefreshCss, /body:has\(\.stale-data-banner\) \{\s*--stage-offset/);

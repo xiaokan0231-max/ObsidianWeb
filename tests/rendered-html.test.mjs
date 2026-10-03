@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render(path = "/calendar", method = "GET") {
+async function render(path = "/calendar", method = "GET", cookie = "") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
@@ -10,7 +10,7 @@ async function render(path = "/calendar", method = "GET") {
   return worker.fetch(
     new Request(`http://localhost${path}`, {
       method,
-      headers: { accept: "text/html", host: "localhost" },
+      headers: { accept: "text/html", host: "localhost", cookie },
     }),
     {
       ASSETS: {
@@ -26,15 +26,19 @@ async function render(path = "/calendar", method = "GET") {
   );
 }
 
-test("server-renders the Memory Atlas shell", async () => {
+test("server-renders the Career War Room shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>回声 · 求职作战室<\/title>/i);
+  assert.match(html, /<title>求职作战室<\/title>/i);
   assert.match(html, /<link rel="icon" href="\/favicon\.svg"/i);
-  assert.match(html, /正在重建你的记忆关系/);
+  assert.match(html, /正在加载求职作战室/);
+  assert.match(html, /class="language-switch"/);
+  assert.match(html, /lang="zh-CN" aria-pressed="true"/);
+  assert.match(html, /lang="ja" aria-pressed="false"/);
+  assert.doesNotMatch(html, /回声/);
   // 顶栏不再有搜索框和刷新按钮，改成「我在哪 / 下一件 / 数据源」。首屏 loading=true。
   assert.match(html, /正在读取/);
   assert.match(html, /重读/);
@@ -54,6 +58,18 @@ test("server-renders the Memory Atlas shell", async () => {
   assert.doesNotMatch(html, /href="\/overview"|aria-label="总览"|近期安排|进行中案件|等待回复/);
   assert.match(html, /class="brand" href="\/calendar"/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
+});
+
+test("保存的日语选择在服务端首屏、菜单与元数据中保持一致", async () => {
+  const response = await render("/jobs?status=応募済", "GET", "career-room-locale=ja");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /<html[^>]*lang="ja"/);
+  assert.match(html, /<title>転職作戦室<\/title>/);
+  assert.match(html, /カレンダー|転職活動|今回の面接/);
+  assert.match(html, /検索とコマンド/);
+  assert.match(html, /lang="ja" aria-pressed="true"/);
+  assert.doesNotMatch(html, /搜索与命令|正在加载求职作战室|回声/);
 });
 
 test("根入口及旧行动、总览入口重定向日历并保留笔记定位", async () => {

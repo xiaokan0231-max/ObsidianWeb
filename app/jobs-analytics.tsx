@@ -26,6 +26,53 @@ import {
 } from "@/lib/job-stats.mjs";
 import { explicitNextEventDate, explicitNextEventTime } from "@/lib/job-progress";
 import { getString, getType, type Note } from "@/lib/notes";
+import { useUiLocale } from "./ui-locale";
+
+// 统计与证据继续使用原文；这里仅切换导航、筛选和操作界面。
+const ANALYTICS_MENU_COPY = {
+  "选考与分析": ["选考与分析", "選考と分析"],
+  "立即重算": ["立即重算", "再集計"],
+  "当前求职进展摘要": ["当前求职进展摘要", "現在の求職状況の概要"],
+  "进行中": ["进行中", "進行中"],
+  "面试阶段": ["面试阶段", "面接段階"],
+  "结果等待": ["结果等待", "結果待ち"],
+  "可応募": ["可应募", "応募候補"],
+  "{label} {count} 件の内訳を見る": ["查看{label}的 {count} 条明细", "{label} {count} 件の内訳を見る"],
+  "当前推进": ["当前推进", "現在の進行"],
+  "{active} 件进行中 · {priority} 件优先处理 · {watch} 件观察": ["{active} 件进行中 · {priority} 件优先处理 · {watch} 件观察", "進行中 {active} 件 · 優先対応 {priority} 件 · 注目 {watch} 件"],
+  "全部进行中": ["全部进行中", "進行中の全案件"],
+  "观察名单": ["观察名单", "注目案件"],
+  "当前手札分析": ["当前候选分析", "現在の候補を分析"],
+  "打开": ["打开", "開く"],
+  "開く": ["打开", "開く"],
+  "集計対象": ["统计范围", "集計対象"],
+  "評点 7 以上": ["评分 7 分以上", "評点 7 以上"],
+  "全件": ["全部", "全件"],
+  "条件": ["条件", "条件"],
+  "重置": ["重置", "リセット"],
+  "来源": ["来源", "求人の出典"],
+  "勤務地": ["工作地点", "勤務地"],
+  "リモート可": ["可远程", "リモート可"],
+  "参考データ": ["参考数据", "参考データ"],
+  "過去の不採用・経路別到達率・選考ファネル": ["历史拒绝・渠道到达率・选考漏斗", "過去の不採用・経路別到達率・選考ファネル"],
+  "履歴の期間": ["历史期间", "履歴の期間"],
+  "全期間": ["全部期间", "全期間"],
+  "直近6か月": ["最近 6 个月", "直近6か月"],
+  "直近3か月": ["最近 3 个月", "直近3か月"],
+  "数値で見る": ["查看数值", "数値で見る"],
+  "案件を開く": ["打开案件", "案件を開く"],
+  "状態の分布": ["状态分布", "状態の分布"],
+  "応募・結果・待機の推移": ["应募、结果与等待趋势", "応募・結果・待機の推移"],
+} as const satisfies Record<string, readonly [string, string]>;
+
+type AnalyticsMenuKey = keyof typeof ANALYTICS_MENU_COPY;
+function useAnalyticsMenu() {
+  const { locale } = useUiLocale();
+  const t = (key: AnalyticsMenuKey, values: Record<string, string | number> = {}) =>
+    ANALYTICS_MENU_COPY[key][locale === "ja" ? 1 : 0].replace(/\{(\w+)\}/g, (match, name: string) => String(values[name] ?? match));
+  const label = (value: string) => Object.hasOwn(ANALYTICS_MENU_COPY, value) ? t(value as AnalyticsMenuKey) : value;
+  return { t, label };
+}
 
 /**
  * 期間フィルタは**1本だけ**、全チャートに効く。
@@ -118,6 +165,7 @@ function ProgressPriority({
   job: JobCard;
   onOpen: (note: Note) => void;
 }) {
+  const { t } = useAnalyticsMenu();
   const evidence = job.matches[0] || job.reason || job.stack.slice(0, 3).join("・");
 
   return (
@@ -147,7 +195,7 @@ function ProgressPriority({
         </div>
       </dl>
       {evidence ? <small className="analytics-priority-evidence">{evidence}</small> : null}
-      <span className="analytics-priority-open">案件を開く <b>→</b></span>
+      <span className="analytics-priority-open">{t("案件を開く")} <b>→</b></span>
     </button>
   );
 }
@@ -193,9 +241,10 @@ function Tile({ value, label, note }: { value: string; label: string; note?: str
  * どのチャートにも必ず付ける（既定は畳んでおく）。
  */
 function TableView({ head, rows }: { head: string[]; rows: (string | number)[][] }) {
+  const { t } = useAnalyticsMenu();
   return (
     <details className="chart-table">
-      <summary>数値で見る</summary>
+      <summary>{t("数値で見る")}</summary>
       <table>
         <thead>
           <tr>{head.map((cell) => <th key={cell}>{cell}</th>)}</tr>
@@ -318,6 +367,7 @@ function JobsAnalytics({
   /** この視図の scope がまだ届いていない：台帳の空状態ではなく読取中を出す。 */
   loading?: boolean;
 }) {
+  const { t, label: menuLabel } = useAnalyticsMenu();
   // 期間は URL に持つ：刷新・別画面からの戻りで「直近3か月」を毎回選び直さなくて済むように。
   const [range, setRange] = useUrlState<RangeId>("range", "all", RANGE_CODEC);
   const openCase = onOpenCase ?? onOpen;
@@ -533,21 +583,21 @@ function JobsAnalytics({
 
   return (
     <div className="analytics">
-      <h1 className="sr-only">选考与分析</h1>
+      <h1 className="sr-only">{t("选考与分析")}</h1>
       {derivedState !== "fresh" && (
         <p className={`analytics-stale ${derivedState}`} role="status">
           {derivedState === "rebuilding"
             ? "案件状态已写入，正在重算台帳的派生统计…"
             : `案件状态已写入，下方图表仍是上一次 vault:stats 的结果。${statsError ? ` ${statsError}` : ""}`}
-          {derivedState === "stale" && onRebuildStats && <button type="button" onClick={onRebuildStats}>立即重算</button>}
+          {derivedState === "stale" && onRebuildStats && <button type="button" onClick={onRebuildStats}>{t("立即重算")}</button>}
         </p>
       )}
-      <dl className="analytics-head-glance module-stat-strip" aria-label="当前求职进展摘要">
+      <dl className="analytics-head-glance module-stat-strip" aria-label={t("当前求职进展摘要")}>
         {GLANCE_CARDS.map((card) => {
           const count = glanceCounts[card.key];
           return (
             <div key={card.key} data-tone={card.tone} data-zero={count === 0}>
-              <dt>{card.label}</dt>
+              <dt>{menuLabel(card.label)}</dt>
               <dd><strong>{count}</strong><small>件</small></dd>
               {/* カード全体を覆う透明ボタン。dt/dd の入れ子（定義リストの意味）を壊さずに
                   押せるようにする。0 件は背景情報なので操作対象にしない。 */}
@@ -556,7 +606,7 @@ function JobsAnalytics({
                 className="analytics-glance-hit"
                 disabled={count === 0}
                 onClick={() => onViewJobs(card.filters)}
-                aria-label={`${card.label} ${count} 件の内訳を見る`}
+                aria-label={t("{label} {count} 件の内訳を見る", { label: menuLabel(card.label), count })}
               />
             </div>
           );
@@ -565,13 +615,13 @@ function JobsAnalytics({
 
       <details className="analytics-command analytics-command-disclosure">
         <summary>
-          <strong>当前推进</strong>
-          <span>{inFlight} 件进行中 · {priorityJob ? 1 : 0} 件优先处理 · {watchJobs.length} 件观察</span>
+          <strong>{t("当前推进")}</strong>
+          <span>{t("{active} 件进行中 · {priority} 件优先处理 · {watch} 件观察", { active: inFlight, priority: priorityJob ? 1 : 0, watch: watchJobs.length })}</span>
           <i aria-hidden="true" />
         </summary>
         <header>
           <button type="button" onClick={() => onViewJobs({ statuses: IN_FLIGHT })}>
-            全部进行中 <b>{inFlight}</b> <i aria-hidden="true">→</i>
+            {t("全部进行中")} <b>{inFlight}</b> <i aria-hidden="true">→</i>
           </button>
         </header>
         {priorityJob ? (
@@ -579,7 +629,7 @@ function JobsAnalytics({
             <ProgressPriority job={priorityJob} onOpen={openCase} />
             <div className="analytics-watch-list">
               <header>
-                <strong>观察名单</strong>
+                <strong>{t("观察名单")}</strong>
                 <small>高优先・选考中</small>
               </header>
               {watchJobs.length > 0 ? (
@@ -597,15 +647,15 @@ function JobsAnalytics({
       <details className="analytics-hand">
         <summary>
           <span>
-            <strong>当前手札分析</strong>
+            <strong>{t("当前手札分析")}</strong>
             <small>评分、状态与技术需求；只有需要比较下一批岗位时再看</small>
           </span>
-          <em>打开</em>
+          <em>{t("打开")}</em>
         </summary>
         <div className="analytics-hand-body">
           {/* 母数を変えるスイッチなので、影響する図より必ず**上**に置く。 */}
           <div className="analytics-filter">
-        <span>集計対象</span>
+        <span>{t("集計対象")}</span>
         {HAND_SCOPES.map((item) => (
           <button
             key={item.id}
@@ -614,7 +664,7 @@ function JobsAnalytics({
             aria-pressed={handScope === item.id}
             onClick={() => setHandScope(item.id)}
           >
-            {item.label}
+            {menuLabel(item.label)}
           </button>
         ))}
         <small className="analytics-filter-note">
@@ -627,7 +677,7 @@ function JobsAnalytics({
           {/* 条件フィルタ。下の3枚（評点・状態・技術）にだけ効く——
               上の KPI・重点案件は行動リストなので絞らない。 */}
           <div className="analytics-filter analytics-cond-filter">
-        <span>条件</span>
+        <span>{t("条件")}</span>
         {condOptions.statuses.map(([status, count]) => (
           <button
             key={status}
@@ -641,7 +691,7 @@ function JobsAnalytics({
         ))}
         {condActive > 0 ? (
           <button type="button" className="job-chip" onClick={() => setCond(EMPTY_COND)}>
-            重置（{condActive}）
+            {t("重置")}（{condActive}）
           </button>
         ) : null}
         <small className="analytics-filter-note">
@@ -650,7 +700,7 @@ function JobsAnalytics({
         </small>
           </div>
           <div className="analytics-filter analytics-cond-filter">
-        <span>来源</span>
+        <span>{t("来源")}</span>
         {condOptions.sources.map(([source, count]) => (
           <button
             key={source}
@@ -664,7 +714,7 @@ function JobsAnalytics({
         ))}
           </div>
           <div className="analytics-filter analytics-cond-filter">
-        <span>勤務地</span>
+        <span>{t("勤務地")}</span>
         {condOptions.regions.slice(0, 8).map(([region, count]) => (
           <button
             key={region}
@@ -682,7 +732,7 @@ function JobsAnalytics({
           aria-pressed={cond.remoteOnly}
           onClick={() => setCond((current) => ({ ...current, remoteOnly: !current.remoteOnly }))}
         >
-          リモート可 <small>{condOptions.remote}</small>
+          {t("リモート可")} <small>{condOptions.remote}</small>
         </button>
           </div>
 
@@ -714,7 +764,7 @@ function JobsAnalytics({
               : `現役 ${statusPool.length} 件${condActive === 0 ? "すべて" : "（条件フィルタ適用中）"}。4〜6 点の投げない札も含む。`
           }
         >
-          <div className="chart-stack" role="img" aria-label="状態の分布">
+          <div className="chart-stack" role="img" aria-label={t("状態の分布")}>
             {statuses.map((row, index) => (
               <i
                 key={row.status}
@@ -765,16 +815,16 @@ function JobsAnalytics({
       <details className="analytics-history">
         <summary>
           <span>
-            <b>参考データ</b>
-            <strong>過去の不採用・経路別到達率・選考ファネル</strong>
+            <b>{t("参考データ")}</b>
+            <strong>{t("過去の不採用・経路別到達率・選考ファネル")}</strong>
             <small>日々の判断には使わないため、通常は閉じておく</small>
           </span>
-          <em>開く</em>
+          <em>{t("開く")}</em>
         </summary>
         <div className="analytics-history-body">
           {/* 期間フィルタは履歴チャートだけに効く。 */}
           <div className="analytics-filter">
-            <span>履歴の期間</span>
+            <span>{t("履歴の期間")}</span>
             {RANGES.map((item) => (
               <button
                 key={item.id}
@@ -783,7 +833,7 @@ function JobsAnalytics({
                 aria-pressed={range === item.id}
                 onClick={() => setRange(item.id)}
               >
-                {item.label}
+                {menuLabel(item.label)}
               </button>
             ))}
           </div>
@@ -930,7 +980,7 @@ function JobsAnalytics({
                   <li><b data-step="4" /> 累計で結果が出た <small>{flow[flow.length - 1].resolvedCum}</small></li>
                   <li><b data-step="2" /> 待っている <small>{flow[flow.length - 1].pending}</small></li>
                 </ul>
-                <svg className="chart-line" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="応募・結果・待機の推移">
+                <svg className="chart-line" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t("応募・結果・待機の推移")}>
                   {[0, 0.5, 1].map((tick) => {
                     const y = PAD.top + plotH - tick * plotH;
                     return (

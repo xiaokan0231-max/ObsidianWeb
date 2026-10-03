@@ -156,11 +156,56 @@
   height: 76px;
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
   padding: 0 38px;
   background: rgba(243, 240, 232, 0.9);
   border-bottom: 1px solid rgba(216, 213, 202, 0.84);
   backdrop-filter: blur(18px);
+}
+
+/* 两种语言始终可见，切换后保留当前页面与筛选状态。 */
+.language-switch {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-soft);
+}
+
+.language-switch button {
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.language-switch button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.language-switch button:hover:not([aria-pressed="true"]) {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+/* 日语标签较长，地点与公司名称可收缩，右侧操作始终留在视口内。 */
+.topbar-where {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.topbar-where strong,
+.topbar-where small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /*
@@ -413,7 +458,7 @@
 /* ===== 顶栏三段：我在哪 / 下一件 / 数据源 ===== */
 
 .topbar-where {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   display: flex;
   align-items: baseline;
   gap: 9px;
@@ -1211,4 +1256,3 @@
 .graph-layout[data-renderer="space"] > .graph-legend {
   display: none;
 }
-

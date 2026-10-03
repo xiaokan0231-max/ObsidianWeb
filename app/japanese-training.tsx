@@ -17,6 +17,51 @@ import {
   LANGUAGE_STRESS_LIMIT,
 } from "@/lib/language/types";
 import { activeSessionMinutes } from "@/lib/language/session-time";
+import { useUiLocale } from "./ui-locale";
+
+// 课程素材与练习题保留原文，仅切换入口、分类和训练模式标签。
+const TRAINING_MENU_COPY = {
+  "今日训练": ["今日训练", "今日の練習"],
+  "能力画像": ["能力画像", "能力プロフィール"],
+  "问题地图": ["问题地图", "課題マップ"],
+  "训练语料": ["训练语料", "練習素材"],
+  "日语集中训练": ["日语集中训练", "日本語集中トレーニング"],
+  "训练入口": ["训练入口", "練習の開始"],
+  "训练规模": ["训练规模", "練習量"],
+  "当前训练阶段": ["当前训练阶段", "現在の練習段階"],
+  "轻量": ["轻量", "軽め"],
+  "标准": ["标准", "標準"],
+  "深度": ["深度", "じっくり"],
+  "主动词块": ["主动词块", "表現の想起"],
+  "错误修正": ["错误修正", "誤りの修正"],
+  "面试官表达": ["面试官表达", "面接官の表現"],
+  "回答结构": ["回答结构", "回答の構成"],
+  "岗位技术": ["岗位技术", "職種の技術用語"],
+  "事实口径": ["事实口径", "事実の表現"],
+  "全部": ["全部", "すべて"],
+  "快速扫描": ["快速扫描", "クイックスキャン"],
+  "集中修正": ["集中修正", "集中修正"],
+  "集中编译": ["集中编译", "集中練習"],
+  "压力测试": ["压力测试", "実力チェック"],
+  "已完成": ["已完成", "完了"],
+  "继续{phase}": ["继续{phase}", "{phase}を続ける"],
+  "设置今日训练": ["设置今日训练", "今日の練習を設定"],
+  "开始今天的集中训练": ["开始今天的集中训练", "今日の集中練習を始める"],
+  "开始 {count} 项": ["开始 {count} 项", "{count} 項目を開始"],
+  "建立集中训练课程": ["建立集中训练课程", "集中練習コースを作成"],
+  "更新训练画像": ["更新训练画像", "練習プロフィールを更新"],
+  "保存": ["保存", "保存"],
+  "退出到总览": ["退出到总览", "概要に戻る"],
+} as const satisfies Record<string, readonly [string, string]>;
+
+type TrainingMenuKey = keyof typeof TRAINING_MENU_COPY;
+function useTrainingMenu() {
+  const { locale } = useUiLocale();
+  const t = (key: TrainingMenuKey, values: Record<string, string | number> = {}) =>
+    TRAINING_MENU_COPY[key][locale === "ja" ? 1 : 0].replace(/\{(\w+)\}/g, (match, name: string) => String(values[name] ?? match));
+  const label = (value: string) => Object.hasOwn(TRAINING_MENU_COPY, value) ? t(value as TrainingMenuKey) : value;
+  return { t, label };
+}
 
 const EMPTY_STATE: LanguageV2State = {
   ready: false,
@@ -86,6 +131,7 @@ function JapaneseTraining({
 }: {
   onVaultChanged: () => Promise<void>;
 }) {
+  const { t, label: menuLabel } = useTrainingMenu();
   const [state, setState] = useState<LanguageV2State>(EMPTY_STATE);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -207,25 +253,25 @@ function JapaneseTraining({
             <h2>从已有面试复盘建立第一份课程</h2>
             <p>核心抽取不调用 Codex，不会用通用JLPT内容凑数量，也不会修改任何逐字稿或复盘事实。</p>
           </div>
-          <button disabled={Boolean(busy)} onClick={() => void rebuild()}>建立集中训练课程</button>
+          <button disabled={Boolean(busy)} onClick={() => void rebuild()}>{t("建立集中训练课程")}</button>
         </section>
       ) : curriculum ? (
         <>
           {state.stale && (
             <section className="focus-language-stale">
               <div><strong>面试或岗位资料已经更新</strong><span>当前批次仍可继续；重建后，新证据才会进入下一批。</span></div>
-              <button disabled={Boolean(busy)} onClick={() => void rebuild()}>更新训练画像</button>
+              <button disabled={Boolean(busy)} onClick={() => void rebuild()}>{t("更新训练画像")}</button>
             </section>
           )}
 
-          <nav className="focus-language-tabs" aria-label="日语集中训练">
+          <nav className="focus-language-tabs" aria-label={t("日语集中训练")}>
             {([
               ["today", "今日训练"],
               ["profile", "能力画像"],
               ["issues", "问题地图"],
               ["library", "训练语料"],
             ] as const).map(([key, label]) => (
-              <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
+              <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{menuLabel(label)}</button>
             ))}
           </nav>
 
@@ -242,14 +288,14 @@ function JapaneseTraining({
               <TodayDashboard state={state} />
             </>
           ) : (
-            <section className="focus-language-resume" aria-label="训练入口">
+            <section className="focus-language-resume" aria-label={t("训练入口")}>
               <span>{state.currentBatch ? `本批 ${state.currentBatch.targetSize} 项 · 进度已保存` : "今日训练尚未开始"}</span>
               <button
                 type="button"
                 disabled={Boolean(busy)}
                 onClick={() => state.currentBatch ? setShowBatch(true) : setTab("today")}
               >
-                {state.currentBatch ? `继续${BATCH_PHASE_LABELS[state.currentBatch.phase]}` : "设置今日训练"}
+                {state.currentBatch ? t("继续{phase}", { phase: menuLabel(BATCH_PHASE_LABELS[state.currentBatch.phase]) }) : t("设置今日训练")}
                 <span aria-hidden="true"> →</span>
               </button>
             </section>
@@ -278,6 +324,7 @@ function TrainingNow({
   onStart: () => void;
   onResume: () => void;
 }) {
+  const { t, label: menuLabel } = useTrainingMenu();
   const batch = state.currentBatch;
   const phaseOrder: Exclude<LanguageBatchPhase, "completed">[] = ["scan", "compile", "stress"];
   const currentIndex = batch ? phaseOrder.indexOf(batch.phase as Exclude<LanguageBatchPhase, "completed">) : -1;
@@ -286,7 +333,7 @@ function TrainingNow({
     <section className="focus-language-now">
       <span className="focus-language-now-mark" aria-hidden="true">語</span>
       <div className="focus-language-now-copy">
-        <h2>{batch ? `继续${BATCH_PHASE_LABELS[batch.phase]}` : "开始今天的集中训练"}</h2>
+        <h2>{batch ? t("继续{phase}", { phase: menuLabel(BATCH_PHASE_LABELS[batch.phase]) }) : t("开始今天的集中训练")}</h2>
         <p>
           {batch
             ? `本批 ${batch.targetSize} 项。当前只处理训练未命中，完成后进入隐藏答案压力测试。`
@@ -294,22 +341,22 @@ function TrainingNow({
         </p>
       </div>
       {batch ? (
-        <ol className="focus-language-now-steps" aria-label="当前训练阶段">
+        <ol className="focus-language-now-steps" aria-label={t("当前训练阶段")}>
           {phaseOrder.map((phase, index) => (
             <li
               key={phase}
               className={index < currentIndex ? "done" : index === currentIndex ? "active" : ""}
             >
               <b>{index + 1}</b>
-              <span>{BATCH_PHASE_LABELS[phase]}</span>
+              <span>{menuLabel(BATCH_PHASE_LABELS[phase])}</span>
             </li>
           ))}
         </ol>
       ) : (
-        <div className="focus-language-size" role="group" aria-label="训练规模">
+        <div className="focus-language-size" role="group" aria-label={t("训练规模")}>
           {[100, 150, 200].map((value) => (
             <button key={value} className={size === value ? "active" : ""} onClick={() => onSize(value as 100 | 150 | 200)}>
-              <strong>{value}</strong><span>{value === 100 ? "轻量" : value === 150 ? "标准" : "深度"}</span>
+              <strong>{value}</strong><span>{value === 100 ? t("轻量") : value === 150 ? t("标准") : t("深度")}</span>
             </button>
           ))}
         </div>
@@ -319,7 +366,7 @@ function TrainingNow({
         disabled={busy}
         onClick={batch ? onResume : onStart}
       >
-        {batch ? `继续${BATCH_PHASE_LABELS[batch.phase]}` : `开始 ${size} 项`}
+        {batch ? t("继续{phase}", { phase: menuLabel(BATCH_PHASE_LABELS[batch.phase]) }) : t("开始 {count} 项", { count: size })}
         <span aria-hidden="true">→</span>
       </button>
     </section>
@@ -430,15 +477,16 @@ function LanguageLibrary({
   items: LanguageLearningItem[];
   progress: Map<string, LanguageItemProgress>;
 }) {
+  const { t, label: menuLabel } = useTrainingMenu();
   const [kind, setKind] = useState<LanguageLearningItemKind | "all">("all");
   const visible = items.filter((value) => kind === "all" || value.kind === kind);
   return (
     <div className="focus-language-panel-page">
       <header><h2>个人词汇、语法和面试表达</h2></header>
       <div className="focus-library-filters">
-        <button className={kind === "all" ? "active" : ""} onClick={() => setKind("all")}>全部 {items.length}</button>
+        <button className={kind === "all" ? "active" : ""} onClick={() => setKind("all")}>{t("全部")} {items.length}</button>
         {(Object.keys(KIND_LABELS) as LanguageLearningItemKind[]).map((key) => (
-          <button key={key} className={kind === key ? "active" : ""} onClick={() => setKind(key)}>{KIND_LABELS[key]} {items.filter((value) => value.kind === key).length}</button>
+          <button key={key} className={kind === key ? "active" : ""} onClick={() => setKind(key)}>{menuLabel(KIND_LABELS[key])} {items.filter((value) => value.kind === key).length}</button>
         ))}
       </div>
       <div className="focus-language-table">
@@ -467,6 +515,7 @@ function LanguageBatchWorkspace({
   onExit: () => void;
   onVaultChanged: () => Promise<void>;
 }) {
+  const { t } = useTrainingMenu();
   const batch = state.currentBatch!;
   const itemById = useMemo(
     () => new Map(state.curriculum!.items.map((value) => [value.id, value])),
@@ -667,14 +716,14 @@ function LanguageBatchWorkspace({
         <div><span>語</span><div><small>DEEP WORK · AUTO SAVED</small><strong>{batch.targetSize} 项集中训练</strong></div></div>
         <div className="language-batch-clock"><strong>{elapsed}</strong><span>分钟</span></div>
         <div>
-          <button disabled={Boolean(busy)} onClick={() => void checkpoint(pending)}>保存</button>
-          <button className="quiet" disabled={Boolean(busy)} onClick={async () => { await checkpoint(pending); onExit(); }}>退出到总览</button>
+          <button disabled={Boolean(busy)} onClick={() => void checkpoint(pending)}>{t("保存")}</button>
+          <button className="quiet" disabled={Boolean(busy)} onClick={async () => { await checkpoint(pending); onExit(); }}>{t("退出到总览")}</button>
         </div>
       </header>
       <div className="language-batch-progress">
         {(["scan", "compile", "stress"] as const).map((phase, index) => (
           <div key={phase} className={batch.phase === phase ? "active" : (["scan", "compile", "stress"].indexOf(batch.phase) > index ? "done" : "")}>
-            <b>{index + 1}</b><span>{phase === "scan" ? "快速扫描" : phase === "compile" ? "集中编译" : "压力测试"}</span>
+            <b>{index + 1}</b><span>{phase === "scan" ? t("快速扫描") : phase === "compile" ? t("集中编译") : t("压力测试")}</span>
           </div>
         ))}
       </div>

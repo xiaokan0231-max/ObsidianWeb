@@ -155,6 +155,7 @@ test("加入按钮与选择器的状态切换都遵守三项上限，可取消�
 const sessionExports = await loadAppModule("app/interview-session.tsx", { stubs: (specifier) => {
   if (specifier === "./company-overview") return components;
   if (specifier === "./interview-session-v2") return { default: ({ doc, companyAction }) => createElement("div", { "data-selected-prep": doc.note.path }, doc.round, companyAction) };
+  if (specifier === "./ui-locale") return undefined;
   if (specifier.startsWith("./")) return { Blocks() {}, Inlines() {}, default() {}, PrepSearchBox() {}, useSlashFocus() {}, copySelectionWithoutRuby() {} };
   return undefined;
 } });

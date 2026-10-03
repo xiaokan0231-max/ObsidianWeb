@@ -11,6 +11,13 @@ import {
 } from "@/lib/review-practice";
 import { textCodec, useUrlState } from "./use-url-state";
 import { practiceStatusLabel } from "@/lib/ui-labels";
+import { useUiLocale } from "./ui-locale";
+
+const PRACTICE_MENU_JA: Record<string, string> = {
+  "练习队列": "練習キュー",
+  "待练": "練習待ち",
+  "已完成": "完了",
+};
 
 type PracticeItem = ReturnType<typeof parseInterviewPractice>[number] & {
   key: string;
@@ -35,6 +42,8 @@ function InterviewPractice({
   today: string;
   onNoteWritten: (note: Note) => void;
 }) {
+  const { locale } = useUiLocale();
+  const ui = (label: string) => locale === "ja" ? PRACTICE_MENU_JA[label] ?? label : label;
   const [showCompleted, setShowCompleted] = useState(false);
   // 选中的题放进 URL：去原笔记查完再回来，仍停在这一题。已完成／过期的键找不到时落回队首，不会空白。
   const [selectedKey, setSelectedKey] = useUrlState("item", "", textCodec);
@@ -101,9 +110,9 @@ function InterviewPractice({
     <section className="practice-view">
       <h1 className="sr-only">回答重练</h1>
 
-      <div className="practice-tabs" role="tablist" aria-label="练习队列">
-        <button className={!showCompleted ? "active" : ""} onClick={() => { setShowCompleted(false); selectItem(""); }}>待练 {current.length}</button>
-        <button className={showCompleted ? "active" : ""} onClick={() => { setShowCompleted(true); selectItem(""); }}>已完成 {completed.length}</button>
+      <div className="practice-tabs" role="tablist" aria-label={ui("练习队列")}>
+        <button className={!showCompleted ? "active" : ""} onClick={() => { setShowCompleted(false); selectItem(""); }}>{ui("待练")} {current.length}</button>
+        <button className={showCompleted ? "active" : ""} onClick={() => { setShowCompleted(true); selectItem(""); }}>{ui("已完成")} {completed.length}</button>
       </div>
 
       {visible.length === 0 ? (

@@ -1,12 +1,14 @@
-# ObsidianWeb
+# 求职作战室（ObsidianWeb）
 
-**以 Obsidian vault 为唯一数据源、不带数据库的本地优先知识工作台。**
+**以求职为中心，以 Obsidian vault 为唯一数据源的本地优先工作台。**
 
 一堆 Markdown 笔记（frontmatter・双链・标题）本身就是领域模型，
 由它实时构建案件看板、日历、面试准备、时间线、3D 知识图谱和学习闭环。
 Next.js (vinext) / React 19 / TypeScript，部署到 Cloudflare Workers。
 
-![ObsidianWeb](public/og.jpg)
+![求职作战室](public/og.jpg)
+
+右上角可切换中文／日本語。导航、搜索命令和常用菜单随界面语言切换，选择会在刷新后保留；笔记标题、正文与业务数据保留原文。
 
 - 🇯🇵 [日本語](README.md) ・ 🇬🇧 [English](README.en.md)
 

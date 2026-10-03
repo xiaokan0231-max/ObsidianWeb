@@ -22,6 +22,16 @@ import ReadingMode from "./reading-mode";
 import { headingPlainText } from "@/lib/reading-document";
 import { OPEN_NOTE_LABEL } from "@/lib/ui-labels";
 import { textCodec, useUrlState } from "./use-url-state";
+import { menuLabel } from "@/lib/ui-menu-labels";
+import { useUiLocale } from "./ui-locale";
+
+const PREP_MENU_JA: Record<string, string> = {
+  "搜索问题、能力或关键词（/ 聚焦）": "質問・能力・キーワードを検索（/ でフォーカス）",
+  "搜索标准回答": "標準回答を検索",
+  "答案分类": "回答の分類",
+  "全部": "すべて",
+  "面试问题": "面接の質問",
+};
 
 function GuidanceBlock({
   title,
@@ -62,6 +72,8 @@ export default function InterviewPrep({
    */
   syncUrl?: boolean;
 }) {
+  const { locale } = useUiLocale();
+  const ui = (label: string) => locale === "ja" ? PREP_MENU_JA[label] ?? menuLabel(label, locale) : label;
   const library = useMemo(() => findInterviewPrepLibrary(notes), [notes]);
   const [query, setQuery] = useState("");
   const [categoryParam, setCategory] = useUrlState("cat", "全部", textCodec, { enabled: syncUrl });
@@ -144,10 +156,10 @@ export default function InterviewPrep({
           value={query}
           onChange={setQuery}
           inputRef={searchRef}
-          placeholder="搜索问题、能力或关键词（/ 聚焦）"
-          label="搜索标准回答"
+          placeholder={ui("搜索问题、能力或关键词（/ 聚焦）")}
+          label={ui("搜索标准回答")}
         />
-        <div className="prep-categories" role="tablist" aria-label="答案分类">
+        <div className="prep-categories" role="tablist" aria-label={ui("答案分类")}>
           {categories.map((item) => (
             <button
               key={item}
@@ -159,14 +171,14 @@ export default function InterviewPrep({
                 setCategory(item);
                 setSelectedId("");
               }}
-            >{item}</button>
+            >{item === "全部" ? ui("全部") : item}</button>
           ))}
         </div>
         <button className="prep-source" type="button" onClick={() => onOpen(library.note)}>
-          {OPEN_NOTE_LABEL} ↗
+          {ui(OPEN_NOTE_LABEL)} ↗
         </button>
         <button type="button" className="reader-entry" onClick={() => setReaderOpen(true)}>
-          全文阅读
+          {ui("全文阅读")}
         </button>
       </section>
 
@@ -174,7 +186,7 @@ export default function InterviewPrep({
         <p className="prep-no-result">没有符合当前搜索和分类的答案。</p>
       ) : (
         <div className="prep-workbench">
-          <nav className="prep-question-list" aria-label="面试问题">
+          <nav className="prep-question-list" aria-label={ui("面试问题")}>
             <header>
               <div>
                 <span>{filteredItems.length}</span>

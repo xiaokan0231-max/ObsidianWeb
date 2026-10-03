@@ -41,8 +41,8 @@ import {
 } from "./app-route";
 import {
   MOBILE_PRIMARY_NAV_IDS,
-  NAVIGATION,
-  SECONDARY_NAVIGATION,
+  getNavigation,
+  getSecondaryNavigation,
   TOP_BAR_SECTION_IDS,
   type NavIconName,
 } from "./navigation";
@@ -75,6 +75,9 @@ import {
 import { scopesToReloadAfterStats, vaultScopeForView, type VaultScope } from "@/lib/vault-scope";
 import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { resolveNoteLink } from "@/lib/wiki-target";
+import { APP_BRANDING } from "@/lib/ui-locale";
+import { LanguageSwitch, useUiLocale } from "./ui-locale";
+import { SHELL_MESSAGES } from "./shell-messages";
 
 
 export type { Note };
@@ -156,6 +159,8 @@ function isRailCollapsed() {
 }
 
 function RailToggle() {
+  const { locale } = useUiLocale();
+  const ui = SHELL_MESSAGES[locale];
   // 服务端与首帧一律按展开渲染，内联脚本已经把视觉切好了。
   const collapsed = useSyncExternalStore(subscribeRail, isRailCollapsed, () => false);
 
@@ -176,10 +181,10 @@ function RailToggle() {
       className="rail-toggle"
       onClick={toggle}
       aria-expanded={!collapsed}
-      aria-label={collapsed ? "展开侧边导航" : "收起侧边导航"}
+      aria-label={collapsed ? ui.expandRail : ui.collapseRail}
     >
       <i aria-hidden="true">‹</i>
-      <span>收起</span>
+      <span>{ui.collapse}</span>
     </button>
   );
 }
@@ -211,6 +216,8 @@ function InterviewOverlay({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const { locale } = useUiLocale();
+  const ui = SHELL_MESSAGES[locale];
   const backRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -247,13 +254,13 @@ function InterviewOverlay({
       <header className="prep-card-overlay-bar">
         <button ref={backRef} type="button" onClick={onClose}>
           <span aria-hidden="true">←</span>
-          返回本场面试
+          {ui.sessionBack}
         </button>
         <div>
           <small>{eyebrow}</small>
           <strong id={titleId}>{title}</strong>
         </div>
-        <span><kbd>Esc</kbd> 也可返回</span>
+        <span><kbd>Esc</kbd> {ui.escapeBack}</span>
       </header>
       <div className={contentClassName}>{children}</div>
     </section>
@@ -273,13 +280,14 @@ function PrepCardOverlay({
   onOpen: (note: Note) => void;
   onClose: () => void;
 }) {
+  const { locale } = useUiLocale();
   return (
     <InterviewOverlay
       className="prep-card-overlay"
       contentClassName="prep-card-overlay-content"
       titleId="prep-card-overlay-title"
       eyebrow="STANDARD ANSWER LIBRARY"
-      title={`回答库 · ${cardId}`}
+      title={`${SHELL_MESSAGES[locale].answerLibrary} · ${cardId}`}
       origin={origin}
       onClose={onClose}
     >
@@ -359,6 +367,11 @@ function newHistoryEntryId() {
 }
 
 function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
+  const { locale } = useUiLocale();
+  const ui = SHELL_MESSAGES[locale];
+  const branding = APP_BRANDING[locale];
+  const navigation = getNavigation(locale);
+  const secondaryMenus = getSecondaryNavigation(locale);
   const [notes, setNotes] = useState<Note[]>([]);
   const [view, setView] = useState<View>(initialView);
   const [interviewRouteSearch, setInterviewRouteSearch] = useState(() =>
@@ -913,7 +926,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     setSelectedPath(note.path);
     setSelectedSection(null);
     setSearchOpen(false);
-  }, []);
+  }, [setSearchOpen]);
 
   const closeNote = useCallback(() => {
     if (window.history.state?.__echoNote) {
@@ -948,7 +961,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
         setSearchOpen(false);
       }
     },
-    [notes],
+    [notes, setSearchOpen],
   );
 
   const closeSceneNote = useCallback(() => {
@@ -1030,11 +1043,11 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     void loadVault({ scope: "all" });
   }, [selectedPath, selectedNote, loadVault]);
 
-  const sourceLabel = error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接";
+  const sourceLabel = error ? (locale === "ja" ? "接続中断" : "连接中断") : loading ? ui.loading : ui.connected;
   const syncedAt = fetchedAt
-    ? `${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(fetchedAt)} 同步`
-    : "本地数据源";
-  const sourceDetail = derivedState === "rebuilding" ? "正在重算统计…" : derivedState === "stale" ? "统计待重算" : syncedAt;
+    ? `${new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(fetchedAt)} ${locale === "ja" ? "同期" : "同步"}`
+    : locale === "ja" ? "ローカルデータ" : "本地数据源";
+  const sourceDetail = derivedState === "rebuilding" ? ui.rebuilding : derivedState === "stale" ? (locale === "ja" ? "集計の更新待ち" : "统计待重算") : syncedAt;
 
   const navigateToView = useCallback((
     nextView: View,
@@ -1068,7 +1081,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     setLibraryQuery(savedQuery);
     navigateToView("library", params);
     setSearchOpen(false);
-  }, [navigateToView]);
+  }, [navigateToView, setSearchOpen]);
 
   const openReview = useCallback((key?: string) => {
     const params = new URLSearchParams();
@@ -1179,23 +1192,23 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   }, [groupFilter, libraryQuery, view]);
 
   const activeNavigation =
-    NAVIGATION.find((item) => item.views.includes(view)) ?? NAVIGATION[0];
+    navigation.find((item) => item.views.includes(view)) ?? navigation[0];
   const secondaryNavigation =
-    SECONDARY_NAVIGATION[activeNavigation.id] ?? [];
+    secondaryMenus[activeNavigation.id] ?? [];
   const secondaryPlacement = TOP_BAR_SECTION_IDS.has(activeNavigation.id)
     ? "bar"
     : "rail";
   const activeSecondaryLabel =
     secondaryNavigation.find((item) => item.id === view)?.label ?? "";
   useEffect(() => {
-    document.title = `${activeSecondaryLabel || activeNavigation.label} · 回声`;
-  }, [activeNavigation.label, activeSecondaryLabel]);
+    document.title = `${activeSecondaryLabel || activeNavigation.label} · ${branding.name}`;
+  }, [activeNavigation.label, activeSecondaryLabel, branding.name]);
   // 左栏只展开当前分区的子项，顶层始终只有 7 个目标。
   const railSecondary = secondaryPlacement === "rail" ? secondaryNavigation : [];
-  const mobilePrimaryNavigation = NAVIGATION.filter((item) =>
+  const mobilePrimaryNavigation = navigation.filter((item) =>
     MOBILE_PRIMARY_NAV_IDS.has(item.id),
   );
-  const mobileMoreNavigation = NAVIGATION.filter(
+  const mobileMoreNavigation = navigation.filter(
     (item) => !MOBILE_PRIMARY_NAV_IDS.has(item.id),
   );
   const mobileMoreActive = mobileMoreNavigation.some((item) =>
@@ -1204,22 +1217,22 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="主导航">
+      <aside className="sidebar" aria-label={ui.primaryNav}>
         <a
           className="brand"
           href={appViewHref("calendar")}
           onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView("calendar"); } }}
-          aria-label="返回日历"
+          aria-label={ui.calendarBack}
         >
-          <span className="brand-mark">回</span>
+          <span className="brand-mark" aria-hidden="true">職</span>
           <span className="brand-copy">
-            <strong>回声</strong>
+            <strong>{branding.name}</strong>
             <small>CAREER WAR ROOM</small>
           </span>
         </a>
 
         <nav className="side-nav">
-          {NAVIGATION.map((item) => {
+          {navigation.map((item) => {
             const isActiveSection = item.views.includes(view);
             const subItems = isActiveSection ? railSecondary : [];
             return (
@@ -1242,7 +1255,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   <div
                     className="side-subnav"
                     role="group"
-                    aria-label={`${item.label}二级导航`}
+                    aria-label={`${item.label} · ${ui.subNav}`}
                   >
                     {subItems.map((sub) => (
                       <a
@@ -1275,8 +1288,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
         */}
         <header className="topbar">
           <div className="mobile-brand">
-            <span className="brand-mark">回</span>
-            <strong>回声</strong>
+            <span className="brand-mark" aria-hidden="true">職</span>
+            <strong>{branding.name}</strong>
           </div>
 
           <div className="topbar-where">
@@ -1292,7 +1305,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
               onClick={openNextEvent}
               title={`${nextEvent.date}${nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST ${nextEvent.label}`}
             >
-              <small>最近安排</small>
+              <small>{ui.nextEvent}</small>
               <em>{countdownLabel(nextEvent.date)}{nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST</em>
               <strong>{nextEvent.company}</strong>
               <i aria-hidden="true">→</i>
@@ -1303,7 +1316,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
             className="topbar-source"
             onClick={() => void loadVault({ fresh: true })}
             disabled={loading}
-            title={`${sourceLabel} · ${sourceDetail}（按 R 重新读取）`}
+            title={`${sourceLabel} · ${sourceDetail}（${ui.reloadHint}）`}
           >
             <span className={`status-dot ${error ? "error" : loading ? "loading" : ""}`} />
             <span className="topbar-source-copy">
@@ -1316,15 +1329,16 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
             className={`topbar-stats state-${derivedState}`}
             onClick={derivedState === "stale" ? () => void rebuildStats() : toggleAutoStats}
             disabled={derivedState === "rebuilding"}
-            title={statsError || (derivedState === "stale" ? "点击立即重算派生统计" : autoStats ? "写入后自动重算派生统计（点击改为手动）" : "派生统计手动重算（点击改为自动）")}
+            title={statsError || (derivedState === "stale" ? ui.rebuildHint : autoStats ? ui.autoStatsHint : ui.manualStatsHint)}
           >
-            {derivedState === "stale" ? "重算统计" : derivedState === "rebuilding" ? "重算中…" : autoStats ? "统计 · 自动" : "统计 · 手动"}
+            {derivedState === "stale" ? ui.rebuild : derivedState === "rebuilding" ? ui.rebuilding : autoStats ? ui.statsAuto : ui.statsManual}
           </button>
 
           <div className="topbar-keys">
-            <button onClick={() => setSearchOpen(true)} aria-label="搜索与命令"><kbd>⌘K</kbd>搜索</button>
-            <span><kbd>R</kbd>重读</span>
+            <button onClick={() => setSearchOpen(true)} aria-label={ui.searchCommands}><kbd>⌘K</kbd>{ui.search}</button>
+            <span><kbd>R</kbd>{ui.reload}</span>
           </div>
+          <LanguageSwitch />
         </header>
 
         {error && notes.length === 0 ? (
@@ -1335,21 +1349,21 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           <ViewErrorBoundary key={view} label={view}>
             {error && notes.length > 0 && (
               <div className="stale-data-banner" role="status">
-                <span>同步中断，正在显示 {sourceDetail} 的可用快照。</span>
-                <button onClick={() => void loadVault()}>重试</button>
+                <span>{ui.stalePrefix} {sourceDetail} {ui.staleSuffix}</span>
+                <button onClick={() => void loadVault()}>{ui.retry}</button>
               </div>
             )}
             {writeError && (
               <div className="global-write-banner" role="alert">
                 <span>{writeError}</span>
-                <button onClick={() => setWriteError("")} aria-label="关闭提示">×</button>
+                <button onClick={() => setWriteError("")} aria-label={ui.closeNotice}>×</button>
               </div>
             )}
             {secondaryNavigation.length > 0 && (
               <nav
                 className="section-nav"
                 data-placement={secondaryPlacement}
-                aria-label={`${activeNavigation.label}二级导航`}
+                aria-label={`${activeNavigation.label} · ${ui.subNav}`}
               >
                 {/* 分区名现在由顶栏的位置指示器说，这条带子只负责章节标签本身。 */}
                 <div className="section-nav-tabs">
@@ -1510,7 +1524,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
         )}
       </main>
 
-      <nav className="mobile-nav" aria-label="移动端主导航">
+      <nav className="mobile-nav" aria-label={ui.mobileNav}>
         {mobilePrimaryNavigation.map((item) => (
           <button
             key={item.id}
@@ -1529,13 +1543,13 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           aria-controls="mobile-more-menu"
         >
           <span aria-hidden="true">•••</span>
-          更多
+          {ui.more}
         </button>
       </nav>
 
       {mobileMoreOpen && (
-        <nav id="mobile-more-menu" className="mobile-more-menu" aria-label="移动端更多导航">
-          <small>更多功能</small>
+        <nav id="mobile-more-menu" className="mobile-more-menu" aria-label={ui.mobileMore}>
+          <small>{ui.moreFeatures}</small>
           {mobileMoreNavigation.map((item) => (
             <button
               key={item.id}
@@ -1608,16 +1622,20 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
 
 
 function LoadingState() {
+  const { locale } = useUiLocale();
+  const ui = SHELL_MESSAGES[locale];
   return (
     <div className="loading-state">
-      <div className="loading-orbit"><i /><i /><i /><strong>回</strong></div>
-      <h1>正在重建你的记忆关系…</h1>
-      <p>读取笔记、双链、时间和事实层级</p>
+      <div className="loading-orbit"><i /><i /><i /><strong>職</strong></div>
+      <h1>{ui.loadingTitle}</h1>
+      <p>{ui.loadingDetail}</p>
     </div>
   );
 }
 
 function ConnectionError({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const { locale } = useUiLocale();
+  const ui = SHELL_MESSAGES[locale];
   const detail = describeConnectionError(error);
   return (
     <div className="connection-error">
@@ -1625,7 +1643,7 @@ function ConnectionError({ error, onRetry }: { error: string; onRetry: () => voi
       <h1>{detail.title}</h1>
       <p>{detail.hint}</p>
       <code>{error}</code>
-      <button onClick={onRetry}>重新连接 <span>↻</span></button>
+      <button onClick={onRetry}>{ui.reconnect} <span>↻</span></button>
     </div>
   );
 }

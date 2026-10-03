@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import ts from "typescript";
+import { loadAppModule } from "./helpers/render-tsx.mjs";
 import * as notes from "../lib/notes.ts";
 import * as review from "../lib/review.ts";
 import * as feedback from "../lib/review-feedback.ts";
@@ -14,16 +11,11 @@ import * as clientApi from "../lib/client-api.ts";
 import * as routes from "../app/app-route.ts";
 import * as filters from "../app/interview-insights-state.ts";
 
-const require = createRequire(import.meta.url);
 async function component(file, additions = {}) {
-  const source = await readFile(new URL(`../app/${file}`, import.meta.url), "utf8");
-  const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
-  const exports = {};
   const dependencies = { "@/lib/notes": notes, "@/lib/review": review, "@/lib/review-feedback": feedback, "@/lib/review-paths": paths,
     "@/lib/client-api": clientApi, "./app-route": routes, "./interview-insights-state": filters,
     "./interview-advisory-sync": { useInterviewAdvisorySync: () => ({ state: null, busy: false, error: "", revision: 0, synchronize() {} }) }, ...additions };
-  runInNewContext(compiled.outputText, { exports, require: (specifier) => dependencies[specifier] ?? require(specifier) });
-  return exports;
+  return loadAppModule(`app/${file}`, { stubs: dependencies });
 }
 const advisoryUi = await component("interview-advisory.tsx");
 const insightsUi = await component("interview-insights.tsx", { "./interview-advisory": advisoryUi });

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { APP_BRANDING, resolveUiLocale, UI_LOCALE_COOKIE } from "@/lib/ui-locale";
+import { UiLocaleProvider } from "./ui-locale";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,8 +20,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
-  const title = "回声 · 求职作战室";
-  const description = "以 Obsidian 为唯一数据源的求职指挥台：岗位、选考进度、面试证据与训练闭环。";
+  const locale = resolveUiLocale((await cookies()).get(UI_LOCALE_COOKIE)?.value);
+  const { name: title, description } = APP_BRANDING[locale];
 
   return {
     title,
@@ -32,7 +34,8 @@ export async function generateMetadata(): Promise<Metadata> {
       title,
       description,
       type: "website",
-      images: [{ url: `${origin}/og.jpg`, width: 1200, height: 675, alt: "回声 求职作战室" }],
+      locale: locale === "ja" ? "ja_JP" : "zh_CN",
+      images: [{ url: `${origin}/og.jpg`, width: 1200, height: 675, alt: title }],
     },
     twitter: {
       card: "summary_large_image",
@@ -43,14 +46,15 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const locale = resolveUiLocale((await cookies()).get(UI_LOCALE_COOKIE)?.value);
   // suppressHydrationWarning：下面的内联脚本会在 hydration 前给 <html> 加 data-rail，属性差异是预期内的。
   return (
-    <html lang="zh-CN" suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
@@ -60,7 +64,7 @@ export default function RootLayout({
             __html: `try{if(localStorage.getItem("echo:rail")==="collapsed"){document.documentElement.dataset.rail="collapsed"}}catch(e){}`,
           }}
         />
-        {children}
+        <UiLocaleProvider initialLocale={locale}>{children}</UiLocaleProvider>
       </body>
     </html>
   );

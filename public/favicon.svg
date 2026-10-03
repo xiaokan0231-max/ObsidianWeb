@@ -3,6 +3,8 @@
     d="M32 0A32 32 0 0 1 64 32A32 32 0 0 1 32 64L7.7 64A7.7 7.7 0 0 1 0 56.3L0 32A32 32 0 0 1 32 0Z"
     fill="#18231e"
   />
-  <rect x="18.5" y="18.5" width="27" height="27" fill="none" stroke="#f7f4ea" stroke-width="4.6" />
-  <rect x="27.5" y="27.5" width="9" height="9" fill="#f7f4ea" />
+  <g fill="none" stroke="#f7f4ea" stroke-width="3.5" stroke-linejoin="round">
+    <rect x="14" y="24" width="36" height="25" rx="3" />
+    <path d="M24 24v-8h16v8M14 33c12 6 24 6 36 0M29 35h6" />
+  </g>
 </svg>

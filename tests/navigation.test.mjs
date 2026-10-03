@@ -8,6 +8,9 @@ import {
   PAGE_COMMANDS,
   SECONDARY_NAVIGATION,
   TOP_BAR_SECTION_IDS,
+  getNavigation,
+  getSecondaryNavigation,
+  getPageCommands,
 } from "../app/navigation.ts";
 
 // 新增一页时只改了 app-route 而忘了导航表或 ⌘K，这页就只能靠手敲 URL 进去。
@@ -16,6 +19,39 @@ test("⌘K 页面命令对每个视图恰好一条", () => {
   const views = PAGE_COMMANDS.map((command) => command.view);
   assert.equal(new Set(views).size, views.length, "没有重复的视图");
   assert.deepEqual([...views].sort(), [...APP_VIEWS].sort());
+});
+
+test("切换为日语只改变文言，导航归属、视图覆盖和默认入口不变", () => {
+  assert.deepEqual(getNavigation("zh-CN"), NAVIGATION);
+  assert.deepEqual(getSecondaryNavigation("zh-CN"), SECONDARY_NAVIGATION);
+  assert.deepEqual(getPageCommands("zh-CN"), PAGE_COMMANDS);
+  const japaneseNavigation = getNavigation("ja");
+  const japaneseSecondary = getSecondaryNavigation("ja");
+  const japaneseCommands = getPageCommands("ja");
+  assert.equal(japaneseNavigation[0].label, "カレンダー");
+  for (const [index, item] of japaneseNavigation.entries()) {
+    const { label, mobileLabel, ...route } = item;
+    const { label: chineseLabel, mobileLabel: chineseMobileLabel, ...chineseRoute } = NAVIGATION[index];
+    assert.deepEqual(route, chineseRoute);
+    assert.ok(label && mobileLabel && chineseLabel && chineseMobileLabel);
+    assert.notEqual(label, chineseLabel);
+    assert.deepEqual(
+      (japaneseSecondary[item.id] ?? []).map(({ id, glyph, caption }) => ({ id, glyph, caption })),
+      (SECONDARY_NAVIGATION[item.id] ?? []).map(({ id, glyph, caption }) => ({ id, glyph, caption })),
+    );
+  }
+  assert.deepEqual(japaneseCommands.map(({ view }) => view), PAGE_COMMANDS.map(({ view }) => view));
+  const labels = new Set([
+    ...japaneseNavigation.map(({ label }) => label),
+    ...Object.values(japaneseSecondary).flat().map(({ label }) => label),
+  ]);
+  for (const [index, command] of japaneseCommands.entries()) {
+    assert.ok(labels.has(command.label), `${command.view} 的日语命令名与菜单一致`);
+    assert.notEqual(command.description, PAGE_COMMANDS[index].description);
+    assert.equal(command.keywords, PAGE_COMMANDS[index].keywords);
+    assert.ok(command.keywords.includes(command.label), "用日语菜单名可检索");
+    assert.ok(command.keywords.includes(PAGE_COMMANDS[index].label), "用中文菜单名仍可检索");
+  }
 });
 
 test("日历是导航首项，没有总览或待办入口，默认命令围绕日程和本场面试", () => {

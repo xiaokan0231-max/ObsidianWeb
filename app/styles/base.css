@@ -73,6 +73,7 @@ body {
   line-height: 1.55;
 }
 
+html[lang="ja"] body,
 [lang="ja"] {
   font-family: var(--font-geist-sans), "Hiragino Sans", "Yu Gothic", "Noto Sans CJK JP", sans-serif;
 }
@@ -131,6 +132,7 @@ button {
 }
 
 .brand-mark {
+  flex: 0 0 auto;
   width: 39px;
   height: 39px;
   display: grid;
@@ -150,8 +152,9 @@ button {
 
 .brand-copy strong {
   font-family: "Songti SC", "Noto Serif CJK SC", serif;
-  font-size: 21px;
-  letter-spacing: 0.08em;
+  font-size: 18px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
 }
 
 .brand-copy small {

@@ -53,6 +53,37 @@ import { buildContextPickerGroups } from "@/lib/context-picker";
 import { companyHeroTone } from "@/lib/company-hero";
 import { copySelectionWithoutRuby } from "./ruby-copy";
 import { isTypingTarget, PrepSearchBox, useSlashFocus } from "./prep-search";
+import { menuLabel } from "@/lib/ui-menu-labels";
+import { useUiLocale } from "./ui-locale";
+
+const LEGACY_SESSION_MENU_JA: Record<string, string> = {
+  "公司与面谈视图": "企業と面談の表示",
+  "面谈准备": "面談準備",
+  "公司对比": "企業比較",
+  "面试轮次": "面接回数",
+  "更多": "その他",
+  "准备模式": "準備モード",
+  "通读": "通読",
+  "导读": "概要",
+  "这场面谈的来龙去脉": "今回の面談の背景と流れ",
+  "5分钟": "5分",
+  "冲刺": "直前確認",
+  "按临场顺序快速热身": "当日の流れに沿って短く確認",
+  "完整": "全体",
+  "深度准备": "詳しく準備",
+  "公司、问答与全部材料": "企業情報・質疑応答・すべての資料",
+  "主模块": "主な項目",
+  "全章搜索（/ 聚焦）": "すべての章を検索（/ でフォーカス）",
+  "在这份准备文档里搜索": "この準備資料を検索",
+  "打开横向对照 →": "面談の比較を開く →",
+  "打开案件正本": "応募案件の元記録を開く",
+  "打开面谈记录": "面談記録を開く",
+};
+
+function useLegacySessionMenu() {
+  const { locale } = useUiLocale();
+  return (label: string) => locale === "ja" ? LEGACY_SESSION_MENU_JA[label] ?? menuLabel(label, locale) : label;
+}
 
 // 会社／応募案件を選び、その中の各回を履歴のまま読む画面。
 // 回答库（面试准备）は平時に引く辞書、こちらは当日に読む一枚。用途が違うので分けている。
@@ -590,6 +621,7 @@ function DocReader({
   onOpenCard: (cardId: string) => void;
   onOpenWiki: (target: string, section?: string) => void;
 }) {
+  const ui = useLegacySessionMenu();
   const [active, setActive] = useState(0);
   const [query, setQuery] = useState("");
   const [readerOpen, setReaderOpen] = useState(false);
@@ -800,7 +832,7 @@ function DocReader({
       )}
 
       <div className="prep-doc-bar">
-        <nav className="prep-doc-nav" aria-label="主模块">
+        <nav className="prep-doc-nav" aria-label={ui("主模块")}>
           {groups.map((group, index) => (
             <button
               key={group.id}
@@ -819,11 +851,11 @@ function DocReader({
           value={query}
           onChange={setQuery}
           inputRef={searchRef}
-          placeholder="全章搜索（/ 聚焦）"
-          label="在这份准备文档里搜索"
+          placeholder={ui("全章搜索（/ 聚焦）")}
+          label={ui("在这份准备文档里搜索")}
         />
         <button type="button" className="reader-entry" onClick={() => setReaderOpen(true)}>
-          全文阅读
+          {ui("全文阅读")}
         </button>
         {readerOpen && (
           <PrepMaterialReader
@@ -1099,6 +1131,7 @@ function InterviewSession({
    *  ——当日かどうかで既定モード（确认/冲刺/深度）が変わる画面なので、ここが一番効く。 */
   today: string;
 }) {
+  const ui = useLegacySessionMenu();
   const docs = useMemo(() => findInterviewPrepDocs(notes), [notes]);
   const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
   const digest = useMemo(() => buildDigest(notes), [notes]);
@@ -1158,7 +1191,7 @@ function InterviewSession({
     if (!compared.length && context) setComparePaths([context.note.path]);
     setCompareSelectorOpen(true);
   };
-  const companyAction = <div className="co-header-actions"><button type="button" className="co-compare-entry" onClick={openCompareSelector}>公司对比<span aria-hidden="true">{compared.length ? ` ${compared.length} / 3` : " ↗"}</span></button><CompanyCompareButton context={context} compared={!!context && compared.some((item) => item.key === context.key)} full={compared.length >= COMPANY_COMPARE_LIMIT} onToggle={() => {
+  const companyAction = <div className="co-header-actions"><button type="button" className="co-compare-entry" onClick={openCompareSelector}>{ui("公司对比")}<span aria-hidden="true">{compared.length ? ` ${compared.length} / 3` : " ↗"}</span></button><CompanyCompareButton context={context} compared={!!context && compared.some((item) => item.key === context.key)} full={compared.length >= COMPANY_COMPARE_LIMIT} onToggle={() => {
     if (!context) return;
     if (compared.some((item) => item.key === context.key)) removeCompare(context.note.path);
     else setComparePaths((current) => toggleCompanyComparison(current, context.note.path));
@@ -1255,7 +1288,7 @@ function InterviewSession({
         )}
       </summary>
       <div className="prep-weakness-body">
-        {onOpenInsights && <div className="prep-insights-entry"><p>准备前也可以对照其他公司的关注点、有效表达与机会条件。</p><button type="button" onClick={onOpenInsights}>打开横向对照 →</button></div>}
+        {onOpenInsights && <div className="prep-insights-entry"><p>准备前也可以对照其他公司的关注点、有效表达与机会条件。</p><button type="button" onClick={onOpenInsights}>{ui("打开横向对照 →")}</button></div>}
         <p>根据 {digest.interviews.length} 场回答质量复盘统计；正本来自 vault 的「面接傾向_横断」。</p>
         <ul>
           {digest.tags.filter((tag) => tag.repeated).map((tag) => (
@@ -1279,13 +1312,13 @@ function InterviewSession({
   if (!selected || legacyPrepPath !== selected.note.path) {
     // 顶部色条跟随案件状态（面接中橙・不採用灰…），与头部胶囊同一张色表。
     return <><div className={`co-shell${context ? ` tone-${companyHeroTone(context, today)}` : ""}`}><header className="co-shell-head"><CompanyHeroCard context={context} rounds={contextRounds} today={today} linkedCase={linkedCase} fallbackCompany={selected?.company || initialCompany} fallbackTitle={selected?.round ?? ""} onOpen={onOpen} /><div className="co-shell-controls">{contextPicker}{companyAction}</div></header>
-      <nav className="co-legacy-tabs" aria-label="公司与面谈视图"><button type="button" aria-pressed="true">公司总览</button><button type="button" disabled={!selected} aria-pressed="false" onClick={() => selected && setLegacyPrepPath(selected.note.path)}>面谈准备</button>{!selected && <span className="co-prep-unavailable">本场尚无准备稿</span>}</nav>
+      <nav className="co-legacy-tabs" aria-label={ui("公司与面谈视图")}><button type="button" aria-pressed="true">{ui("公司总览")}</button><button type="button" disabled={!selected} aria-pressed="false" onClick={() => selected && setLegacyPrepPath(selected.note.path)}>{ui("面谈准备")}</button>{!selected && <span className="co-prep-unavailable">本场尚无准备稿</span>}</nav>
       {companyContent}{context && <button type="button" className="co-compare-toggle" onClick={() => onOpen(context.note)}>{context.kind === "meeting" ? "打开面谈记录" : "打开案件记录"} ↗</button>}
     </div>{compareUI}</>;
   }
 
   return (
-    <><div className="co-legacy-tabs co-legacy-return" role="navigation" aria-label="公司与面谈视图"><button type="button" aria-pressed="false" onClick={() => { setLegacyPrepPath(null); window.scrollTo({ top: 0, behavior: "instant" }); }}>公司总览</button><button type="button" aria-pressed="true">面谈准备</button>{companyAction}</div>
+    <><div className="co-legacy-tabs co-legacy-return" role="navigation" aria-label={ui("公司与面谈视图")}><button type="button" aria-pressed="false" onClick={() => { setLegacyPrepPath(null); window.scrollTo({ top: 0, behavior: "instant" }); }}>{ui("公司总览")}</button><button type="button" aria-pressed="true">{ui("面谈准备")}</button>{companyAction}</div>
     <div className={`prep-view session-view mode-${sessionMode}`}>
       {selected && (
         <>
@@ -1318,9 +1351,9 @@ function InterviewSession({
               {series.length > 1 && contextPicker}
               {(selectedSeries?.rounds.length ?? 0) > 1 && (
                 <label className="session-company-switch session-round-switch">
-                  <span>面试轮次</span>
+                  <span>{ui("面试轮次")}</span>
                   <select
-                    aria-label="切换当前公司的面试轮次"
+                    aria-label={ui("切换当前公司的面试轮次")}
                     value={selected.note.path}
                     onChange={(event) => {
                       const next = docs.find((doc) => doc.note.path === event.target.value);
@@ -1337,14 +1370,14 @@ function InterviewSession({
                 </label>
               )}
               <details className="session-hero-more">
-                <summary>更多</summary>
+                <summary>{ui("更多")}</summary>
                 <div>
                   <button type="button" onClick={() => onOpen(selected.note)}>
-                    {OPEN_NOTE_LABEL} ↗
+                    {ui(OPEN_NOTE_LABEL)} ↗
                   </button>
                   {(selected.caseLink || selected.meetingLink) && (
                     <button type="button" onClick={() => onOpenWiki(selected.caseLink || selected.meetingLink)}>
-                      {selected.caseLink ? "打开案件正本" : "打开面谈记录"} ↗
+                      {selected.caseLink ? ui("打开案件正本") : ui("打开面谈记录")} ↗
                     </button>
                   )}
                 </div>
@@ -1371,7 +1404,7 @@ function InterviewSession({
             </dl>
           </header>
 
-          <nav className="session-mode-nav" aria-label="准备模式">
+          <nav className="session-mode-nav" aria-label={ui("准备模式")}>
             <div data-modes={availableModes.length}>
               {availableModes.map((mode) => (
                 <button
@@ -1381,9 +1414,9 @@ function InterviewSession({
                   aria-current={sessionMode === mode.id ? "page" : undefined}
                   onClick={() => chooseSessionMode(selected.note.path, mode.id)}
                 >
-                  <span>{mode.duration}</span>
-                  <strong>{mode.label}</strong>
-                  <small>{mode.description}</small>
+                  <span>{ui(mode.duration)}</span>
+                  <strong>{ui(mode.label)}</strong>
+                  <small>{ui(mode.description)}</small>
                 </button>
               ))}
             </div>

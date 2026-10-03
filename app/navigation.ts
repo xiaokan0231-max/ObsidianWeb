@@ -1,4 +1,5 @@
 import type { AppView } from "./app-route.ts";
+import type { UiLocale } from "../lib/ui-locale.ts";
 
 /*
  * 导航表的正本：左栏、顶部章节带、移动端底栏、⌘K 页面命令都从这里读。
@@ -100,6 +101,48 @@ export const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigat
   ],
 };
 
+const JAPANESE_PRIMARY_LABELS: Record<PrimaryNavId, { label: string; mobileLabel: string }> = {
+  actions: { label: "カレンダー", mobileLabel: "予定" },
+  career: { label: "就職活動", mobileLabel: "就活" },
+  interview: { label: "面接対策", mobileLabel: "面接" },
+  training: { label: "トレーニング", mobileLabel: "練習" },
+  resources: { label: "資料ライブラリ", mobileLabel: "資料" },
+};
+
+const JAPANESE_SECONDARY_LABELS: Record<Exclude<AppView, "calendar">, string> = {
+  jobs: "求人・応募先",
+  analytics: "選考・分析",
+  session: "今回の面接",
+  prep: "基本の準備",
+  review: "面接の振り返り",
+  insights: "面接の比較",
+  practice: "回答練習",
+  language: "日本語練習",
+  topics: "テーマ別練習",
+  library: "すべての資料",
+  timeline: "タイムライン",
+  graph: "関連図",
+};
+
+/** 只翻译显示文言，让两种语言共用同一套 URL 和视图归属。 */
+export function getNavigation(locale: UiLocale): PrimaryNavigationItem[] {
+  if (locale === "zh-CN") return NAVIGATION;
+  return NAVIGATION.map((item) => ({ ...item, ...JAPANESE_PRIMARY_LABELS[item.id] }));
+}
+
+export function getSecondaryNavigation(locale: UiLocale): Partial<Record<PrimaryNavId, SecondaryNavigationItem[]>> {
+  if (locale === "zh-CN") return SECONDARY_NAVIGATION;
+  return Object.fromEntries(
+    Object.entries(SECONDARY_NAVIGATION).map(([id, items]) => [
+      id,
+      items.map((item) => ({
+        ...item,
+        label: item.id === "calendar" ? "カレンダー" : JAPANESE_SECONDARY_LABELS[item.id],
+      })),
+    ]),
+  );
+}
+
 /**
  * 二级导航住在哪：
  * 资料库的三项是**同一批笔记的三种看法**（列表・时序・关系），切换是浏览时的常态动作，
@@ -132,13 +175,13 @@ export type PageCommand = {
  */
 const PAGE_COMMAND_HINTS: Record<AppView, { description: string; keywords: string }> = {
   calendar: { description: "已约定的面试与面谈日程", keywords: "日历 首页 日程 安排 面试时间 home calendar schedule 予定 カレンダー" },
-  jobs: { description: "判断下一项応募", keywords: "岗位 机会 求职 応募 job" },
+  jobs: { description: "判断下一项応募", keywords: "岗位 机会 求职 応募 求人 就職 就活 job" },
   analytics: { description: "选考进度、渠道与到达率", keywords: "选考 分析 进度 统计 漏斗 渠道 pipeline analytics progress 選考 応募状況" },
   session: { description: "当前这场面试的准备稿与话术", keywords: "本场 面试 当日 准备稿 session interview 面接 本番 志望動機 逆質問" },
   prep: { description: "通用回答库与标准答案", keywords: "通用 准备 回答库 标准答案 playbook prep answers 回答集 自己紹介" },
   review: { description: "面试复盘与待裁定的批注", keywords: "复盘 面试 裁定 批注 review 振り返り 反省" },
   insights: { description: "跨场面试的顾问分析与多轮对照", keywords: "横向 对照 洞察 顾问 分析 跨面试 insights advisory 横断 傾向" },
-  practice: { description: "开始今天的素振り", keywords: "回答 重练 练习 practice 面试" },
+  practice: { description: "开始今天的素振り", keywords: "回答 重练 练习 practice 面试 面接 練習 素振り" },
   language: { description: "日语表达与会话训练", keywords: "日语 训练 会话 日本語 nihongo japanese language 敬語" },
   topics: { description: "按专项练习日语表达", keywords: "专项 训练 表达 课程 topics focus course 表現 練習" },
   library: { description: "浏览全部笔记与资料", keywords: "资料 全部 笔记 资料库 library archive notes ノート 資料" },
@@ -146,21 +189,48 @@ const PAGE_COMMAND_HINTS: Record<AppView, { description: string; keywords: strin
   graph: { description: "笔记之间的关系图", keywords: "关系 关系图 图谱 双链 graph network links 関係 グラフ" },
 };
 
+const JAPANESE_COMMAND_DESCRIPTIONS: Record<AppView, string> = {
+  calendar: "確定した面接・面談の予定",
+  jobs: "次の応募先を検討する",
+  analytics: "選考の進捗・応募経路・通過率",
+  session: "今回の面接の準備メモ・回答例",
+  prep: "共通の回答集・標準回答",
+  review: "面接の振り返り・未確認のコメント",
+  insights: "面接を横断した分析・選考段階の比較",
+  practice: "今日の回答練習を始める",
+  language: "日本語の表現・会話練習",
+  topics: "テーマ別に日本語表現を練習する",
+  library: "すべてのノート・資料を見る",
+  timeline: "出来事・記録を時系列で振り返る",
+  graph: "ノート同士のつながりを見る",
+};
+
 /** 每个视图恰好一条，顺序与左栏一致。 */
-export const PAGE_COMMANDS: readonly PageCommand[] = (() => {
+export function getPageCommands(locale: UiLocale): readonly PageCommand[] {
   const commands: PageCommand[] = [];
   const seen = new Set<AppView>();
-  for (const primary of NAVIGATION) {
-    const secondary = SECONDARY_NAVIGATION[primary.id] ?? [];
+  const secondaryNavigation = getSecondaryNavigation(locale);
+  for (const primary of getNavigation(locale)) {
+    const secondary = secondaryNavigation[primary.id] ?? [];
     for (const view of primary.views) {
       if (seen.has(view)) continue;
       seen.add(view);
       const label = secondary.find((item) => item.id === view)?.label ?? primary.label;
-      commands.push({ view, label, ...PAGE_COMMAND_HINTS[view] });
+      const chineseLabel = SECONDARY_NAVIGATION[primary.id]?.find((item) => item.id === view)?.label ?? NAVIGATION.find((item) => item.id === primary.id)?.label ?? "";
+      const japaneseLabel = view === "calendar" ? "カレンダー" : JAPANESE_SECONDARY_LABELS[view];
+      commands.push({
+        view,
+        label,
+        // 切换界面语言后，仍可用另一种语言的菜单名找到同一页。
+        keywords: `${PAGE_COMMAND_HINTS[view].keywords} ${chineseLabel} ${japaneseLabel}`,
+        description: locale === "ja" ? JAPANESE_COMMAND_DESCRIPTIONS[view] : PAGE_COMMAND_HINTS[view].description,
+      });
     }
   }
   return commands;
-})();
+}
+
+export const PAGE_COMMANDS: readonly PageCommand[] = getPageCommands("zh-CN");
 
 /**
  * 没输入关键词时只摆这几条：全部页面按钮摊开，搜索面板就先变成了第二个左栏，

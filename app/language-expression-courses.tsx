@@ -27,6 +27,42 @@ import { isTypingTarget as isEditableTarget } from "@/lib/keyboard";
 import type { Note } from "@/lib/notes";
 import { Inlines } from "./prep-doc-render";
 import { textCodec, useUrlState } from "./use-url-state";
+import { useUiLocale } from "./ui-locale";
+
+// 练习方式的名称从界面字典派生，课程与练习素材仍按原文显示。
+const EXPRESSION_MENU_COPY = {
+  "专项课程目录": ["专项课程目录", "専門コース一覧"],
+  "{count} 门课程": ["{count} 门课程", "{count} コース"],
+  "{chunks} 词块 · {patterns} 句型": ["{chunks} 词块 · {patterns} 句型", "表現 {chunks} 件 · 文型 {patterns} 件"],
+  "专项训练方式": ["专项训练方式", "専門トレーニングの練習方式"],
+  "中译日词块": ["中译日词块", "中国語から日本語の表現へ"],
+  "固定搭配补全": ["固定搭配补全", "定型表現の穴埋め"],
+  "句型替换": ["句型替换", "文型の置き換え"],
+  "随机表达": ["随机表达", "ランダム発話"],
+  "安全改写": ["安全改写", "適切な言い換え"],
+  "词": ["词", "語"],
+  "搭": ["搭", "連"],
+  "句": ["句", "型"],
+  "说": ["说", "話"],
+  "改": ["改", "改"],
+  "先看中文功能，主动提取日语表达。": ["先看中文功能，主动提取日语表达。", "中国語で意図を確認し、日本語表現を思い出す。"],
+  "把词块放回自然、常用的搭配中。": ["把词块放回自然、常用的搭配中。", "表現を自然でよく使う組み合わせに当てはめる。"],
+  "用同一个骨架替换不同观点和内容。": ["用同一个骨架替换不同观点和内容。", "同じ文型で意見や内容を置き換える。"],
+  "抽取原因、对策和句型，自由说二至四句。": ["抽取原因、对策和句型，自由说二至四句。", "原因・対策・文型を選び、自由に 2〜4 文話す。"],
+  "修正真实口误，换掉绝对化或越界表达。": ["修正真实口误，换掉绝对化或越界表达。", "実際の言い間違いや、断定しすぎた表現を修正する。"],
+  "词块范围": ["词块范围", "表現の範囲"],
+  "核心词块": ["核心词块", "基本表現"],
+  "扩展词块": ["扩展词块", "発展表現"],
+} as const satisfies Record<string, readonly [string, string]>;
+
+type ExpressionMenuKey = keyof typeof EXPRESSION_MENU_COPY;
+function useExpressionMenu() {
+  const { locale } = useUiLocale();
+  const t = (key: ExpressionMenuKey, values: Record<string, string | number> = {}) =>
+    EXPRESSION_MENU_COPY[key][locale === "ja" ? 1 : 0].replace(/\{(\w+)\}/g, (match, name: string) => String(values[name] ?? match));
+  const label = (value: string) => Object.hasOwn(EXPRESSION_MENU_COPY, value) ? t(value as ExpressionMenuKey) : value;
+  return { t, label };
+}
 
 type PracticeMode =
   | "recall"
@@ -382,6 +418,7 @@ function LanguageExpressionCourses({
   /** 進捗保存の応答に載る更新後ノートを1件差し替える。全量再取得（onVaultChanged）の代替。 */
   onNoteWritten?: (note: Note) => void;
 }) {
+  const { t } = useExpressionMenu();
   const courses = useMemo(() => findLanguageExpressionCourses(notes), [notes]);
   // 选中的课程放进 URL，便于刷新后停在原处；各课程的练习位置仍由本机的 study state 记住。
   const [selectedCourseId, setSelectedCourseId] = useUrlState("course", "", textCodec);
@@ -438,10 +475,10 @@ function LanguageExpressionCourses({
   return (
     <div className="expression-courses-view">
       <div className="expression-course-shell">
-        <aside className="expression-catalog" aria-label="专项课程目录">
+        <aside className="expression-catalog" aria-label={t("专项课程目录")}>
           <div className="expression-catalog-heading">
             <small>COURSE CATALOG</small>
-            <strong>{courses.length} 门课程</strong>
+            <strong>{t("{count} 门课程", { count: courses.length })}</strong>
           </div>
           {courses.map((course) => (
             <button
@@ -453,7 +490,7 @@ function LanguageExpressionCourses({
               <span>{course.topic}</span>
               <strong>{course.title}</strong>
               <small>
-                {course.chunks.length} 词块 · {course.patterns.length} 句型
+                {t("{chunks} 词块 · {patterns} 句型", { chunks: course.chunks.length, patterns: course.patterns.length })}
               </small>
             </button>
           ))}
@@ -493,6 +530,7 @@ function CourseWorkbench({
   initialPosition?: StudyPosition;
   onPositionChange: (courseId: string, position: StudyPosition) => void;
 }) {
+  const { t, label: menuLabel } = useExpressionMenu();
   const derivedProgress = useMemo(
     () => courseProgress(course, notes),
     [course, notes],
@@ -749,7 +787,7 @@ function CourseWorkbench({
         </dl>
       </header>
 
-      <nav className="expression-mode-tabs" aria-label="专项训练方式">
+      <nav className="expression-mode-tabs" aria-label={t("专项训练方式")}>
         {MODES.map((item) => (
           <button
             type="button"
@@ -757,8 +795,8 @@ function CourseWorkbench({
             className={mode === item.id ? "active" : ""}
             onClick={() => switchMode(item.id)}
           >
-            <i aria-hidden="true">{item.short}</i>
-            <span><strong>{item.label}</strong><small>{item.description}</small></span>
+            <i aria-hidden="true">{menuLabel(item.short)}</i>
+            <span><strong>{menuLabel(item.label)}</strong><small>{menuLabel(item.description)}</small></span>
           </button>
         ))}
       </nav>
@@ -848,21 +886,22 @@ function LevelSwitch({
   value: "core" | "extended";
   onChange: (value: "core" | "extended") => void;
 }) {
+  const { t } = useExpressionMenu();
   return (
-    <div className="expression-level-switch" aria-label="词块范围">
+    <div className="expression-level-switch" aria-label={t("词块范围")}>
       <button
         type="button"
         className={value === "core" ? "active" : ""}
         onClick={() => onChange("core")}
       >
-        核心词块
+        {t("核心词块")}
       </button>
       <button
         type="button"
         className={value === "extended" ? "active" : ""}
         onClick={() => onChange("extended")}
       >
-        扩展词块
+        {t("扩展词块")}
       </button>
     </div>
   );
