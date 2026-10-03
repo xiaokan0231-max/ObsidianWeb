@@ -76,6 +76,17 @@ test("schema：形の正しい job-case は問題なし", () => {
   assert.deepEqual(validateJobCaseFrontmatter(valid), []);
 });
 
+test("schema：AI応募执行者需要真实応募日和执行AI，作者与旧数据不推定为代投", () => {
+  const submitted = { ...valid, applied_on: "2026-08-01", application_actor: "ai", application_agent: "Codex" };
+  assert.deepEqual(validateJobCaseFrontmatter(submitted), []);
+  assert.deepEqual(validateJobCaseFrontmatter({ ...valid, ai_author: "Codex", origin: "ai-reco" }), []);
+  assert.ok(validateJobCaseFrontmatter({ ...submitted, applied_on: undefined }).some((problem) => /applied_on/.test(problem)));
+  assert.ok(validateJobCaseFrontmatter({ ...submitted, applied_on: "2026-02-30" }).some((problem) => /applied_on/.test(problem)));
+  assert.ok(validateJobCaseFrontmatter({ ...submitted, application_agent: "" }).some((problem) => /application_agent/.test(problem)));
+  assert.ok(validateJobCaseFrontmatter({ ...submitted, status: "未応募" }).some((problem) => /未応募/.test(problem)));
+  assert.ok(validateJobCaseFrontmatter({ ...submitted, application_actor: "author" }).some((problem) => /application_actor/.test(problem)));
+});
+
 test("schema：v2の六軸・cap・Gate・監査labelが整合していれば問題なし", () => {
   assert.deepEqual(validateJobCaseFrontmatter(validV2), []);
 });

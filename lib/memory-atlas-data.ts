@@ -326,11 +326,11 @@ export function localDateKey(date = new Date()) {
 }
 
 /** 今日から見て何日か。日付として読めなければ null（0日先と区別する）。 */
-export function daysFromToday(date: string) {
+export function daysFromToday(date: string, now = new Date()) {
   if (!date) return null;
   const target = new Date(`${date}T00:00:00`);
   if (Number.isNaN(target.getTime())) return null;
-  const today = new Date(`${localDateKey()}T00:00:00`);
+  const today = new Date(`${localDateKey(now)}T00:00:00`);
   return Math.round((target.getTime() - today.getTime()) / 86400000);
 }
 
@@ -341,8 +341,8 @@ export function daysFromToday(date: string) {
  * そのまま `${days} 天后` に流していて、期限を過ぎた予定が「-2 天后」と出ていた。
  * 表示だけの分岐に見えるが、遅れているものが遅れて見えないという実害がある。
  */
-export function countdownLabel(date: string) {
-  const days = daysFromToday(date);
+export function countdownLabel(date: string, now = new Date()) {
+  const days = daysFromToday(date, now);
   if (days === null) return "日期未定";
   if (days === 0) return "今天";
   if (days === 1) return "明天";

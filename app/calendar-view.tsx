@@ -5,6 +5,7 @@ import { type Note } from "@/lib/notes";
 import { type UiLocale } from "@/lib/ui-locale";
 import { useUiLocale } from "./ui-locale";
 import { calendarMonthDays } from "@/lib/calendar-month";
+import { buildAiApplicationDays, type AiApplicationDay } from "@/lib/calendar-applications";
 import { isInterviewEvent, type CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { calendarProgress, type CalendarProgress } from "@/lib/calendar-progress";
 import { calendarRoundBadge, interviewRound } from "@/lib/interview-round";
@@ -54,6 +55,17 @@ const calendarZh = {
   recent: "最近记录",
   history: "历史事实",
   historyEmpty: "还没有历史日程。",
+  aiApplications: "AI 代投",
+  aiApplicationsToday: "今天 AI 代投",
+  applicationCompanyUnit: "家公司",
+  applicationPositionCount: (count: number) => `${count} 个岗位`,
+  applicationDayLabel: (date: string, companies: number, positions: number) => `${date} JST · AI 代投 ${companies} 家公司 · ${positions} 个岗位 · 展开申请详情`,
+  applicationNoPosition: "岗位未记载",
+  applicationSubmission: (agent: string) => `由 ${agent} 提交`,
+  applicationRecord: "查看记录",
+  applicationRecordLabel: (date: string, company: string, position: string, agent: string) => `${date} JST · ${company} · ${position} · 由 ${agent} 提交 · 查看申请记录`,
+  applicationsLoading: "正在读取申请记录…",
+  applicationsEmpty: "今天暂无已确认的 AI 代投。",
 };
 type CalendarCopy = typeof calendarZh;
 const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
@@ -73,6 +85,12 @@ const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
     interview: "面接", meeting: "面談", review: "面接の振り返り", schedule: "予定を見る", source: "元の記録を見る",
     more: (count) => `ほか ${count} 件`, upcomingWeek: "今後 7 日間", upcomingEmpty: "今後 7 日間に確定した予定はありません。",
     later: "その後の予定", recent: "最近の記録", history: "過去の記録", historyEmpty: "過去の予定はまだありません。",
+    aiApplications: "AI代行応募", aiApplicationsToday: "今日のAI代行応募", applicationCompanyUnit: "社",
+    applicationPositionCount: (count) => `${count} 求人`,
+    applicationDayLabel: (date, companies, positions) => `${date} JST · AI代行応募 ${companies} 社 · ${positions} 求人 · 応募の詳細を開く`,
+    applicationNoPosition: "職種未記載", applicationSubmission: (agent) => `${agent} が提出`, applicationRecord: "記録を見る",
+    applicationRecordLabel: (date, company, position, agent) => `${date} JST · ${company} · ${position} · ${agent} が提出 · 応募記録を見る`,
+    applicationsLoading: "応募記録を読み込み中…", applicationsEmpty: "今日の確認済みAI代行応募はありません。",
   },
 };
 
@@ -136,12 +154,14 @@ function CalendarView({
   onOpen,
   interviewTargets,
   onInterview,
+  loading = false,
 }: {
   events: CalendarEvent[];
   notes: Note[];
   onOpen: (note: Note) => void;
   interviewTargets: ReadonlyMap<string, CalendarInterviewTarget>;
   onInterview: (event: CalendarEvent) => void;
+  loading?: boolean;
   /** 「今日」は殻が持つ。memo 越しなので中で求めると日付を跨いでも昨日のままになる。 */
   today: string;
 }) {
@@ -153,8 +173,8 @@ function CalendarView({
       const [year, monthNumber] = requested.split("-").map(Number);
       return new Date(year, monthNumber - 1, 1);
     }
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1);
+    const [year, monthNumber] = today.split("-").map(Number);
+    return new Date(year, monthNumber - 1, 1);
   });
   const [expandedDay, setExpandedDay] = useState("");
   const monthLabel = new Intl.DateTimeFormat(locale, {
@@ -171,6 +191,8 @@ function CalendarView({
     events.forEach((event) => map.set(event.date, [...(map.get(event.date) ?? []), event]));
     return map;
   }, [events]);
+  const applicationsByDate = useMemo(() => new Map(buildAiApplicationDays(notes, today)
+    .map((day) => [day.date, day])), [notes, today]);
   const progressByEvent = useMemo(() => new Map(events.map((event) => [
     event.id, calendarProgress(event, notes, interviewTargets.get(event.id)),
   ])), [events, notes, interviewTargets]);
@@ -215,8 +237,8 @@ function CalendarView({
               <button onClick={() => moveMonth(-1)} aria-label={copy.previousMonth}>←</button>
               <button
                 onClick={() => {
-                  const now = new Date();
-                  setMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+                  const [year, monthNumber] = today.split("-").map(Number);
+                  setMonth(new Date(year, monthNumber - 1, 1));
                 }}
               >
                 {copy.today}
@@ -232,6 +254,7 @@ function CalendarView({
               ))}
               {days.map((day) => {
                 const dayEvents = eventsByDate.get(day.key) ?? [];
+                const applications = applicationsByDate.get(day.key);
                 return (
                   <div
                     className={`calendar-day ${day.inMonth ? "" : "outside"} ${day.key === today ? "today" : ""}`}
@@ -274,6 +297,15 @@ function CalendarView({
                         </button>
                       )}
                     </div>
+                    {applications && (
+                      <details className="calendar-ai-applications">
+                        <summary aria-label={copy.applicationDayLabel(day.key, applications.companyCount, applications.positionCount)}>
+                          <strong>{copy.aiApplications} · {applications.companyCount} {copy.applicationCompanyUnit}</strong>
+                          <small>{copy.applicationPositionCount(applications.positionCount)}</small>
+                        </summary>
+                        <ApplicationList day={applications} onOpen={onOpen} copy={copy} />
+                      </details>
+                    )}
                   </div>
                 );
               })}
@@ -282,6 +314,18 @@ function CalendarView({
         </div>
 
         <aside className="calendar-agenda">
+          <section className="calendar-application-summary" aria-label={copy.aiApplicationsToday}>
+            <h2>{copy.aiApplicationsToday}</h2>
+            <time dateTime={today}>{today} · JST</time>
+            {loading ? <p className="agenda-empty">{copy.applicationsLoading}</p> : (
+              <>
+                <p className="calendar-application-count"><strong>{applicationsByDate.get(today)?.companyCount ?? 0}</strong> {copy.applicationCompanyUnit} · {copy.applicationPositionCount(applicationsByDate.get(today)?.positionCount ?? 0)}</p>
+                {applicationsByDate.has(today)
+                  ? <ApplicationList day={applicationsByDate.get(today)!} onOpen={onOpen} copy={copy} />
+                  : <p className="agenda-empty">{copy.applicationsEmpty}</p>}
+              </>
+            )}
+          </section>
           <AgendaGroup
             title={copy.upcomingWeek}
             empty={copy.upcomingEmpty}
@@ -320,6 +364,25 @@ function CalendarView({
         </aside>
       </div>
     </section>
+  );
+}
+
+function ApplicationList({ day, onOpen, copy }: { day: AiApplicationDay; onOpen: (note: Note) => void; copy: CalendarCopy }) {
+  return (
+    <ul className="calendar-application-list">
+      {day.applications.map((application) => (
+        <li key={application.id}>
+          <button
+            onClick={() => onOpen(application.note)}
+            aria-label={copy.applicationRecordLabel(day.date, application.company, application.position || copy.applicationNoPosition, application.agent)}
+          >
+            <strong>{application.company}</strong>
+            <span>{application.position || copy.applicationNoPosition}</span>
+            <small>{copy.applicationSubmission(application.agent)} · {copy.applicationRecord} →</small>
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

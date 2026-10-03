@@ -62,6 +62,7 @@ import {
   type Note,
 } from "@/lib/notes";
 import {
+  buildCalendarEvents,
   buildDerivedData,
   calendarEventTime,
   countdownLabel,
@@ -75,6 +76,7 @@ import {
 import { scopesToReloadAfterStats, vaultScopeForView, type VaultScope } from "@/lib/vault-scope";
 import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { resolveNoteLink } from "@/lib/wiki-target";
+import { tokyoParts } from "@/lib/dojo/utils";
 import { APP_BRANDING } from "@/lib/ui-locale";
 import { LanguageSwitch, useUiLocale } from "./ui-locale";
 import { SHELL_MESSAGES } from "./shell-messages";
@@ -423,6 +425,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   // ——視圖は memo で包んであるので、中で new Date() を呼ぶだけだと日付を跨いでも
   // props が変わらず再レンダーされず、昨日の日付が凍りつく（総覧の見出し・日历の「今天」）。
   const [today, setToday] = useState(() => localDateKey());
+  const [calendarToday, setCalendarToday] = useState(() => tokyoParts().date);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [writeError, setWriteError] = useState("");
@@ -484,6 +487,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   useEffect(() => {
     let timer = 0;
     const sync = () => {
+      setCalendarToday(tokyoParts().date);
       setToday((current: string) => {
         const now = localDateKey();
         return now === current ? current : now;
@@ -494,7 +498,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
       window.clearTimeout(timer);
       const now = new Date();
       const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-      timer = window.setTimeout(sync, Math.max(1000, midnight.getTime() - now.getTime()));
+      const jstMidnight = Date.parse(`${tokyoParts(now).date}T00:00:00+09:00`) + 86400000;
+      timer = window.setTimeout(sync, Math.max(1000, Math.min(midnight.getTime(), jstMidnight) - now.getTime()));
     };
     schedule();
     document.addEventListener("visibilitychange", sync);
@@ -985,21 +990,26 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     () => buildDerivedData(notes, new Date(`${today}T00:00:00`)),
     [notes, today],
   );
-
-  const interviewTargets = useMemo(() => {
+  // 日历统一使用 JST 日界；其它视图仍保留各自的本机日期口径。
+  const calendarEvents = useMemo(
+    () => buildCalendarEvents(notes, new Date(`${calendarToday}T00:00:00`)),
+    [notes, calendarToday],
+  );
+  const calendarInterviewTargets = useMemo(() => {
     const targets = new Map<string, CalendarInterviewTarget>();
-    for (const event of derived.commitments) {
+    for (const event of calendarEvents) {
       const target = resolveCalendarInterview(event, notes);
       if (target) targets.set(event.id, target);
     }
     return targets;
-  }, [derived.commitments, notes]);
+  }, [calendarEvents, notes]);
+
   const calendarInterview = useMemo(() => {
     const requested = calendarInterviewFromSearch(view, interviewRouteSearch);
     if (!requested) return null;
     const source = notes.find((note) => note.path === requested.sourcePath);
     if (!source) return { ...requested, path: null };
-    const event = derived.calendarEvents.find((item) =>
+    const event = calendarEvents.find((item) =>
       item.date === requested.date && item.note.path === requested.sourcePath,
     );
     // 日历只加载行动资料；到面试页加载完整资料后重新匹配，不能把先前的空结果冻结。
@@ -1011,12 +1021,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
       date: requested.date,
       time: requested.time || event?.time || "",
       label: requested.label,
-      phase: requested.date < today ? "past" : "upcoming",
+      phase: requested.date < calendarToday ? "past" : "upcoming",
       caseId: requested.caseId,
       prepPath: "",
     }, notes);
     return resolved ?? { ...requested, path: null };
-  }, [view, interviewRouteSearch, notes, derived.calendarEvents, today]);
+  }, [view, interviewRouteSearch, notes, calendarEvents, calendarToday]);
   const interviewParams = new URLSearchParams(interviewRouteSearch);
   const reviewInitialKey = calendarInterview?.path ?? interviewParams.get("review");
   const prepInitialPath = calendarInterview ? calendarInterview.path ?? "" : interviewParams.get("prep") ?? "";
@@ -1029,12 +1039,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   // 最近安排只表示实际约定；行动期限和外部跟进留在待办与等待区。
   const nextEvent = useMemo(
     () =>
-      derived.calendarEvents
+      calendarEvents
         .filter((event) => event.phase === "upcoming")
         .toSorted((left, right) =>
           `${left.date} ${left.time}`.localeCompare(`${right.date} ${right.time}`),
         )[0] ?? null,
-    [derived.calendarEvents],
+    [calendarEvents],
   );
 
   // ?note= が指すノートが今の scope に無い（他ページのリンクや共有 URL）：黙って開かないのではなく、全量を一度取りに行く。
@@ -1112,17 +1122,17 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   }, [navigateToView]);
 
   const openCalendarInterview = useCallback((commitment: Commitment) => {
-    const target = interviewTargets.get(commitment.id);
+    const target = calendarInterviewTargets.get(commitment.id);
     if (target) navigateToView(target.view, calendarInterviewSearch(target));
     else openNote(commitment.note);
-  }, [interviewTargets, navigateToView, openNote]);
+  }, [calendarInterviewTargets, navigateToView, openNote]);
 
   // 顶栏「最近安排」直达那场面试的准备页；认不出对应面试的日程才退回日历。
   const openNextEvent = useCallback(() => {
-    const target = nextEvent ? interviewTargets.get(nextEvent.id) : undefined;
+    const target = nextEvent ? calendarInterviewTargets.get(nextEvent.id) : undefined;
     if (target) navigateToView(target.view, calendarInterviewSearch(target));
     else navigateToView("calendar");
-  }, [interviewTargets, navigateToView, nextEvent]);
+  }, [calendarInterviewTargets, navigateToView, nextEvent]);
 
   const openAnswerLibrary = useCallback(() => navigateToView("prep"), [navigateToView]);
 
@@ -1306,7 +1316,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
               title={`${nextEvent.date}${nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST ${nextEvent.label}`}
             >
               <small>{ui.nextEvent}</small>
-              <em>{countdownLabel(nextEvent.date)}{nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST</em>
+              <em>{countdownLabel(nextEvent.date, new Date(`${calendarToday}T00:00:00`))}{nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST</em>
               <strong>{nextEvent.company}</strong>
               <i aria-hidden="true">→</i>
             </button>
@@ -1492,11 +1502,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
               )}
               {view === "calendar" && (
                 <CalendarView
-                  events={derived.calendarEvents}
+                  events={calendarEvents}
                   notes={notes}
-                  today={today}
+                  today={calendarToday}
+                  loading={!scopeReady}
                   onOpen={openNote}
-                  interviewTargets={interviewTargets}
+                  interviewTargets={calendarInterviewTargets}
                   onInterview={openCalendarInterview}
                 />
               )}

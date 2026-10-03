@@ -65,6 +65,7 @@ export const SALARY_RANGE_CLASS_VALUES = [
   "undisclosed",
 ];
 export const ACCESS_STATE_VALUES = ["company_selected", "direct", "company_received", "not_sent", "agent_only"];
+export const APPLICATION_ACTOR_VALUES = ["user", "ai", "agent"];
 
 /**
  * Web の詳細カードが読む節の名前。**lib/jobs.ts はここを import する**ので、
@@ -109,6 +110,9 @@ export const JOB_CASE_FIELDS: Record<string, FieldRule> = {
   origin: { required: true, enum: JOB_CASE_ORIGINS },
   channel: { enum: KNOWN_CHANNELS, requiredWhenStatusIn: CHANNEL_REQUIRED_FROM },
   status_updated: { date: true, requiredWhenStatusIn: CHANNEL_REQUIRED_FROM },
+  applied_on: { date: true },
+  application_actor: { enum: APPLICATION_ACTOR_VALUES, requiresField: "applied_on" },
+  application_agent: { requiresField: "application_actor" },
   waiting_for: { enum: WAITING_FOR_VALUES },
   follow_up_at: { date: true, requiresField: "waiting_for" },
   next_event_at: { dateTime: true },
@@ -198,6 +202,16 @@ export function validateJobCaseFrontmatter(frontmatter: Frontmatter): string[] {
     }
     if (rule.requiresField && !fm[rule.requiresField]) {
       problems.push(`${key} があるなら ${rule.requiresField} も必要`);
+    }
+  }
+
+  // 执行者是实际申请的事实，和写推荐的作者分开；旧案件不要求补猜执行者。
+  if (String(fm.application_actor ?? "") === "ai") {
+    if (!String(fm.application_agent ?? "").trim()) {
+      problems.push("application_actor ai なら実際に提出した application_agent が要る");
+    }
+    if (base === "未応募") {
+      problems.push("application_actor ai は提出成功後に記録する。未応募には書かない");
     }
   }
 

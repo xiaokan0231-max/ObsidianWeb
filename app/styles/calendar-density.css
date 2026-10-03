@@ -364,3 +364,65 @@
   height: 20px;
   font-size: 12px;
 }
+
+/* 申请活动单独展开，避免把提交记录画成有时间的面试卡片。 */
+.calendar-ai-applications {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--line);
+}
+
+.calendar-ai-applications summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 7px;
+  color: var(--info);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.calendar-ai-applications summary strong::before { content: "+ "; }
+.calendar-ai-applications[open] summary strong::before { content: "− "; }
+.calendar-ai-applications summary small { color: var(--muted); font-size: 10px; }
+
+.calendar-application-summary {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.calendar-application-summary h2 { margin: 0 0 5px; font-size: 15px; }
+.calendar-application-summary > time { color: var(--muted); font-size: 11px; }
+.calendar-application-count { margin: 12px 0; color: var(--text-secondary); font-size: 12px; }
+.calendar-application-count > strong { color: var(--info); font-size: 24px; }
+
+.calendar-application-list {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calendar-application-list button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.calendar-application-list strong { color: var(--ink); font-size: 12px; }
+.calendar-application-list span { font-size: 11px; line-height: 1.5; }
+.calendar-application-list small { color: var(--muted); font-size: 10px; }
+.calendar-application-list button:hover { background: var(--surface-soft); }
+.calendar-ai-applications summary:focus-visible,
+.calendar-application-list button:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
