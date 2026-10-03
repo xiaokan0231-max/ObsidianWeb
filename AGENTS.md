@@ -128,6 +128,8 @@ npm run lint
 
 ## 写代码时
 
+- 常规修改直接在 `main` 对应的工作区完成、提交并推送，不另建临时分支或 worktree。当前会话若在临时 worktree，先用 `git worktree list` 找到 `main` 的检出目录，再在那里操作；保留已有未提交改动。
+- 开发与验收默认使用 `http://localhost:3000`，从同一个 `main` 工作区运行 `npm run dev`。端口号不代表分支；启动时核对监听进程的工作目录，不得只在其他端口验证后报告完成。
 - 所有页面以桌面端为设计与验收目标；不要求移动端适配，不为移动端新增布局或测试。
 - 注释和文档跟随周围风格：本仓库注释用中文，说明「为什么」而不是「做了什么」。
 - `position` 是 Obsidian metadata cache 的保留键，Local REST API 会剥掉，
