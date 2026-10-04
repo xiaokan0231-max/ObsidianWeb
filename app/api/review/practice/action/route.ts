@@ -9,7 +9,7 @@ import {
 import { isReviewNotePath } from "@/lib/review-paths";
 import { errorResponse, readJson } from "@/lib/server/api";
 import { upsertAppendNote } from "@/lib/server/note-append";
-import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
+import { withReviewWrite } from "@/lib/server/review-write-queue";
 
 type Body = {
   practicePath?: string;
@@ -20,7 +20,6 @@ type Body = {
 
 const ACTIONS = new Set<InterviewPracticeAction>(["attempt", "complete", "snooze"]);
 const RATINGS = new Set<InterviewPracticeRating>(["smooth", "stuck", "unknown"]);
-const inPracticeActionQueue = createKeyedSerialQueue();
 
 function actionAtInTokyo() {
   const { date, time } = tokyoParts();
@@ -49,7 +48,7 @@ export async function POST(request: Request) {
 
     const at = actionAtInTokyo();
     const dueAt = action === "snooze" ? tomorrowInTokyo() : undefined;
-    const outcome = await inPracticeActionQueue(practicePath, () =>
+    const outcome = await withReviewWrite(practicePath, () =>
       upsertAppendNote<{ status: string }>({
         path: practicePath,
         plan: (existing) => {

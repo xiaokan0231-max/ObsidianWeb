@@ -1,4 +1,5 @@
 import { getType, type Note } from "./notes.ts";
+import { isLanguageTextbookChapter } from "./language-textbook.ts";
 
 export type VaultScope = "all" | "overview" | "actions" | "jobs" | "interview" | "training";
 
@@ -21,6 +22,11 @@ const TRAINING_TYPES = new Set([
   "language-batch-log", "language-expression-course", "language-expression-course-progress",
 ]);
 
+export function isLanguageScenarioResource(note: Note) {
+  return getType(note) === "material"
+    && ["language-scenario-guide", "language-scenario-coverage"].includes(String(note.frontmatter.material_kind));
+}
+
 export function normalizeVaultScope(value: string | null): VaultScope {
   return value === "overview" || value === "actions" || value === "jobs" || value === "interview" || value === "training"
     ? value
@@ -39,7 +45,11 @@ export function noteInVaultScope(note: Note, scope: VaultScope) {
   }
   if (scope === "interview") return INTERVIEW_TYPES.has(type) || COMMITMENT_TYPES.has(type) || type === "company" || type === "self"
     || (type === "ai-report" && ["company-fit", "company-summary"].includes(String(note.frontmatter.report_kind)));
-  return TRAINING_TYPES.has(type) || type === "self";
+  // 专项课和学习说明属于 material；按标记读取，避免把全部求职素材载入训练页。
+  return TRAINING_TYPES.has(type) || type === "self"
+    || (type === "material" && note.frontmatter.material_kind === "language-expression-course")
+    || isLanguageTextbookChapter(note)
+    || isLanguageScenarioResource(note);
 }
 
 /**

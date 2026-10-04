@@ -16,7 +16,7 @@ import { buildJobStatusUndo, validateJobStatusRestore } from "@/lib/job-status-r
 import { assertExpectedMtime, errorResponse, parseExpectedMtime, parseOptionalText, parseRequiredText, readJson, badRequestError } from "@/lib/server/api";
 import { patchFrontmatterScalars } from "@/lib/server/frontmatter-patch";
 import { readNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
-import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
+import { withJobCaseWrite } from "@/lib/server/job-write-queue";
 
 type Body = {
   path?: string;
@@ -44,10 +44,6 @@ function assertJobCasePath(path: string) {
   }
 }
 
-// 「読む→status を差し替える→書く」は原子的ではない。看板の連打や二重送信が
-// 同時に来ると後勝ちで片方が消えるので、他の書込ルートと同じく短い直列区間にする。
-const inStatusQueue = createKeyedSerialQueue();
-
 export async function POST(request: Request) {
   try {
     const body = await readJson<Body>(request);
@@ -70,7 +66,7 @@ export async function POST(request: Request) {
 
     const value = composeJobStatus(status, statusNote);
 
-    return await inStatusQueue(path, async () => {
+    return await withJobCaseWrite(path, async () => {
       const note = await readNote(path);
       if (note.frontmatter.type !== JOB_CASE_TYPE) {
         throw badRequestError("这条笔记不是应募案件，拒绝写入。");
@@ -196,7 +192,7 @@ async function restoreStatus(body: Body) {
     throw Object.assign(new Error("撤销必须带 expectedMtime（只能撤销刚写入的那个版本）。"), { status: 400 });
   }
 
-  return await inStatusQueue(path, async () => {
+  return await withJobCaseWrite(path, async () => {
     const note = await readNote(path);
     if (note.frontmatter.type !== JOB_CASE_TYPE) {
       throw badRequestError("这条笔记不是应募案件，拒绝写入。");

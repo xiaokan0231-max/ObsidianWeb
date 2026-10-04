@@ -28,6 +28,30 @@ test("views map to stable module scopes", () => {
   assert.equal(vaultScopeForView("graph"), "all");
 });
 
+test("专项训练冷启动同时读取两版课程，只收课程 material", () => {
+  for (const schemaVersion of [1, 2]) {
+    const course = note("material");
+    course.frontmatter.material_kind = "language-expression-course";
+    course.frontmatter.schema_version = schemaVersion;
+    assert.equal(noteInVaultScope(course, vaultScopeForView("topics")), true);
+  }
+  const otherMaterial = note("material");
+  otherMaterial.frontmatter.material_kind = "interview-library";
+  assert.equal(noteInVaultScope(otherMaterial, "training"), false);
+  assert.equal(noteInVaultScope(note("material"), "training"), false);
+});
+
+test("训练说明按独立材料标记载入，不把同名非材料或全部原稿带入训练", () => {
+  for (const kind of ["language-scenario-guide", "language-scenario-coverage"]) {
+    const resource = note("material");
+    resource.frontmatter.material_kind = kind;
+    assert.equal(noteInVaultScope(resource, vaultScopeForView("topics")), true);
+    resource.frontmatter.type = "transcript";
+    assert.equal(noteInVaultScope(resource, "training"), false);
+  }
+  assert.equal(noteInVaultScope(note("transcript"), "training"), false);
+});
+
 test("面试加载公司契合与总结报告，不引入无关AI报告", () => {
   for (const kind of ["company-fit", "company-summary"]) {
     const report = note("ai-report");

@@ -6,8 +6,8 @@ import * as api from "../lib/server/api.ts";
 import * as guards from "../lib/server/write-guards.ts";
 import { validateJobStatusRestore } from "../lib/job-status-restore.ts";
 
-// 写路由的三道门是否装齐：每条 POST 都过同源校验（readJson 内置，或显式调用），
-// 案件状态与跟进都用 mtime。源码断言而不是行为测试，因为路由靠 "@/" 别名，node 加载不了。
+// 扫描保证所有 POST 入口都有同源校验。案件版本保护和跨路由串行的实际行为，
+// 由 backend-write-routes.test.mjs 通过统一 loader 加载真实路由验证。
 async function postRoutes(dir) {
   const out = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -47,52 +47,6 @@ test("状态撤销必须带 expectedMtime，并返回可校验的撤销表", asy
   assert.match(jobs, /buildJobStatusUndo\(note\.frontmatter/, "撤销表取写入前的 frontmatter");
   assert.match(jobs, /if \(expectedMtime === undefined\)/, "撤销缺 expectedMtime 时拒绝，而不是放行");
   assert.match(jobs, /restore 与 status 不能同时提交/);
-});
-
-/** 断言 needles 在 source 里依次出现（每个都要找得到，且位置递增）。 */
-function assertInOrder(source, needles, label) {
-  let cursor = -1;
-  for (const needle of needles) {
-    const index = source.indexOf(needle, cursor + 1);
-    assert.ok(index > cursor, `${label}：「${needle}」缺失或顺序不对`);
-    cursor = index;
-  }
-}
-
-test("状态撤销分支：先走白名单校验，缺 expectedMtime 就 400，进队列后用共用的 assertExpectedMtime 比对再写", async () => {
-  const source = await readFile("app/api/jobs/status/route.ts", "utf8");
-  assert.match(source, /import \{[^}]*\bvalidateJobStatusRestore\b[^}]*\} from "@\/lib\/job-status-restore";/, "restore 校验来自 lib/job-status-restore.ts，而不是路由里另写一份");
-  assert.match(source, /import \{[^}]*\bassertExpectedMtime\b[^}]*\} from "@\/lib\/server\/api";/);
-  // POST 先分派撤销：撤销请求不能掉进状态写入的规则里（会再推进 status_updated、补 applied_on）。
-  assertInOrder(source, ["if (body.restore !== undefined) return await restoreStatus(body);", "parseRequiredText(body.status"], "POST 分派");
-  const restore = source.slice(source.indexOf("async function restoreStatus("));
-  assert.ok(restore.length > 0, "找到 restoreStatus");
-  assertInOrder(restore, [
-    "validateJobStatusRestore(body.restore)",
-    "parseExpectedMtime(body.expectedMtime)",
-    "if (expectedMtime === undefined)",
-    "status: 400",
-    "inStatusQueue(path, async () => {",
-    "readNote(path)",
-    "assertExpectedMtime(expectedMtime, note.stat.mtime)",
-    "writeNote(path, content)",
-    "readNoteOrNull(path)",
-  ], "restoreStatus");
-});
-
-test("跟进路由在队列里、写入前用共用的 assertExpectedMtime，不自己拼比较", async () => {
-  for (const [path, queue] of [["app/api/jobs/follow-up/route.ts", "inFollowUpQueue"]]) {
-    const source = await readFile(path, "utf8");
-    assert.match(source, /import \{[^}]*\bassertExpectedMtime\b[^}]*\} from "@\/lib\/server\/api";/, `${path} 没有引入共用的 assertExpectedMtime`);
-    assertInOrder(source, [
-      "parseExpectedMtime(body.expectedMtime)",
-      `${queue}(path, async () => {`,
-      "readNote(path)",
-      "assertExpectedMtime(expectedMtime, note.stat.mtime)",
-      "writeNote(",
-    ], path);
-    assert.doesNotMatch(source, /expectedMtime !==? note\.stat\.mtime|note\.stat\.mtime !==? expectedMtime/, `${path} 自己拼了版本比较`);
-  }
 });
 
 test("api.ts 转出的 assertExpectedMtime 就是 write-guards 的那一个（路由从 api 引，不能分叉成两份）", () => {

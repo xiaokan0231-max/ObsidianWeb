@@ -3,7 +3,7 @@ import { WAITING_FOR_VALUES } from "@/lib/job-case-schema";
 import { assertExpectedMtime, errorResponse, parseExpectedMtime, parseRequiredText, readJson, badRequestError } from "@/lib/server/api";
 import { patchFrontmatterScalars } from "@/lib/server/frontmatter-patch";
 import { readNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
-import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
+import { withJobCaseWrite } from "@/lib/server/job-write-queue";
 
 type Body = {
   path?: string;
@@ -16,7 +16,6 @@ type Body = {
 
 const DATE = /^20\d{2}-\d{2}-\d{2}$/;
 const DATE_TIME = /^20\d{2}-\d{2}-\d{2}(?: (?:[01]\d|2[0-3]):[0-5]\d)?$/;
-const inFollowUpQueue = createKeyedSerialQueue();
 
 function normalized(value: string | null | undefined) {
   if (value === undefined) return undefined;
@@ -43,7 +42,7 @@ export async function POST(request: Request) {
     if (followUpAt && !DATE.test(followUpAt)) throw badRequestError("follow_up_at 必须是 YYYY-MM-DD。");
     if (nextEventAt && !DATE_TIME.test(nextEventAt)) throw badRequestError("next_event_at 必须是 YYYY-MM-DD 或 YYYY-MM-DD HH:MM。");
 
-    return await inFollowUpQueue(path, async () => {
+    return await withJobCaseWrite(path, async () => {
       const note = await readNote(path);
       if (note.frontmatter.type !== JOB_CASE_TYPE) throw badRequestError("这条笔记不是应募案件，拒绝写入。");
       assertExpectedMtime(expectedMtime, note.stat.mtime);

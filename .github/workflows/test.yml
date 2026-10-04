@@ -1,6 +1,5 @@
-# 代码层的门禁：类型、lint、单测。故意不含 build 与 vault 检查——
-# vault 是别的机器上不存在的外部数据（见 CLAUDE.md「自动检查装在哪」），
-# build 需要下载 MediaPipe 模型，留给本机 `npm run test:build`。
+# 代码门禁含构建与 Worker 首屏；模型下载显式跳过，不依赖 Google 网络。
+# vault 是独立外部数据，仍不加入 CI（见 CLAUDE.md「自动检查装在哪」）。
 name: test
 
 on:
@@ -21,3 +20,6 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run lint
       - run: npm run test:unit
+      - run: node scripts/fetch-mediapipe.mjs --skip-model-download
+      - run: npm run build:app
+      - run: npm run test:built

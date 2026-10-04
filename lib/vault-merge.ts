@@ -21,8 +21,8 @@ export function mergeScopedNotes(current: Note[], incoming: Note[], scope: Vault
   return [...merged.values()].sort((left, right) => right.stat.mtime - left.stat.mtime);
 }
 
-/** 弱 ETag 的素材：scope 内的路径与最新 mtime。删除、改名、修改都会改变它。 */
-export function vaultEtag(scope: string, notes: readonly Pick<Note, "path" | "stat">[]) {
+/** 每个路径都参与指纹；只取最大 mtime 会漏掉时间较旧的同步文件被改写。 */
+export function vaultSnapshotFingerprint(notes: readonly Pick<Note, "path" | "stat">[]): string {
   let hash = 2166136261;
   const feed = (text: string) => {
     for (let index = 0; index < text.length; index += 1) {
@@ -30,13 +30,23 @@ export function vaultEtag(scope: string, notes: readonly Pick<Note, "path" | "st
       hash = Math.imul(hash, 16777619) >>> 0;
     }
   };
-  feed(scope);
-  let latest = 0;
-  for (const note of notes) {
-    feed(note.path);
-    feed("\n");
-    if (note.stat.mtime > latest) latest = note.stat.mtime;
+  // API 的排序不是数据变化；长度边界也避免路径中的换行与下一条记录混淆。
+  const entries = notes.map((note) => [note.path, note.stat.mtime] as const)
+    .sort(([leftPath, leftMtime], [rightPath, rightMtime]) =>
+      leftPath < rightPath ? -1 : leftPath > rightPath ? 1 : leftMtime - rightMtime);
+  for (const [path, mtime] of entries) {
+    feed(`${path.length}:${path}:${mtime};`);
   }
-  feed(String(latest));
+  return `W/"${notes.length.toString(36)}-${hash.toString(36)}"`;
+}
+
+/** scope 也参与验证器，不能把另一种投影的 304 当成本页的快照。 */
+export function vaultEtag(scope: string, notes: readonly Pick<Note, "path" | "stat">[]) {
+  const fingerprint = vaultSnapshotFingerprint(notes);
+  let hash = 2166136261;
+  for (const char of `${scope}:${fingerprint}`) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
   return `W/"${notes.length.toString(36)}-${hash.toString(36)}"`;
 }

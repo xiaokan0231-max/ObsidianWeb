@@ -35,9 +35,9 @@ Obsidian (Local REST API) ──► app/api/vault?scope=… ──► readAllNot
   goes through `lib/server/frontmatter-patch.ts`, which replaces only the scalar lines each route
   permits and never touches the body. **Records** (review annotations, feedback, practice) go
   through `lib/server/note-append.ts` into append-only notes. Since read-modify-write is not
-  atomic, each route serializes writes per note path (`createKeyedSerialQueue`); different notes
-  and different routes never wait on each other.
-- Optimistic locking: a case that has `status_updated` sends it, a TODO sends the on-disk `mtime`,
+  atomic, routes writing the same note share a path queue (`createKeyedSerialQueue`). Read,
+  version check, modification and read-back stay inside the lock; different notes run in parallel.
+- Optimistic locking: cases send the on-disk `mtime`
   as the version; a mismatch returns 409 and the UI reloads. After a case-status write, derived
   statistics are flagged `derivedState: stale` rather than pretending to be current until
   `vault:stats` runs again.
@@ -187,11 +187,14 @@ config and passes it to the server process only.
 ## Quality gates
 
 ```bash
-npm test       # tsc --noEmit → build → node --test (440 tests)
+npm test       # types → lint → unit tests → build → Worker rendering
+npm run build:app  # build only; the caller chooses resource preparation and model downloads
 npm run lint   # eslint --max-warnings 0
 ```
 
-`npm test` includes type checking and a production build. Tests concentrate on the data layer
+`npm test` includes types, lint, unit tests, a production build and Worker rendering. CI prepares
+WASM with `node scripts/fetch-mediapipe.mjs --skip-model-download` and builds without fetching models.
+An in-memory Obsidian stub tests concurrent writes through the real routes. Tests also cover the data layer
 extracted as pure functions (`lib/*.ts`, `lib/*.mjs`), covering parsers, normalization,
 race conditions, rendered output, GLSL/CPU formula parity and hand-gesture frame sequences.
 

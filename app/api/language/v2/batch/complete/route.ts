@@ -1,9 +1,10 @@
 import type { LanguageBatch, LanguageBatchAction, LanguageCurriculum } from "@/lib/language/types";
 import { LANGUAGE_OPEN_STRESS_LIMIT } from "@/lib/language/types";
-import { errorResponse, readJson } from "@/lib/server/api";
+import { conflictError, errorResponse, readJson } from "@/lib/server/api";
 import { invokeCodex } from "@/lib/server/codex-bridge";
 import {
   batchVaultPath,
+  languageBatchById,
   languageBatchWriteQueue,
   languageCurriculumByFingerprint,
   loadLanguageV2State,
@@ -105,20 +106,30 @@ export async function POST(request: Request) {
 
     // ② キューの外：採点（外部プロセス待ち）。ここを握らないのが要点。
     const passedByActionId = await gradeOpenAnswers(staged.batch, staged.curriculum);
+    const submittedActions = new Map(staged.batch.actions.map((action) => [action.actionId, action]));
 
     // ③ キュー内：最新の批次を読み直してから採点を反映し、完了させる。
     //    ②の間に自動保存が走って新しいアクションが増えている可能性があるので、
     //    ①で手元にあった批次ではなく、その時点の正本に対して適用する。
     const finished = await languageBatchWriteQueue(async () => {
-      const state = await loadLanguageV2State();
-      const current = state.currentBatch?.id === staged.batch.id ? state.currentBatch : staged.batch;
+      const current = languageBatchById(await readAllNotes(), staged.batch.id);
+      if (!current) throw conflictError("训练批次已不存在，请刷新后确认；已保存的其他记录未修改。");
+      // 另一条完成请求可能先结束；旧任务不能重写已完成记录或影响新批次。
+      if (current.phase === "completed") return current;
+      if (current.curriculumFingerprint !== staged.batch.curriculumFingerprint) {
+        throw conflictError("评分期间训练课程已更新，请刷新后重试；已保存的答案仍然保留。");
+      }
       const graded = passedByActionId.size === 0
         ? current
         : {
             ...current,
             actions: current.actions.map((action) => {
               const passed = passedByActionId.get(action.actionId);
-              return passed === undefined ? action : { ...action, passed };
+              const submitted = submittedActions.get(action.actionId);
+              const sameAnswer = submitted && submitted.itemId === action.itemId &&
+                submitted.phase === action.phase && submitted.at === action.at && submitted.answer === action.answer;
+              // 同一 actionId 可以修改回答；评分只属于送评的那个版本。
+              return passed === undefined || !sameAnswer ? action : { ...action, passed };
             }),
           };
       const next = mergeLanguageBatchCheckpoint(graded, staged.curriculum, [], "completed", 0);

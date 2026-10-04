@@ -31,9 +31,9 @@ Obsidian (Local REST API) ──► app/api/vault?scope=… ──► readAllNot
 - 書き戻しの原語は 2 つだけ。**状態**（案件の状態・経路・跟進、TODO の状態）は
   `lib/server/frontmatter-patch.ts` が各ルートの許可した key のスカラー行だけを差し替え、本文には触らない。
   **記録**（復盤の注釈・フィードバック・練習）は `lib/server/note-append.ts` が追記専用ノートへ本文追記する。
-  「読む→書く」が原子的でないため、ルート内でノートパス単位に直列化する
-  （`createKeyedSerialQueue`。別ノート・別ルートは互いに待たせない）。
-- 楽観ロック：`status_updated` を持つ案件はそれを、TODO はディスクの `mtime` を版として送り、
+  「読む→書く」が原子的でないため、同じノートを書くルートはパス単位のキューを共有する
+  （`createKeyedSerialQueue`）。読み取り・版確認・変更・再読み取りはロック内、別ノートは並行する。
+- 楽観ロック：案件はディスクの `mtime` を版として送り、
   ずれていれば 409 を返して画面側が再読込する。案件状態の書き込み後は派生統計を
   `derivedState: stale` と明示し、`vault:stats` を再実行するまで「同時点の集計」を装わない。
 - 経路（channel）は**歴史事実**として扱い、状態変更で上書きできない。未採点は 0 点ではなく「—」。
@@ -168,11 +168,14 @@ npm run dev
 ## 品質ゲート
 
 ```bash
-npm test    # tsc --noEmit → build → node --test（440 tests）
+npm test    # 型 → lint → 単体テスト → ビルド → Worker レンダリング
+npm run build:app  # 純粋なビルド。リソース準備・モデル取得は呼び出し側が選ぶ
 npm run lint   # eslint --max-warnings 0
 ```
 
-`npm test` は型チェックとビルドを含む。テストは純関数として切り出したデータ層
+`npm test` は型・lint・単体テスト・本番ビルド・Worker レンダリングを含む。CI は
+`node scripts/fetch-mediapipe.mjs --skip-model-download` で WASM を準備し、モデルを取得せずビルドする。
+メモリ内の Obsidian スタブで実際のルートの並行書き込みを検証し、純関数として切り出したデータ層
 （`lib/*.ts` / `lib/*.mjs`）を中心に、パーサ・正規化・競合条件・レンダリング結果・
 GLSL と CPU 式の一致・手勢のフレーム列まで覆う。
 

@@ -2,6 +2,7 @@
  * AI 活用のようなテーマ別教材は、完成回答ではなく再利用できる語彙・型を正本にする。
  * Markdown は人が読める形を保ちつつ、H3 の安定 ID と `字段:: 值` だけを機械契約にする。
  */
+import { parseScenarioLesson, type ScenarioLesson } from "./language-scenario.ts";
 
 export type LanguageExpressionCourseNote = {
   path: string;
@@ -100,6 +101,7 @@ export type LanguageExpressionCourse = {
   safeRewrites: SafeRewriteCard[];
   recipes: RandomPromptRecipe[];
   itemIds: string[];
+  scenario?: ScenarioLesson;
 };
 
 export type LanguageExpressionExercise =
@@ -361,6 +363,10 @@ export function validateLanguageExpressionCourse(course: LanguageExpressionCours
   }
   if (!course.title) errors.push("课程缺少 title。");
   if (!course.topic) errors.push("课程缺少 topic。");
+  if (course.schemaVersion === 2) {
+    if (!course.scenario) errors.push("schema_version 2 必须包含情境课程。");
+    return errors;
+  }
   if (course.schemaVersion !== 1) errors.push("schema_version 必须是 1。");
 
   const allIds = [
@@ -454,6 +460,22 @@ export function parseLanguageExpressionCourse(
   note: LanguageExpressionCourseNote,
 ): LanguageExpressionCourse | null {
   if (!isLanguageExpressionCourseNote(note)) return null;
+  if (Number(note.frontmatter.schema_version) === 2) {
+    const scenario = parseScenarioLesson(note.content);
+    const course: LanguageExpressionCourse = {
+      courseId: text(note.frontmatter.course_id),
+      title: text(note.frontmatter.title) || h1(note.content),
+      topic: text(note.frontmatter.topic),
+      notePath: note.path,
+      schemaVersion: 2,
+      chunks: [], patterns: [], ideaCards: [], corrections: [], safeRewrites: [], recipes: [],
+      itemIds: scenario.steps.map((step) => step.id),
+      scenario,
+    };
+    const errors = validateLanguageExpressionCourse(course);
+    if (errors.length) throw new Error(`${note.path}: ${errors.join("\n")}`);
+    return course;
+  }
   if (FORBIDDEN_SCRIPT.test(note.content)) {
     throw new Error(`${note.path}: 专项课程禁止保存标准回答或 20／60 秒背诵稿。`);
   }

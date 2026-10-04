@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeScopedNotes, vaultEtag } from "../lib/vault-merge.ts";
+import { mergeScopedNotes, vaultEtag, vaultSnapshotFingerprint } from "../lib/vault-merge.ts";
 
 const note = (path, type, mtime = 1) => ({ path, frontmatter: { type }, content: "", tags: [], stat: { ctime: 0, mtime, size: 0 } });
 
@@ -15,7 +15,7 @@ test("按 scope 合并：本 scope 里消失的笔记被删掉，别的 scope �
   assert.deepEqual(mergeScopedNotes(current, incoming, "all"), incoming, "all 就是全量替换");
 });
 
-test("ETag 随路径集合与最新 mtime 变化，删除或改名后不再命中", () => {
+test("ETag 随每条路径的 mtime 变化，删除或改名后不再命中", () => {
   const notes = [note("a.md", "job-case", 1), note("b.md", "job-case", 5)];
   const tag = vaultEtag("jobs", notes);
   assert.match(tag, /^W\/"[0-9a-z]+-[0-9a-z]+"$/);
@@ -24,4 +24,15 @@ test("ETag 随路径集合与最新 mtime 变化，删除或改名后不再命�
   assert.notEqual(vaultEtag("jobs", [note("a.md", "job-case", 1), note("c.md", "job-case", 5)]), tag, "改名");
   assert.notEqual(vaultEtag("jobs", [note("a.md", "job-case", 1), note("b.md", "job-case", 7)]), tag, "改了内容（mtime）");
   assert.notEqual(vaultEtag("actions", notes), tag, "不同 scope 不同 ETag");
+});
+
+test("快照指纹检查旧文件的修改和时间回退，但不把返回顺序当成修改", () => {
+  const before = [note("a.md", "job-case", 1), note("b.md", "job-case", 100)];
+  const changed = [note("a.md", "job-case", 2), note("b.md", "job-case", 100)];
+  assert.notEqual(vaultSnapshotFingerprint(before), vaultSnapshotFingerprint(changed));
+  assert.notEqual(vaultEtag("jobs", before), vaultEtag("jobs", changed), "最大 mtime 没变也不能返回 304");
+  assert.notEqual(vaultSnapshotFingerprint(changed), vaultSnapshotFingerprint(before), "同步回旧时间戳仍是变更");
+  assert.equal(vaultSnapshotFingerprint(before), vaultSnapshotFingerprint([...before].reverse()));
+  assert.equal(vaultEtag("jobs", before), vaultEtag("jobs", [...before].reverse()));
+  assert.equal(vaultSnapshotFingerprint([]), vaultSnapshotFingerprint([]));
 });

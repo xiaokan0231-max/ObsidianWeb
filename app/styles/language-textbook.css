@@ -1,0 +1,148 @@
+.language-textbook { min-width: 0; color: var(--ink); }
+.textbook-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+.textbook-heading h1 { margin: 7px 0 10px; font-size: clamp(24px, 3vw, 34px); line-height: 1.35; font-weight: 600; }
+.textbook-heading p { max-width: 640px; margin: 0; font-size: 14px; line-height: 1.8; color: var(--muted); }
+.textbook-heading small, .textbook-chapter-heading > small { color: var(--green); font-size: 12px; }
+.textbook-heading > button, .textbook-practice button, .textbook-return button { padding: 11px 15px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--green); cursor: pointer; font-size: 13px; line-height: 1.5; flex-shrink: 0; }
+.textbook-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 26px; align-items: start; }
+.textbook-catalog { position: sticky; top: 82px; max-height: calc(100dvh - 110px); overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.textbook-catalog > h2 { display: flex; justify-content: space-between; margin: 0; padding: 17px; font-size: 14px; border-bottom: 1px solid var(--line); }
+.textbook-catalog > h2 span { color: var(--muted); }
+.textbook-catalog section { padding: 14px 9px 6px; }
+.textbook-catalog h3 { margin: 0 8px 8px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.textbook-catalog button { width: 100%; display: grid; gap: 6px; padding: 12px 10px; border: 0; border-left: 3px solid transparent; border-radius: 4px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.textbook-catalog button:hover { background: var(--paper); }
+.textbook-catalog button[aria-current] { border-left-color: var(--green); background: var(--success-wash); }
+.textbook-catalog button strong { font-size: 13px; line-height: 1.6; font-weight: 600; }
+.textbook-catalog button span { font-size: 11px; line-height: 1.7; color: var(--muted); }
+.textbook-catalog button small { font-size: 10px; color: var(--muted); }
+.textbook-chapter { min-width: 0; padding: clamp(20px, 4vw, 48px); border: 1px solid var(--line); border-radius: 9px; background: var(--surface-raised-solid); scroll-margin-top: 80px; }
+.textbook-chapter-heading h2 { margin: 9px 0 13px; font-size: clamp(23px, 2.8vw, 31px); line-height: 1.5; font-weight: 600; }
+.textbook-chapter-heading > p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.9; }
+.textbook-section-nav { display: flex; flex-wrap: wrap; gap: 8px 17px; padding: 20px 0; margin: 12px 0 26px; border-bottom: 1px solid var(--line); }
+.textbook-section-nav a { color: var(--green); font-size: 12px; line-height: 1.7; text-decoration: underline; text-underline-offset: 3px; }
+.textbook-prose.reader-prose { max-width: 760px; margin: 0 auto; font-size: 16px; line-height: 1.95; overflow-wrap: anywhere; }
+.textbook-prose :is(h2, h3) { scroll-margin-top: 88px; }
+.textbook-prose .md-table { max-width: 100%; overflow-x: auto; }
+.textbook-prose pre { max-width: 100%; overflow-x: auto; }
+.textbook-practice { padding: 20px; margin-top: 35px; border: 1px solid var(--line); border-radius: 6px; background: var(--success-wash); }
+.textbook-practice h3 { margin: 0 0 7px; font-size: 15px; }
+.textbook-practice p { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.textbook-pagination { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--line); }
+.textbook-pagination button { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.textbook-pagination button:last-child { text-align: right; }
+.textbook-pagination small { color: var(--green); font-size: 12px; }
+.textbook-pagination strong { font-size: 13px; line-height: 1.7; }
+.textbook-pagination p { margin: 0; font-size: 13px; line-height: 1.8; color: var(--muted); }
+.textbook-return { display: flex; align-items: center; gap: 18px; }
+.textbook-return > span { color: var(--muted); font-size: 13px; }
+.textbook-chapter:has(.learning-module) { padding: 28px; background: var(--surface); }
+.textbook-chapter:has(.learning-module) .textbook-chapter-heading h2 { font-family: inherit; font-size: 27px; font-weight: 650; margin-bottom: 24px; }
+.learning-module { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans CJK SC", sans-serif; }
+.learning-overview-title h3 { margin: 0 0 8px; font-size: 16px; font-weight: 650; }
+.learning-overview-title p { margin: 0 0 17px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.learning-point-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.learning-point-grid > button { position: relative; min-width: 0; display: grid; gap: 7px; padding: 16px 15px; text-align: left; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--surface-overlay); color: var(--ink); cursor: pointer; }
+.learning-point-grid > button:hover { background: var(--surface); border-color: var(--success-line); }
+.learning-point-grid > button[aria-pressed="true"] { border-color: var(--green); background: var(--success-wash); box-shadow: inset 0 0 0 1px var(--green); }
+.learning-point-number { color: var(--text-faint); font-size: 10px; letter-spacing: .08em; }
+.learning-point-grid strong { font-size: 18px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.learning-point-grid button > span:last-child { color: var(--text-tertiary); font-size: 12px; line-height: 1.6; }
+.learning-focus { margin-top: 22px; border: 1px solid var(--line-cool); border-radius: 11px; background: var(--surface-overlay); overflow: hidden; }
+.learning-focus > header { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 22px 24px 18px; }
+.learning-focus header small { color: var(--text-faint); font-size: 11px; }
+.learning-focus h3 { font-family: inherit; margin: 7px 0 0; font-size: 19px; font-weight: 650; line-height: 1.5; }
+.learning-mode-label { color: var(--text-faint); font-size: 11px; white-space: nowrap; }
+.learning-tabs { display: flex; padding: 0 24px; gap: 23px; border-bottom: 1px solid var(--line-soft); }
+.learning-tabs button { padding: 12px 0; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--text-tertiary); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.learning-tabs button[aria-selected="true"] { color: var(--success); border-color: var(--green); font-weight: 650; }
+.learning-tabs button:focus-visible, .learning-point-grid button:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.learning-panel { padding: 24px; min-height: 310px; outline-offset: -4px; }
+.learning-rule { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; padding: 16px 18px; border-radius: 7px; background: var(--success-wash); }
+.learning-rule strong { font-size: 23px; line-height: 1.5; color: var(--success); font-weight: 600; }
+.learning-rule span { font-size: 13px; color: var(--text-tertiary); }
+.learning-why { margin: 21px 0; }
+.learning-why h4 { font-family: inherit; margin: 0 0 9px; font-size: 13px; color: var(--muted); }
+.learning-why p, .learning-source-explanation { margin: 8px 0; font-size: 14px; line-height: 1.9; }
+.learning-inline-example { padding: 15px 18px; border-left: 3px solid var(--line-strong); background: var(--surface); }
+.learning-inline-example small, .learning-natural small, .learning-revision small, .learning-example-origin > small { font-size: 10px; color: var(--text-faint); }
+.learning-inline-example p, .learning-sentence { margin: 8px 0; font-size: 18px; line-height: 1.7; }
+.learning-inline-example > span { font-size: 12px; line-height: 1.7; color: var(--text-tertiary); }
+.learning-caution { display: flex; align-items: baseline; gap: 10px; margin: 18px 0 0; font-size: 12px; line-height: 1.8; color: var(--text-tertiary); }
+.learning-caution b, .learning-contrast-note b { flex-shrink: 0; font-size: 10px; font-weight: 500; border-radius: 4px; background: var(--paper); padding: 2px 6px; color: var(--gold-text); }
+.learning-source-status { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 17px; }
+.learning-source-status span { padding: 5px 8px; background: var(--success-wash); color: var(--text-tertiary); border-radius: 5px; font-size: 11px; line-height: 1.6; }
+.learning-revision { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.learning-revision section, .learning-natural { padding: 17px; border-radius: 7px; background: var(--surface); }
+.learning-revision section:last-child { background: var(--success-wash); }
+.learning-revision p, .learning-natural p { margin: 9px 0 0; font-size: 19px; line-height: 1.75; overflow-wrap: anywhere; }
+.learning-natural { margin-top: 12px; background: var(--surface); }
+.learning-evidence { margin-top: 18px; border-top: 1px solid var(--line-soft); padding-top: 15px; font-size: 12px; }
+.learning-evidence summary { color: var(--text-tertiary); cursor: pointer; }
+.learning-source-links { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 13px; }
+.learning-source-links :is(button, a) { border: 1px solid var(--line-soft); background: var(--surface); color: var(--green); border-radius: 5px; padding: 7px 10px; font-size: 11px; cursor: pointer; text-decoration: none; }
+.learning-example-origin p { font-size: 13px; line-height: 1.9; color: var(--text-tertiary); }
+.learning-contrast + .learning-contrast { margin-top: 20px; }
+.learning-contrast-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.learning-contrast-pair > div { border: 1px solid var(--line-soft); border-radius: 8px; padding: 17px; background: var(--surface); }
+.learning-contrast-pair > div:last-child { background: var(--success-wash); border-color: var(--line-soft); }
+.learning-contrast-pair small { color: var(--text-faint); font-size: 10px; }
+.learning-contrast-pair p { font-size: 19px; line-height: 1.7; margin: 10px 0; overflow-wrap: anywhere; }
+.learning-contrast-pair span { font-size: 12px; line-height: 1.75; color: var(--text-tertiary); }
+.learning-contrast-note { display: flex; gap: 10px; align-items: baseline; margin: 12px 0 0; font-size: 13px; line-height: 1.8; }
+.learning-examples > p { margin: 0 0 15px; color: var(--text-faint); font-size: 12px; }
+.learning-examples section { display: flex; gap: 15px; padding: 15px 0; border-bottom: 1px solid var(--line-soft); }
+.learning-examples section small { padding-top: 6px; color: var(--text-disabled); font-size: 11px; }
+.learning-examples section p { margin: 0 0 5px; font-size: 18px; line-height: 1.7; }
+.learning-examples section span { color: var(--text-tertiary); font-size: 12px; line-height: 1.75; }
+.learning-point-nav { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--line-soft); background: var(--surface-raised-solid); }
+.learning-point-nav span { font-size: 11px; color: var(--text-faint); }
+.learning-point-nav button { color: var(--green); background: transparent; border: 0; padding: 5px 0; font-size: 12px; cursor: pointer; text-align: left; }
+.learning-point-nav > div { display: flex; flex-wrap: wrap; gap: 20px; }
+.learning-reading { display: flex; align-items: baseline; gap: 10px; margin: 10px 0; color: var(--text-tertiary); font-size: 13px; }
+.learning-reading small, .learning-collocations small { color: var(--text-faint); font-size: 11px; }
+.learning-collocations { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 10px 0 18px; }
+.learning-collocations span { border: 1px solid var(--line-soft); border-radius: 5px; padding: 4px 8px; background: var(--surface-raised-solid); font-size: 13px; }
+.learning-recap { margin-top: 22px; padding: 18px 21px; border-radius: 9px; background: var(--paper); }
+.learning-recap h3 { font-family: inherit; font-size: 13px; margin: 0 0 10px; color: var(--green); }
+.learning-recap ul { margin: 0; padding-left: 18px; display: grid; gap: 7px; }
+.learning-recap li { font-size: 12px; line-height: 1.8; color: var(--text-tertiary); }
+.textbook-full-lesson { margin-top: 22px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--surface); }
+.textbook-full-lesson > summary { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 17px 20px; cursor: pointer; color: var(--text-tertiary); font-size: 12px; }
+.textbook-full-lesson > summary span::before { content: "＋"; margin-right: 9px; }
+.textbook-full-lesson[open] > summary span::before { content: "－"; }
+.textbook-full-lesson summary small { color: var(--text-disabled); font-size: 10px; }
+.textbook-full-lesson[open] { padding: 0 20px 20px; }
+.textbook-full-lesson[open] > summary { padding-left: 0; padding-right: 0; }
+/* 课文也可独立于 reading-mode 展示，表格样式不能依赖阅读器外壳。 */
+.textbook-prose .reader-markdown-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px; }
+.textbook-prose .reader-markdown-table :is(th, td) { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line-soft); line-height: 1.8; vertical-align: top; overflow-wrap: anywhere; }
+.textbook-prose .reader-markdown-table th { background: var(--success-wash); font-weight: 600; }
+.textbook-prose .reader-markdown-table tr:last-child td { border-bottom: 0; }
+@media (max-width: 900px) {
+  .textbook-layout { grid-template-columns: 210px minmax(0, 1fr); gap: 16px; }
+  .textbook-heading { align-items: start; flex-direction: column; gap: 15px; }
+}
+@media (max-width: 680px) {
+  .textbook-layout { grid-template-columns: minmax(0, 1fr); }
+  .textbook-catalog { position: static; max-height: 300px; }
+  .textbook-catalog button { min-height: 48px; }
+  .textbook-catalog button span { display: none; }
+  .textbook-chapter { padding: 22px 17px; }
+  .textbook-prose.reader-prose { font-size: 16px; line-height: 1.95; }
+  .textbook-pagination { gap: 10px; }
+  .textbook-pagination button { min-height: 76px; padding: 11px; }
+  .textbook-heading > button { white-space: normal; max-width: 100%; }
+  .textbook-chapter:has(.learning-module) { padding: 18px 14px; }
+  .textbook-chapter:has(.learning-module) .textbook-chapter-heading h2 { font-size: 23px; }
+  .learning-point-grid { gap: 8px; }
+  .learning-point-grid > button { padding: 13px 11px; }
+  .learning-point-grid strong { font-size: 15px; }
+  .learning-focus > header, .learning-panel { padding: 18px 15px; }
+  .learning-tabs { padding: 0 15px; gap: 17px; overflow-x: auto; }
+  .learning-tabs button { font-size: 12px; }
+  .learning-mode-label { display: none; }
+  .learning-revision, .learning-contrast-pair { grid-template-columns: minmax(0, 1fr); }
+  .learning-point-nav { padding: 14px 15px; }
+  .learning-panel { min-height: 0; }
+}

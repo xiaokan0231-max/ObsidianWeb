@@ -32,11 +32,10 @@ import { findDayNote, findRoundNote } from "../review-join.ts";
 import type { ObsidianNote } from "./obsidian";
 
 import { createSerialQueue } from "./serial-queue.ts";
+import { vaultSnapshotFingerprint } from "../vault-merge.ts";
 
-// checkpoint（自動保存・beforeunload の keepalive）と complete は別ルートだが、
-// どちらも同じ批次ノートを「読む→マージ→全文書き戻す」。各自にキューを持たせると
-// ルート間の競合（保存中にタブを閉じた等）が後勝ちで片方のアクションを消すので、
-// 批次への書込は必ずこの共有キューを通す。
+// 创建、迁移、自动保存与完成都写同一批次；共享队列还保证同时开始只创建一个当前批次。
+// 外部模型评分必须在队列外等待，避免阻塞自动保存。
 export const languageBatchWriteQueue = createSerialQueue();
 
 export const CURRICULUM_START = "<!-- language-curriculum-json:start -->";
@@ -719,6 +718,11 @@ function allBatches(notes: ObsidianNote[]) {
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
+/** 完成任务回来时批次可能已经完成，不能只在 currentBatch 里找，更不能回写送评前的快照。 */
+export function languageBatchById(notes: ObsidianNote[], id: string) {
+  return allBatches(notes).find((batch) => batch.id === id);
+}
+
 function emptyProgress(itemId: string): LanguageItemProgress {
   return {
     itemId,
@@ -816,14 +820,12 @@ function historyOf(batch: LanguageBatch): LanguageBatchHistory {
   };
 }
 
-// 訓練ページを開くたびに study／review ノートを全部解析し直していた（数秒）。vault のスナップショットが
-// 同じなら結果も同じなので、件数＋最新 mtime を鍵に 1 世代だけ持つ。書込ルートは vault-cache を
-// invalidate するので、次の読み取りで鍵が変わり自然に作り直される。
+// 避免每次打开训练页都重解析全部材料。逐路径比较版本，才能识别未改变全库最大 mtime 的更新。
 let stateMemo: { key: string; value: Promise<LanguageV2State> } | null = null;
 
 export async function loadLanguageV2State(notes?: ObsidianNote[]): Promise<LanguageV2State> {
   const allNotes = notes ?? await (await import("./obsidian")).readAllNotes();
-  const key = `${allNotes.length}:${allNotes.reduce((latest, note) => Math.max(latest, note.stat?.mtime ?? 0), 0)}`;
+  const key = vaultSnapshotFingerprint(allNotes);
   if (stateMemo?.key === key) return stateMemo.value;
   const value = computeLanguageV2State(allNotes);
   stateMemo = { key, value };

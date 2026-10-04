@@ -24,14 +24,23 @@ import { parseInline } from "@/lib/interview-prep-doc";
 import { postJson } from "@/lib/client-api";
 import ScopeLoading from "./scope-loading";
 import { isTypingTarget as isEditableTarget } from "@/lib/keyboard";
-import type { Note } from "@/lib/notes";
+import { getTitle, type Note } from "@/lib/notes";
+import { isLanguageScenarioResource } from "@/lib/vault-scope";
 import { Inlines } from "./prep-doc-render";
-import { textCodec, useUrlState } from "./use-url-state";
+import { notifyUrlChange, writeUrlParam } from "./use-url-state";
 import { useUiLocale } from "./ui-locale";
+import LanguageScenarioCourse from "./language-scenario-course";
+import LanguageTextbook from "./language-textbook";
+import { useTextbookSearch } from "./use-textbook-position";
+import { findLanguageTextbookChapters, languageChapterHref, languageTextbookSelection } from "@/lib/language-textbook";
+import { readTextbookPosition, resolveTextbookPosition, type TextbookPosition } from "@/lib/language-textbook-position";
 
 // 练习方式的名称从界面字典派生，课程与练习素材仍按原文显示。
 const EXPRESSION_MENU_COPY = {
   "专项课程目录": ["专项课程目录", "専門コース一覧"],
+  "学习顺序与覆盖说明": ["学习顺序与覆盖说明", "学習順序と出典の説明"],
+  "学习顺序": ["学习顺序", "学習順序"],
+  "来源覆盖": ["来源覆盖", "出典の範囲"],
   "{count} 门课程": ["{count} 门课程", "{count} コース"],
   "{chunks} 词块 · {patterns} 句型": ["{chunks} 词块 · {patterns} 句型", "表現 {chunks} 件 · 文型 {patterns} 件"],
   "专项训练方式": ["专项训练方式", "専門トレーニングの練習方式"],
@@ -407,11 +416,15 @@ function currentSequentialQuestion(
 
 function LanguageExpressionCourses({
   notes,
+  onOpen,
+  onOpenWiki,
   onVaultChanged,
   onNoteWritten,
   loading = false,
 }: {
   notes: Note[];
+  onOpen: (note: Note) => void;
+  onOpenWiki: (target: string, section?: string) => void;
   /** この視図の scope がまだ届いていない：空状態ではなく読取中を出す。 */
   loading?: boolean;
   onVaultChanged: () => Promise<void>;
@@ -420,8 +433,28 @@ function LanguageExpressionCourses({
 }) {
   const { t } = useExpressionMenu();
   const courses = useMemo(() => findLanguageExpressionCourses(notes), [notes]);
+  const chapters = useMemo(() => findLanguageTextbookChapters(notes), [notes]);
+  const resources = useMemo(() => notes.filter(isLanguageScenarioResource).sort((a, b) => {
+    const rank = (note: Note) => note.frontmatter.material_kind === "language-scenario-guide" ? 0 : 1;
+    return rank(a) - rank(b) || getTitle(a).localeCompare(getTitle(b)) || a.path.localeCompare(b.path);
+  }), [notes]);
+  const resourceLinks = resources.length > 0 && <section className="expression-course-resources" aria-label={t("学习顺序与覆盖说明")}>
+    <h2>{t("学习顺序与覆盖说明")}</h2>
+    <div>{resources.map((note) => <button type="button" key={note.path} onClick={() => onOpen(note)}>
+      <small>{t(note.frontmatter.material_kind === "language-scenario-guide" ? "学习顺序" : "来源覆盖")}</small>
+      <span>{getTitle(note)} <i aria-hidden="true">↗</i></span>
+    </button>)}</div>
+  </section>;
   // 选中的课程放进 URL，便于刷新后停在原处；各课程的练习位置仍由本机的 study state 记住。
-  const [selectedCourseId, setSelectedCourseId] = useUrlState("course", "", textCodec);
+  const locationParams = new URLSearchParams(useTextbookSearch());
+  const selectedCourseId = locationParams.get("course") ?? "";
+  const selectedChapterId = locationParams.get("chapter") ?? "";
+  const setSelectedCourseId = (courseId: string) => {
+    // 先同步地址再通知阅读组件，避免从练习返回时旧 effect 把 course 写回来。
+    writeUrlParam("course", courseId || null);
+    notifyUrlChange();
+  };
+  const textbook = languageTextbookSelection(chapters, selectedChapterId, selectedCourseId);
   const storedStudyState = useSyncExternalStore(
     subscribeStudyState,
     getStudyStateSnapshot,
@@ -450,16 +483,38 @@ function LanguageExpressionCourses({
     }));
   };
 
+  const chooseChapter = (chapterId: string, requestedPosition?: TextbookPosition) => {
+    if (chapterId === textbook.chapter?.chapterId && !requestedPosition) return;
+    const target = chapters.find(item => item.chapterId === chapterId);
+    const position = target?.module ? requestedPosition ?? resolveTextbookPosition(target.module, "", readTextbookPosition(chapterId)) : undefined;
+    // 章节是阅读页面，前进后退应能回到上一章；其它视图仍沿用各自的 URL 策略。
+    window.history.pushState({ ...(window.history.state ?? {}), __echoNote: null }, "", languageChapterHref(window.location.search, chapterId, position));
+    notifyUrlChange();
+  };
+
   // URL 里的课程已下架（改名・删除）时，不当成「选中了一个不存在的课」，依次落回上次学习的课与第一门。
   const selected =
     courses.find((course) => course.courseId === selectedCourseId) ??
     courses.find((course) => course.courseId === storedStudyState?.activeCourseId) ??
     courses[0];
 
+  if (textbook.mode === "study" && textbook.chapter) {
+    return <div className="expression-courses-view">
+      <LanguageTextbook chapters={chapters} chapter={textbook.chapter}
+        onSelectChapter={chooseChapter}
+        onOpenWiki={onOpenWiki}
+        hasPractice={courses.length > 0}
+        hasChapterPractice={courses.some((course) => course.courseId === textbook.chapter?.exerciseCourseId)}
+        onPractice={(courseId) => setSelectedCourseId(courseId || courses[0]?.courseId || "catalog")} />
+      {resourceLinks}
+    </div>;
+  }
+
   if (!selected) {
     if (loading) return <div className="expression-courses-view"><ScopeLoading label="专项课程" /></div>;
     return (
       <div className="expression-courses-view">
+        {resourceLinks}
         <section className="expression-empty">
           <b>語</b>
           <div>
@@ -474,6 +529,8 @@ function LanguageExpressionCourses({
 
   return (
     <div className="expression-courses-view">
+      {textbook.chapter && <div className="textbook-return"><button type="button" onClick={() => setSelectedCourseId("")}>← 返回学习章节</button><span>课后练习（可选）</span></div>}
+      {resourceLinks}
       <div className="expression-course-shell">
         <aside className="expression-catalog" aria-label={t("专项课程目录")}>
           <div className="expression-catalog-heading">
@@ -490,13 +547,19 @@ function LanguageExpressionCourses({
               <span>{course.topic}</span>
               <strong>{course.title}</strong>
               <small>
-                {t("{chunks} 词块 · {patterns} 句型", { chunks: course.chunks.length, patterns: course.patterns.length })}
+                {course.scenario ? `情境练习 · 约 ${course.scenario.durationMinutes} 分钟` : t("{chunks} 词块 · {patterns} 句型", { chunks: course.chunks.length, patterns: course.patterns.length })}
               </small>
             </button>
           ))}
         </aside>
 
-        <CourseWorkbench
+        {selected.scenario ? <LanguageScenarioCourse
+          key={selected.courseId}
+          course={selected}
+          notes={notes}
+          onVaultChanged={onVaultChanged}
+          onNoteWritten={onNoteWritten}
+        /> : <CourseWorkbench
           // 保存位置が読めた時点で別インスタンスとして作り直す。effect で setState して
           // 復元すると「既定表示 → 復元表示」のカスケードレンダーになる。
           key={`${selected.courseId}:${storedStudyState ? "restored" : "initial"}`}
@@ -507,7 +570,7 @@ function LanguageExpressionCourses({
           positionReady={storedStudyState !== null}
           initialPosition={storedStudyState?.positions[selected.courseId]}
           onPositionChange={rememberPosition}
-        />
+        />}
       </div>
     </div>
   );

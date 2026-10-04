@@ -31,8 +31,8 @@ Obsidian (Local REST API) ──► app/api/vault?scope=… ──► readAllNot
 - 写回原语只有两个。**状态**（案件的状态・渠道・跟进，TODO 的状态）走 `lib/server/frontmatter-patch.ts`，
   只替换各路由允许的 key 的标量行，正文一个字不碰；**记录**（复盘的批注・反馈・练习）走
   `lib/server/note-append.ts`，追记到专用笔记的正文。由于「读→改→写」不是原子操作，
-  每条路由按笔记路径分片串行（`createKeyedSerialQueue`），不同笔记、不同路由互不等待。
-- 乐观锁：有 `status_updated` 的案件带它、TODO 带磁盘上的 `mtime` 作为版本，不一致就返回 409 让页面重新加载。
+  修改同一笔记的路由共用路径队列（`createKeyedSerialQueue`），锁内读取、校验版本、修改并回读；不同笔记仍可并行。
+- 乐观锁：案件使用磁盘上的 `mtime` 作为版本，不一致就返回 409 让页面重新加载。
   案件状态写完之后把派生统计标成 `derivedState: stale`，在 `vault:stats` 重跑前不冒充「同一时点的汇总」。
 - 投递渠道是**历史事实**，改状态时不允许覆盖；未评分显示「—」而不是 0 分。
 
@@ -161,11 +161,14 @@ npm run dev
 ## 质量门禁
 
 ```bash
-npm test       # tsc --noEmit → build → node --test（440 个测试）
+npm test       # 类型 → lint → 单测 → 构建 → Worker 渲染测试
+npm run build:app  # 纯构建；资源准备与模型下载由调用方选择
 npm run lint   # eslint --max-warnings 0
 ```
 
-`npm test` 含类型检查和一次生产构建。测试集中在被抽成纯函数的数据层
+`npm test` 含类型、lint、单测、生产构建和 Worker 渲染检查。CI 先用
+`node scripts/fetch-mediapipe.mjs --skip-model-download` 准备 WASM，再执行纯构建，不下载模型。
+测试使用内存 Obsidian 桩覆盖真实路由并发写入，也覆盖被抽成纯函数的数据层
 （`lib/*.ts` / `lib/*.mjs`），覆盖解析、规范化、竞态、渲染结果、GLSL 与 CPU 公式一致性、手势帧序列。
 
 实际在生产里坏过的形状——公司名的全半角差异、「株式会社」的前后位置、括号别名——

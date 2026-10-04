@@ -2,6 +2,8 @@
 
 import {
   Fragment,
+  lazy,
+  Suspense,
   type ReactNode,
   useCallback,
   useEffect,
@@ -10,26 +12,15 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import InterviewReview from "./interview-review";
-import InterviewInsights from "./interview-insights";
 import type { AdvisoryEvidenceRef } from "@/lib/interview-advisory";
-import InterviewPractice from "./interview-practice";
-import InterviewPrep from "./interview-prep";
-import InterviewSession from "./interview-session";
 import InterviewSharedAsset from "./interview-shared-asset";
-import { isTypingTarget } from "./prep-search";
-import JapaneseTraining from "./japanese-training";
-import LanguageExpressionCourses from "./language-expression-courses";
-import JobsAnalytics from "./jobs-analytics";
-import JobsView, { type JobsInitialFilters } from "./jobs-view";
+import { isTypingTarget } from "@/lib/keyboard";
+import type { JobsInitialFilters } from "./jobs-view";
 import CalendarView from "./calendar-view";
 import CalendarInterviewState from "./calendar-interview-state";
-import GraphView from "./graph-view";
-import LibraryView from "./library-view";
 import NoteDrawer from "./note-drawer";
 import SceneNoteReader from "./scene-note-reader";
 import SearchPalette, { type PaletteAction } from "./search-palette";
-import TimelineView from "./timeline-view";
 import {
   appViewFromPathname,
   appViewHref,
@@ -50,7 +41,8 @@ import { useUndoFlash, UndoFlashBar } from "./undo-flash";
 import { notifyUrlChange, SHELL_URL_KEYS } from "./use-url-state";
 import { describeConnectionError } from "@/lib/connection-error";
 import { postJson } from "@/lib/client-api";
-import { mergeScopedNotes } from "@/lib/vault-merge";
+import { createVaultReader, type VaultReadOptions } from "@/lib/vault-reader";
+import { createWikiNavigator, type WikiNavigationNotice } from "@/lib/wiki-navigation";
 import ViewErrorBoundary from "./view-error-boundary";
 import {
   isRoundSpecificAsset,
@@ -68,14 +60,11 @@ import {
   countdownLabel,
   GROUPS,
   localDateKey,
-  mergePendingWrites,
-  type PendingWrite,
   type Commitment,
   type GroupKey,
 } from "@/lib/memory-atlas-data";
-import { scopesToReloadAfterStats, vaultScopeForView, type VaultScope } from "@/lib/vault-scope";
+import { scopesToReloadAfterStats, vaultScopeForView } from "@/lib/vault-scope";
 import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
-import { resolveNoteLink } from "@/lib/wiki-target";
 import { tokyoParts } from "@/lib/dojo/utils";
 import { APP_BRANDING } from "@/lib/ui-locale";
 import { LanguageSwitch, useUiLocale } from "./ui-locale";
@@ -83,18 +72,21 @@ import { ThemeSwitch, useUiTheme } from "./ui-theme";
 import { rememberRecentPath } from "@/lib/recent-notes";
 import { SHELL_MESSAGES } from "./shell-messages";
 
+// 业务页首次进入时再加载；组件身份固定，笔记刷新和 URL 更新不能重建页面状态。
+const InterviewReview = lazy(() => import("./interview-review"));
+const InterviewInsights = lazy(() => import("./interview-insights"));
+const InterviewPractice = lazy(() => import("./interview-practice"));
+const InterviewPrep = lazy(() => import("./interview-prep"));
+const InterviewSession = lazy(() => import("./interview-session"));
+const JapaneseTraining = lazy(() => import("./japanese-training"));
+const LanguageExpressionCourses = lazy(() => import("./language-expression-courses"));
+const JobsAnalytics = lazy(() => import("./jobs-analytics"));
+const JobsView = lazy(() => import("./jobs-view"));
+const GraphView = lazy(() => import("./graph-view"));
+const LibraryView = lazy(() => import("./library-view"));
+const TimelineView = lazy(() => import("./timeline-view"));
 
 export type { Note };
-
-type VaultResponse = {
-  connected: boolean;
-  fetchedAt?: number;
-  error?: string;
-  notes: Note[];
-  scope?: VaultScope;
-  /** 該 scope に現存する全パス。無い（旧サーバ）なら削除同期はしない。 */
-  paths?: string[];
-};
 
 type View = AppView;
 
@@ -295,7 +287,11 @@ function PrepCardOverlay({
       origin={origin}
       onClose={onClose}
     >
-      <InterviewPrep key={cardId} notes={notes} onOpen={onOpen} initialCardId={cardId} />
+      <ViewErrorBoundary label="prep-card">
+        <Suspense fallback={<LoadingState view="prep" />}>
+          <InterviewPrep key={cardId} notes={notes} onOpen={onOpen} initialCardId={cardId} />
+        </Suspense>
+      </ViewErrorBoundary>
     </InterviewOverlay>
   );
 }
@@ -377,7 +373,9 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const branding = APP_BRANDING[locale];
   const navigation = getNavigation(locale);
   const secondaryMenus = getSecondaryNavigation(locale);
-  const [notes, setNotes] = useState<Note[]>([]);
+  const [vaultReader] = useState(() => createVaultReader());
+  const vaultState = useSyncExternalStore(vaultReader.subscribe, vaultReader.getState, vaultReader.getState);
+  const notes = vaultState.notes;
   const [view, setView] = useState<View>(initialView);
   const [interviewRouteSearch, setInterviewRouteSearch] = useState(() =>
     typeof window === "undefined" ? "" : window.location.search,
@@ -429,16 +427,17 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   // props が変わらず再レンダーされず、昨日の日付が凍りつく（総覧の見出し・日历の「今天」）。
   const [today, setToday] = useState(() => localDateKey());
   const [calendarToday, setCalendarToday] = useState(() => tokyoParts().date);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const loading = vaultState.loading || vaultState.readyScopes.size === 0 && vaultState.errors.size === 0;
+  const activeScope = vaultScopeForView(view);
+  const error = vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
   const [writeError, setWriteError] = useState("");
   // 撤销失败而它的提示已被新的一次写入顶掉时，理由落到全局的写入错误横幅上（见 useUndoFlash）。
   const reportStaleUndoFailure = useCallback((message: string) => setWriteError(`撤销没有完成：${message}`), []);
   const undoFlash = useUndoFlash({ onStaleFailure: reportStaleUndoFailure });
   const { show: showFlash } = undoFlash;
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const fetchedAt = vaultState.checkedAt.get(activeScope) ?? vaultState.checkedAt.get("all") ?? null;
   // どの scope が手元に揃ったか。視図はこれで「まだ来ていない」と「本当に無い」を分ける（假空态の根）。
-  const [readyScopes, setReadyScopes] = useState<ReadonlySet<VaultScope>>(() => new Set());
+  const readyScopes = vaultState.readyScopes;
   const interviewScopeReady = readyScopes.has("all") || readyScopes.has("interview");
   const scopeReady = readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
 
@@ -514,80 +513,45 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     };
   }, []);
 
-  /**
-   * 書き込み結果の突き合わせ台帳。key はパス、値は「このリクエストで書いた本文」。
-   *
-   * 全量取得は在途中に発行されたものが後から着地し得る（R キーの強制爬取は 0.5〜1s かかり、
-   * その間も画面は操作できる）。到着した全量スナップショットは**発行時点**の vault なので、
-   * その後の書き込みを含まない——素直に setNotes すると、書いたばかりの内容が
-   * 写前の値で黙って上書きされる（last-write-wins）。以前は書くたびに新しい全量取得を
-   * 起こしていたので最後に着地するのがほぼ必ず写後スナップショットだったが、
-   * 単条差し替えに変えた今はその保証が無い。
-   *
-   * だから「サーバがまだ追いついていない書き込み」だけをここに保持し、
-   * 着地したスナップショットへ被せ直す。内容が一致した時点で台帳から落とす。
-   */
-  const pendingWrites = useRef(new Map<string, PendingWrite>());
-  const loadedScopes = useRef(new Set<VaultScope>());
-  const loadingScopes = useRef(new Set<VaultScope>());
-  // scope ごとの ETag。焦点が戻った時の照合で 304 なら十数 MB の JSON を受け取らない。
-  const scopeEtags = useRef(new Map<VaultScope, string>());
+  // 请求次序、scope 快照和写回保护由独立协调器管理，页面只订阅接受后的状态。
+  const loadVault = useCallback(async (options?: VaultReadOptions): Promise<void> => {
+    await vaultReader.request(options);
+  }, [vaultReader]);
 
-  const applyPendingWrites = useCallback((incoming: Note[]) => {
-    const { notes: merged, settled } = mergePendingWrites(incoming, pendingWrites.current);
-    // サーバが追いついたものは台帳から外す。以後はサーバ側が正。
-    for (const path of settled) pendingWrites.current.delete(path);
-    return merged;
-  }, []);
+  const [wikiNotice, setWikiNotice] = useState<WikiNavigationNotice>(null);
+  const [wikiNavigator] = useState(() => createWikiNavigator({
+    getNotes: () => vaultReader.getState().notes,
+    isComplete: () => vaultReader.getState().readyScopes.has("all"),
+    ensureAll: async () => {
+      // R 可替代在途请求；等它的最新结果，不能拿点击前闭包里的旧 notes 解析。
+      let result = await vaultReader.request({ scope: "all" });
+      while (result.status === "superseded" && vaultReader.getState().loadingScopes.has("all")) {
+        result = await vaultReader.request({ scope: "all" });
+      }
+      return result.status === "accepted" ? vaultReader.getState().notes : null;
+    },
+    onNotice: setWikiNotice,
+    onOpen: ({ path, section }) => {
+      const params = new URLSearchParams(window.location.search);
+      params.set("note", path);
+      if (section) params.set("section", section);
+      else params.delete("section");
+      window.history.pushState(
+        { ...(window.history.state ?? {}), __echoNote: path }, "",
+        `${window.location.pathname}?${params.toString()}`,
+      );
+      setSelectedPath(path);
+      setSelectedSection(section);
+      setSearchOpen(false);
+    },
+  }));
 
-  const loadVault = useCallback(async (options?: { fresh?: boolean; scope?: VaultScope }) => {
-    const scope = options?.fresh ? "all" : options?.scope ?? "all";
-    if (!options?.fresh && loadingScopes.current.has(scope)) return;
-    loadingScopes.current.add(scope);
-    setLoading(true);
-    setError("");
-    // R キーは「ローカルの状態も含めて信じ直す」操作。台帳ごと捨てて、
-    // サーバの言う通りにする（ここが台帳の逃げ道＝永久に貼り付き続けない保証）。
-    if (options?.fresh) pendingWrites.current.clear();
-    try {
-      // fresh は R キー専用の「サーバのキャッシュも信じない」通路。通常は増分キャッシュで足りる。
-      const params = new URLSearchParams({ scope });
-      if (options?.fresh) params.set("refresh", "1");
-      const url = `/api/vault?${params.toString()}`;
-      const knownEtag = options?.fresh ? null : scopeEtags.current.get(scope);
-      const response = await fetch(url, {
-        cache: "no-store",
-        headers: knownEtag ? { "If-None-Match": knownEtag } : {},
-        // Obsidian 側が黙ると「正在读取」が永遠に続く。読み取りは 20 秒で諦めて再試行に回す。
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (response.status === 304) {
-        // 路径集合も最新 mtime も変わっていない：手元のままでよい。
-        loadedScopes.current.add(scope);
-        setReadyScopes((current) => (current.has(scope) ? current : new Set(current).add(scope)));
-        setFetchedAt(Date.now());
-        return;
-      }
-      const payload = (await response.json()) as VaultResponse;
-      if (!response.ok || !payload.connected) {
-        throw new Error(payload.error || "无法连接 Obsidian");
-      }
-      const etag = response.headers.get("ETag");
-      if (etag) scopeEtags.current.set(scope, etag);
-      const incoming = applyPendingWrites(payload.notes);
-      // 該 scope で消えた／改名したノートは paths に無い → 落とす（lib/vault-merge.ts）。
-      setNotes((current) => mergeScopedNotes(current, incoming, scope, payload.paths));
-      loadedScopes.current.add(scope);
-      setReadyScopes((current) => (current.has(scope) ? current : new Set(current).add(scope)));
-      setFetchedAt(payload.fetchedAt ?? Date.now());
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "无法连接 Obsidian");
-    } finally {
-      loadingScopes.current.delete(scope);
-      // 複数 scope を並行で取っている時、先に終わった方が全体の loading を落としてはいけない。
-      setLoading(loadingScopes.current.size > 0);
-    }
-  }, [applyPendingWrites]);
+  useEffect(() => {
+    return () => {
+      wikiNavigator.cancel();
+      vaultReader.dispose();
+    };
+  }, [vaultReader, wikiNavigator]);
 
   // Obsidian で編集して戻ってきた時だけ軽量キャッシュ照合を行う。常時 poll はせず、
   // 直前の取得から60秒未満なら何もしないので、Cmd+Tab のたびに画面を揺らさない。
@@ -620,12 +584,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
       setDerivedState("fresh");
       // generated 区块は複数の scope に散っている（台帳・応募日台帳は jobs、面接傾向は interview、数据字典は all だけ）。
       // 手元に載っている scope を全部取り直す——変わっていない scope は ETag で 304 になるので安い。
-      await Promise.all(scopesToReloadAfterStats(loadedScopes.current).map((scope) => loadVault({ scope })));
+      await Promise.all(scopesToReloadAfterStats(vaultReader.getState().readyScopes).map((scope) => loadVault({ scope })));
     } catch (rebuildError) {
       setDerivedState("stale");
       setStatsError(rebuildError instanceof Error ? rebuildError.message : "重算派生统计失败");
     }
-  }, [loadVault]);
+  }, [loadVault, vaultReader]);
 
   // 事実を書いた直後に呼ぶ。自動なら 3 秒待って（連打をまとめて）再計算、手動なら「待重算」の印だけ出す。
   const markDerivedStale = useCallback(() => {
@@ -638,18 +602,9 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const toggleAutoStats = useCallback(() => writeAutoStats(!readAutoStats()), []);
 
   const patchNote = useCallback((note: Note) => {
-    // 在途の全量取得が写前スナップショットを持って着地しても潰されないよう、台帳にも残す。
-    // 時刻を持たせるのは期限切れの判定用（食い違ったまま永久に貼り続けないため）。
-    pendingWrites.current.set(note.path, { note, at: Date.now() });
-    setNotes((current) => {
-      const index = current.findIndex((item) => item.path === note.path);
-      if (index < 0) return [...current, note];
-      const next = [...current];
-      next[index] = note;
-      return next;
-    });
+    vaultReader.patchNote(note);
     if (DERIVED_SOURCE_TYPES.has(getType(note))) markDerivedStale();
-  }, [markDerivedStale]);
+  }, [markDerivedStale, vaultReader]);
 
   const openPrepCard = useCallback((cardId: string) => {
     // setState→overlay の effect を待つと、focus と overflow の変更後の座標を
@@ -809,6 +764,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
       setSelectedSection(params.get("section"));
     };
     const onPopState = (event: PopStateEvent) => {
+      wikiNavigator.cancel();
       syncOverlays(event.state);
       // 只认浏览器真正的后退／前进（isTrusted）：日历补齐场次时自己派发的 popstate 不是「回来」。
       // 同一页内的回退（关 drawer・关回答库浮层）由各自的逻辑复位，这里不插手。
@@ -833,7 +789,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     syncRoute();
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [wikiNavigator]);
 
   useEffect(() => {
     // rAF は非アクティブなタブでは発火しないため timer で初回ロードする。
@@ -843,9 +799,9 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
 
   useEffect(() => {
     const scope = vaultScopeForView(view);
-    if (loadedScopes.current.has("all") || loadedScopes.current.has(scope)) return;
+    if (vaultReader.getState().readyScopes.has("all") || vaultReader.getState().readyScopes.has(scope)) return;
     void loadVault({ scope });
-  }, [loadVault, view]);
+  }, [loadVault, view, vaultReader]);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -875,6 +831,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
         }
         // 回答库の上に原笔记 drawer を開いている時は、一段ずつ閉じる。
         if (selectedPath) {
+          wikiNavigator.cancel();
           if (window.history.state?.__echoNote) window.history.back();
           else {
             const params = new URLSearchParams(window.location.search);
@@ -897,6 +854,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           closeSharedAsset();
           return;
         }
+        wikiNavigator.cancel();
         setSearchOpen(false);
         setSelectedPath(null);
       }
@@ -911,6 +869,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     searchOpen,
     selectedPath,
     sharedAssetOverlay,
+    wikiNavigator,
   ]);
 
   const notesByBasename = useMemo(() => {
@@ -929,6 +888,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     : null;
 
   const openNote = useCallback((note: Note) => {
+    wikiNavigator.cancel();
     const params = new URLSearchParams(window.location.search);
     params.set("note", note.path);
     params.delete("section");
@@ -940,9 +900,10 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     setSelectedPath(note.path);
     setSelectedSection(null);
     setSearchOpen(false);
-  }, [setSearchOpen]);
+  }, [setSearchOpen, wikiNavigator]);
 
   const closeNote = useCallback(() => {
+    wikiNavigator.cancel();
     if (window.history.state?.__echoNote) {
       window.history.back();
       return;
@@ -954,31 +915,14 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
     setSelectedPath(null);
     setSelectedSection(null);
-  }, []);
+  }, [wikiNavigator]);
 
-  const openWikiLink = useCallback(
-    (target: string, section?: string) => {
-      const resolved = resolveNoteLink(notes, target, section);
-      if (resolved) {
-        const { note, section: heading } = resolved;
-        const params = new URLSearchParams(window.location.search);
-        params.set("note", note.path);
-        if (heading) params.set("section", heading);
-        else params.delete("section");
-        window.history.pushState(
-          { ...(window.history.state ?? {}), __echoNote: note.path },
-          "",
-          `${window.location.pathname}?${params.toString()}`,
-        );
-        setSelectedPath(note.path);
-        setSelectedSection(heading);
-        setSearchOpen(false);
-      }
-    },
-    [notes, setSearchOpen],
-  );
+  const openWikiLink = useCallback((target: string, section?: string) => {
+    void wikiNavigator.open(target, section);
+  }, [wikiNavigator]);
 
   const closeSceneNote = useCallback(() => {
+    wikiNavigator.cancel();
     // 关联笔记可能已经翻了多篇，关闭全文必须直接回到场景，而不是逐篇退出。
     const params = new URLSearchParams(window.location.search);
     params.delete("note");
@@ -990,7 +934,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     );
     setSelectedPath(null);
     setSelectedSection(null);
-  }, []);
+  }, [wikiNavigator]);
 
   // today を依存に入れるのは、日历事件の upcoming/past が「今日」で決まるため。
   // 入れないと、日付を跨いだ時に見出しの日付だけ進んで、昨日の面接が「未来の予定」の
@@ -1012,7 +956,6 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     }
     return targets;
   }, [calendarEvents, notes]);
-
   const calendarInterview = useMemo(() => {
     const requested = calendarInterviewFromSearch(view, interviewRouteSearch);
     if (!requested) return null;
@@ -1058,16 +1001,16 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
 
   // ?note= が指すノートが今の scope に無い（他ページのリンクや共有 URL）：黙って開かないのではなく、全量を一度取りに行く。
   useEffect(() => {
-    if (!selectedPath || selectedNote || loadedScopes.current.has("all") || loadingScopes.current.has("all")) return;
+    if (!selectedPath || selectedNote || vaultReader.getState().readyScopes.has("all") || vaultReader.getState().loadingScopes.has("all")) return;
     void loadVault({ scope: "all" });
-  }, [selectedPath, selectedNote, loadVault]);
+  }, [selectedPath, selectedNote, loadVault, vaultReader]);
 
   // ⌘K 搜的是「全库」：没去过资料库时只载了当前视图的 scope，打开面板时把 all 补齐，
   // 面板在补齐前会说明「正在载入全部资料」，不把部分结果当成全库。
   useEffect(() => {
-    if (!searchOpen || loadedScopes.current.has("all") || loadingScopes.current.has("all")) return;
+    if (!searchOpen || vaultReader.getState().readyScopes.has("all") || vaultReader.getState().loadingScopes.has("all")) return;
     void loadVault({ scope: "all" });
-  }, [searchOpen, loadVault]);
+  }, [searchOpen, loadVault, vaultReader]);
 
   // 「最近打开」记在本机：不论从哪一页、哪种方式打开笔记，都在这里统一记一笔。
   useEffect(() => {
@@ -1104,6 +1047,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     search?: URLSearchParams | string,
     preserveJobsInitialFilters = false,
   ) => {
+    wikiNavigator.cancel();
     setInterviewRouteSearch(typeof search === "string" ? search : search?.toString() ?? "");
     interviewNavigation.current = interviewNavigationKey(nextView, search?.toString() ?? "");
     setInterviewRouteVersion((version) => version + 1);
@@ -1121,7 +1065,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     setView(nextView);
     // 同一页上再点一次导航时，页内放进 URL 的状态要跟着新地址回到默认（pushState 不触发 popstate）。
     notifyUrlChange();
-  }, []);
+  }, [wikiNavigator]);
 
   // 以下の遷移系コールバックは全部 useCallback：視圖側は React.memo で包んであり、
   // ここが毎レンダー新しい関数だと memo が一度も命中しない。
@@ -1463,6 +1407,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
               </nav>
             )}
             <div className="view-container">
+              <Suspense fallback={<LoadingState view={view} />}>
               {calendarInterview && (!interviewScopeReady || calendarInterview.view !== view || (!calendarInterview.path && !calendarCompanyContext)) && (
                 <CalendarInterviewState
                   target={calendarInterview}
@@ -1536,6 +1481,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                 <LanguageExpressionCourses
                   loading={!scopeReady}
                   notes={notes}
+                  onOpen={openNote}
+                  onOpenWiki={openWikiLink}
                   onVaultChanged={loadVault}
                   onNoteWritten={patchNote}
                 />
@@ -1602,6 +1549,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   onOpen={openNote}
                 />
               )}
+              </Suspense>
             </div>
           </ViewErrorBoundary>
         )}
@@ -1647,6 +1595,14 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
       )}
 
       <UndoFlashBar state={undoFlash} />
+      {wikiNotice && (
+        <div className="wiki-navigation-notice" role="status" aria-live="polite">
+          <span>{locale === "ja"
+            ? wikiNotice.kind === "loading" ? "ノートを探しています…" : wikiNotice.kind === "ambiguous" ? "同名のノートが複数あります。完全なパスで指定してください。" : "該当するノートが見つかりません。"
+            : wikiNotice.kind === "loading" ? "正在查找笔记…" : wikiNotice.kind === "ambiguous" ? "同名笔记有多篇，请使用完整路径。" : "找不到这篇笔记。"}</span>
+          <button type="button" onClick={() => wikiNavigator.cancel()} aria-label={ui.closeNotice}>×</button>
+        </div>
+      )}
 
       {searchOpen && (
         <SearchPalette

@@ -28,10 +28,12 @@ export default class ViewErrorBoundary extends Component<Props, State> {
     return (
       <div className="view-error" role="alert">
         <span className="error-code">RENDER / {this.props.label}</span>
-        <h1>这个视图渲染时出错了。</h1>
-        <p>其它页面不受影响。多半是某篇笔记的 frontmatter 形状不符合预期；错误原文如下，可以先跑 npm run vault:check。</p>
+        <h1>这个页面暂时无法显示。</h1>
+        <p>可以先重试；如果页面内容仍未载入，请重新载入页面。侧栏仍可切换到其它页面。</p>
         <code>{this.state.error.message}</code>
         <button onClick={() => this.setState({ error: null })}>重试 <span>↻</span></button>
+        {/* lazy 会缓存失败的模块请求；只重挂组件不能重新下载，需要保留整页恢复入口。 */}
+        <button onClick={() => window.location.reload()}>重新载入页面</button>
       </div>
     );
   }

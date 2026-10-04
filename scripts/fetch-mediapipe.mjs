@@ -18,6 +18,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const wasmSource = join(root, "node_modules/@mediapipe/tasks-vision/wasm");
 const wasmTarget = join(root, "public/mediapipe/wasm");
 const modelTarget = join(root, "public/mediapipe/gesture_recognizer.task");
+// CI 只验证构建和页面外壳；显式跳过远程模型，避免网络或缓存状态左右代码门禁。
+const skipModelDownload = process.argv.includes("--skip-model-download");
 
 // バージョンを固定した正規配布 URL（コード内の latest URL と違い、勝手に変わらない）
 const MODEL_URL =
@@ -51,8 +53,8 @@ for (const name of WASM_FILES) {
   copied += 1;
 }
 
-let model = "cached";
-if ((await fileSize(modelTarget)) < MODEL_MIN_BYTES) {
+let model = skipModelDownload ? "skipped (--skip-model-download)" : "cached";
+if (!skipModelDownload && (await fileSize(modelTarget)) < MODEL_MIN_BYTES) {
   try {
     const response = await fetch(MODEL_URL);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);

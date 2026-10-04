@@ -827,6 +827,28 @@ button.prep-doc-ref.card::after { content: " →"; font-size: 0.85em; }
   gap: 18px;
 }
 
+.expression-course-resources {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+.expression-course-resources h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; }
+.expression-course-resources > div { display: flex; flex-wrap: wrap; gap: 10px; }
+.expression-course-resources button {
+  display: grid;
+  gap: 5px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.expression-course-resources button:hover { background: var(--success-wash); }
+.expression-course-resources button small { color: var(--muted); font-size: 10px; }
+.expression-course-resources button span { font-size: 12px; line-height: 1.5; }
+.expression-course-resources button i { color: var(--green); font-style: normal; }
+
 .expression-catalog {
   position: sticky;
   top: 84px;
