@@ -493,6 +493,8 @@ test("quickSummary：阶段分布只数可出题条目，到期、新题、种�
   assert.equal(Object.values(summary.stageCounts).reduce((sum, value) => sum + value, 0), drillable);
   assert.equal(summary.stageCounts.retrievable, 1);
   assert.equal(summary.due, 1);
+  // ip_6 今天答错、排到明天：明天到期要算上今天答过的题。
+  assert.equal(summary.dueTomorrow, 1);
   assert.equal(summary.lapsedToday, 1);
   assert.equal(summary.newAvailable, drillable - 3);
   assert.deepEqual(summary.seedRemaining, { unknown: 1, uncertain: 2 });

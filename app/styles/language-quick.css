@@ -478,3 +478,23 @@
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
+
+/* 顶部四格的副数字（答对 N、明天 N）：跟在大号数字后面，小一档、次要色，不和主数字抢。 */
+.quick-overview .focus-language-glance dd small {
+  margin-left: 8px;
+  color: var(--text-secondary);
+  /* 大号数字是宋体；副数字回到正文的无衬线字体。--font-body 在 base.css 里是字号，不是字体族。 */
+  font-family: var(--font-geist-sans), "PingFang SC", "Hiragino Sans", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* 阶段分布下的条件说明：几个阶段为什么练完一组不动，一行讲清。 */
+.focus-pulse-stage-note {
+  margin: 10px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.6;
+}

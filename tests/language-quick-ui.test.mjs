@@ -81,7 +81,7 @@ const renderCard = (module, value, props = {}) => renderToStaticMarkup(createEle
 }));
 
 const SUMMARY = {
-  ready: true, stale: false, day: DAY, due: 7, lapsedToday: 1, newAvailable: 320, newToday: 4, dailyNewLimit: 40,
+  ready: true, stale: false, day: DAY, due: 7, dueTomorrow: 3, lapsedToday: 1, newAvailable: 320, newToday: 4, dailyNewLimit: 40,
   answeredToday: 12, firstPassToday: 9, seedRemaining: { unknown: 30, uncertain: 12 },
   stageCounts: { unseen: 300, recognized: 40, correctable: 20, retrievable: 11, transferable: 0, stable: 5 },
   drillable: 376, excludedJaMeaning: 511, notebookParsed: 89,
@@ -97,13 +97,15 @@ const overviewProps = (values = {}) => ({
 
 test("总览：首次读取时数字显示「—」，不先闪一排 0；入口按钮不可用", () => {
   const html = renderToStaticMarkup(createElement(shell.default, { onVaultChanged: async () => {} }));
-  assert.match(html, /<dt>今天到期<\/dt><dd>—<\/dd>/);
-  assert.match(html, /<dt>训练稳定<\/dt><dd>—<\/dd>/);
+  assert.match(html, /<dt>今天已练<\/dt><dd>—<\/dd>/);
+  assert.match(html, /<dt>已学会<\/dt><dd>—<\/dd>/);
+  assert.match(html, /<dt>待复习<\/dt><dd>—<\/dd>/, "汇总没到时不带「明天 0」");
   assert.match(html, /今天到期 — · 新题 — · 约 5 分钟/);
   assert.match(html, /<button type="button" class="quick-primary" disabled=""/);
   assert.doesNotMatch(html, /<dd>0<\/dd>/);
   const ja = renderToStaticMarkup(createElement(shellJa.default, { onVaultChanged: async () => {} }));
-  assert.match(ja, /<dt>今日の復習<\/dt><dd>—<\/dd>/);
+  assert.match(ja, /<dt>今日の練習<\/dt><dd>—<\/dd>/);
+  assert.match(ja, /<dt>復習待ち<\/dt><dd>—<\/dd>/);
   assert.match(ja, /クイック練習を始める/);
 });
 
@@ -119,7 +121,12 @@ test("总览：入口卡给出到期、新题、预计用时，组大小用 aria
   assert.match(html, /単語文法帳已解析 89 条/);
   assert.match(html, /助詞[\s\S]*4 场 · 21 次证据/);
   assert.match(html, /<time>2026-10-03<\/time><strong>20 \/ 20<\/strong><em>命中 16<\/em>/);
-  assert.match(html, /<dt>能主动提取<\/dt><dd>11<\/dd>/);
+  // 顶部四格要练完一组就会动：今天已练（含答对数）、已学会（能修正及以上）、待复习（含明天）、未练新题。
+  assert.match(html, /<dt>今天已练<\/dt><dd>12<small>答对 9<\/small><\/dd>/);
+  assert.match(html, /<dt>已学会<\/dt><dd>36<\/dd>/, "20 能修正 + 11 能主动提取 + 0 + 5 稳定");
+  assert.match(html, /<dt>待复习<\/dt><dd>7<small>明天 3<\/small><\/dd>/);
+  assert.match(html, /<dt>未练新题<\/dt><dd>320<\/dd>/);
+  assert.match(html, /class="focus-pulse-stage-note">能修正＝有 1 天首答答对/, "长期阶段的条件写在分布下面");
   // 节奏带的阶段分布来自 summary 的计数，不需要逐条进度。
   assert.match(html, /<small>掌握阶段分布<\/small><span>376<\/span>/);
   assert.doesNotMatch(html, /再加一组新题/, "额度没用完时不出现");

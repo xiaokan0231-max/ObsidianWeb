@@ -156,6 +156,7 @@ export function TrainingPulse({
             </li>
           ))}
         </ul>
+        <p className="focus-pulse-stage-note">{t("阶段条件说明")}</p>
       </div>
     </section>
   );
@@ -336,16 +337,25 @@ export function QuickOverview(props: QuickOverviewProps) {
   }, [canStart, onStart]);
 
   const stages = summary?.stageCounts;
+  // 「已学会」＝至少有一天首答答对（correctable 及以上）。能主动提取、稳定要隔天多次答对，
+  // 放在顶部的话练完一组四个数字几乎都不动，看不出这组练了什么；它们留在下面的阶段分布里。
+  const learned = stages ? stages.correctable + stages.retrievable + stages.transferable + stages.stable : undefined;
   const fresh = summary ? quickFreshLeft(summary) : undefined;
   const pulseState = useMemo(() => ({ history: summary?.history ?? [], progress: [] as LanguageItemProgress[] }), [summary?.history]);
 
   return (
     <div className="focus-language-view quick-overview">
       <dl className="focus-language-glance page-stat-strip module-stat-strip" aria-label={t("日语训练摘要")}>
-        <div><dt>{t("今天到期")}</dt><dd>{dash(summary?.due)}</dd></div>
+        <div>
+          <dt>{t("今天已练")}</dt>
+          <dd>{dash(summary?.answeredToday)}{summary && summary.answeredToday > 0 && <small>{t("答对 {count}", { count: summary.firstPassToday })}</small>}</dd>
+        </div>
+        <div title={t("至少有一天首答答对的条目")}><dt>{t("已学会")}</dt><dd>{dash(learned)}</dd></div>
+        <div>
+          <dt>{t("待复习")}</dt>
+          <dd>{dash(summary?.due)}{summary && <small>{t("明天 {count}", { count: summary.dueTomorrow ?? 0 })}</small>}</dd>
+        </div>
         <div><dt>{t("未练新题")}</dt><dd>{dash(summary?.newAvailable)}</dd></div>
-        <div><dt>{t("能主动提取")}</dt><dd>{stages ? stages.retrievable + stages.transferable : "—"}</dd></div>
-        <div><dt>{t("训练稳定")}</dt><dd>{dash(stages?.stable)}</dd></div>
       </dl>
 
       {(error || notice || busy) && (

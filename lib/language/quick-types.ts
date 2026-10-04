@@ -225,6 +225,8 @@ export type QuickSummary = {
   stale: boolean;
   day: string;
   due: number;
+  /** 明天（JST）到期的条目数：今天答错的、以及排期正好落在明天的。练完马上能看到「明天会回来几题」。 */
+  dueTomorrow?: number;
   lapsedToday: number;
   newAvailable: number;
   newToday: number;

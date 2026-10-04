@@ -451,19 +451,24 @@ export function quickSummary(input: QuickSummaryInput): QuickSummary {
   const typing = input.typing ?? true;
   const today = todayContext(events, day);
   const endOfToday = Date.parse(jstMidnightIso(day, 1));
+  const endOfTomorrow = Date.parse(jstMidnightIso(day, 2));
   // 只数可出题、没被排除的条目：阶段分布与「新题 N 条」都要和练习里实际能见到的一致。
   const active = pool.items.filter((item) =>
     !excluded(item, progress, legacy) && availableCardTypes(item, index, { typing }).length > 0
   );
   const stageCounts = Object.fromEntries(STAGES.map((stage) => [stage, 0])) as Record<LanguageTrainingStage, number>;
   let due = 0;
+  let dueTomorrow = 0;
   let lapsedToday = 0;
   let newAvailable = 0;
   const seedRemaining = { unknown: 0, uncertain: 0 };
   for (const item of active) {
     const entry = progress.get(item.id);
     stageCounts[entry?.stage ?? "unseen"] += 1;
-    if (!today.answered.has(item.id) && dueTime(entry) < endOfToday) due += 1;
+    const dueAt = dueTime(entry);
+    if (!today.answered.has(item.id) && dueAt < endOfToday) due += 1;
+    // 不排除今天答过的：今天答错的题正是明天要回来的那批。
+    if (dueAt >= endOfToday && dueAt < endOfTomorrow) dueTomorrow += 1;
     if (today.lapsed.has(item.id)) lapsedToday += 1;
     if (isNew(entry) && !today.answered.has(item.id)) {
       newAvailable += 1;
@@ -476,6 +481,7 @@ export function quickSummary(input: QuickSummaryInput): QuickSummary {
     stale: input.stale ?? false,
     day,
     due,
+    dueTomorrow,
     lapsedToday,
     newAvailable,
     newToday: today.introduced.size,
