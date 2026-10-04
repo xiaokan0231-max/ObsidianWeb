@@ -330,7 +330,11 @@ for (const path of operationalFiles) {
   const frontmatter = parseFrontmatter(content);
   const type = frontmatter.type;
   if (typeof type === "string" && type) typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1);
-  if (isGeneratedNote({ frontmatter })) generatedBytes += (await stat(path)).size;
+  // layer: user-action（快練ログ・専門コース進捗）は本人の解答の追記で、1組練習するたびに数 KB 増える。
+  // 体積に入れると 0.1MB 丸めでも数日おきにずれ、「練習した」だけで Stop hook が止まる。
+  if (isGeneratedNote({ frontmatter }) && frontmatter.layer !== "user-action") {
+    generatedBytes += (await stat(path)).size;
+  }
   graphNotes.push({
     path: path.slice(VAULT.length + 1),
     stat: { ctime: 0, mtime: 0, size: content.length },

@@ -280,3 +280,17 @@ test("compact apply refuses an existing archive target before writing metadata",
   assert.equal(await readFile(target, "utf8"), "do not overwrite\n");
   assert.equal(await readFile(latest, "utf8"), before);
 });
+
+test("未知の type（快練ログ）は古くても圧縮候補にならない", () => {
+  // 快練ログは追記のみの本人記録。compact が版管理生成物と同じ扱いで 90_归档 へ移すと、進捗の回放元が消える。
+  const notes = [
+    note("30_日本語学習/快練ログ/2025-01_快練ログ.md", "language-quick-log", "<!-- language-quick-event:{} -->", {
+      month: "2025-01",
+      layer: "user-action",
+      date: "2025-01-31",
+    }),
+  ];
+  const plan = planVaultCompaction(notes, { now: new Date("2026-08-01T00:00:00Z") });
+  assert.deepEqual(plan.candidates, []);
+  assert.equal(plan.updates.has("30_日本語学習/快練ログ/2025-01_快練ログ.md"), false);
+});

@@ -332,6 +332,25 @@ export function patternSlug(pattern: string): string {
   return pattern.replace(/（.*$/, "").trim();
 }
 
+/**
+ * patternSlug が落とす 型:: の補足（）の中身。「語法（丁寧形は名詞修飾に使わない）」→「丁寧形は名詞修飾に使わない」。
+ * 集計キーには邪魔だが、快練の答え合わせではこれが一番短い解説になる。
+ * 括弧の対応を数えるのは、型:: の後ろに表の「|」や追記が続く行があり、末尾までを中身にすると混ざるため。
+ */
+export function patternNote(pattern: string): string {
+  const start = pattern.indexOf("（");
+  if (start < 0) return "";
+  let depth = 0;
+  for (let index = start; index < pattern.length; index += 1) {
+    if (pattern[index] === "（") depth += 1;
+    if (pattern[index] === "）") {
+      depth -= 1;
+      if (depth === 0) return pattern.slice(start + 1, index).trim();
+    }
+  }
+  return "";
+}
+
 export type ReviewStats = {
   sentenceTotal: number;
   bySpeaker: Record<ReviewSpeaker, number>;

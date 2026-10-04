@@ -411,3 +411,232 @@ test("训练状态缓存识别最大mtime未变的单笔记更新", { timeout: 5
   assert.equal(after.currentBatch, undefined);
   assert.equal(after.history[0].completedAt, "2026-01-03T00:01:00Z");
 });
+
+// ── 快练作答：全库 eventId 去重、服务端判分、与课程重建同一条写入车道 ────────────
+
+const QUICK_LOG_PREFIX = "30_日本語学習/快練ログ/";
+// 虚构的通用寒暄短语：只为凑够四选一的干扰项，不含任何个人事实。
+const QUICK_PHRASES = [
+  ["なるほど", "原来如此"], ["かしこまりました", "明白了"], ["おっしゃる通りです", "您说得对"],
+  ["差し支えなければ", "如果方便的话"], ["恐れ入りますが", "不好意思"], ["念のため", "以防万一"],
+];
+
+function quickCurriculum(fingerprint = "quick-one") {
+  const items = QUICK_PHRASES.map(([ja, zh], index) => ({ id: `phrase-${index}`, kind: "interviewer_phrase",
+    targetJa: ja, correctedJa: "", originalJa: "", reading: "", meaningZh: zh, promptZh: "", basePriority: 50,
+    evidence: [], pattern: "" }));
+  items.push({ id: "chunk-0", kind: "active_chunk", targetJa: "〜という点が強みです", correctedJa: "",
+    meaningZh: "……这一点是优势", promptZh: "", basePriority: 40, evidence: [], pattern: "" });
+  return { version: 2, generatedAt: fingerprint === "quick-one" ? "2026-01-01T00:00:00Z" : "2026-01-02T00:00:00Z",
+    contentFingerprint: fingerprint, sourceFingerprint: fingerprint, sourceCount: 1, summaryZh: "快练测试课程",
+    profile: { interviewCount: 1, learnerErrorCount: 0, reviewedBlockCount: 0, listeningGapCount: 0, staleReviewPaths: [], topIssues: [] },
+    items };
+}
+
+async function quickRoutes({ withCurriculum = true, nextCurriculum, notes = [] } = {}) {
+  const vault = memoryVault(notes);
+  const engine = await loadAppModule("lib/server/language-v2.ts", {
+    stubs: { "./obsidian": vault.io, "./language-store": { loadLanguageState: async () => ({ units: [] }) } },
+  });
+  if (withCurriculum) {
+    await vault.io.writeNote("80_AI分析/日本語訓練/quick-course.md", engine.renderLanguageCurriculum(quickCurriculum()));
+  }
+  // language-quick 与路由必须共用同一个 engine：写入队列是同一个对象，重建与作答才真的排在一条车道上。
+  const quick = await loadAppModule("lib/server/language-quick.ts", { stubs: { "./language-v2.ts": engine } });
+  const append = await loadAppModule("lib/server/note-append.ts", { stubs: { "./obsidian.ts": vault.io } });
+  const artifact = await loadAppModule("lib/server/generated-artifact.ts", { stubs: { "./obsidian": vault.io } });
+  const options = { stubs: {
+    "@/lib/server/obsidian": vault.io,
+    "@/lib/server/language-v2": nextCurriculum ? { ...engine, buildLanguageCurriculum: () => nextCurriculum } : engine,
+    "@/lib/server/language-quick": quick,
+    "@/lib/server/note-append": append,
+    "@/lib/server/generated-artifact": artifact,
+  } };
+  return {
+    vault,
+    engine,
+    answer: (await loadAppModule("app/api/language/v2/quick/answer/route.ts", options)).POST,
+    set: (await loadAppModule("app/api/language/v2/quick/set/route.ts", options)).GET,
+    summary: (await loadAppModule("app/api/language/v2/quick/summary/route.ts", options)).GET,
+    rebuild: (await loadAppModule("app/api/language/v2/rebuild/route.ts", options)).POST,
+  };
+}
+
+const { parseQuickEvents, renderQuickEvent, renderQuickLogNote } = await import("../lib/language/quick-log.ts");
+
+function quickLogEvents(vault) {
+  return [...vault.notes.values()]
+    .filter((value) => value.path.startsWith(QUICK_LOG_PREFIX))
+    .flatMap((value) => parseQuickEvents(value.content));
+}
+
+function quickLogWrites(vault) {
+  return vault.writes.filter((value) => value.path.startsWith(QUICK_LOG_PREFIX)).length;
+}
+
+function quickAnswer(overrides = {}) {
+  return { eventId: "qa-1", itemId: "phrase-0", type: "meaning_choice", response: "原来如此", ...overrides };
+}
+
+function quickBody(answers, setId = "q20260105-20-test") {
+  return { setId, answers };
+}
+
+const getRequest = (path) => new Request(`http://localhost:3000${path}`);
+
+test("快练：并发提交同一个 eventId 只落盘一条，另一条报 duplicate", { timeout: 5000 }, async () => {
+  const { answer, vault } = await quickRoutes();
+  const responses = await Promise.all([answer(request(quickBody([quickAnswer()]))), answer(request(quickBody([quickAnswer()])))]);
+  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+  const bodies = await Promise.all(responses.map((response) => response.json()));
+  assert.deepEqual(bodies.map((body) => body.results[0].status).sort(), ["duplicate", "recorded"]);
+  assert.equal(quickLogEvents(vault).length, 1);
+  assert.equal(quickLogWrites(vault), 1, "重复的那条不能再 PUT 一次");
+});
+
+test("快练：并发提交不同 eventId 都落盘，同月追加到同一份日志", { timeout: 5000 }, async () => {
+  const { answer, vault } = await quickRoutes();
+  const responses = await Promise.all([
+    answer(request(quickBody([quickAnswer({ eventId: "qa-1" })]))),
+    answer(request(quickBody([quickAnswer({ eventId: "qa-2", itemId: "phrase-1", response: "明白了" })]))),
+  ]);
+  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+  const events = quickLogEvents(vault);
+  assert.deepEqual(events.map((event) => event.eventId).sort(), ["qa-1", "qa-2"]);
+  const logs = [...vault.notes.values()].filter((value) => value.path.startsWith(QUICK_LOG_PREFIX));
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].frontmatter.type, "language-quick-log");
+  assert.equal(logs[0].frontmatter.layer, "user-action");
+});
+
+test("快练：判分只用题库重算，客户端传的 passed 被忽略；首答答对升到 correctable", { timeout: 5000 }, async () => {
+  const { answer, vault } = await quickRoutes();
+  const response = await answer(request(quickBody([
+    { ...quickAnswer({ eventId: "qa-wrong", response: "以防万一" }), passed: true },
+    { ...quickAnswer({ eventId: "qa-right", itemId: "phrase-1", response: "明白了" }), passed: false },
+  ])));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.results.map((result) => [result.status, result.passed, result.first]),
+    [["recorded", false, true], ["recorded", true, true]]);
+  assert.deepEqual(body.results.map((result) => [result.stageBefore, result.stageAfter]),
+    [["unseen", "unseen"], ["unseen", "correctable"]]);
+  assert.ok(body.results.every((result) => result.nextDueAt), "判分题作答后都有下次到期日");
+  const events = quickLogEvents(vault);
+  assert.deepEqual(events.map((event) => event.passed), [false, true]);
+  assert.ok(events.every((event) => typeof event.at === "string" && event.setSize === 20));
+  assert.equal(body.summary.answeredToday, 2);
+});
+
+test("快练：同一请求里组内重出不算首答", { timeout: 5000 }, async () => {
+  const { answer } = await quickRoutes();
+  const body = await (await answer(request(quickBody([
+    quickAnswer({ eventId: "qa-1", response: "以防万一" }),
+    quickAnswer({ eventId: "qa-2" }),
+  ])))).json();
+  assert.deepEqual(body.results.map((result) => [result.passed, result.first]), [[false, true], [true, false]]);
+  assert.equal(body.results[1].stageAfter, "unseen", "答错后当天再答对拿不到成功日");
+});
+
+test("快练：题型不在该条目的可用题型里返回 400，请求里的其他作答也不写", { timeout: 5000 }, async () => {
+  const { answer, vault } = await quickRoutes();
+  for (const answers of [
+    [quickAnswer({ type: "bogus" })],
+    [quickAnswer({ eventId: "qa-ok" }), quickAnswer({ eventId: "qa-bad", itemId: "chunk-0", type: "meaning_choice" })],
+    [quickAnswer({ itemId: "chunk-0", type: "flip", response: undefined })],
+  ]) {
+    assert.equal((await answer(request(quickBody(answers)))).status, 400, JSON.stringify(answers));
+  }
+  for (const body of [{ answers: [quickAnswer()] }, quickBody([]), quickBody([quickAnswer({ eventId: "-bad" })]),
+    quickBody([quickAnswer({ response: "あ".repeat(65) })]), quickBody(Array.from({ length: 31 }, (_, index) => quickAnswer({ eventId: `qa-${index}` })))]) {
+    assert.equal((await answer(request(body))).status, 400);
+  }
+  assert.equal(quickLogWrites(vault), 0);
+});
+
+test("快练：条目不在题库时报 stale 且不写", { timeout: 5000 }, async () => {
+  const { answer, vault } = await quickRoutes();
+  const response = await answer(request(quickBody([quickAnswer({ itemId: "missing-item" })])));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.results[0].status, "stale");
+  assert.equal(body.results[0].passed, undefined);
+  assert.equal(quickLogWrites(vault), 0);
+});
+
+test("快练：没有训练课程时作答返回 409，取题返回 ready:false", { timeout: 5000 }, async () => {
+  const { answer, set, summary, vault } = await quickRoutes({ withCurriculum: false });
+  const response = await answer(request(quickBody([quickAnswer()])));
+  assert.equal(response.status, 409);
+  assert.equal(vault.writes.length, 0);
+  assert.deepEqual(await (await set(getRequest("/api/language/v2/quick/set"))).json(), { ready: false });
+  assert.equal((await (await summary(getRequest("/api/language/v2/quick/summary"))).json()).ready, false);
+});
+
+test("快练：写入失败不留半条，重发同一批全部落盘", { timeout: 5000 }, async () => {
+  const { answer, vault } = await quickRoutes();
+  const answers = [quickAnswer({ eventId: "qa-1" }), quickAnswer({ eventId: "qa-2", itemId: "phrase-1", response: "明白了" })];
+  vault.failNextWrite();
+  const failed = await answer(request(quickBody(answers)));
+  assert.equal(failed.status, 502);
+  assert.equal(quickLogEvents(vault).length, 0);
+  const retried = await answer(request(quickBody(answers)));
+  assert.equal(retried.status, 200, "失败必须释放写入队列");
+  assert.deepEqual((await retried.json()).results.map((result) => result.status), ["recorded", "recorded"]);
+  assert.equal(quickLogEvents(vault).length, 2);
+});
+
+for (const rebuildFirst of [true, false]) {
+  test(`快练：作答与课程重建交错不丢：${rebuildFirst ? "先重建" : "先作答"}`, { timeout: 5000 }, async () => {
+    const { answer, rebuild, vault, engine } = await quickRoutes({ nextCurriculum: quickCurriculum("quick-two") });
+    const gate = vault.pauseAll();
+    const save = () => answer(request(quickBody([quickAnswer()])));
+    const first = rebuildFirst ? rebuild(request()) : save();
+    await gate.entered.promise;
+    const second = rebuildFirst ? save() : rebuild(request());
+    gate.released.resolve();
+    assert.deepEqual((await Promise.all([first, second])).map((response) => response.status), [200, 200]);
+    assert.deepEqual(quickLogEvents(vault).map((event) => event.eventId), ["qa-1"]);
+    const notes = await vault.io.readAllNotes();
+    assert.equal(engine.latestLanguageCurriculumEntry(notes).curriculum.contentFingerprint, "quick-two");
+    // 训练状态（能力画像、阶段分布）也要看到快练结果，而且只返回课程条目的进度。
+    const state = await engine.loadLanguageV2State(notes);
+    assert.equal(state.progress.find((value) => value.itemId === "phrase-0").stage, "correctable");
+    assert.equal(state.progress.length, quickCurriculum().items.length);
+  });
+}
+
+test("快练：eventId 在别的月份的日志里已有，也按 duplicate 处理不写", { timeout: 5000 }, async () => {
+  const old = { eventId: "qa-old", setId: "q20250131-20-old", setSize: 20, itemId: "phrase-0", type: "meaning_choice",
+    action: "answer", response: "原来如此", passed: true, first: true, at: "2025-01-31T10:00:00.000Z" };
+  const path = `${QUICK_LOG_PREFIX}2025-01_快練ログ.md`;
+  const { answer, vault } = await quickRoutes({ notes: [note(path, `${renderQuickLogNote("2025-01")}${renderQuickEvent(old)}\n`)] });
+  const response = await answer(request(quickBody([quickAnswer({ eventId: "qa-old", response: "以防万一" })])));
+  assert.equal(response.status, 200);
+  const result = (await response.json()).results[0];
+  assert.deepEqual([result.status, result.passed], ["duplicate", true], "报的是已落盘那条的判分");
+  assert.equal(quickLogWrites(vault), 0);
+});
+
+test("快练：取题无副作用，同一份数据两次取到同一组；非法参数 400", { timeout: 5000 }, async () => {
+  const { set, summary, vault } = await quickRoutes();
+  const before = vault.writes.length;
+  const responses = [await set(getRequest("/api/language/v2/quick/set?size=10&typing=0")),
+    await set(getRequest("/api/language/v2/quick/set?size=10&typing=0"))];
+  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+  assert.equal(responses[0].headers.get("Cache-Control"), "no-store");
+  const [first, second] = await Promise.all(responses.map((response) => response.json()));
+  assert.deepEqual(first, second);
+  assert.equal(first.ready, true);
+  assert.equal(first.set.size, 10);
+  assert.ok(first.set.cards.length > 0);
+  assert.ok(first.set.cards.every((card) => card.type !== "short_input"), "typing=0 不出短输入");
+  assert.equal(first.summary.drillable, quickCurriculum().items.length);
+  const nonced = await (await set(getRequest("/api/language/v2/quick/set?size=10&typing=0&nonce=abc123"))).json();
+  assert.notEqual(nonced.set.setId, first.set.setId, "nonce 让取下一组时 setId 不撞号");
+  for (const query of ["size=15", "typing=yes", "extra=2", "nonce=bad-nonce"]) {
+    assert.equal((await set(getRequest(`/api/language/v2/quick/set?${query}`))).status, 400, query);
+  }
+  assert.equal((await summary(getRequest("/api/language/v2/quick/summary?size=15"))).status, 400);
+  assert.equal(vault.writes.length, before);
+});

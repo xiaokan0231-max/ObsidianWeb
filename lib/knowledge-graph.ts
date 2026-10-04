@@ -100,6 +100,7 @@ const GENERATED_TYPES = new Set([
   "language-exam-log",
   "language-curriculum",
   "language-batch-log",
+  "language-quick-log",
   "language-expression-course-progress",
   "outbound-draft",
 ]);

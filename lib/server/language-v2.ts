@@ -17,11 +17,18 @@ import {
   LANGUAGE_OPEN_STRESS_LIMIT,
   LANGUAGE_STRESS_LIMIT,
 } from "../language/types.ts";
-import { normalizeAnswer, stableId, tokyoParts, yamlString } from "../dojo/utils.ts";
+import type { QuickEvent, QuickPool } from "../language/quick-types";
+import { cleanGoMeaning, splitGoEntries } from "../language/quick-text.ts";
+import { applyQuickEvent, jstMidnightIso } from "../language/quick-progress.ts";
+import { buildQuickPool, VOCAB_NOTEBOOK_PATH } from "../language/quick-items.ts";
+import { createQuickIndex, isBinaryOnly, type QuickIndex } from "../language/quick-cards.ts";
+import { collectQuickEvents } from "../language/quick-log.ts";
+import { normalizeAnswer, stableHash, stableId, tokyoParts, yamlString } from "../dojo/utils.ts";
 import {
   latestListeningMarks,
   parseAnnotations,
   parseSeirikou,
+  patternNote,
   patternSlug,
   plainSei,
   reviewDecisionTasks,
@@ -134,20 +141,32 @@ function firstCorrection(value: string) {
   return value.split(/[／/]/u)[0]?.trim().replace(/（.*$/, "").trim() || value.trim();
 }
 
-function readingFromGo(value: string) {
-  const reading = value.match(/（([^）]+)）/)?.[1]?.trim() ?? "";
-  return /^[ぁ-んァ-ヶー・\s]+$/u.test(reading) ? reading : "";
-}
+// 中文弯引号同样成层（与 quick-text 一致）：「委婉确认“看起来／听起来…”」不能在引号里的「／」处截断。
+const GO_OPENERS = new Set(["（", "(", "「", "『", "“", "‘"]);
+const GO_CLOSERS = new Set(["）", ")", "」", "』", "”", "’"]);
 
-function topLevelEqualsIndex(value: string) {
+/** 括号与引号之外第一个命中 chars 的位置。引号也算层级：与 quick-text 的切分口径一致，「」里的＝不当分隔。 */
+function topLevelIndexOf(value: string, chars: string) {
   let depth = 0;
   for (let index = 0; index < value.length; index += 1) {
     const char = value[index];
-    if (char === "（" || char === "(") depth += 1;
-    if (char === "）" || char === ")") depth = Math.max(0, depth - 1);
-    if (depth === 0 && (char === "＝" || char === "=")) return index;
+    if (GO_OPENERS.has(char)) depth += 1;
+    else if (GO_CLOSERS.has(char)) depth = Math.max(0, depth - 1);
+    else if (depth === 0 && chars.includes(char)) return index;
   }
   return -1;
+}
+
+function topLevelEqualsIndex(value: string) {
+  return topLevelIndexOf(value, "＝=");
+}
+
+/** 读音只取＝左侧目标里的（かな）：释义里的括注（「（って＝は的口语）」之类）不是读音。 */
+function readingFromGo(value: string) {
+  const separator = topLevelEqualsIndex(value);
+  const left = separator < 0 ? value : value.slice(0, separator);
+  const reading = left.match(/（([^）]+)）/)?.[1]?.trim() ?? "";
+  return /^[ぁ-んァ-ヶー・\s]+$/u.test(reading) ? reading : "";
 }
 
 function targetFromGo(value: string) {
@@ -156,16 +175,57 @@ function targetFromGo(value: string) {
   return value.slice(0, separator).replace(/（[^）]+）/g, "").trim();
 }
 
-function meaningFromGo(value: string) {
+const TRANSCRIPT_NOTE = /転写|转写|ASR|文字起こし|誤認識/u;
+
+/**
+ * 释义：null＝整条丢弃（转写订正注记，或清洗后什么都不剩），""＝原本就没写释义（沿用旧的译文兜底）。
+ * 清洗交给 quick-text 的 cleanGoMeaning（与出卡层同一口径），这里只决定存什么：
+ * - 「／」后不像词条的段旧切法整段丢弃，这里保持丢弃，否则释义会混进下一句的日文说明；
+ * - 「；」后的用法补充与第二句起的说明不是噪声，接在主释义后面保留，出卡层再清洗一次会把它们放进答后解释。
+ */
+function meaningFromGo(value: string): string | null {
   const separator = topLevelEqualsIndex(value);
-  return separator < 0 ? "" : value.slice(separator + 1).trim();
+  if (separator < 0) return "";
+  const raw = value.slice(separator + 1).trim();
+  if (!raw) return "";
+  const cleaned = cleanGoMeaning(raw, value.slice(0, separator));
+  if (cleaned.drop) return null;
+  const slash = topLevelIndexOf(cleaned.meaning, "／");
+  const head = (slash < 0 ? cleaned.meaning : cleaned.meaning.slice(0, slash)).trim();
+  if (!head) return null;
+  const extras = cleaned.rest
+    .split("；")
+    .map((part) => part.trim())
+    .filter((part) => part && !TRANSCRIPT_NOTE.test(part));
+  return [head, ...extras].join("；");
 }
 
-function splitGoEntries(value: string) {
-  return value
-    .split("／")
-    .map((entry) => entry.trim())
-    .filter((entry) => topLevelEqualsIndex(entry) >= 0);
+/**
+ * 改错条目的解释：整理稿 型:: 后的括注。去掉对人有用、对练习无用的元信息——
+ * 「[[誤用辞典]]既載」这类登记标记、指向别场句号的交叉引用（s044 等）、本人裁定与转写说明。
+ */
+function errorPatternNote(pattern: string | undefined) {
+  if (!pattern) return "";
+  return patternNote(pattern)
+    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/gu, "$2")
+    .replace(/\[\[([^\]]+)\]\]/gu, "$1")
+    .split(/(?<=。)/u)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence &&
+      !(sentence.length <= 14 && /(既載|筆頭)。?$/u.test(sentence)) &&
+      !/(?:^|[^A-Za-z])[sa]\d{3}(?!\d)|本人裁定/u.test(sentence) &&
+      !TRANSCRIPT_NOTE.test(sentence))
+    .join("")
+    .replace(/。$/u, "")
+    .trim();
+}
+
+function joinNotes(left: string | undefined, right: string | undefined) {
+  const parts = [left, right]
+    .flatMap((value) => (value ?? "").split("；"))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return [...new Set(parts)].join("；");
 }
 
 const STRATEGY_TEMPLATES: Record<string, { ja: string; zh: string }> = {
@@ -334,6 +394,8 @@ function item(
     basePriority: values.basePriority ?? 50,
     listeningMark: values.listeningMark,
     strategyTags: values.strategyTags ?? [],
+    // 空串不写键：没有括注的条目与旧课程逐字相同，生成物不会因为一个空字段整体变大。
+    ...(values.noteJa ? { noteJa: values.noteJa } : {}),
   };
 }
 
@@ -381,6 +443,7 @@ function extractStudyItems(notes: ObsidianNote[]) {
           originalJa: plainSei(sentence),
           correctedJa: error.correction,
           pattern,
+          noteJa: errorPatternNote(error.pattern),
           sourceInterviewKeys: [key],
           evidence: [ref],
           basePriority: 76,
@@ -393,11 +456,13 @@ function extractStudyItems(notes: ObsidianNote[]) {
           for (const [partIndex, entry] of splitGoEntries(note).entries()) {
             const target = targetFromGo(entry);
             if (!target) continue;
+            const meaning = meaningFromGo(entry);
+            if (meaning === null) continue;
             items.push(item("interviewer_phrase", `${study.path}|${sentence.id}|${index}|${partIndex}`, {
               titleZh: mark ? `听解${mark} · 面试官表达` : "面试官表达",
               targetJa: target,
               reading: readingFromGo(entry),
-              meaningZh: meaningFromGo(entry) || sentence.yaku || entry,
+              meaningZh: meaning || sentence.yaku || entry,
               promptZh: `看到这段面试官表达时，快速确认其功能：${target}`,
               sourceInterviewKeys: [key],
               evidence: [evidence(study, key, sentence.sei, sentence.id)],
@@ -580,6 +645,9 @@ function mergeItems(values: LanguageLearningItem[]) {
       current.meaningZh = source
         ? `把「${source}」按语境改为「${alternatives.join("／")}」`
         : `按语境使用「${alternatives.join("／")}」`;
+      // 同一错形在几场面试里各带一段括注：去重拼接，哪一场的解释都不丢。
+      const noteJa = joinNotes(current.noteJa, value.noteJa);
+      if (noteJa) current.noteJa = noteJa;
     }
     current.sourceInterviewKeys = [...new Set([...current.sourceInterviewKeys, ...value.sourceInterviewKeys])];
     current.evidence = [...current.evidence, ...value.evidence]
@@ -647,6 +715,8 @@ export function languageV2SourceFingerprint(notes: ObsidianNote[]) {
     .join("|"));
 }
 
+export const LANGUAGE_CURRICULUM_BUILDER = "builder:2";
+
 export function buildLanguageCurriculum(notes: ObsidianNote[]): LanguageCurriculum {
   const extracted = extractStudyItems(notes);
   const items = mergeItems([
@@ -655,9 +725,11 @@ export function buildLanguageCurriculum(notes: ObsidianNote[]): LanguageCurricul
     ...extractLegacyFacts(notes),
   ]);
   const sourceFingerprint = languageV2SourceFingerprint(notes);
-  const contentFingerprint = stableId("lcv2content", items
-    .map((value) => `${value.id}:${value.targetJa}:${value.meaningZh}`)
-    .join("|"));
+  // 构建器版本进指纹：只新增字段（如 noteJa）、id/目标/释义都不变的改动，否则会被 rebuild 当成「未变化」不落盘。
+  // 改了构建规则就把版本号加一。
+  const contentFingerprint = stableId("lcv2content", `${LANGUAGE_CURRICULUM_BUILDER}|${items
+    .map((value) => `${value.id}:${value.targetJa}:${value.meaningZh}:${value.noteJa ?? ""}`)
+    .join("|")}`);
   return {
     version: 2,
     generatedAt: new Date().toISOString(),
@@ -710,7 +782,8 @@ export function languageCurriculumByFingerprint(notes: ObsidianNote[], fingerpri
     .find((value) => value.contentFingerprint === fingerprint || value.sourceFingerprint === fingerprint);
 }
 
-function allBatches(notes: ObsidianNote[]) {
+/** 全部旧批次（按创建时间升序）。快练的进度回放与选题种子也要读，所以导出。 */
+export function allBatches(notes: ObsidianNote[]) {
   return notes
     .filter((note) => text(note.frontmatter.type) === "language-batch-log")
     .map((note) => markerJson<LanguageBatch>(note.content, BATCH_START, BATCH_END))
@@ -746,12 +819,42 @@ function stageRank(stage: LanguageTrainingStage) {
   return ["unseen", "recognized", "correctable", "retrievable", "transferable", "stable"].indexOf(stage);
 }
 
+/** ISO 时刻 → JST 日。不用 Intl：回放在服务端热路径上逐条调用，固定 +9 小时足够（日本没有夏令时）。 */
+function jstDayOf(at: string) {
+  const time = Date.parse(at);
+  return Number.isFinite(time) ? new Date(time + 9 * 3_600_000).toISOString().slice(0, 10) : dateText(at);
+}
+
+export type LanguageQuickReplay = {
+  /** 快练事件日志（任意顺序；与批次动作合并后按时间回放）。 */
+  events: readonly QuickEvent[];
+  /** 不在课程里、但也要有进度的条目（単語文法帳 nb_…）。 */
+  extraItemIds?: readonly string[];
+  /** 只有二选一可判分的条目：stable 门槛更高（见 quick-progress）。 */
+  binaryOnly?: ReadonlySet<string>;
+};
+
+type ReplayEntry =
+  | { at: string; order: number; batch: LanguageBatchAction }
+  | { at: string; order: number; quick: QuickEvent };
+
+/**
+ * 回放全部练习记录得到每个条目的掌握进度。
+ * 旧批次动作与快练事件合成一条时间线，按 (at, 原顺序) 排序：两种记录交错发生时，
+ * 谁先谁后决定阶段（例如快练答对后旧批次的失败要能把它拉回来），分开回放就会丢掉这层顺序。
+ * 不传 quick 时与旧的三参版本行为一致。
+ */
 export function deriveLanguageProgress(
   curriculum: LanguageCurriculum,
   batches: LanguageBatch[],
   legacyTargets: Set<string>,
+  quick?: LanguageQuickReplay,
 ) {
+  const itemById = new Map(curriculum.items.map((value) => [value.id, value]));
   const progress = new Map(curriculum.items.map((value) => [value.id, emptyProgress(value.id)]));
+  for (const id of quick?.extraItemIds ?? []) {
+    if (!progress.has(id)) progress.set(id, emptyProgress(id));
+  }
   for (const value of curriculum.items) {
     if (legacyTargets.has(normalizeAnswer(value.targetJa))) {
       const state = progress.get(value.id)!;
@@ -759,8 +862,25 @@ export function deriveLanguageProgress(
       state.seenCount = 1;
     }
   }
-  const actions = batches.flatMap((batch) => batch.actions).sort((left, right) => left.at.localeCompare(right.at));
-  for (const action of actions) {
+  const timeline: ReplayEntry[] = [
+    ...batches.flatMap((batch) => batch.actions).map((action) => ({ at: action.at, batch: action })),
+    ...(quick?.events ?? []).map((event) => ({ at: event.at, quick: event })),
+  ].map((entry, order) => ({ ...entry, order }) as ReplayEntry);
+  timeline.sort((left, right) => left.at.localeCompare(right.at) || left.order - right.order);
+
+  for (const entry of timeline) {
+    if ("quick" in entry) {
+      const event = entry.quick;
+      const state = progress.get(event.itemId);
+      // 条目已不在题库（课程重建后消失、単語文法帳删了行）：事件留在日志里，不参与回放。
+      if (!state) continue;
+      progress.set(event.itemId, applyQuickEvent(state, event, {
+        binaryOnly: quick?.binaryOnly?.has(event.itemId) ?? false,
+        day: jstDayOf(event.at),
+      }));
+      continue;
+    }
+    const action = entry.batch;
     const state = progress.get(action.itemId);
     if (!state) continue;
     state.seenCount += 1;
@@ -773,9 +893,10 @@ export function deriveLanguageProgress(
     if (action.passed) {
       state.successCount += 1;
       state.firstSuccessAt ??= action.at;
-      const day = dateText(action.at);
+      // 成功日按 JST 归日，与快练同一口径；否则日本时间早上 9 点前的练习会记到前一天。
+      const day = jstDayOf(action.at);
       if (!state.successDates.includes(day)) state.successDates.push(day);
-      const item = curriculum.items.find((candidate) => candidate.id === action.itemId);
+      const item = itemById.get(action.itemId);
       if (action.phase === "stress" && item?.kind === "answer_strategy") state.stage = "transferable";
       else if (state.successDates.length >= 2) state.stage = "retrievable";
       else state.stage = "correctable";
@@ -791,21 +912,56 @@ export function deriveLanguageProgress(
     }
   }
 
+  // 同一错误型在之后的面试里出现的次数：画像用，按型统计、与首次成功比较（口径不变）。
+  const interviewDaysByPattern = new Map<string, string[]>();
+  for (const value of curriculum.items) {
+    if (!value.pattern) continue;
+    const days = interviewDaysByPattern.get(value.pattern) ?? [];
+    for (const entry of value.evidence) {
+      if (/^\d{4}-\d{2}-\d{2}/.test(entry.interviewKey)) days.push(entry.interviewKey.slice(0, 10));
+    }
+    interviewDaysByPattern.set(value.pattern, days);
+  }
   for (const value of curriculum.items) {
     const state = progress.get(value.id)!;
-    if (!state.firstSuccessAt || !value.pattern) continue;
-    const laterInterviews = curriculum.items
-      .filter((candidate) => candidate.pattern === value.pattern)
-      .flatMap((candidate) => candidate.evidence)
-      .filter((entry) => /^\d{4}-\d{2}-\d{2}/.test(entry.interviewKey))
-      .filter((entry) => entry.interviewKey.slice(0, 10) > dateText(state.firstSuccessAt!));
-    state.postTrainingOccurrences = laterInterviews.length;
-    if (laterInterviews.length && stageRank(state.stage) > stageRank("retrievable")) {
-      state.stage = "retrievable";
-      state.nextDueAt = new Date().toISOString();
+    if (state.firstSuccessAt && value.pattern) {
+      const firstDay = dateText(state.firstSuccessAt);
+      state.postTrainingOccurrences = (interviewDaysByPattern.get(value.pattern) ?? [])
+        .filter((day) => day > firstDay).length;
     }
+    // 降级只看条目自己：它本身在最近一次成功之后的面试里又说错了，才说明没掌握。
+    // 旧规则按型、且与永不更新的 firstSuccessAt 比，助詞这种上百条的型只要再出现一次，
+    // 所有已掌握的条目每次推导都被打回并「立刻到期」，答对也出不来。
+    // 与最后一个成功日比，之后再答对一次成功日就晚于那场面试，自然解除。
+    const lastSuccess = state.successDates.toSorted().at(-1);
+    if (!lastSuccess || stageRank(state.stage) <= stageRank("retrievable")) continue;
+    const laterInterview = value.evidence
+      .map((entry) => entry.interviewKey)
+      .filter((key) => /^\d{4}-\d{2}-\d{2}/.test(key))
+      .map((key) => key.slice(0, 10))
+      .filter((day) => day > lastSuccess)
+      .toSorted()[0];
+    if (!laterInterview) continue;
+    state.stage = "retrievable";
+    // 从那场面试的第二天起到期（JST 0 点），不用当前时间：同一份数据任何时候推导都得到同一结果。
+    state.nextDueAt = jstMidnightIso(laterInterview, 1);
   }
   return [...progress.values()];
+}
+
+/**
+ * 旧批次里每个条目最后一次 scan 判断（known / uncertain / unknown / reject）。
+ * 快练用它给首批新题排序（先「不会」再「犹豫」）。只读批次 JSON，批次文件与签名都不动。
+ */
+export function legacyScanJudgments(batches: readonly LanguageBatch[]): Map<string, LanguageScanJudgment> {
+  const scans = batches
+    .flatMap((batch) => batch.actions)
+    .map((action, order) => ({ action, order }))
+    .filter(({ action }) => action.phase === "scan" && action.judgment)
+    .sort((left, right) => left.action.at.localeCompare(right.action.at) || left.order - right.order);
+  const judgments = new Map<string, LanguageScanJudgment>();
+  for (const { action } of scans) judgments.set(action.itemId, action.judgment!);
+  return judgments;
 }
 
 function historyOf(batch: LanguageBatch): LanguageBatchHistory {
@@ -832,17 +988,89 @@ export async function loadLanguageV2State(notes?: ObsidianNote[]): Promise<Langu
   return value;
 }
 
-async function computeLanguageV2State(allNotes: ObsidianNote[]): Promise<LanguageV2State> {
-  const curriculum = latestCurriculum(allNotes);
-  const batches = allBatches(allNotes);
-  if (!curriculum) return { ready: false, stale: false, progress: [], history: batches.map(historyOf).reverse() };
+/**
+ * 旧瞬发训练里已训练或已掌握的目标（归一化后）。回放时这些条目从 recognized 起步。
+ * 训练状态与快练上下文必须用同一份，否则同一条目在两处显示的阶段不同。
+ */
+export async function languageLegacyTargets(allNotes: ObsidianNote[]): Promise<Set<string>> {
   const legacy = await (await import("./language-store")).loadLanguageState(allNotes);
-  const legacyTargets = new Set(
+  return new Set(
     legacy.units
       .filter((value) => value.trainingStatus === "trained" || value.masteryStatus === "mastered")
       .map((value) => normalizeAnswer(value.targetJa)),
   );
-  const progress = deriveLanguageProgress(curriculum, batches, legacyTargets);
+}
+
+/** 単語文法帳：basename 与 type 都对上才认，避免同名的草稿或副本被当成题库；有多份时优先约定路径。 */
+export function findVocabNotebook(notes: readonly ObsidianNote[]): ObsidianNote | undefined {
+  const candidates = notes.filter((note) =>
+    basename(note.path) === "単語文法帳" && text(note.frontmatter.type) === "material");
+  return candidates.find((note) => note.path === VOCAB_NOTEBOOK_PATH)
+    ?? candidates.toSorted((left, right) => left.path.localeCompare(right.path))[0];
+}
+
+export type LanguageQuickInputs = {
+  notebook?: ObsidianNote;
+  pool: QuickPool;
+  index: QuickIndex;
+  /** 全库快练事件（collectQuickEvents 的输出：已排序、按 eventId 去重）。 */
+  events: QuickEvent[];
+  /** 単語文法帳条目 id：不在课程里，回放时也要有进度。 */
+  extraItemIds: string[];
+  binaryOnly: ReadonlySet<string>;
+};
+
+// 题库与索引只由课程内容和単語文法帳原文决定，作答只改事件日志。
+// 按题库指纹单独缓存：每答一题全库快照都会变，若跟着快照重建索引，
+// availableCardTypes 的几百毫秒冷计算就会落在每一次作答上。
+let quickPoolMemo: {
+  key: string;
+  pool: QuickPool;
+  index: QuickIndex;
+  extraItemIds: string[];
+  binaryOnly: ReadonlySet<string>;
+} | null = null;
+
+export function languageQuickInputs(
+  allNotes: ObsidianNote[],
+  curriculum: LanguageCurriculum | undefined,
+): LanguageQuickInputs {
+  const notebook = findVocabNotebook(allNotes);
+  const key = [
+    curriculum ? `${curriculum.contentFingerprint ?? curriculum.sourceFingerprint}|${curriculum.generatedAt}` : "-",
+    notebook ? `${notebook.path}|${notebook.content.length}|${stableHash(notebook.content)}` : "-",
+  ].join("\n");
+  if (quickPoolMemo?.key !== key) {
+    const pool = buildQuickPool(curriculum, notebook ? { path: notebook.path, content: notebook.content } : undefined);
+    const index = createQuickIndex(pool.items);
+    quickPoolMemo = {
+      key,
+      pool,
+      index,
+      extraItemIds: pool.items.filter((item) => item.source === "notebook").map((item) => item.id),
+      binaryOnly: new Set(pool.items.filter((item) => isBinaryOnly(item, index)).map((item) => item.id)),
+    };
+  }
+  const { pool, index, extraItemIds, binaryOnly } = quickPoolMemo;
+  return { notebook, pool, index, events: collectQuickEvents(allNotes), extraItemIds, binaryOnly };
+}
+
+async function computeLanguageV2State(allNotes: ObsidianNote[]): Promise<LanguageV2State> {
+  const curriculum = latestCurriculum(allNotes);
+  const batches = allBatches(allNotes);
+  if (!curriculum) return { ready: false, stale: false, progress: [], history: batches.map(historyOf).reverse() };
+  const legacyTargets = await languageLegacyTargets(allNotes);
+  // 快练事件与旧批次动作一起回放，能力画像与阶段分布才反映快练。
+  // 単語文法帳条目也参与回放（快练总览用），但 state.progress 只返回课程条目：
+  // 现有界面按课程条目逐一对照进度，混进 nb_… 会让阶段分布多出课程之外的条目、与课程总数对不上；
+  // 単語文法帳的进度由快练 summary 的 stageCounts 展示。
+  const quick = languageQuickInputs(allNotes, curriculum);
+  const curriculumIds = new Set(curriculum.items.map((value) => value.id));
+  const progress = deriveLanguageProgress(curriculum, batches, legacyTargets, {
+    events: quick.events,
+    extraItemIds: quick.extraItemIds,
+    binaryOnly: quick.binaryOnly,
+  }).filter((value) => curriculumIds.has(value.itemId));
   return {
     ready: true,
     stale: curriculum.sourceFingerprint !== languageV2SourceFingerprint(allNotes),
@@ -874,6 +1102,10 @@ function progressScore(value: LanguageLearningItem, progress: LanguageItemProgre
   return value.basePriority + due + failed - stagePenalty;
 }
 
+/**
+ * @deprecated 旧「集中训练」批次引擎（扫描→输入→压力测试）。快练上线后界面不再调用；
+ * 保留它是为了回放历史批次、以及必要时回滚旧界面。不要在新代码里使用，行为也不要改。
+ */
 export function selectLanguageBatchItems(
   curriculum: LanguageCurriculum,
   progressValues: LanguageItemProgress[],
@@ -947,6 +1179,10 @@ function batchSignaturePayload(batch: Omit<LanguageBatch, "signature"> | Languag
   };
 }
 
+/**
+ * @deprecated 旧「集中训练」批次引擎（扫描→输入→压力测试）。快练上线后界面不再调用；
+ * 保留它是为了回放历史批次、以及必要时回滚旧界面。不要在新代码里使用，行为也不要改。
+ */
 export async function createLanguageBatch(state: LanguageV2State, size: 100 | 150 | 200) {
   if (!state.curriculum) throw new Error("请先建立面试证据训练课程。");
   if (state.currentBatch) return state.currentBatch;
@@ -968,6 +1204,10 @@ export async function createLanguageBatch(state: LanguageV2State, size: 100 | 15
   return { ...batchWithoutSignature, signature: await hmac(batchSignaturePayload(batchWithoutSignature)) };
 }
 
+/**
+ * @deprecated 旧「集中训练」批次引擎（扫描→输入→压力测试）。快练上线后界面不再调用；
+ * 保留它是为了回放历史批次、以及必要时回滚旧界面。不要在新代码里使用，行为也不要改。
+ */
 export async function verifyLanguageBatch(batch: LanguageBatch) {
   const payload = batchSignaturePayload(batch);
   for (const secret of languageSigningSecrets()) {
@@ -976,6 +1216,10 @@ export async function verifyLanguageBatch(batch: LanguageBatch) {
   return false;
 }
 
+/**
+ * @deprecated 旧「集中训练」批次引擎（扫描→输入→压力测试）。快练上线后界面不再调用；
+ * 保留它是为了回放历史批次、以及必要时回滚旧界面。不要在新代码里使用，行为也不要改。
+ */
 export async function refreshLanguageBatchSignature(
   batch: LanguageBatch,
   curriculum: LanguageCurriculum,
@@ -1002,6 +1246,10 @@ export async function refreshLanguageBatchSignature(
   return { ...batch, signature: await hmac(batchSignaturePayload(batch)) };
 }
 
+/**
+ * @deprecated 旧「集中训练」批次引擎（扫描→输入→压力测试）。快练上线后界面不再调用；
+ * 保留它是为了回放历史批次、以及必要时回滚旧界面。不要在新代码里使用，行为也不要改。
+ */
 export async function migrateScanningBatchToCurriculum(
   batch: LanguageBatch,
   curriculum: LanguageCurriculum,
@@ -1076,12 +1324,20 @@ function acceptedAnswers(value: LanguageLearningItem) {
     .filter(Boolean);
 }
 
+/**
+ * @deprecated 旧「集中训练」批次引擎（扫描→输入→压力测试）。快练上线后界面不再调用；
+ * 保留它是为了回放历史批次、以及必要时回滚旧界面。不要在新代码里使用，行为也不要改。
+ */
 export function gradeLanguageItem(value: LanguageLearningItem, answer: string) {
   const normalized = normalizeAnswer(answer);
   if (!normalized) return false;
   return acceptedAnswers(value).some((accepted) => accepted === normalized);
 }
 
+/**
+ * @deprecated 旧「集中训练」批次引擎（扫描→输入→压力测试）。快练上线后界面不再调用；
+ * 保留它是为了回放历史批次、以及必要时回滚旧界面。不要在新代码里使用，行为也不要改。
+ */
 export function mergeLanguageBatchCheckpoint(
   batch: LanguageBatch,
   curriculum: LanguageCurriculum,

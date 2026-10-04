@@ -238,3 +238,15 @@ test("governs フィールドで、本文リンクの無い規範ノートも接
   assert.equal(edge.target, "20_求職/_不採用台帳_正.md");
   assert.equal(edge.sourceField, "governs");
 });
+
+test("快練ログは generated 層に落ち、既定ビューの節点・孤点を増やさない", () => {
+  const notes = [
+    note("30_日本語学習/快練ログ/2026-10_快練ログ.md", "language-quick-log", { month: "2026-10", layer: "user-action" }),
+  ];
+  const graph = buildKnowledgeGraph(notes);
+  assert.equal(graph.nodes.find((node) => node.id === notes[0].path)?.layer, "generated");
+  assert.equal(selectKnowledgeGraphView(graph, { mode: "semantic" }).nodes.length, 0);
+  const health = graphHealth(graph);
+  assert.equal(health.semanticNodes, 0);
+  assert.equal(health.defaultIsolates, 0);
+});

@@ -280,6 +280,20 @@ for (const path of files) {
       activeBatchReferences.push({ relativePath, fingerprint: String(batch.curriculumFingerprint ?? "") });
     }
   }
+  if (type === "language-quick-log") {
+    // 読み取り側はパスで当月ログを探し、month で月を決める。食い違うと事件が別の月に入るか見つからない。
+    // 検査はこの2点だけ。壊れた行は実行時の解析器が読み飛ばすので、1行のために全セッションを止めない。
+    const match = relativePath.match(/^30_日本語学習\/快練ログ\/(\d{4}-\d{2})_快練ログ\.md$/u);
+    if (!match) {
+      problems.push(`${relativePath}: language-quick-log は 30_日本語学習/快練ログ/YYYY-MM_快練ログ.md に置く`);
+    } else {
+      // 簡易パーサは引用符を残す。month: "2026-10" と month: 2026-10 はどちらも正しい書き方。
+      const month = String(frontmatter.month ?? "").trim().replace(/^["']|["']$/g, "");
+      if (month !== match[1]) {
+        problems.push(`${relativePath}: language-quick-log の month（${month}）がファイル名の ${match[1]} と一致しない`);
+      }
+    }
+  }
   if (relativePath === "10_关于我/技術スタック.md") {
     const confirmedSkills = parseConfirmedSkillTable(content);
     if (confirmedSkills.length === 0) {
