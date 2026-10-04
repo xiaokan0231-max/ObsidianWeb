@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { UNDO_LABEL } from "@/lib/ui-labels";
 
 /*
@@ -75,7 +75,16 @@ export function UndoFlashBar({ state }: { state: UndoFlashState }) {
   const { flash, busy, error, runUndo, dismiss } = state;
   if (!flash) return null;
   return (
-    <div className="undo-flash" role="status" aria-live="polite">
+    // key 换成新的 id：连续两次写入时第二条也从头播放入场和倒计时。
+    // 撤销进行中或显示失败理由时不会自动消失（见上面的 effect），倒计时条也一起停住。
+    <div
+      key={flash.id}
+      className="undo-flash"
+      role="status"
+      aria-live="polite"
+      data-paused={busy || error ? "true" : undefined}
+      style={{ "--undo-ms": `${UNDO_FLASH_MS}ms` } as CSSProperties}
+    >
       <span>{flash.message}</span>
       {flash.undo && (
         <button type="button" className="undo-flash-action" disabled={busy} onClick={() => void runUndo()}>

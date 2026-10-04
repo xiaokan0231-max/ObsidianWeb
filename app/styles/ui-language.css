@@ -456,3 +456,28 @@
   border-top: 1px solid var(--line);
   background: transparent;
 }
+
+/* ===== 通用雷达图（app/radar-chart.tsx） =====
+ * 主序列填色 + 实线；历史平均、对比对象只描边。四种色调取分区色，暗色下 token 自动提亮。 */
+.radar-chart { margin: 0; width: 100%; }
+.radar-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.radar-grid { fill: none; stroke: var(--line); stroke-width: 0.8; }
+.radar-axis { stroke: var(--line); stroke-width: 0.8; }
+.radar-series { --radar-tone: var(--green); transform-origin: 50% 50%; transform-box: view-box; animation: radar-in var(--dur-slow) var(--ease-spring) backwards; }
+.radar-series.tone-secondary { --radar-tone: var(--text-tertiary); }
+.radar-series.tone-tertiary { --radar-tone: var(--brand); }
+.radar-series.tone-quaternary { --radar-tone: var(--violet); }
+.radar-shape { fill: var(--radar-tone); fill-opacity: 0.2; stroke: none; }
+.radar-edge { stroke: var(--radar-tone); stroke-width: 2; stroke-linecap: round; }
+.radar-series:not(.tone-primary) .radar-edge { stroke-width: 1.4; stroke-dasharray: 4 3; }
+.radar-dot { fill: var(--radar-tone); stroke: var(--surface); stroke-width: 1.5; }
+.radar-label { fill: var(--text-secondary); font-size: 11px; }
+.radar-label.unknown { fill: var(--text-faint); }
+.radar-value { fill: var(--ink); font-family: var(--font-mono); font-size: 11px; font-weight: 650; }
+.radar-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; margin-top: 4px; color: var(--text-secondary); font-size: 11px; }
+.radar-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.radar-legend i { width: 14px; height: 2px; background: var(--green); }
+.radar-legend .tone-secondary i { background: var(--text-tertiary); }
+.radar-legend .tone-tertiary i { background: var(--brand); }
+.radar-legend .tone-quaternary i { background: var(--violet); }
+@keyframes radar-in { from { opacity: 0; transform: scale(0.6); } }

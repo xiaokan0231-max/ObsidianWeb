@@ -282,8 +282,10 @@
   align-items: flex-start;
   justify-content: center;
   padding: clamp(40px, 12vh, 120px) 20px 40px;
-  background: color-mix(in oklab, var(--ink) 26%, transparent);
+  /* 遮罩用阴影基色而不是墨色：暗色下墨色是浅的，会变成一层发白的雾。 */
+  background: color-mix(in oklab, var(--shadow-color) 30%, transparent);
   backdrop-filter: blur(3px);
+  animation: fade-in var(--dur-fast) var(--ease-out);
 }
 
 .search-palette-input {
@@ -530,7 +532,10 @@
   padding: 0 0 8px;
   background: var(--surface);
   border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: pop-in var(--dur-base) var(--ease-spring);
 }
 
 .search-panel-head {
@@ -719,7 +724,11 @@
 }
 
 /* 视图要的笔记还没到：骨架而不是「还没有 X」的假空态。 */
-.scope-loading { display: flex; align-items: center; gap: 12px; padding: 48px 24px; color: var(--muted); font-size: 14px; }
+.scope-loading { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 48px 24px; color: var(--muted); font-size: 14px; }
+.scope-loading-skeleton { flex: 0 0 100%; display: grid; gap: 12px; margin-top: 14px; }
+.scope-loading-skeleton > i { height: 14px; }
+.scope-loading-skeleton > i:nth-child(3n + 2) { width: 82%; }
+.scope-loading-skeleton > i:nth-child(3n) { width: 64%; }
 .scope-loading p { margin: 0; }
 .scope-loading-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); animation: scope-loading-pulse 1.2s ease-in-out infinite; }
 @keyframes scope-loading-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }

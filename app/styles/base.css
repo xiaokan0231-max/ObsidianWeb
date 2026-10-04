@@ -499,3 +499,125 @@ button {
   transform: translateY(-50%);
   background: var(--orange);
 }
+
+/* ===== 动效 =====
+ * 全站共用的 keyframes 都在这里（名字被各视图直接引用，改名要全局搜）。
+ * 入场类只写 from、不加 forwards/both：结束后元素回到自己的样式，带 transform 的祖先
+ * 只存在约 200ms，不会长期成为 position: fixed 子元素（对比托盘、失败提示层）的包含块。
+ */
+@keyframes pulse { to { opacity: 0.35; } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes slide-in { from { transform: translateX(100%); } }
+@keyframes rotate { to { transform: rotate(360deg); } }
+@keyframes rotate-reverse { to { transform: rotate(-360deg); } }
+@keyframes view-enter { from { opacity: 0; transform: translateY(6px); } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(10px); } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(-8px) scale(0.98); } }
+@keyframes drop-in { from { opacity: 0; transform: translateY(-100%); } }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes grow-x { from { transform: scaleX(0); } }
+@keyframes grow-y { from { transform: scaleY(0); } }
+@keyframes draw-line { from { stroke-dashoffset: 1; } }
+@keyframes countdown { to { transform: scaleX(0); } }
+@keyframes land {
+  0% { box-shadow: 0 0 0 10px color-mix(in oklab, var(--gold) 42%, transparent); }
+}
+@keyframes stamp {
+  0% { opacity: 0; transform: scale(1.6) rotate(-8deg); }
+  60% { opacity: 1; }
+}
+
+/* 顶部横幅（数据过期、写入失败）从顶栏下沿滑出，而不是突然把正文顶下去。 */
+.stale-data-banner,
+.global-write-banner {
+  animation: pop-in var(--dur-base) var(--ease-out);
+}
+
+/* ===== 暗色外壳质感 =====
+ * 取 og.jpg 的构图：右上一团朱橙、左下一团墨绿的环境光，固定在视口上，滚动时不动。
+ * 只在暗色下加：浅色纸面上这层光会显得脏。
+ */
+:root:not([data-theme="light"]) body {
+  background:
+    radial-gradient(1100px 640px at 96% -10%, color-mix(in oklab, var(--brand) 9%, transparent), transparent 64%),
+    radial-gradient(900px 620px at 4% 110%, color-mix(in oklab, var(--green) 10%, transparent), transparent 62%),
+    var(--paper);
+  background-attachment: fixed;
+}
+:root:not([data-theme="light"]) .sidebar {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--surface) 70%, var(--surface-sunken)), var(--surface-sunken) 46%);
+  border-right-color: color-mix(in oklab, var(--highlight) 7%, transparent);
+}
+/* 品牌印章：暗色下是一枚纸色的「職」，加一圈朱橙微光呼应封面图。 */
+:root:not([data-theme="light"]) .brand-mark {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--brand) 35%, transparent),
+    0 0 22px color-mix(in oklab, var(--brand) 28%, transparent);
+}
+.brand-mark { transition: transform var(--dur-slow) var(--ease-spring), box-shadow var(--dur-slow) var(--ease-out); }
+.brand:hover .brand-mark { transform: rotate(-8deg) scale(1.04); }
+/*
+ * 暗色下当前分区不用整块反白（浅色里的墨块反过来就是一块刺眼的纸），
+ * 改成凸起面 + 左侧朱线 + 一点朱橙渐变，和 3D 舞台的选中光一个语气。
+ */
+:root:not([data-theme="light"]) .side-nav > a.active {
+  background: linear-gradient(90deg, color-mix(in oklab, var(--brand) 20%, var(--surface-raised-solid)), var(--surface-raised-solid) 70%);
+  color: var(--ink);
+  box-shadow:
+    inset 3px 0 0 var(--brand),
+    0 10px 26px color-mix(in oklab, var(--shade) 35%, transparent);
+}
+:root:not([data-theme="light"]) .side-nav > a.active .nav-glyph { color: var(--brand); }
+:root:not([data-theme="light"]) .topbar {
+  backdrop-filter: blur(18px) saturate(1.4);
+}
+
+/* 视图切换：挂在容器本身。子节点会因 key 变化在页内重挂（换场次、scope 到达），挂在子节点上会误播。 */
+.view-container {
+  animation: view-enter var(--dur-base) var(--ease-out);
+}
+/* 3D 舞台只淡入：位移会让 canvas 首帧错位，并临时撑出滚动条。 */
+.view-container:has(.stage-immersive) {
+  animation-name: fade-in;
+}
+
+/*
+ * 按压回弹。用独立的 scale 属性而不是 transform：它和元素自己的 transform（居中、hover 位移）
+ * 叠加而不是覆盖，按下时不会跳位。:where 让任何视图自己的写法都能覆盖它。
+ */
+:where(button, [role="button"], .side-nav a, .section-nav-tabs > a):not(:disabled):active {
+  scale: 0.97;
+}
+:where(button, [role="button"]) {
+  transition-property: scale, color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+/* 骨架：.skeleton 自己画一条会扫光的占位条，宽高由调用处给。 */
+.skeleton {
+  display: block;
+  border-radius: var(--radius-control);
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--ink) 6%, transparent) 25%,
+    color-mix(in oklab, var(--ink) 12%, transparent) 50%,
+    color-mix(in oklab, var(--ink) 6%, transparent) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/*
+ * 减弱动效的全局兜底：压时长而不是取消动画（取消会让 animationend 永远不来），
+ * 所以必须的状态不能依赖动画结束事件；装饰性的交错也一并取消延迟。
+ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
