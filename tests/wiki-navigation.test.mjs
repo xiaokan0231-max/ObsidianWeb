@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWikiNavigator } from "../lib/wiki-navigation.ts";
+import { createExitController } from "../lib/exit-transition.ts";
 
 const note = (path) => ({ path, content: "", frontmatter: {}, tags: [], stat: { ctime: 0, mtime: 1, size: 0 } });
 const deferred = () => {
@@ -106,6 +107,33 @@ test("局部索引缺失的完整路径补读后再打开，真正缺失时不�
   await missing;
   assert.deepEqual(absent.opened, []);
   assert.equal(absent.notices.at(-1).kind, "missing");
+});
+
+test("关闭意图在退场动画开始时取消链接，动画中的晚响应不能抢回阅读层", async () => {
+  const request = deferred();
+  let current = "资料/当前.md";
+  let closed = false;
+  const timers = new Map();
+  let nextTimer = 0;
+  const navigator = createWikiNavigator({
+    getNotes: () => [], isComplete: () => false, ensureAll: () => request.promise,
+    onOpen: (link) => { current = link.path; }, onNotice() {},
+  });
+  const exit = createExitController({
+    current: () => current, reducedMotion: () => false, onExiting() {}, onRelease() {},
+    scheduler: { set: (callback) => { timers.set(++nextTimer, callback); return nextTimer; }, clear: (id) => timers.delete(id) },
+  });
+  const opening = navigator.open("另一篇");
+  navigator.cancel();
+  exit.exit(() => { current = null; closed = true; });
+  assert.equal(closed, false, "仍保留退场动画");
+  request.resolve([note("资料/另一篇.md")]);
+  await opening;
+  assert.equal(current, "资料/当前.md", "晚响应不能换篇，否则退场控制器会放弃原来的关闭");
+  timers.get(1)();
+  assert.equal(current, null);
+  assert.equal(closed, true);
+  exit.dispose();
 });
 
 test("读取失败保留当前阅读位置，后续点击能够重新加载", async () => {
