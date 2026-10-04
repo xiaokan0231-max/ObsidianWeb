@@ -80,6 +80,9 @@ function jumpTo(selector: string) {
     const target = event.currentTarget.closest(".markdown-document")?.querySelector<HTMLElement>(selector);
     if (!target) return;
     event.preventDefault();
+    // 落点在收起的 callout 里时先展开，不然滚过去的是一块看不见的地方。
+    const fold = target.closest("details");
+    if (fold) fold.open = true;
     // JS 里显式写 smooth 会绕过 CSS 的减弱动效兜底，所以这里自己问一次。
     const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     target.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
@@ -283,6 +286,19 @@ function MarkdownDocument({
     const head = calloutHead(buffered[0] ?? "");
     const tone = head ? head.tone ?? calloutTone(head.title) : calloutTone(buffered[0] ?? "");
     const body = head ? buffered.slice(1) : buffered;
+    // [!type]- 默认收起、[!type]+ 默认展开：交给原生 details，键盘、读屏与页内查找自动展开都不用另写。
+    if (head?.fold) {
+      blocks.push(
+        <details key={`quote-${quoteStart}`} className="md-callout" data-reading-anchor={`md-${quoteStart}`}
+          data-callout={tone ?? undefined} data-callout-kind={head.kind} open={head.fold === "open"}>
+          <summary className="md-callout-title">{head.title ? inline(head.title) : <CalloutTitle zh={head.titleZh} ja={head.titleJa} />}</summary>
+          {body.map((quoted, offset) => (
+            <span key={offset}>{inline(quoted)}</span>
+          ))}
+        </details>,
+      );
+      return;
+    }
     blocks.push(
       <blockquote key={`quote-${quoteStart}`} data-reading-anchor={`md-${quoteStart}`} data-callout={tone ?? undefined} data-callout-kind={head?.kind}>
         {head && <span className="md-callout-title">{head.title ? inline(head.title) : <CalloutTitle zh={head.titleZh} ja={head.titleJa} />}</span>}

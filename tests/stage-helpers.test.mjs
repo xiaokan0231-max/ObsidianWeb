@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { approachValues, createRenderGate, speedFeel } from "../lib/stage-motion.mjs";
+import { approachValues, createRenderGate, flightCarry, speedFeel } from "../lib/stage-motion.mjs";
 import { estimateLabelWidth, staggerLabels } from "../lib/stage-interaction.mjs";
 
 test("明暗渐变：逐元素趋近目标，收敛后报告停止", () => {
@@ -45,6 +45,23 @@ test("滚轮速度感：按满速阈值归一，方向无关，封顶 1", () => 
   assert.equal(speedFeel(-20, 40), 0.5, "往当下滚和往过去滚一样有速度感");
   assert.equal(speedFeel(72, 40), 1);
   assert.equal(speedFeel(Number.NaN, 40), 0);
+});
+
+test("飞行底座：从起飞时的 fov 淡回基准，起止两端分毫不差", () => {
+  // 航道滚轮速度感把 fov 抬到 47，起飞第一帧仍是 47，落地正好 43，中途单调回落。
+  assert.equal(flightCarry(47, 43, 0), 47);
+  assert.equal(flightCarry(47, 43, 1), 43);
+  assert.equal(flightCarry(47, 43, 0.5), 45);
+  const samples = [0, 0.2, 0.4, 0.6, 0.8, 1].map((progress) => flightCarry(47, 43, progress));
+  assert.ok(samples.every((value, index) => index === 0 || value <= samples[index - 1]), "不回弹");
+  // 星图起飞时就在基准：退化为常量，与改动前逐位相同。
+  for (const progress of [0, 0.37, 1]) assert.equal(flightCarry(43, 43, progress), 43);
+  assert.equal(flightCarry(0.042, 0.042, 0.5), 0.042);
+  // 进度越界与坏值兜底：越界按端点算，起飞值不是数时当作已在基准。
+  assert.equal(flightCarry(47, 43, -1), 47);
+  assert.equal(flightCarry(47, 43, 2), 43);
+  assert.equal(flightCarry(Number.NaN, 43, 0), 43);
+  assert.equal(flightCarry(47, 43, Number.NaN), 43);
 });
 
 test("标签错开：横向重叠又挨得太近的往下推一行，不重叠的不动", () => {

@@ -99,6 +99,19 @@
 .novel-reader.reading-mode:not(.scene-reader--embedded) { animation: fade-in 240ms var(--ease-out) backwards; }
 .novel-reader.reading-mode:not(.scene-reader--embedded) .nr-paper { animation: reading-enter 240ms var(--ease-out) backwards; }
 
+/*
+ * 场景阅读层的退场：整层淡出即可（舞台还在背后，不需要位移）。data-state 与时长变量由
+ * SceneNoteReader 写上，时长与外壳计时器同一常量（lib/exit-transition.ts），播完由外壳卸载。
+ * 减弱动效时外壳直接关闭，不进入这个状态。
+ */
+@keyframes scene-reader-exit {
+  to { opacity: 0; }
+}
+.novel-reader.reading-mode.scene-reader[data-state="closing"] {
+  animation: scene-reader-exit var(--note-exit-duration, 200ms) var(--ease-out) forwards;
+}
+.novel-reader.reading-mode.scene-reader[data-state="closing"] .nr-paper { animation: none; }
+
 /* 文末去向：「提到这篇的 N 篇」与「本文链接到的笔记」，多列卡片，读完直接接着走。 */
 .reading-mode .reader-related {
   flex: 1 0 100%;
@@ -242,24 +255,31 @@
  * 抹掉就分不出轻重。这里只补回低饱和底色与彩色左线，字色仍按书页走；
  * 色调和 --nr-ink 混合，浅色书页与深色书页上都不会刺眼。
  */
-.reading-mode .reader-prose blockquote[data-callout] {
+.reading-mode .reader-prose :is(blockquote, .md-callout)[data-callout] {
   padding: .65em 1em .65em 1.1em;
   border-left: 3px solid color-mix(in oklab, var(--callout-tone) 72%, var(--nr-line-strong));
   border-radius: 0 3px 3px 0;
   background: color-mix(in oklab, var(--callout-tone) 7%, transparent);
 }
-.reading-mode .reader-prose blockquote[data-callout="danger"] { --callout-tone: var(--danger); }
-.reading-mode .reader-prose blockquote[data-callout="warn"] { --callout-tone: var(--gold); }
-.reading-mode .reader-prose blockquote[data-callout="key"] { --callout-tone: var(--brand); }
-.reading-mode .reader-prose blockquote[data-callout="data"] { --callout-tone: var(--violet); }
-.reading-mode .reader-prose blockquote[data-callout="info"] { --callout-tone: var(--info); }
-.reading-mode .reader-prose blockquote:is([data-callout="aim"], [data-callout="idea"]) { --callout-tone: var(--green); }
-.reading-mode .reader-prose blockquote[data-callout] > .md-callout-title {
+.reading-mode .reader-prose :is(blockquote, .md-callout)[data-callout="danger"] { --callout-tone: var(--danger); }
+.reading-mode .reader-prose :is(blockquote, .md-callout)[data-callout="warn"] { --callout-tone: var(--gold); }
+.reading-mode .reader-prose :is(blockquote, .md-callout)[data-callout="key"] { --callout-tone: var(--brand); }
+.reading-mode .reader-prose :is(blockquote, .md-callout)[data-callout="data"] { --callout-tone: var(--violet); }
+.reading-mode .reader-prose :is(blockquote, .md-callout)[data-callout="info"] { --callout-tone: var(--info); }
+.reading-mode .reader-prose :is(blockquote, .md-callout):is([data-callout="aim"], [data-callout="idea"]) { --callout-tone: var(--green); }
+.reading-mode .reader-prose :is(blockquote, .md-callout)[data-callout] > .md-callout-title {
   margin-bottom: .2em;
   color: color-mix(in oklab, var(--callout-tone) 55%, var(--nr-ink));
   font-weight: 600;
 }
-.reading-mode .reader-prose blockquote:not([data-callout]) > .md-callout-title { color: var(--nr-ink); font-weight: 600; }
+.reading-mode .reader-prose :is(blockquote, .md-callout):not([data-callout]) > .md-callout-title { color: var(--nr-ink); font-weight: 600; }
+/*
+ * 可折叠 callout 在书页上：收起时标题行就是整块的高度，不留标题下的空隙；
+ * 箭头与悬停底色都取 currentColor，白书页、夜间书页各自跟着标题色走。
+ */
+.reading-mode .reader-prose .md-callout[data-callout]:not([open]) > .md-callout-title { margin-bottom: 0; }
+.reading-mode .reader-prose .md-callout > summary { margin-inline: -.3em; padding-inline: .3em; }
+.reading-mode .reader-prose .md-callout > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .reading-mode .reader-prose .prep-doc-say {
   padding: 0;
   border: 0;

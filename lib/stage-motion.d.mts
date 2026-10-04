@@ -65,3 +65,5 @@ export type RenderGate = {
 export function createRenderGate(settleFrames?: number): RenderGate;
 
 export function speedFeel(velocity: number, fullAt?: number): number;
+
+export function flightCarry(from: number, base: number, progress: number): number;

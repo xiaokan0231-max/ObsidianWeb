@@ -118,6 +118,63 @@
   transform: rotate(180deg);
 }
 
+/* ===== 侧栏角标（lib/nav-badges.ts）=====
+   日历＝今天已约定的场次，用填充色；求职＝选考中的件数，用中性凸起面，不抢日历的注意力。
+   DOM 里角标排在文字前（base.css 的 `span:last-child` 指文字），这里用 order 排到最右。 */
+.side-nav a > .nav-badge {
+  order: 1;
+  flex: 0 0 auto;
+  min-width: 20px;
+  height: 18px;
+  margin-left: auto;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  animation: pop-in var(--dur-base) var(--ease-spring) backwards;
+}
+
+.side-nav a > .nav-badge[data-kind="today"] {
+  color: var(--on-interactive);
+  background: var(--interactive-fill);
+}
+
+.side-nav a > .nav-badge[data-kind="selection"] {
+  color: var(--ink);
+  background: var(--surface-raised-solid);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* 暗色的当前分区本身就是 --surface-raised-solid 凸起面，同色徽章只剩一圈细线；改用凹面压一档。 */
+:root:not([data-theme="light"]):not([data-rail="collapsed"]) .side-nav > a.active > .nav-badge[data-kind="selection"] {
+  background: var(--surface-sunken);
+}
+
+/* 折叠态只剩 66px 图标条：缩成图标右上角的小圆点，数字留在链接的 aria-label 与悬停气泡里。 */
+:root[data-rail="collapsed"] .side-nav a > .nav-badge {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  min-width: 0;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  font-size: 0;
+  /* 一圈侧栏底色把圆点和图标分开，深浅两套主题都成立。 */
+  outline: 2px solid var(--surface-sunken);
+}
+
+/* 8px 的近白凸起面在浅色侧栏上几乎看不见；圆点不承载数字，改用中性的三级文字色实心点。 */
+:root[data-rail="collapsed"] .side-nav a > .nav-badge[data-kind="selection"] {
+  background: var(--text-tertiary);
+  box-shadow: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-shell,
   .sidebar,

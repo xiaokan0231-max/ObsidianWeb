@@ -12,6 +12,7 @@ import {
   type ReadingPosition,
 } from "./reading-mode";
 import { scanReadingHeadings } from "@/lib/reading-document";
+import { NOTE_EXIT_MS } from "@/lib/exit-transition";
 import { resolveNoteLink } from "@/lib/wiki-target";
 import type { UiLocale } from "@/lib/ui-locale";
 import {
@@ -79,10 +80,13 @@ export default function NoteDrawer({
   onOpenWiki,
   onOpen,
   wikiIndexComplete = false,
+  closing = false,
 }: {
   note: Note;
   section: string | null;
   allNotes: Note[];
+  /** 外壳正在播退场（lib/exit-transition.ts）：只换样式，卸载仍由外壳在计时结束后做。 */
+  closing?: boolean;
   onClose: () => void;
   onOpenWiki: (target: string, section?: string) => void;
   onOpen: (note: Note) => void;
@@ -178,7 +182,9 @@ export default function NoteDrawer({
   const hasAside = frontmatterEntries.length > 0 || backlinks.length > 0 || outlinks.length > 0;
 
   return (
-    <div className="drawer-backdrop drawer-backdrop--full" inert={readerOpen} aria-hidden={readerOpen || undefined}>
+    // 退场时长经内联变量交给 CSS，和外壳的计时器读同一个常量。
+    <div className="drawer-backdrop drawer-backdrop--full" inert={readerOpen} aria-hidden={readerOpen || undefined}
+      data-state={closing ? "closing" : "open"} style={{ "--note-exit-duration": `${NOTE_EXIT_MS}ms` } as CSSProperties}>
       <aside ref={dialogRef} tabIndex={-1} className="note-drawer note-drawer--full" aria-label={copy.dialog} aria-modal="true" role="dialog"
         style={{ "--drawer-font-size": `${fontSize}px` } as CSSProperties}>
         <header className="drawer-header">

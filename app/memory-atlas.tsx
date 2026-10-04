@@ -71,6 +71,8 @@ import { LanguageSwitch, useUiLocale } from "./ui-locale";
 import { ThemeSwitch, useUiTheme } from "./ui-theme";
 import { rememberRecentPath } from "@/lib/recent-notes";
 import { SHELL_MESSAGES } from "./shell-messages";
+import { buildNavBadges, type NavBadge, type NavBadges } from "@/lib/nav-badges";
+import { useExitTransition } from "./use-exit-transition";
 
 // 业务页首次进入时再加载；组件身份固定，笔记刷新和 URL 更新不能重建页面状态。
 const InterviewReview = lazy(() => import("./interview-review"));
@@ -404,6 +406,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const [selectedSection, setSelectedSection] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("section"),
   );
+  // 详情・场景阅读层先播退场再走原来的关闭逻辑；退场途中换了篇就取消（见 lib/exit-transition.ts）。
+  const { exiting: noteExiting, exit: exitNote } = useExitTransition(selectedPath);
   /*
    * 资料库那一页的筛选词。以前它和顶栏那个全局搜索框共用同一个 state，
    * 于是「页面状态住在全局 chrome 里」：在顶栏打字，底下的卡片列表跟着变，
@@ -832,16 +836,19 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
         // 回答库の上に原笔记 drawer を開いている時は、一段ずつ閉じる。
         if (selectedPath) {
           wikiNavigator.cancel();
-          if (window.history.state?.__echoNote) window.history.back();
-          else {
-            const params = new URLSearchParams(window.location.search);
-            params.delete("note");
-            params.delete("section");
-            const query = params.toString();
-            window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
-            setSelectedPath(null);
-            setSelectedSection(null);
-          }
+          // 与 × 同一条退场：退场中再按 Esc 由 exitNote 吞掉，不会连退两层。
+          exitNote(() => {
+            if (window.history.state?.__echoNote) window.history.back();
+            else {
+              const params = new URLSearchParams(window.location.search);
+              params.delete("note");
+              params.delete("section");
+              const query = params.toString();
+              window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+              setSelectedPath(null);
+              setSelectedSection(null);
+            }
+          });
           return;
         }
         if (prepOverlayCard) {
@@ -864,6 +871,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   }, [
     closePrepCard,
     closeSharedAsset,
+    exitNote,
     loadVault,
     prepOverlayCard,
     searchOpen,
@@ -902,20 +910,23 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     setSearchOpen(false);
   }, [setSearchOpen, wikiNavigator]);
 
+  // 先播退场（lib/exit-transition.ts），播完再走下面原来的关闭逻辑。
   const closeNote = useCallback(() => {
     wikiNavigator.cancel();
-    if (window.history.state?.__echoNote) {
-      window.history.back();
-      return;
-    }
-    const params = new URLSearchParams(window.location.search);
-    params.delete("note");
-    params.delete("section");
-    const query = params.toString();
-    window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
-    setSelectedPath(null);
-    setSelectedSection(null);
-  }, [wikiNavigator]);
+    exitNote(() => {
+      if (window.history.state?.__echoNote) {
+        window.history.back();
+        return;
+      }
+      const params = new URLSearchParams(window.location.search);
+      params.delete("note");
+      params.delete("section");
+      const query = params.toString();
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+      setSelectedPath(null);
+      setSelectedSection(null);
+    });
+  }, [exitNote, wikiNavigator]);
 
   const openWikiLink = useCallback((target: string, section?: string) => {
     void wikiNavigator.open(target, section);
@@ -923,18 +934,20 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
 
   const closeSceneNote = useCallback(() => {
     wikiNavigator.cancel();
-    // 关联笔记可能已经翻了多篇，关闭全文必须直接回到场景，而不是逐篇退出。
-    const params = new URLSearchParams(window.location.search);
-    params.delete("note");
-    params.delete("section");
-    const query = params.toString();
-    window.history.replaceState(
-      { ...(window.history.state ?? {}), __echoNote: null }, "",
-      `${window.location.pathname}${query ? `?${query}` : ""}`,
-    );
-    setSelectedPath(null);
-    setSelectedSection(null);
-  }, [wikiNavigator]);
+    exitNote(() => {
+      // 关联笔记可能已经翻了多篇，关闭全文必须直接回到场景，而不是逐篇退出。
+      const params = new URLSearchParams(window.location.search);
+      params.delete("note");
+      params.delete("section");
+      const query = params.toString();
+      window.history.replaceState(
+        { ...(window.history.state ?? {}), __echoNote: null }, "",
+        `${window.location.pathname}${query ? `?${query}` : ""}`,
+      );
+      setSelectedPath(null);
+      setSelectedSection(null);
+    });
+  }, [exitNote, wikiNavigator]);
 
   // today を依存に入れるのは、日历事件の upcoming/past が「今日」で決まるため。
   // 入れないと、日付を跨いだ時に見出しの日付だけ進んで、昨日の面接が「未来の予定」の
@@ -956,6 +969,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     }
     return targets;
   }, [calendarEvents, notes]);
+  // 侧栏角标与日历同一份场次表、同一个 JST「今天」；scope 未到手时不出数（lib/nav-badges.ts）。
+  const navBadges: NavBadges = useMemo(() => buildNavBadges({
+    events: calendarEvents, notes, today: calendarToday, readyScopes,
+    interviewTargets: calendarInterviewTargets, locale,
+  }), [calendarEvents, notes, calendarToday, readyScopes, calendarInterviewTargets, locale]);
+
   const calendarInterview = useMemo(() => {
     const requested = calendarInterviewFromSearch(view, interviewRouteSearch);
     if (!requested) return null;
@@ -1254,6 +1273,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           {navigation.map((item) => {
             const isActiveSection = item.views.includes(view);
             const subItems = isActiveSection ? railSecondary : [];
+            const badge: NavBadge | undefined = navBadges[item.id as keyof NavBadges];
+            const badgedLabel = badge ? `${item.label} · ${badge.label}` : undefined;
             return (
               <Fragment key={item.id}>
                 <a
@@ -1264,10 +1285,19 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   aria-current={
                     isActiveSection && secondaryNavigation.length === 0 ? "page" : undefined
                   }
+                  // 角标本身对读屏隐藏，完整说法并进链接名；折叠态的提示气泡同样带上数字。
+                  aria-label={badgedLabel}
                   // 折叠态把文字视觉隐藏，靠这个属性画出 hover 提示气泡。
-                  data-label={item.label}
+                  data-label={badgedLabel ?? item.label}
                 >
                   <span className="nav-glyph" aria-hidden="true"><NavigationIcon name={item.glyph} /></span>
+                  {/* 放在文字前：base.css 的 `span:last-child` 指的是文字。视觉上由 CSS order 排到最右；
+                      key 跟着数字走，数字一变就重挂、重播 pop-in。 */}
+                  {badge && (
+                    <b key={badge.count} className="nav-badge" data-kind={badge.kind} title={badge.label} aria-hidden="true">
+                      {badge.count}
+                    </b>
+                  )}
                   <span>{item.label}</span>
                 </a>
                 {subItems.length > 0 && (
@@ -1644,6 +1674,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           allNotes={notes}
           wikiIndexComplete={readyScopes.has("all")}
           scene={view}
+          closing={noteExiting}
           onClose={closeSceneNote}
           onOpenWiki={openWikiLink}
           onOpen={openNote}
@@ -1654,6 +1685,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           section={selectedSection}
           allNotes={notes}
           wikiIndexComplete={readyScopes.has("all")}
+          closing={noteExiting}
           onClose={closeNote}
           onOpenWiki={openWikiLink}
           onOpen={openNote}

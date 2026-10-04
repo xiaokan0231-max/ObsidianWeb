@@ -48,6 +48,14 @@ test("callout 类型映射到现有色调，未知类型按 note 处理", () => 
   assert.equal(calloutHead("普通引用"), null);
 });
 
+test("callout 折叠标记：- 默认收起、+ 默认展开，没写时不带 fold", () => {
+  assert.equal(calloutHead("[!note]- 收起的说明").fold, "closed");
+  assert.equal(calloutHead("[!note]- 收起的说明").title, "收起的说明");
+  assert.equal(calloutHead("[!tip]+ 展开的提示").fold, "open");
+  assert.equal(calloutHead("[!TIP]-").fold, "closed");
+  assert.equal("fold" in calloutHead("[!note] 普通"), false);
+});
+
 test("列表项：层级、有序、任务状态", () => {
   assert.deepEqual(parseListItem("  - [x] 已提交"), { depth: 1, ordered: false, marker: "-", task: "done", text: "已提交" });
   assert.deepEqual(parseListItem("\t3. 第三步"), { depth: 2, ordered: true, marker: "3.", task: null, text: "第三步" });
@@ -119,6 +127,17 @@ test("渲染：原生 callout 单独输出标题行，emoji 判色仍然有效",
   assert.match(html, /data-callout="warn" data-callout-kind="warning"><span class="md-callout-title">截止前确认<\/span><span>正文第一行<\/span>/);
   assert.match(html, /data-callout="key" data-callout-kind="tip"><span class="md-callout-title">提示<\/span>/);
   assert.match(html, /data-callout="danger"><span>🔴 禁止事项<\/span>/);
+});
+
+test("渲染：可折叠 callout 输出 details＋summary，锚点与色调照旧，不可折叠的不变", () => {
+  const html = render(["> [!note]- 收起的说明", "> 正文 [[资料]]", "", "> [!tip]+ 展开的提示", "> 第二段", "", "> [!warning] 不折叠"].join("\n"));
+  assert.match(html, /<details class="md-callout" data-reading-anchor="md-0" data-callout="info" data-callout-kind="note"><summary class="md-callout-title">收起的说明<\/summary><span>正文 <button class="wiki-link">资料 ↗<\/button><\/span><\/details>/);
+  assert.match(html, /<details class="md-callout" data-reading-anchor="md-3" data-callout="key" data-callout-kind="tip" open=""><summary class="md-callout-title">展开的提示<\/summary><span>第二段<\/span><\/details>/);
+  assert.match(html, /<blockquote data-reading-anchor="md-6" data-callout="warn" data-callout-kind="warning"><span class="md-callout-title">不折叠<\/span><\/blockquote>/);
+  // 没写标题时 summary 用类型的默认名；callout 里的 # 仍不算标题。
+  const untitled = render(["## 节", "> [!faq]-", "> # 不是标题"].join("\n"));
+  assert.match(untitled, /<summary class="md-callout-title">常见问题<\/summary><span># 不是标题<\/span>/);
+  assert.deepEqual(scanReadingHeadings("## 节\n> [!faq]-\n> # 不是标题").map((heading) => heading.text), ["节"]);
 });
 
 test("渲染：脚注成上标并收到文末，未定义的保持原文", () => {

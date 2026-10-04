@@ -36,6 +36,36 @@ const RELATED_COPY: Record<UiLocale, {
   },
 };
 
+/** 笔记阅读层的入口文案：返回去哪、场景里的眉题、信息面板里的空值。 */
+const NOTE_READER_COPY: Record<UiLocale, {
+  back: Record<"graph" | "timeline" | "page", string>;
+  eyebrow: Record<"graph" | "timeline", string>;
+  updated: (date: string) => string;
+  sceneNote: string;
+  sceneHint: string;
+  empty: string;
+  mentionedBy: string;
+}> = {
+  "zh-CN": {
+    back: { graph: "返回星图", timeline: "返回时间线", page: "返回详情" },
+    eyebrow: { graph: "记忆星图", timeline: "时之航道" },
+    updated: (date) => `更新于 ${date}`,
+    sceneNote: "场景内阅读",
+    sceneHint: "关闭全文，继续探索。",
+    empty: "未填写",
+    mentionedBy: "提到这篇文章",
+  },
+  ja: {
+    back: { graph: "星図に戻る", timeline: "タイムラインに戻る", page: "詳細に戻る" },
+    eyebrow: { graph: "記憶の星図", timeline: "時の航路" },
+    updated: (date) => `${date} 更新`,
+    sceneNote: "シーン内で読む",
+    sceneHint: "全文を閉じて探索を続けます。",
+    empty: "未記入",
+    mentionedBy: "このノートに言及しているノート",
+  },
+};
+
 export function SnippetText({ parts }: { parts: readonly SnippetPart[] }) {
   return <>{parts.map((part, index) => part.hit ? <mark key={index}>{part.text}</mark> : <span key={index}>{part.text}</span>)}</>;
 }
@@ -109,6 +139,7 @@ export default function NoteReader({ note, section, onClose, onOpenWiki, backlin
   /** allNotes 是否为全库：局部范围里查不到的双链不能标成「找不到」，只有全库时才做悬浮预览与断链标记。 */
   wikiIndexComplete?: boolean;
 }) {
+  const copy = NOTE_READER_COPY[useUiLocale().locale];
   const headings = useMemo(() => scanReadingHeadings(note.content), [note.content]);
   const heading = findHeadingBySection(headings, section);
   const trust = trustLayer(note);
@@ -119,16 +150,16 @@ export default function NoteReader({ note, section, onClose, onOpenWiki, backlin
   );
   return <ReadingMode key={`${note.path}#${section ?? ""}`} documentKey={`note:${note.path}`}
     presentation={scene ? "scene" : "page"}
-    backLabel={scene === "graph" ? "返回星图" : scene === "timeline" ? "返回时间线" : "返回详情"}
-    title={headingPlainText(getTitle(note))} eyebrow={scene === "graph" ? "记忆星图" : scene === "timeline" ? "时之航道" : typeLabel(getType(note))}
-    metadata={[trust.label, `更新于 ${formatDate(note.stat.mtime, true)}`]}
-    headerNote={scene ? <p className="nr-reading-note">场景内阅读<span> / </span>关闭全文，继续探索。</p> : undefined}
+    backLabel={copy.back[scene ?? "page"]}
+    title={headingPlainText(getTitle(note))} eyebrow={scene ? copy.eyebrow[scene] : typeLabel(getType(note))}
+    metadata={[trust.label, copy.updated(formatDate(note.stat.mtime, true))]}
+    headerNote={scene ? <p className="nr-reading-note">{copy.sceneNote}<span> / </span>{copy.sceneHint}</p> : undefined}
     headings={headings} initialHeadingId={heading?.id} initialPosition={initialPosition} onClose={onClose}
     footerActions={<ReaderRelated note={note} backlinks={backlinks} outlinks={outlinks} onOpen={onOpen} />}
     information={<>
       <p className="reader-source-path">{note.path}</p>
-      <dl>{Object.entries(note.frontmatter).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{Array.isArray(value) ? value.join(" · ") : getString(value) || "未填写"}</dd></div>)}</dl>
-      {backlinks.length > 0 && <section className="reader-backlinks"><h3>提到这篇文章</h3>{backlinks.map((backlink) => <button key={backlink.path} onClick={() => onOpen?.(backlink)}>{headingPlainText(getTitle(backlink))}<span aria-hidden="true">↗</span></button>)}</section>}
+      <dl>{Object.entries(note.frontmatter).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{Array.isArray(value) ? value.join(" · ") : getString(value) || copy.empty}</dd></div>)}</dl>
+      {backlinks.length > 0 && <section className="reader-backlinks"><h3>{copy.mentionedBy}</h3>{backlinks.map((backlink) => <button key={backlink.path} onClick={() => onOpen?.(backlink)}>{headingPlainText(getTitle(backlink))}<span aria-hidden="true">↗</span></button>)}</section>}
     </>}>
     <div className="reader-prose"><MarkdownDocument content={note.content} onWikiLink={onOpenWiki} reading resolveWiki={allNotes && wikiIndexComplete ? resolveWiki : undefined} /></div>
   </ReadingMode>;

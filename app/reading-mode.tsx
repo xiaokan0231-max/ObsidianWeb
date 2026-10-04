@@ -4,8 +4,79 @@ import { useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, use
 import { createPortal } from "react-dom";
 import type { ReadingHeading } from "@/lib/reading-document";
 import { isTypingTarget } from "@/lib/keyboard";
+import type { UiLocale } from "@/lib/ui-locale";
 import { useDialogFocus } from "./use-dialog-focus";
 import { copySelectionWithoutRuby } from "./ruby-copy";
+import { useUiLocale } from "./ui-locale";
+
+/** 阅读层自带的工具栏与面板文案。调用方传入的标题、返回文字等由调用方自己按语言给。 */
+const READER_COPY: Record<UiLocale, {
+  eyebrow: string;
+  back: string;
+  end: string;
+  fullText: string;
+  language: string;
+  fontSize: string;
+  smaller: string;
+  larger: string;
+  information: string;
+  informationShort: string;
+  closeInformation: string;
+  toc: string;
+  tocLabel: string;
+  tocTitle: string;
+  closeToc: string;
+  tocSummary: (count: number) => string;
+  closeReader: string;
+  article: string;
+  whole: string;
+  progress: string;
+}> = {
+  "zh-CN": {
+    eyebrow: "长文阅读",
+    back: "返回详情",
+    end: "全文完",
+    fullText: "全文阅读",
+    language: "正文语言",
+    fontSize: "正文字号",
+    smaller: "缩小字号",
+    larger: "放大字号",
+    information: "文档信息",
+    informationShort: "信息",
+    closeInformation: "关闭文档信息",
+    toc: "目录",
+    tocLabel: "全文目录",
+    tocTitle: "本文目录",
+    closeToc: "关闭目录",
+    tocSummary: (count) => `${count} 个章节 · 全文连续呈现`,
+    closeReader: "关闭全文阅读",
+    article: "文章全文",
+    whole: "全文",
+    progress: "阅读进度",
+  },
+  ja: {
+    eyebrow: "長文",
+    back: "詳細に戻る",
+    end: "以上",
+    fullText: "全文表示",
+    language: "本文の言語",
+    fontSize: "本文の文字サイズ",
+    smaller: "文字を小さく",
+    larger: "文字を大きく",
+    information: "文書情報",
+    informationShort: "情報",
+    closeInformation: "文書情報を閉じる",
+    toc: "目次",
+    tocLabel: "全文の目次",
+    tocTitle: "目次",
+    closeToc: "目次を閉じる",
+    tocSummary: (count) => `${count} 章 · 全文を通して表示`,
+    closeReader: "全文表示を閉じる",
+    article: "記事の全文",
+    whole: "全文",
+    progress: "読書の進捗",
+  },
+};
 
 export type ReadingPosition = { anchor: string | null; offset: number; scrollTop: number };
 const positions = new Map<string, ReadingPosition>();
@@ -164,9 +235,9 @@ export function useReadingProgress(scrollRef: RefObject<HTMLElement | null>, {
 
 /** 阅读工具与文档内容分离；语言选择只由真实存在的对应版本提供。 */
 export default function ReadingMode({
-  documentKey, title, eyebrow = "长文阅读", metadata = [], headings = [], children,
-  onClose, backLabel = "返回详情", presentation = "page", languageSwitch, headerNote, information,
-  initialHeadingId, initialPosition, endLabel = "全文完", endNote, footerActions,
+  documentKey, title, eyebrow: eyebrowProp, metadata = [], headings = [], children,
+  onClose, backLabel: backLabelProp, presentation = "page", languageSwitch, headerNote, information,
+  initialHeadingId, initialPosition, endLabel: endLabelProp, endNote, footerActions,
 }: {
   documentKey: string;
   title: string;
@@ -187,6 +258,11 @@ export default function ReadingMode({
   endNote?: string;
   footerActions?: ReactNode;
 }) {
+  const copy = READER_COPY[useUiLocale().locale];
+  // 不传时的默认文字跟界面语言走；默认参数里取不到 hook，所以放到这里补。
+  const eyebrow = eyebrowProp ?? copy.eyebrow;
+  const backLabel = backLabelProp ?? copy.back;
+  const endLabel = endLabelProp ?? copy.end;
   const readerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLElement>(null);
@@ -302,44 +378,44 @@ export default function ReadingMode({
       <header ref={toolbarRef} className="nr-toolbar">
         <div className="nr-toolbar-start">
           <button className="nr-exit" onClick={close}><span aria-hidden="true">←</span>{backLabel}</button>
-          <span className="nr-toolbar-title">{presentation === "stage" ? eyebrow : "全文阅读"}</span>
+          <span className="nr-toolbar-title">{presentation === "stage" ? eyebrow : copy.fullText}</span>
         </div>
         <div className="nr-controls">
-          {hasLanguages && languageSwitch && <div className="nr-language" role="group" aria-label="正文语言">
+          {hasLanguages && languageSwitch && <div className="nr-language" role="group" aria-label={copy.language}>
             {languageSwitch.options.map((option) => <button key={option.value} aria-pressed={languageSwitch.value === option.value} onClick={() => {
               if (languageSwitch.value === option.value) return;
               remember();
               languageSwitch.onChange(option.value);
             }}>{option.label}</button>)}
           </div>}
-          <div className="nr-font-controls" role="group" aria-label="正文字号">
-            <button aria-label="缩小字号" disabled={fontSize <= 16} onClick={() => resizeFont(-2)}>A−</button>
+          <div className="nr-font-controls" role="group" aria-label={copy.fontSize}>
+            <button aria-label={copy.smaller} disabled={fontSize <= 16} onClick={() => resizeFont(-2)}>A−</button>
             <span aria-live="polite">{fontSize}</span>
-            <button aria-label="放大字号" disabled={fontSize >= 24} onClick={() => resizeFont(2)}>A＋</button>
+            <button aria-label={copy.larger} disabled={fontSize >= 24} onClick={() => resizeFont(2)}>A＋</button>
           </div>
-          {information && <button ref={infoRef} className="reader-info-toggle" aria-label="文档信息" aria-expanded={menu === "info"} aria-controls={`${id}-info`} onClick={() => setMenu(menu === "info" ? null : "info")}><span aria-hidden="true">i</span><span>信息</span></button>}
+          {information && <button ref={infoRef} className="reader-info-toggle" aria-label={copy.information} aria-expanded={menu === "info"} aria-controls={`${id}-info`} onClick={() => setMenu(menu === "info" ? null : "info")}><span aria-hidden="true">i</span><span>{copy.informationShort}</span></button>}
           {headings.length > 0 && <button ref={tocRef} className="nr-toc-toggle" aria-expanded={menu === "toc"} aria-controls={`${id}-toc`} onClick={() => setMenu(menu === "toc" ? null : "toc")}>
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 3.5h12M2 8h12M2 12.5h12" stroke="currentColor" strokeWidth="1.2" /></svg>目录
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 3.5h12M2 8h12M2 12.5h12" stroke="currentColor" strokeWidth="1.2" /></svg>{copy.toc}
           </button>}
-          {presentation === "scene" && <button type="button" className="scene-reader-close" aria-label="关闭全文阅读" title={backLabel} onClick={close}>×</button>}
+          {presentation === "scene" && <button type="button" className="scene-reader-close" aria-label={copy.closeReader} title={backLabel} onClick={close}>×</button>}
         </div>
       </header>
       <div className="nr-progress-track" aria-hidden="true"><i /></div>
-      {menu === "toc" && <nav id={`${id}-toc`} className="nr-toc reader-menu" aria-label="全文目录">
-        <header><span>本文目录</span><button aria-label="关闭目录" onClick={closeMenu}>×</button></header>
-        <p>{headings.length} 个章节 · 全文连续呈现</p>
+      {menu === "toc" && <nav id={`${id}-toc`} className="nr-toc reader-menu" aria-label={copy.tocLabel}>
+        <header><span>{copy.tocTitle}</span><button aria-label={copy.closeToc} onClick={closeMenu}>×</button></header>
+        <p>{copy.tocSummary(headings.length)}</p>
         {headings.map((heading, index) => <button key={heading.id} data-level={heading.level ?? 2} aria-current={activeHeading === heading.id ? "location" : undefined} onClick={() => {
           scrollRef.current?.querySelector<HTMLElement>(`#${CSS.escape(heading.id)}`)?.scrollIntoView({ block: "start" });
           closeMenu();
         }}><span>{String(index + 1).padStart(2, "0")}</span><span lang={heading.lang}>{heading.text}</span></button>)}
       </nav>}
-      {menu === "info" && <aside id={`${id}-info`} className="nr-toc reader-menu reader-information" aria-label="文档信息">
-        <header><span>文档信息</span><button aria-label="关闭文档信息" onClick={closeMenu}>×</button></header>{information}
+      {menu === "info" && <aside id={`${id}-info`} className="nr-toc reader-menu reader-information" aria-label={copy.information}>
+        <header><span>{copy.information}</span><button aria-label={copy.closeInformation} onClick={closeMenu}>×</button></header>{information}
       </aside>}
-      <div ref={scrollRef} className="nr-scroll" tabIndex={0} aria-label="文章全文" onClick={() => { if (menu) setMenu(null); }}>
+      <div ref={scrollRef} className="nr-scroll" tabIndex={0} aria-label={copy.article} onClick={() => { if (menu) setMenu(null); }}>
         <article className="nr-paper">
           <header className="nr-book-heading">
-            <p className="nr-eyebrow">{eyebrow}{presentation !== "stage" && <><span>/</span>全文阅读</>}</p>
+            <p className="nr-eyebrow">{eyebrow}{presentation !== "stage" && <><span>/</span>{copy.fullText}</>}</p>
             <h1 id={`${id}-title`}>{title}</h1>
             {metadata.length > 0 && <p className="nr-book-meta">{metadata.filter(Boolean).map((value, index) => <span key={index}>{value}</span>)}</p>}
             {headerNote}
@@ -348,7 +424,7 @@ export default function ReadingMode({
           <footer className="nr-colophon"><span className="nr-end-mark" aria-hidden="true">◇</span><p>{endLabel}</p>{endNote && <span>{endNote}</span>}<div><button onClick={close}>{backLabel}</button>{footerActions}</div></footer>
         </article>
       </div>
-      <footer className="nr-status"><span>{headings.length > 0 ? `${String(currentIndex + 1).padStart(2, "0")} / ${String(headings.length).padStart(2, "0")}` : "全文"}<i>{headings[currentIndex]?.text ?? title}</i></span><span role="progressbar" aria-label="阅读进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>{progress}%</span></footer>
+      <footer className="nr-status"><span>{headings.length > 0 ? `${String(currentIndex + 1).padStart(2, "0")} / ${String(headings.length).padStart(2, "0")}` : copy.whole}<i>{headings[currentIndex]?.text ?? title}</i></span><span role="progressbar" aria-label={copy.progress} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>{progress}%</span></footer>
     </div>, sceneHost ?? document.body,
   );
 }

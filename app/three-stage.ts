@@ -11,6 +11,7 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { createStageInteraction, staggerLabels } from "@/lib/stage-interaction.mjs";
 import {
   createPointerMotionField,
+  flightCarry,
   MOTION_IMPULSE_GAIN,
   MOTION_MASS_MAX,
   MOTION_MASS_MIN,
@@ -348,6 +349,10 @@ type Flight = {
   fromTarget: THREE.Vector3;
   toCamera: THREE.Vector3;
   toTarget: THREE.Vector3;
+  /** 起飞时的 fov 与星场：飞行途中从这里淡回基准，而不是第一帧就跳回去。 */
+  fromFov: number;
+  fromWarpSize: number;
+  fromWarpOpacity: number;
 };
 
 export type FlightController = {
@@ -392,6 +397,10 @@ export function createFlightController(options: {
         fromTarget: options.target.clone(),
         toCamera,
         toTarget,
+        // 航道的滚轮速度感会抬高 fov 与星点；中途换目标时也停在冲刺半路。都从当前值接着飞。
+        fromFov: options.camera.fov,
+        fromWarpSize: options.warp?.material.size ?? 0,
+        fromWarpOpacity: options.warp?.material.opacity ?? 0,
       };
     },
     cancel() {
@@ -406,10 +415,11 @@ export function createFlightController(options: {
       const thrust = Math.sin(rawProgress * Math.PI);
       options.camera.position.lerpVectors(flight.fromCamera, flight.toCamera, progress);
       options.target.lerpVectors(flight.fromTarget, flight.toTarget, progress);
-      options.camera.fov = baseFov + thrust * fovKick;
+      // 起飞值与基准的差按位置的同一条缓动淡出，冲刺照旧叠在上面；落地时 restore 精确写回基准。
+      options.camera.fov = flightCarry(flight.fromFov, baseFov, progress) + thrust * fovKick;
       if (options.warp) {
-        options.warp.material.size = options.warp.baseSize + thrust * 0.045;
-        options.warp.material.opacity = options.warp.baseOpacity + thrust * 0.24;
+        options.warp.material.size = flightCarry(flight.fromWarpSize, options.warp.baseSize, progress) + thrust * 0.045;
+        options.warp.material.opacity = flightCarry(flight.fromWarpOpacity, options.warp.baseOpacity, progress) + thrust * 0.24;
       }
       options.camera.updateProjectionMatrix();
       if (rawProgress >= 1) {

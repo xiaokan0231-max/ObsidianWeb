@@ -42,15 +42,26 @@ const CALLOUT_KINDS: Record<string, { tone: CalloutTone | null; zh: string; ja: 
   cite: { tone: null, zh: "引用", ja: "引用" },
 };
 
-export type CalloutHead = { kind: string; tone: CalloutTone | null; title: string; titleZh: string; titleJa: string };
+export type CalloutHead = {
+  kind: string;
+  tone: CalloutTone | null;
+  title: string;
+  titleZh: string;
+  titleJa: string;
+  /** 只有写了 `-`（默认收起）或 `+`（默认展开）才可折叠；没写时不带这个键。 */
+  fold?: "open" | "closed";
+};
 
 /** `[!note] 标题` → 类型与标题。不认识的类型按 Obsidian 的做法当 note。 */
 export function calloutHead(firstLine: string): CalloutHead | null {
-  const match = firstLine.trim().match(/^\[!([\w-]+)\][+-]?\s*(.*)$/);
+  const match = firstLine.trim().match(/^\[!([\w-]+)\]([+-]?)\s*(.*)$/);
   if (!match) return null;
   const kind = match[1].toLowerCase();
   const meta = CALLOUT_KINDS[kind] ?? CALLOUT_KINDS.note;
-  return { kind, tone: meta.tone, title: match[2].trim(), titleZh: meta.zh, titleJa: meta.ja };
+  const head: CalloutHead = { kind, tone: meta.tone, title: match[3].trim(), titleZh: meta.zh, titleJa: meta.ja };
+  // 不可折叠的保持原样（不加 fold: undefined），渲染端据此决定是 blockquote 还是 details。
+  if (match[2]) head.fold = match[2] === "+" ? "open" : "closed";
+  return head;
 }
 
 export type ListItem = { depth: number; ordered: boolean; marker: string; task: "open" | "done" | null; text: string };

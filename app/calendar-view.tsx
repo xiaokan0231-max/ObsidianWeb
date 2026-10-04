@@ -1,12 +1,14 @@
 "use client";
 
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { type Note } from "@/lib/notes";
 import { type UiLocale } from "@/lib/ui-locale";
 import { useUiLocale } from "./ui-locale";
 import { CountUp } from "./count-up";
+import { enumCodec, useUrlState, type UrlStateCodec } from "./use-url-state";
 import { isTypingTarget } from "@/lib/keyboard";
 import { calendarMonthDays } from "@/lib/calendar-month";
+import { buildCalendarWeek, calendarWeekDays, calendarWeekRangeLabel, calendarWeekStart, jstClock, minutesLabel } from "@/lib/calendar-week";
 import { buildAiApplicationDays, type AiApplicationDay } from "@/lib/calendar-applications";
 import { calendarConflicts } from "@/lib/calendar-conflicts";
 import { isInterviewEvent, type CalendarInterviewTarget } from "@/lib/calendar-interview";
@@ -94,6 +96,15 @@ const calendarZh = {
   applicationRecordLabel: (date: string, company: string, position: string, agent: string) => `${date} JST · ${company} · ${position} · 由 ${agent} 提交 · 查看申请记录`,
   applicationsLoading: "正在读取申请记录…",
   applicationsEmpty: "今天暂无已确认的 AI 代投。",
+  viewSwitch: "日历视图",
+  viewMonth: "月",
+  viewWeek: "周",
+  previousWeek: "上一周",
+  nextWeek: "下一周",
+  thisWeek: "本周",
+  allDay: "全天",
+  allDayHint: "未写具体时刻，不占时间段",
+  weekGrid: (range: string) => `${range} · 周视图（日本时间）`,
 };
 type CalendarCopy = typeof calendarZh;
 
@@ -147,7 +158,18 @@ const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
     applicationNoPosition: "職種未記載", applicationSubmission: (agent) => `${agent} が提出`, applicationRecord: "記録を見る",
     applicationRecordLabel: (date, company, position, agent) => `${date} JST · ${company} · ${position} · ${agent} が提出 · 応募記録を見る`,
     applicationsLoading: "応募記録を読み込み中…", applicationsEmpty: "今日の確認済みAI代行応募はありません。",
+    viewSwitch: "カレンダーの表示", viewMonth: "月", viewWeek: "週",
+    previousWeek: "前の週", nextWeek: "次の週", thisWeek: "今週",
+    allDay: "終日", allDayHint: "時刻の記載がなく、時間帯を占めません",
+    weekGrid: (range) => `${range} · 週表示（日本時間）`,
   },
+};
+
+type CalendarMode = "month" | "week";
+const CALENDAR_MODE_CODEC = enumCodec<CalendarMode>(["month", "week"]);
+/** 手改成周中某天也落到那周的周一，链接里写哪天都指向同一周。 */
+const WEEK_START_CODEC: UrlStateCodec<string> = {
+  parse: (raw) => /^20\d{2}-\d{2}-\d{2}$/.test(raw) && Number.isFinite(Date.parse(`${raw}T00:00:00Z`)) ? calendarWeekStart(raw) : null,
 };
 
 /** 侧栏每组默认露出的条数；更多的折进「另有 N 项」，首屏不被一长串议程推走。 */
@@ -268,6 +290,17 @@ function CalendarView({
   // 空串＝没有主动选中：键盘与「今天」以 today 为起点，但侧栏不常驻一块与「未来 7 天」重复的当日详情。
   const [selectedDay, setSelectedDay] = useState("");
   const [focusTone, setFocusTone] = useState<ProgressTone | "">("");
+  // 月／周存进 URL：刷新或从别页返回时停在原来的看法上；默认月视图，链接里不出现参数。
+  const [calView, setCalView] = useUrlState("calview", "month", CALENDAR_MODE_CODEC);
+  // 空串＝「本周」：默认值不随 today 变，跨过午夜或周一时链接里不会凭空冒出一个 calweek，
+  // 停在本周的人也会跟着进入新的一周。
+  const currentWeek = calendarWeekStart(today);
+  const [weekParam, setWeekParam] = useUrlState("calweek", "", WEEK_START_CODEC);
+  const weekStart = weekParam || currentWeek;
+  const setWeekStart = (next: string) => setWeekParam(next === currentWeek ? "" : next);
+  const [weekDir, setWeekDir] = useState<"prev" | "next" | "">("");
+  // 实时刻度线只在挂载后由 effect 写入：渲染期取当前时刻会让 SSR 与客户端对不上。
+  const [nowClock, setNowClock] = useState<ReturnType<typeof jstClock> | null>(null);
   const focusDayRef = useRef("");
   const monthKey = monthKeyOf(month);
   const monthLabel = new Intl.DateTimeFormat(locale, {
@@ -315,6 +348,19 @@ function CalendarView({
     window.history.replaceState(window.history.state, "", `${window.location.pathname}?${params.toString()}`);
   }, [month]);
 
+  // 刻度线每分钟对齐到整分刷新一次；只在周视图挂着时走表，月视图不需要。
+  useEffect(() => {
+    if (calView !== "week") return;
+    let timer = 0;
+    const tick = () => {
+      const now = Date.now();
+      setNowClock(jstClock(now));
+      timer = window.setTimeout(tick, 60000 - (now % 60000) + 50);
+    };
+    timer = window.setTimeout(tick, 0);
+    return () => window.clearTimeout(timer);
+  }, [calView]);
+
   // 键盘跨月移动时月格整块重挂，焦点会掉回 body；渲染后把焦点还给新选中的那一天。
   useLayoutEffect(() => {
     const key = focusDayRef.current;
@@ -342,6 +388,45 @@ function CalendarView({
   const toggleFocusTone = (tone: ProgressTone) => setFocusTone((current) => current === tone ? "" : tone);
   const openEvent = (event: CalendarEvent) => interviewTargets.get(event.id) ? onInterview(event) : onOpen(event.note);
 
+  const goToWeek = (target: string) => {
+    const next = calendarWeekStart(target);
+    if (next === weekStart) return;
+    setWeekDir(next > weekStart ? "next" : "prev");
+    setWeekStart(next);
+  };
+  const moveWeek = (offset: number) => goToWeek(shiftCalendarDay(weekStart, offset * 7));
+  const goThisWeek = () => {
+    goToWeek(today);
+    setSelectedDay("");
+  };
+  // 两种看法之间切换时带上「正在看的那段」：月→周落到选中日／今天／该月 1 日所在周，
+  // 周→月落到选中日／今天／周四所在月（周四定月份，跨月的一周归给占天数多的那个月）。
+  const switchView = (next: CalendarMode) => {
+    if (next === calView) return;
+    if (next === "week") {
+      const anchor = selectedDay || (monthKey === today.slice(0, 7) ? today : `${monthKey}-01`);
+      setWeekDir("");
+      setWeekStart(calendarWeekStart(anchor));
+    } else {
+      const visible = calendarWeekDays(weekStart);
+      const anchor = visible.includes(selectedDay) ? selectedDay : visible.includes(today) ? today : visible[3];
+      const target = monthOf(anchor);
+      if (monthKeyOf(target) !== monthKey) {
+        setMonthDir("");
+        setMonth(target);
+      }
+      // 月视图用不到所在周；留着会让月视图的链接带一个看不见作用的参数。
+      setWeekParam("");
+    }
+    setCalView(next);
+  };
+  // 今天的 AI 代投已在侧栏「今日 AI 代投」里列出，当日详情不再重复一份；
+  // 点今天的代投标记时把那一块带进视野，免得点了看不出任何变化。
+  const showWeekApplications = (key: string) => {
+    if (selectedDay !== key) setSelectedDay(key);
+    if (key === today) sectionRef.current?.querySelector(".calendar-application-summary")?.scrollIntoView({ block: "nearest" });
+  };
+
   const onCalendarKey = (event: KeyboardEvent) => {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
     const section = sectionRef.current;
@@ -352,6 +437,17 @@ function CalendarView({
     // 浮层开着而焦点掉回 body 时（关掉内层阅读层之类），方向键不能在浮层背后翻日历。
     if (section.closest("[inert]") || document.querySelector('[aria-modal="true"]')) return;
     const key = event.key;
+    if (calView === "week") {
+      // 周视图里没有「格子间移动」：左右与方括号都是整周翻页，T 回到本周。
+      if (key === "[" || key === "]" || key === "ArrowLeft" || key === "ArrowRight") {
+        event.preventDefault();
+        moveWeek(key === "[" || key === "ArrowLeft" ? -1 : 1);
+      } else if (key.toLowerCase() === "t") {
+        event.preventDefault();
+        goThisWeek();
+      }
+      return;
+    }
     if (key === "[" || key === "]") {
       event.preventDefault();
       moveMonth(key === "[" ? -1 : 1);
@@ -391,6 +487,7 @@ function CalendarView({
   }, []);
 
   const nextProgress = summary.next ? progressByEvent.get(summary.next.event.id) : undefined;
+  const weekLabel = calendarWeekRangeLabel(weekStart, today.slice(0, 4));
 
   return (
     <section className="calendar-view" ref={sectionRef} data-focus-tone={focusTone || undefined}>
@@ -434,7 +531,9 @@ function CalendarView({
         <div className="calendar-board">
           <div className="calendar-toolbar">
             <h2>
-              <span className="calendar-month-label" key={monthKey} data-dir={monthDir || undefined}>{monthLabel}</span>
+              {calView === "week"
+                ? <span className="calendar-month-label" key={`week-${weekStart}`} data-dir={weekDir || undefined}>{weekLabel}</span>
+                : <span className="calendar-month-label" key={monthKey} data-dir={monthDir || undefined}>{monthLabel}</span>}
               <small className="calendar-timezone">{copy.timezone}</small>
             </h2>
             <ul className="calendar-legend calendar-progress-legend" aria-label={copy.progressLegend}>
@@ -448,14 +547,48 @@ function CalendarView({
               ))}
             </ul>
             <div className="calendar-tools">
-              <RoundHelp copy={copy} />
-              <div className="calendar-actions">
-                <button type="button" onClick={() => moveMonth(-1)} aria-label={copy.previousMonth} aria-keyshortcuts="[">←</button>
-                <button type="button" onClick={goToday} aria-keyshortcuts="T">{copy.today}</button>
-                <button type="button" onClick={() => moveMonth(1)} aria-label={copy.nextMonth} aria-keyshortcuts="]">→</button>
+              <div className="cw-switch" role="group" aria-label={copy.viewSwitch}>
+                {([["month", copy.viewMonth], ["week", copy.viewWeek]] as const).map(([mode, label]) => (
+                  <button type="button" key={mode} aria-pressed={calView === mode} onClick={() => switchView(mode)}>{label}</button>
+                ))}
               </div>
+              <RoundHelp copy={copy} />
+              {calView === "week" ? (
+                <div className="calendar-actions">
+                  <button type="button" onClick={() => moveWeek(-1)} aria-label={copy.previousWeek} aria-keyshortcuts="[">←</button>
+                  <button type="button" onClick={goThisWeek} aria-keyshortcuts="T">{copy.thisWeek}</button>
+                  <button type="button" onClick={() => moveWeek(1)} aria-label={copy.nextWeek} aria-keyshortcuts="]">→</button>
+                </div>
+              ) : (
+                <div className="calendar-actions">
+                  <button type="button" onClick={() => moveMonth(-1)} aria-label={copy.previousMonth} aria-keyshortcuts="[">←</button>
+                  <button type="button" onClick={goToday} aria-keyshortcuts="T">{copy.today}</button>
+                  <button type="button" onClick={() => moveMonth(1)} aria-label={copy.nextMonth} aria-keyshortcuts="]">→</button>
+                </div>
+              )}
             </div>
           </div>
+          {calView === "week" ? (
+            <WeekBoard
+              key={weekStart}
+              weekStart={weekStart}
+              dir={weekDir}
+              label={weekLabel}
+              events={events}
+              today={today}
+              nowClock={nowClock}
+              selectedDay={selectedDay}
+              progressByEvent={progressByEvent}
+              conflicts={conflicts}
+              interviewTargets={interviewTargets}
+              applicationsByDate={applicationsByDate}
+              copy={copy}
+              dayLabel={dayLabel}
+              onSelectDay={(key) => setSelectedDay((current) => current === key ? "" : key)}
+              onShowApplications={showWeekApplications}
+              onOpenEvent={openEvent}
+            />
+          ) : (
           <div className="calendar-grid-scroll">
             <div className="calendar-grid-frame">
               <div className="calendar-grid" role="grid" aria-label={monthLabel} key={monthKey} data-dir={monthDir || undefined}>
@@ -541,6 +674,7 @@ function CalendarView({
               </div>
             </div>
           </div>
+          )}
         </div>
 
         <aside className="calendar-agenda">
@@ -632,6 +766,149 @@ function CalendarView({
         </aside>
       </div>
     </section>
+  );
+}
+
+function eventStage(event: CalendarEvent, round: CalendarBadge | null, copy: CalendarCopy) {
+  return !round || round.kind === "unknown" ? event.label
+    : round.kind === "casual" || round.kind === "agent" ? copy.meeting : copy.interview;
+}
+
+/**
+ * 周视图：周一到周日 7 列 + 左侧 JST 时间刻度。
+ *
+ * 数据与月格是同一份 events、同一套进展与冲突判定；这里只决定摆放。
+ * 没写具体时刻的场次进顶部「全天」行，不在时间轴上画出一段并不存在的占用。
+ * 位置全用百分比：时间轴高度由 --cw-hours 决定，块的 top/height 跟着刻度范围走，不写死像素。
+ */
+function WeekBoard({
+  weekStart, dir, label, events, today, nowClock, selectedDay, progressByEvent, conflicts,
+  interviewTargets, applicationsByDate, copy, dayLabel, onSelectDay, onShowApplications, onOpenEvent,
+}: {
+  weekStart: string;
+  dir: "prev" | "next" | "";
+  label: string;
+  events: CalendarEvent[];
+  today: string;
+  nowClock: ReturnType<typeof jstClock> | null;
+  selectedDay: string;
+  progressByEvent: ReadonlyMap<string, CalendarProgress>;
+  conflicts: ReadonlySet<string>;
+  interviewTargets: ReadonlyMap<string, CalendarInterviewTarget>;
+  applicationsByDate: ReadonlyMap<string, AiApplicationDay>;
+  copy: CalendarCopy;
+  dayLabel: (key: string) => string;
+  onSelectDay: (key: string) => void;
+  onShowApplications: (key: string) => void;
+  onOpenEvent: (event: CalendarEvent) => void;
+}) {
+  const week = useMemo(() => buildCalendarWeek(weekStart, events), [weekStart, events]);
+  const { start, end } = week.range;
+  const total = end - start;
+  const hours = Array.from({ length: total / 60 }, (_, index) => start + index * 60);
+  const percent = (minutes: number) => `${((minutes - start) / total) * 100}%`;
+  const hasAllDay = week.days.some((day) => day.allDay.length > 0);
+  const nowTop = nowClock && nowClock.date === today && nowClock.minutes >= start && nowClock.minutes <= end
+    ? percent(nowClock.minutes) : null;
+  const eventButton = (event: CalendarEvent, className: string, style?: CSSProperties) => {
+    const target = interviewTargets.get(event.id);
+    const progress = progressByEvent.get(event.id)!;
+    const round = eventRoundBadge(event, copy);
+    const conflict = conflicts.has(event.id);
+    const actionLabel = eventActionLabel(event, progress, copy, target, conflict);
+    return (
+      <button
+        type="button"
+        className={`${className} ${event.phase} status-${progress.tone}${conflict ? " conflict" : ""}`}
+        key={event.id}
+        style={style}
+        onClick={() => onOpenEvent(event)}
+        title={actionLabel}
+        aria-label={actionLabel}
+      >
+        <span className="cw-block-meta">
+          {event.time && <time className="cw-block-time" dateTime={`${event.date}T${event.time}+09:00`}>{calendarEventTime(event)}</time>}
+          {round && <RoundBadge round={round} />}
+          <span className="cw-block-stage">{eventStage(event, round, copy)}</span>
+        </span>
+        <strong className="cw-block-company">{event.company}</strong>
+      </button>
+    );
+  };
+  return (
+    <div
+      className="calendar-week-view"
+      role="group"
+      aria-label={copy.weekGrid(label)}
+      data-dir={dir || undefined}
+      style={{ "--cw-hours": total / 60 } as CSSProperties}
+    >
+      <div className="cw-head">
+        <span className="cw-corner" aria-hidden="true">JST</span>
+        {week.days.map((day, index) => {
+          const applications = applicationsByDate.get(day.date);
+          const className = ["cw-day-head", day.date === today && "today", day.date < today && "past",
+            index >= 5 && "weekend", selectedDay === day.date && "selected"].filter(Boolean).join(" ");
+          return (
+            <div className={className} key={day.date} data-day={day.date} aria-current={day.date === today ? "date" : undefined}>
+              <button
+                type="button"
+                className="cw-day-select"
+                aria-pressed={selectedDay === day.date}
+                aria-label={copy.selectDay(dayLabel(day.date))}
+                onClick={() => onSelectDay(day.date)}
+              >
+                <span className="cw-weekday">{copy.weekdays[index]}</span>
+                <time dateTime={day.date}>{Number(day.date.slice(8))}</time>
+              </button>
+              {applications && (
+                <button
+                  type="button"
+                  className="cw-ai"
+                  data-heat={Math.min(applications.companyCount, 4)}
+                  aria-label={copy.applicationDayLabel(day.date, applications.companyCount, applications.positionCount)}
+                  onClick={() => onShowApplications(day.date)}
+                >
+                  {copy.aiShort} {applications.companyCount}{copy.applicationCompanyShort}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {hasAllDay && (
+        <div className="cw-allday">
+          <span className="cw-gutter-label" title={copy.allDayHint}>{copy.allDay}</span>
+          {week.days.map((day) => (
+            <div className={`cw-allday-cell${day.date === today ? " today" : ""}`} key={day.date}>
+              {day.allDay.map((event) => eventButton(event, "cw-chip"))}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="cw-body">
+        <div className="cw-times" aria-hidden="true">
+          {hours.map((minutes) => <span key={minutes}>{minutesLabel(minutes)}</span>)}
+          <span className="cw-time-end">{minutesLabel(end)}</span>
+        </div>
+        {week.days.map((day, index) => (
+          <div
+            className={["cw-col", day.date === today && "today", index >= 5 && "weekend"].filter(Boolean).join(" ")}
+            key={day.date}
+            data-day={day.date}
+          >
+            {/* 每小时 48px，不到 50 分钟的块放不下两行：改成「时刻＋公司」单行，公司名不被挤出可见区。 */}
+            {day.blocks.map((block) => eventButton(block.event, block.end - block.start < 50 ? "cw-block cw-short" : "cw-block", {
+              top: percent(block.start),
+              height: `${((block.end - block.start) / total) * 100}%`,
+              left: `calc(${(block.column / block.columns) * 100}% + 2px)`,
+              width: `calc(${100 / block.columns}% - 4px)`,
+            }))}
+            {nowTop && day.date === today && <i className="cw-now" style={{ top: nowTop }} aria-hidden="true" />}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

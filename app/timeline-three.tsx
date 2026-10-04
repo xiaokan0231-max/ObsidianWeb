@@ -1314,7 +1314,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
 
     let lastFrameAt = performance.now();
     let tiltWeight = 1;
-    // 滚轮穿行的速度感（0..1，渐变）。只在没有飞行时写 FOV／星场／时间流：
+    // 滚轮穿行的速度感（0..1，渐变）。只在没有飞行时写 FOV／星场（时间流照常写）：
     // createFlightController 飞行中逐帧写 fov、结束时写回基准，两边同时写会互相覆盖。
     let speedFeelCurrent = 0;
     let speedFeelApplied = false;
@@ -1408,7 +1408,18 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       // 滚轮就是时间机器：速度越快，FOV 越张、星场越拉长、管内时间流越亮。
       // 幅度只有飞行冲刺的一小半，读成「在加速」，不读成「在跳转」。
       if (flightController.active) {
-        // 飞行接管 fov 与星场；时间流不归它管，这里顺手复位。
+        // 飞行接管 fov 与星场：控制器从起飞那一刻（可能被速度感抬高过）的值淡回基准，
+        // 这里不再先把它们清回基准，否则起飞第一帧会跳几度。
+        // 时间流不归控制器管，速度感照常衰减、只写它；不在途中清零，免得亮度一闪。
+        speedFeelCurrent *= Math.exp(-dt * 6);
+        if (speedFeelCurrent < 0.002) speedFeelCurrent = 0;
+        if (speedFeelApplied) {
+          flowMaterial.opacity = 0.5 + speedFeelCurrent * 0.35;
+          speedFeelApplied = speedFeelCurrent > 0;
+        }
+      } else if (flying) {
+        // 落地这一帧 restore 已把 fov 与星场写回基准：剩下的速度感（减弱动态或很短的飞行才会有）
+        // 直接清掉，不然下面会把 fov 重新抬起再降一次。
         if (speedFeelApplied) flowMaterial.opacity = 0.5;
         speedFeelCurrent = 0;
         speedFeelApplied = false;

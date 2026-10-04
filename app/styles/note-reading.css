@@ -200,7 +200,7 @@
 .note-drawer--full .markdown-document h3 { font-size: 20px; }
 .note-drawer--full .markdown-document h4 { font-size: 17px; }
 
-.note-drawer--full .markdown-document blockquote {
+.note-drawer--full .markdown-document :is(blockquote, .md-callout) {
   font-size: calc(var(--drawer-font-size, 16px) - 1px);
   line-height: 1.85;
 }
@@ -350,6 +350,32 @@
 /* ?section= 与 [[笔记#章节]] 打开后约 60ms 就跳章节，那时阅读列与正文还带着合计约 14–22px 的入场位移，
    scrollIntoView 按位移后的位置对齐，动画收尾时标题会被顶边裁掉一截。留出比位移更大的余量。 */
 .note-drawer--full .markdown-document [data-md-heading] { scroll-margin-top: 24px; }
+
+/* ===== 关闭动效：背景淡出 + 阅读列下移 8px 淡出 =====
+   时长来自内联的 --note-exit-duration（与外壳计时器同一常量，lib/exit-transition.ts），播完由外壳卸载，
+   不等 animationend。forwards 只在卸载前的这一瞬保留位移，阅读列里没有 fixed 子元素。
+   减弱动效时外壳直接关闭，不进入这个状态。 */
+@keyframes drawer-fade-out {
+  to { opacity: 0; }
+}
+
+@keyframes drawer-sink {
+  to { opacity: 0; transform: translateY(8px); }
+}
+
+.drawer-backdrop--full[data-state="closing"] {
+  animation: drawer-fade-out var(--note-exit-duration, 200ms) var(--ease-out) forwards;
+}
+
+.drawer-backdrop--full[data-state="closing"] .drawer-reading {
+  animation: drawer-sink var(--note-exit-duration, 200ms) var(--ease-out) forwards;
+}
+
+/* 退场途中别让入场错峰（30–90ms 延迟）的子元素在淡出时又往上冒。 */
+.drawer-backdrop--full[data-state="closing"] .drawer-reading > *,
+.drawer-backdrop--full[data-state="closing"] :is(.doc-toc, .drawer-aside) {
+  animation: none;
+}
 
 @media (max-width: 1180px) {
   /* 这个宽度起目录隐藏（ui-language.css），把它那一栏也收掉，别留一条空白。 */
@@ -583,7 +609,7 @@
   text-decoration-color: color-mix(in oklab, var(--text-tertiary) 60%, transparent);
 }
 
-.markdown-document blockquote {
+.markdown-document :is(blockquote, .md-callout) {
   margin: 19px 0;
   padding: 13px 16px;
   background: var(--surface-sunken);
@@ -596,39 +622,39 @@
 
 /* 引用の頭に付いた記号（🔴 ⚠️ 🔑 📊 🎯 💡）で色を変える。
    vault 側は記号で強弱を書き分けているので、全部同じ灰箱にするとその情報が消える。 */
-.markdown-document blockquote[data-callout] {
+.markdown-document :is(blockquote, .md-callout)[data-callout] {
   border-left-width: 4px;
   color: var(--text-secondary);
 }
 
-.markdown-document blockquote[data-callout="danger"] {
+.markdown-document :is(blockquote, .md-callout)[data-callout="danger"] {
   background: var(--danger-wash);
   border-left-color: var(--interactive);
 }
 
-.markdown-document blockquote[data-callout="warn"] {
+.markdown-document :is(blockquote, .md-callout)[data-callout="warn"] {
   background: var(--warning-wash-soft);
   border-left-color: var(--gold);
 }
 
-.markdown-document blockquote[data-callout="key"] {
+.markdown-document :is(blockquote, .md-callout)[data-callout="key"] {
   background: var(--brand-wash);
   border-left-color: var(--orange);
 }
 
-.markdown-document blockquote[data-callout="data"] {
+.markdown-document :is(blockquote, .md-callout)[data-callout="data"] {
   background: var(--violet-wash);
   border-left-color: var(--violet);
 }
 
-.markdown-document blockquote[data-callout="aim"],
-.markdown-document blockquote[data-callout="idea"] {
+.markdown-document :is(blockquote, .md-callout)[data-callout="aim"],
+.markdown-document :is(blockquote, .md-callout)[data-callout="idea"] {
   background: var(--surface-sunken);
   border-left-color: var(--green);
 }
 
 /* Obsidian 原生 [!note]/[!info] 等：emoji 体系里没有「中性说明」这一档，借信息色。 */
-.markdown-document blockquote[data-callout="info"] {
+.markdown-document :is(blockquote, .md-callout)[data-callout="info"] {
   background: var(--info-wash);
   border-left-color: var(--info);
 }
@@ -639,12 +665,12 @@
   font-weight: 640;
 }
 
-.markdown-document blockquote[data-callout="danger"] > .md-callout-title { color: var(--danger); }
-.markdown-document blockquote[data-callout="warn"] > .md-callout-title { color: var(--warning); }
-.markdown-document blockquote[data-callout="key"] > .md-callout-title { color: var(--interactive); }
-.markdown-document blockquote[data-callout="data"] > .md-callout-title { color: var(--violet); }
-.markdown-document blockquote[data-callout="info"] > .md-callout-title { color: var(--info); }
-.markdown-document blockquote:is([data-callout="aim"], [data-callout="idea"]) > .md-callout-title { color: var(--green); }
+.markdown-document :is(blockquote, .md-callout)[data-callout="danger"] > .md-callout-title { color: var(--danger); }
+.markdown-document :is(blockquote, .md-callout)[data-callout="warn"] > .md-callout-title { color: var(--warning); }
+.markdown-document :is(blockquote, .md-callout)[data-callout="key"] > .md-callout-title { color: var(--interactive); }
+.markdown-document :is(blockquote, .md-callout)[data-callout="data"] > .md-callout-title { color: var(--violet); }
+.markdown-document :is(blockquote, .md-callout)[data-callout="info"] > .md-callout-title { color: var(--info); }
+.markdown-document :is(blockquote, .md-callout):is([data-callout="aim"], [data-callout="idea"]) > .md-callout-title { color: var(--green); }
 
 /* 連続した > 行は1つの引用の中で改行して並べる */
 .markdown-document blockquote > span {
@@ -653,6 +679,64 @@
 
 .markdown-document blockquote > span + span {
   margin-top: 6px;
+}
+
+/*
+ * 可折叠 callout（[!type]- 默认收起、[!type]+ 默认展开）：外观与上面的引用框同一套，
+ * 只把标题行换成可点、可 Tab 聚焦的 summary。默认三角各浏览器画法不一，换成自绘箭头，随展开转 90°。
+ */
+.markdown-document .md-callout > summary {
+  display: block;
+  margin: -2px -4px;
+  padding: 2px 4px;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  list-style: none;
+}
+
+.markdown-document .md-callout > summary::-webkit-details-marker { display: none; }
+
+.markdown-document .md-callout > summary::before {
+  content: "";
+  display: inline-block;
+  width: .42em;
+  height: .42em;
+  margin: 0 .6em .14em .1em;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  vertical-align: middle;
+  transform: rotate(-45deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.markdown-document .md-callout[open] > summary::before { transform: rotate(45deg); }
+.markdown-document .md-callout > summary:hover { background: color-mix(in oklab, currentColor 7%, transparent); }
+
+.markdown-document .md-callout > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.markdown-document .md-callout > span {
+  display: block;
+  margin-top: 6px;
+}
+
+/* 高度过渡：两样都支持的浏览器才有。只认 ::details-content、不认 interpolate-size 的浏览器
+   在 0 与 auto 之间插不了值，这段规则只剩改写原生行为的风险，所以整条一起丢弃，原生直接展开。 */
+@supports selector(::details-content) and (interpolate-size: allow-keywords) {
+  .markdown-document .md-callout { interpolate-size: allow-keywords; }
+  .markdown-document .md-callout::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition: block-size var(--dur-base) var(--ease-out), content-visibility var(--dur-base) var(--ease-out) allow-discrete;
+  }
+  .markdown-document .md-callout[open]::details-content { block-size: auto; }
+}
+
+/* 全局减弱动效兜底只覆盖 *、::before、::after，::details-content 要自己关。 */
+@media (prefers-reduced-motion: reduce) {
+  .markdown-document .md-callout::details-content { transition: none; }
 }
 
 .markdown-document hr {

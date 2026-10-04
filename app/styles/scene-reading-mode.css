@@ -114,19 +114,22 @@
   background: transparent;
 }
 /* callout 在深色阅读层里也要分得出轻重：色调取暗底上校过的亮值，底色只留一层薄雾。 */
-.reading-mode.scene-reader .reader-prose blockquote[data-callout] {
+.reading-mode.scene-reader .reader-prose :is(blockquote, .md-callout)[data-callout] {
   border-left-color: var(--scene-callout);
   background: color-mix(in oklab, var(--scene-callout) 9%, transparent);
 }
-.reading-mode.scene-reader .reader-prose blockquote[data-callout="danger"] { --scene-callout: #d77d6b; }
-.reading-mode.scene-reader .reader-prose blockquote[data-callout="warn"] { --scene-callout: #d2ad62; }
-.reading-mode.scene-reader .reader-prose blockquote[data-callout="key"] { --scene-callout: #e0957a; }
-.reading-mode.scene-reader .reader-prose blockquote[data-callout="data"] { --scene-callout: #a99ad6; }
-.reading-mode.scene-reader .reader-prose blockquote[data-callout="info"] { --scene-callout: #82a6c2; }
-.reading-mode.scene-reader .reader-prose blockquote:is([data-callout="aim"], [data-callout="idea"]) { --scene-callout: #7dbb95; }
-.reading-mode.scene-reader .reader-prose blockquote[data-callout] > .md-callout-title {
+.reading-mode.scene-reader .reader-prose :is(blockquote, .md-callout)[data-callout="danger"] { --scene-callout: #d77d6b; }
+.reading-mode.scene-reader .reader-prose :is(blockquote, .md-callout)[data-callout="warn"] { --scene-callout: #d2ad62; }
+.reading-mode.scene-reader .reader-prose :is(blockquote, .md-callout)[data-callout="key"] { --scene-callout: #e0957a; }
+.reading-mode.scene-reader .reader-prose :is(blockquote, .md-callout)[data-callout="data"] { --scene-callout: #a99ad6; }
+.reading-mode.scene-reader .reader-prose :is(blockquote, .md-callout)[data-callout="info"] { --scene-callout: #82a6c2; }
+.reading-mode.scene-reader .reader-prose :is(blockquote, .md-callout):is([data-callout="aim"], [data-callout="idea"]) { --scene-callout: #7dbb95; }
+.reading-mode.scene-reader .reader-prose :is(blockquote, .md-callout)[data-callout] > .md-callout-title {
   color: color-mix(in oklab, var(--scene-callout) 70%, #e4ece6);
 }
+/* 星图深色层固定墨底：可折叠 callout 的悬停与焦点环不跟主题，取舞台上校过的亮绿。 */
+.reading-mode.scene-reader .reader-prose .md-callout > summary:hover { background: color-mix(in oklab, #e4ece6 6%, transparent); }
+.reading-mode.scene-reader .reader-prose .md-callout > summary:focus-visible { outline-color: #9fd3b4; }
 .reading-mode.scene-reader .reader-prose .md-list-item > i { color: #86a490; }
 .reading-mode.scene-reader .reader-prose pre { border-color: #304538; color: #c8dacf; background: #080e0b; }
 .reading-mode.scene-reader .reader-prose code { color: #c9dccf; background: #223128; }

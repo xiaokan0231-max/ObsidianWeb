@@ -110,6 +110,11 @@ test("航道进场运镜与滚轮速度感", () => {
   // 飞行控制器飞行中逐帧写 fov、结束时写回基准；速度感只在不飞的时候写。
   const speedBlock = corridor.slice(corridor.indexOf("滚轮就是时间机器"));
   assert.ok(speedBlock.indexOf("if (flightController.active)") < speedBlock.indexOf("camera.fov = BASE_FOV"));
+  // 起飞不再把速度感抬高的 fov 瞬间写回基准：控制器记下起飞值，按进度淡回。
+  assert.ok(stage.includes("fromFov: options.camera.fov"));
+  assert.ok(stage.includes("flightCarry(flight.fromFov, baseFov, progress) + thrust * fovKick"));
+  const flyingBlock = speedBlock.slice(speedBlock.indexOf("if (flightController.active)"), speedBlock.indexOf("} else if (flying)"));
+  assert.doesNotMatch(flyingBlock, /^\s+speedFeelCurrent = 0;$/m, "飞行途中速度感衰减，不瞬间清零");
 });
 
 test("3D 选中节点进 URL：可选 props，外壳用 ?focus= 接上", () => {
