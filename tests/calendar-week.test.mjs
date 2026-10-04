@@ -11,6 +11,7 @@ import {
   jstClock,
   layoutWeekDay,
   minutesLabel,
+  stepWeekSelection,
 } from "../lib/calendar-week.ts";
 
 const slot = (id, time, endTime, date = "2026-08-12") => ({ id, date, time, ...(endTime ? { endTime } : {}) });
@@ -91,4 +92,22 @@ test("周标题：同月只写一次月份，跨月写出后一个月，跨年�
   assert.equal(calendarWeekRangeLabel("2026-09-28", "2026"), "9月28日 – 10月4日");
   assert.equal(calendarWeekRangeLabel("2026-12-28", "2026"), "2026年12月28日 – 2027年1月3日");
   assert.equal(calendarWeekRangeLabel("2025-10-06", "2026"), "2025年10月6日 – 12日");
+});
+
+test("周视图方向键：周内逐日移动，越过周一／周日落到相邻周", () => {
+  // 2026-08-10（周一）– 16（周日）这一周。
+  assert.equal(stepWeekSelection("2026-08-10", "2026-08-12", "2026-08-12", 1), "2026-08-13");
+  assert.equal(stepWeekSelection("2026-08-10", "2026-08-12", "2026-08-12", -1), "2026-08-11");
+  assert.equal(stepWeekSelection("2026-08-10", "2026-08-16", "2026-08-12", 1), "2026-08-17", "周日往后是下周一");
+  assert.equal(stepWeekSelection("2026-08-10", "2026-08-10", "2026-08-12", -1), "2026-08-09", "周一往前是上周日");
+  assert.equal(calendarWeekStart(stepWeekSelection("2026-08-10", "2026-08-16", "", 1)), "2026-08-17", "调用方据此翻到下一周");
+  assert.equal(stepWeekSelection("2026-12-28", "2027-01-03", "", 1), "2027-01-04", "跨年照常");
+});
+
+test("周视图方向键：还没选中或选中日在别周时，先落到起点", () => {
+  assert.equal(stepWeekSelection("2026-08-10", "", "2026-08-12", 1), "2026-08-12", "今天在这周：先选中今天");
+  assert.equal(stepWeekSelection("2026-08-10", "", "2026-08-12", -1), "2026-08-12");
+  assert.equal(stepWeekSelection("2026-08-17", "", "2026-08-12", 1), "2026-08-17", "今天不在这周：往后从周一开始");
+  assert.equal(stepWeekSelection("2026-08-17", "", "2026-08-12", -1), "2026-08-23", "往前从周日开始");
+  assert.equal(stepWeekSelection("2026-08-17", "2026-08-12", "2026-08-12", 1), "2026-08-17", "选中日在别周（[ ] 翻过来的）不跳回去");
 });

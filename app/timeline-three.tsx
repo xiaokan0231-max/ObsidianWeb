@@ -17,7 +17,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { compareTimelineTimes, nearestTimelineDate } from "@/lib/timeline-browser";
 import type { TimelineScene, TimelineSceneNote } from "@/lib/timeline-scene";
-import { approachValues, createRenderGate, speedFeel } from "@/lib/stage-motion.mjs";
+import { approachValues, createRenderGate, lensHandoff, settleHandoff, speedFeel } from "@/lib/stage-motion.mjs";
 import {
   NODE_FRAGMENT_SHADER,
   NODE_VERTEX_SHADER,
@@ -776,13 +776,16 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     let pointerHeld = false;
     let visible = true;
 
+    // 星场基准：飞行控制器与滚轮速度感都从这里起算，打断飞行时的交接也以它为准。
+    const STAR_BASE_SIZE = 0.042;
+    const STAR_BASE_OPACITY = 0.58;
     const flightController = createFlightController({
       camera,
       target: controls.target,
       warp: {
         material: starfield.material,
-        baseSize: 0.042,
-        baseOpacity: 0.58,
+        baseSize: STAR_BASE_SIZE,
+        baseOpacity: STAR_BASE_OPACITY,
       },
       onComplete: () => {
         if (flightTargetTravel !== null) {
@@ -1076,7 +1079,17 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
         return;
       }
       entryFlight = false;
-      flightController.cancel();
+      if (flightController.active && !reducedMotion) {
+        // 冲刺半路被打断：fov 与星场不瞬间写回基准，记下比「基准 + 速度感」多出的残差，
+        // 由 animate 里的速度感分支按同一条曲线收回，画面从此刻的值平滑回落。
+        flightController.cancel({ keepLens: true });
+        lensCarry.fov = lensHandoff(camera.fov, BASE_FOV + speedFeelCurrent * 4);
+        lensCarry.size = lensHandoff(starfield.material.size, STAR_BASE_SIZE + speedFeelCurrent * 0.04);
+        lensCarry.opacity = lensHandoff(starfield.material.opacity, STAR_BASE_OPACITY);
+        lensCarryWeight = 1;
+      } else {
+        flightController.cancel();
+      }
       flightTargetTravel = null;
       if (reducedMotion) {
         travelVelocity = 0;
@@ -1319,6 +1332,9 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     let speedFeelCurrent = 0;
     let speedFeelApplied = false;
     const BASE_FOV = 43;
+    // 滚轮打断飞行时交接过来的残差（见 onWheel）与它的衰减权重；权重为 0 时不参与。
+    const lensCarry = { fov: 0, size: 0, opacity: 0 };
+    let lensCarryWeight = 0;
     const animate = (now: number) => {
       if (!visible) {
         lastFrameAt = now;
@@ -1413,6 +1429,8 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
         // 时间流不归控制器管，速度感照常衰减、只写它；不在途中清零，免得亮度一闪。
         speedFeelCurrent *= Math.exp(-dt * 6);
         if (speedFeelCurrent < 0.002) speedFeelCurrent = 0;
+        // 新的飞行从当前值（已含残差）起飞，残差由控制器一并淡掉，这里不再叠加。
+        lensCarryWeight = 0;
         if (speedFeelApplied) {
           flowMaterial.opacity = 0.5 + speedFeelCurrent * 0.35;
           speedFeelApplied = speedFeelCurrent > 0;
@@ -1423,16 +1441,22 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
         if (speedFeelApplied) flowMaterial.opacity = 0.5;
         speedFeelCurrent = 0;
         speedFeelApplied = false;
+        lensCarryWeight = 0;
       } else {
         const feelTarget = speedFeel(travelVelocity, SPEED_FEEL_FULL);
         speedFeelCurrent += (feelTarget - speedFeelCurrent) * (1 - Math.exp(-dt * 6));
         if (feelTarget === 0 && speedFeelCurrent < 0.002) speedFeelCurrent = 0;
-        if (speedFeelCurrent > 0 || speedFeelApplied) {
-          camera.fov = BASE_FOV + speedFeelCurrent * 4;
+        // 交接残差与速度感同速衰减：打断那一帧的值原样接住，之后两者一起回落到基准。
+        const carrying = lensCarryWeight > 0;
+        lensCarryWeight = settleHandoff(lensCarryWeight, dt);
+        if (speedFeelCurrent > 0 || speedFeelApplied || carrying) {
+          camera.fov = BASE_FOV + speedFeelCurrent * 4 + lensCarry.fov * lensCarryWeight;
           camera.updateProjectionMatrix();
-          starfield.material.size = 0.042 + speedFeelCurrent * 0.04;
+          starfield.material.size = STAR_BASE_SIZE + speedFeelCurrent * 0.04 + lensCarry.size * lensCarryWeight;
+          // 星场亮度平时只归飞行控制器管；只有交接中才写，权重落到 0 的这一帧正好写回基准。
+          if (carrying) starfield.material.opacity = STAR_BASE_OPACITY + lensCarry.opacity * lensCarryWeight;
           flowMaterial.opacity = 0.5 + speedFeelCurrent * 0.35;
-          speedFeelApplied = speedFeelCurrent > 0;
+          speedFeelApplied = speedFeelCurrent > 0 || lensCarryWeight > 0;
         }
       }
 
@@ -1478,6 +1502,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
         || controlsMoved
         || easing
         || speedFeelCurrent > 0
+        || lensCarryWeight > 0
         || pointerEffects.energy > 0.01
         || pointerEffects.dragEnergy > 0.01
         || pointerEffects.motion.active;

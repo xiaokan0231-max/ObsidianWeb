@@ -582,6 +582,40 @@ button {
 }
 
 /*
+ * 页面切换（View Transitions）。只有支持 document.startViewTransition、文档可见且未要求减弱动效时，
+ * navigateToView 才把提交放进转场（lib/view-transition.ts）；不支持的浏览器不生成这些伪元素，规则零影响。
+ * 根快照只剩正文区：侧栏、顶栏、撤销条等各有名字（shell.css），不跟着上移，选中项与页标题单独过渡。
+ * 旧快照比新快照先播完，必须 both 停在终点：不然它会在最后几十毫秒回到不透明、闪一下旧页面。
+ * 伪元素在转场结束后整体移除，填充模式不会遗留到页面上（与上面「入场只写 from」的约定不冲突）。
+ */
+@keyframes vt-page-out { to { opacity: 0; } }
+@keyframes vt-page-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes vt-page-fade-in { from { opacity: 0; } }
+::view-transition-group(*) {
+  animation-duration: var(--dur-base);
+  animation-timing-function: var(--ease-out);
+}
+::view-transition-old(root) {
+  animation: vt-page-out var(--dur-fast) var(--ease-out) both;
+}
+::view-transition-new(root) {
+  animation: vt-page-in var(--dur-base) var(--ease-out) both;
+}
+/* 与 .view-container 的约定一致：进 3D 舞台只淡入不位移。 */
+:root:has(.view-container .stage-immersive)::view-transition-new(root) {
+  animation-name: vt-page-fade-in;
+}
+
+/* 伪元素挂在 :root 上，下面全局兜底的 *, ::before, ::after 选不中它们，只能单独关。 */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/*
  * 按压回弹。用独立的 scale 属性而不是 transform：它和元素自己的 transform（居中、hover 位移）
  * 叠加而不是覆盖，按下时不会跳位。:where 让任何视图自己的写法都能覆盖它。
  */

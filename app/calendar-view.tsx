@@ -8,7 +8,7 @@ import { CountUp } from "./count-up";
 import { enumCodec, useUrlState, type UrlStateCodec } from "./use-url-state";
 import { isTypingTarget } from "@/lib/keyboard";
 import { calendarMonthDays } from "@/lib/calendar-month";
-import { buildCalendarWeek, calendarWeekDays, calendarWeekRangeLabel, calendarWeekStart, jstClock, minutesLabel } from "@/lib/calendar-week";
+import { buildCalendarWeek, calendarWeekDays, calendarWeekRangeLabel, calendarWeekStart, jstClock, minutesLabel, stepWeekSelection } from "@/lib/calendar-week";
 import { buildAiApplicationDays, type AiApplicationDay } from "@/lib/calendar-applications";
 import { calendarConflicts } from "@/lib/calendar-conflicts";
 import { isInterviewEvent, type CalendarInterviewTarget } from "@/lib/calendar-interview";
@@ -105,6 +105,7 @@ const calendarZh = {
   allDay: "全天",
   allDayHint: "未写具体时刻，不占时间段",
   weekGrid: (range: string) => `${range} · 周视图（日本时间）`,
+  weekKeys: "← → 逐日选择 · [ ] 翻周 · T 回到今天 · Enter 打开当日第一场",
 };
 type CalendarCopy = typeof calendarZh;
 
@@ -162,6 +163,7 @@ const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
     previousWeek: "前の週", nextWeek: "次の週", thisWeek: "今週",
     allDay: "終日", allDayHint: "時刻の記載がなく、時間帯を占めません",
     weekGrid: (range) => `${range} · 週表示（日本時間）`,
+    weekKeys: "← → 日を選択 · [ ] 週を移動 · T 今日に戻る · Enter その日の最初の予定を開く",
   },
 };
 
@@ -366,7 +368,7 @@ function CalendarView({
     const key = focusDayRef.current;
     if (!key) return;
     focusDayRef.current = "";
-    sectionRef.current?.querySelector<HTMLButtonElement>(`[data-day="${key}"] .calendar-day-select`)?.focus();
+    sectionRef.current?.querySelector<HTMLButtonElement>(`[data-day="${key}"] :is(.calendar-day-select, .cw-day-select)`)?.focus();
   });
 
   const goToMonth = (target: Date) => {
@@ -438,13 +440,33 @@ function CalendarView({
     if (section.closest("[inert]") || document.querySelector('[aria-modal="true"]')) return;
     const key = event.key;
     if (calView === "week") {
-      // 周视图里没有「格子间移动」：左右与方括号都是整周翻页，T 回到本周。
-      if (key === "[" || key === "]" || key === "ArrowLeft" || key === "ArrowRight") {
+      // 周视图：← → 在一周里逐日移动选中日（越过周一／周日就翻到相邻周），[ ] 仍整周翻页，
+      // T 回到本周并选中今天，Enter 打开选中日的第一场。选中日联动侧栏「当日详情」。
+      if (key === "[" || key === "]") {
         event.preventDefault();
-        moveWeek(key === "[" || key === "ArrowLeft" ? -1 : 1);
+        moveWeek(key === "[" ? -1 : 1);
+      } else if (key === "ArrowLeft" || key === "ArrowRight") {
+        event.preventDefault();
+        const next = stepWeekSelection(weekStart, selectedDay, today, key === "ArrowLeft" ? -1 : 1);
+        goToWeek(next);
+        setSelectedDay(next);
+        // 跨周时整块周格按 key 重挂，焦点会掉回 body；渲染后还给新选中那天的日期按钮。
+        focusDayRef.current = next;
       } else if (key.toLowerCase() === "t") {
         event.preventDefault();
-        goThisWeek();
+        // 按钮「本周」只是回到本周；键盘还要接着用方向键走，所以顺手选中今天作为起点。
+        goToWeek(today);
+        setSelectedDay(today);
+      } else if (key === "Enter" && selectedDay && calendarWeekDays(weekStart).includes(selectedDay)) {
+        // 与月视图同一条规则：Tab 到另一天的日期按钮上按 Enter 是「选中那一天」，交给按钮自己的 click。
+        const focusedDay = fromPage ? selectedDay
+          : target instanceof Element && target.classList.contains("cw-day-select")
+            ? target.closest("[data-day]")?.getAttribute("data-day") : null;
+        if (focusedDay !== selectedDay) return;
+        const first = eventsByDate.get(selectedDay)?.[0];
+        if (!first) return;
+        event.preventDefault();
+        openEvent(first);
       }
       return;
     }
@@ -856,6 +878,9 @@ function WeekBoard({
                 className="cw-day-select"
                 aria-pressed={selectedDay === day.date}
                 aria-label={copy.selectDay(dayLabel(day.date))}
+                // 方向键与 Enter 由日历统一监听（见 onCalendarKey），这里只负责告诉读屏与悬停提示。
+                aria-keyshortcuts="ArrowLeft ArrowRight Enter"
+                title={copy.weekKeys}
                 onClick={() => onSelectDay(day.date)}
               >
                 <span className="cw-weekday">{copy.weekdays[index]}</span>
@@ -880,7 +905,7 @@ function WeekBoard({
         <div className="cw-allday">
           <span className="cw-gutter-label" title={copy.allDayHint}>{copy.allDay}</span>
           {week.days.map((day) => (
-            <div className={`cw-allday-cell${day.date === today ? " today" : ""}`} key={day.date}>
+            <div className={`cw-allday-cell${day.date === today ? " today" : ""}${selectedDay === day.date ? " selected" : ""}`} key={day.date}>
               {day.allDay.map((event) => eventButton(event, "cw-chip"))}
             </div>
           ))}
@@ -893,7 +918,7 @@ function WeekBoard({
         </div>
         {week.days.map((day, index) => (
           <div
-            className={["cw-col", day.date === today && "today", index >= 5 && "weekend"].filter(Boolean).join(" ")}
+            className={["cw-col", day.date === today && "today", index >= 5 && "weekend", selectedDay === day.date && "selected"].filter(Boolean).join(" ")}
             key={day.date}
             data-day={day.date}
           >

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { approachValues, createRenderGate, flightCarry, speedFeel } from "../lib/stage-motion.mjs";
+import { approachValues, createRenderGate, flightCarry, lensHandoff, settleHandoff, speedFeel } from "../lib/stage-motion.mjs";
 import { estimateLabelWidth, staggerLabels } from "../lib/stage-interaction.mjs";
 
 test("明暗渐变：逐元素趋近目标，收敛后报告停止", () => {
@@ -62,6 +62,34 @@ test("飞行底座：从起飞时的 fov 淡回基准，起止两端分毫不差
   assert.equal(flightCarry(47, 43, 2), 43);
   assert.equal(flightCarry(Number.NaN, 43, 0), 43);
   assert.equal(flightCarry(47, 43, Number.NaN), 43);
+});
+
+test("打断飞行的镜头交接：取消那一帧不跳，之后与速度感同速平滑回落", () => {
+  // 冲刺半路 fov 48.2，此刻速度感应有 43 + 0.25×4 = 44：残差 4.2，权重 1 时正好是原值。
+  const settled = 43 + 0.25 * 4;
+  const carry = lensHandoff(48.2, settled);
+  assert.ok(Math.abs(settled + carry * 1 - 48.2) < 1e-9, "交接那一帧画面不动");
+  // 帧率无关：两帧各 1/120 秒与一帧 1/60 秒衰减到同一处。
+  const twoSteps = settleHandoff(settleHandoff(1, 1 / 120), 1 / 120);
+  assert.ok(Math.abs(twoSteps - settleHandoff(1, 1 / 60)) < 1e-12);
+  // 单调落到 0，并在 epsilon 以下归零，渲染闸门才能停。
+  let weight = 1;
+  const samples = [];
+  for (let frame = 0; frame < 120 && weight > 0; frame += 1) {
+    weight = settleHandoff(weight, 1 / 60);
+    samples.push(weight);
+  }
+  assert.ok(samples.every((value, index) => index === 0 || value <= samples[index - 1]), "不回弹");
+  assert.equal(weight, 0, "两秒内收干净");
+  assert.ok(samples[0] > 0.85, "第一帧只收回一小步，看不出跳变");
+  // 已在应有值上（星图的情形）残差为 0，叠加后与原值逐位相同。
+  assert.equal(lensHandoff(43, 43), 0);
+  assert.equal(43 + lensHandoff(43, 43) * 0.5, 43);
+  // 坏值兜底。
+  assert.equal(lensHandoff(Number.NaN, 43), 0);
+  assert.equal(settleHandoff(Number.NaN, 1 / 60), 0);
+  assert.equal(settleHandoff(1, -1), 1, "时间倒流不衰减也不放大");
+  assert.equal(settleHandoff(3, 0), 1, "权重封顶 1");
 });
 
 test("标签错开：横向重叠又挨得太近的往下推一行，不重叠的不动", () => {

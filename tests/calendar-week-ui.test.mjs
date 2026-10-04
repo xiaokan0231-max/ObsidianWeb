@@ -146,3 +146,23 @@ test("「本周」不写进 URL；切回月视图时清掉 calweek", async () =>
   const switcher = source.slice(source.indexOf("const switchView"), source.indexOf("const onCalendarKey"));
   assert.match(switcher, /setWeekParam\(""\)/);
 });
+
+test("周视图键盘：← → 逐日选择、[ ] 翻周、T 选中今天、Enter 打开当日第一场；提示中日两份", async () => {
+  const zhHtml = render(zh);
+  const jaHtml = render(ja);
+  assert.match(zhHtml, /class="cw-day-select" aria-pressed="false" aria-label="[^"]+" aria-keyshortcuts="ArrowLeft ArrowRight Enter" title="← → 逐日选择 · \[ \] 翻周 · T 回到今天 · Enter 打开当日第一场"/);
+  assert.match(jaHtml, /aria-keyshortcuts="ArrowLeft ArrowRight Enter" title="← → 日を選択 · \[ \] 週を移動 · T 今日に戻る · Enter その日の最初の予定を開く"/);
+  // 翻周按钮仍只认方括号：方向键不再翻周。
+  assert.match(zhHtml, /aria-label="上一周" aria-keyshortcuts="\[">/);
+
+  const source = await readFile(new URL("../app/calendar-view.tsx", import.meta.url), "utf8");
+  const weekKeys = source.slice(source.indexOf('if (calView === "week") {', source.indexOf("const onCalendarKey")), source.indexOf('if (key === "[" || key === "]") {\n      event.preventDefault();\n      moveMonth'));
+  assert.ok(weekKeys.length > 0);
+  assert.match(weekKeys, /moveWeek\(key === "\[" \? -1 : 1\)/);
+  assert.match(weekKeys, /stepWeekSelection\(weekStart, selectedDay, today, key === "ArrowLeft" \? -1 : 1\)/);
+  assert.match(weekKeys, /setSelectedDay\(today\)/);
+  assert.match(weekKeys, /openEvent\(first\)/, "与点时间块同一个打开回调");
+  assert.doesNotMatch(weekKeys, /moveWeek\(key === "\[" \|\| key === "ArrowLeft"/, "方向键不再整周翻页");
+  // 跨周重挂后焦点要还给新选中那天：聚焦选择器同时认月格与周视图的日期按钮。
+  assert.match(source, /:is\(\.calendar-day-select, \.cw-day-select\)/);
+});

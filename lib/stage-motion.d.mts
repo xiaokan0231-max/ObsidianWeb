@@ -67,3 +67,7 @@ export function createRenderGate(settleFrames?: number): RenderGate;
 export function speedFeel(velocity: number, fullAt?: number): number;
 
 export function flightCarry(from: number, base: number, progress: number): number;
+
+export function lensHandoff(current: number, settled: number): number;
+
+export function settleHandoff(weight: number, dt: number, rate?: number, epsilon?: number): number;

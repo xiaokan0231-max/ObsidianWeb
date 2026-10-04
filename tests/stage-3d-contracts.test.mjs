@@ -117,6 +117,20 @@ test("航道进场运镜与滚轮速度感", () => {
   assert.doesNotMatch(flyingBlock, /^\s+speedFeelCurrent = 0;$/m, "飞行途中速度感衰减，不瞬间清零");
 });
 
+test("航道滚轮打断飞行：fov 与星场交给速度感渐变收回，星图的 cancel 逐位不变", () => {
+  // 默认的 cancel 照旧写回基准；只有显式 keepLens 才跳过。
+  assert.match(stage, /if \(!cancelOptions\?\.keepLens\) restore\(\);/);
+  assert.ok(corridor.includes("flightController.cancel({ keepLens: true });"));
+  assert.ok(corridor.includes("lensHandoff(camera.fov, BASE_FOV + speedFeelCurrent * 4)"));
+  assert.ok(corridor.includes("lensCarryWeight = settleHandoff(lensCarryWeight, dt);"));
+  assert.ok(corridor.includes("|| lensCarryWeight > 0"), "交接没收完时不能停帧");
+  // 减弱动态时照旧一步写回基准。
+  const wheel = corridor.slice(corridor.indexOf("const onWheel"), corridor.indexOf("const onKeyDown"));
+  assert.ok(wheel.includes("flightController.active && !reducedMotion"));
+  // 星图从不带参数调用：起飞时 fov 本来等于基准，写回与改动前完全相同。
+  assert.doesNotMatch(graph, /flightController\.cancel\(\{/);
+});
+
 test("3D 选中节点进 URL：可选 props，外壳用 ?focus= 接上", () => {
   assert.ok(graph.includes("initialFocusId?: string | null;"));
   assert.ok(graph.includes("onFocusChange?: (id: string | null) => void;"));

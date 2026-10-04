@@ -1163,6 +1163,22 @@
 .cw-allday-cell.today,
 .cw-day-head.today { background-color: color-mix(in oklab, var(--brand) 6%, transparent); }
 
+/* 选中日（点日期或用 ← → 走到的那天）整列铺一层交互色，与侧栏「当日详情」对应得上；
+ * 写在今天、周末之后：同特异性靠顺序压过它们，选中今天时也看得出选中。收尾的底线内阴影要一起带上。 */
+.cw-col.selected,
+.cw-allday-cell.selected {
+  background-color: color-mix(in oklab, var(--interactive) 8%, transparent);
+  box-shadow:
+    inset 1px 0 0 color-mix(in oklab, var(--interactive) 32%, transparent),
+    inset -1px 0 0 color-mix(in oklab, var(--interactive) 32%, transparent);
+}
+.cw-col.selected {
+  box-shadow:
+    inset 1px 0 0 color-mix(in oklab, var(--interactive) 32%, transparent),
+    inset -1px 0 0 color-mix(in oklab, var(--interactive) 32%, transparent),
+    inset 0 -1px 0 var(--line-soft);
+}
+
 /* 状态色直接取月格同一套 --calendar-status-color（.calendar-view .status-*）。 */
 .cw-block,
 .cw-chip {

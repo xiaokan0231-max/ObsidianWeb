@@ -1298,3 +1298,37 @@
   color: inherit;
   cursor: pointer;
 }
+
+/* ===== 页面切换：哪些部分单独过渡 =====
+ * 名字只在转场期间（<html data-view-transition>，见 lib/view-transition.ts）挂上：
+ * 平时带名字的元素会多一层层叠上下文，折叠侧栏的悬停提示、顶栏毛玻璃可能被波及。
+ * 侧栏与顶栏单独成组，根快照只剩正文区，新页上移 8px 时外壳纹丝不动；
+ * 固定在视口上的撤销条、双链查找提示也各自成组，不被截进根快照跟着淡出淡入、上移。
+ * 父项与子项同时处于 active，两者名字必须不同：重名会让浏览器跳过整个转场。 */
+:root[data-view-transition] .sidebar { view-transition-name: app-sidebar; }
+:root[data-view-transition] .topbar { view-transition-name: app-topbar; }
+/* 当前分区整块（底色、朱线连同文字）在两个导航项之间滑动；旧文字在途中淡成新文字。 */
+:root[data-view-transition] .side-nav > a.active { view-transition-name: nav-active; }
+:root[data-view-transition] .side-subnav a.active { view-transition-name: nav-sub-active; }
+/* 「我在哪」：宽度随新标题伸缩，旧标题淡出、新标题淡入，不是硬换一行字。 */
+:root[data-view-transition] .topbar-where { view-transition-name: page-title; }
+:root[data-view-transition] .undo-flash { view-transition-name: undo-flash; }
+:root[data-view-transition] .wiki-navigation-notice { view-transition-name: wiki-notice; }
+/* 写入失败提示同样固定在右下角、跨页常驻，跟着根快照淡出再上移淡入会闪一下。 */
+:root[data-view-transition] .global-write-banner { view-transition-name: write-banner; }
+/* 新旧标题宽度不同：默认快照按组宽度拉伸，文字会在 200ms 里被横向压扁再弹开。
+ * 改成按原尺寸靠左画，旧字淡出、新字淡入，宽度变化只体现在组的裁切上。 */
+::view-transition-old(page-title),
+::view-transition-new(page-title) {
+  width: auto;
+  height: auto;
+  object-fit: none;
+  object-position: left center;
+}
+::view-transition-group(page-title) { overflow: hidden; }
+
+/* 转场带进来的页面：新快照已经淡入上移，容器自己的 view-enter 再播就是双重入场。
+ * 属性挂在随 view 重挂的容器上，转场结束不会被摘掉，所以不会重播。 */
+.view-container[data-enter="transition"] {
+  animation: none;
+}

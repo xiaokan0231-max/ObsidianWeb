@@ -1371,7 +1371,9 @@
   margin-top: 9px;
 }
 
-.job-week-md .markdown-document blockquote {
+/* 可折叠 callout（details.md-callout）与引用框共用 note-reading.css 的外观，周复盘里也要同样收紧，
+   不然折叠的那几块比旁边的引用框高一截、字也小一号。 */
+.job-week-md .markdown-document :is(blockquote, .md-callout) {
   margin: 10px 0;
   padding: 8px 14px;
   font-size: 12px;

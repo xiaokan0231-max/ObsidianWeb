@@ -358,7 +358,8 @@ type Flight = {
 export type FlightController = {
   readonly active: boolean;
   start(toCamera: THREE.Vector3, toTarget: THREE.Vector3, duration?: number): void;
-  cancel(): void;
+  /** keepLens：不把 fov／星场写回基准，留给调用方从当前值渐变收回（航道的滚轮交接）。 */
+  cancel(options?: { keepLens?: boolean }): void;
   tick(now: number): void;
 };
 
@@ -403,10 +404,12 @@ export function createFlightController(options: {
         fromWarpOpacity: options.warp?.material.opacity ?? 0,
       };
     },
-    cancel() {
+    cancel(cancelOptions) {
       if (!flight) return;
       flight = null;
-      restore();
+      // 默认照旧写回基准（星图起飞时本来就在基准，逐位不变）；
+      // 航道被滚轮打断时冲刺正在半路，瞬间写回会一跳，由航道把当前值交给速度感渐变收回。
+      if (!cancelOptions?.keepLens) restore();
     },
     tick(now) {
       if (!flight) return;

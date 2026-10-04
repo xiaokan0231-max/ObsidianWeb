@@ -12,6 +12,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { flushSync } from "react-dom";
 import type { AdvisoryEvidenceRef } from "@/lib/interview-advisory";
 import InterviewSharedAsset from "./interview-shared-asset";
 import { isTypingTarget } from "@/lib/keyboard";
@@ -73,20 +74,61 @@ import { rememberRecentPath } from "@/lib/recent-notes";
 import { SHELL_MESSAGES } from "./shell-messages";
 import { buildNavBadges, type NavBadge, type NavBadges } from "@/lib/nav-badges";
 import { useExitTransition } from "./use-exit-transition";
+import {
+  canStartViewTransition,
+  createPreloadable,
+  createViewTransitionNavigator,
+  startViewTransition,
+  type ViewTransitionCommitMode,
+} from "@/lib/view-transition";
 
 // 业务页首次进入时再加载；组件身份固定，笔记刷新和 URL 更新不能重建页面状态。
-const InterviewReview = lazy(() => import("./interview-review"));
-const InterviewInsights = lazy(() => import("./interview-insights"));
-const InterviewPractice = lazy(() => import("./interview-practice"));
-const InterviewPrep = lazy(() => import("./interview-prep"));
-const InterviewSession = lazy(() => import("./interview-session"));
-const JapaneseTraining = lazy(() => import("./japanese-training"));
-const LanguageExpressionCourses = lazy(() => import("./language-expression-courses"));
-const JobsAnalytics = lazy(() => import("./jobs-analytics"));
-const JobsView = lazy(() => import("./jobs-view"));
-const GraphView = lazy(() => import("./graph-view"));
-const LibraryView = lazy(() => import("./library-view"));
-const TimelineView = lazy(() => import("./timeline-view"));
+// 加载器与预取共用一份：侧栏悬停／聚焦时先拉 chunk，切换时 lazy 当场读到模块，转场的新快照里不是骨架。
+const VIEW_MODULES = {
+  review: createPreloadable(() => import("./interview-review")),
+  insights: createPreloadable(() => import("./interview-insights")),
+  practice: createPreloadable(() => import("./interview-practice")),
+  prep: createPreloadable(() => import("./interview-prep")),
+  session: createPreloadable(() => import("./interview-session")),
+  language: createPreloadable(() => import("./japanese-training")),
+  topics: createPreloadable(() => import("./language-expression-courses")),
+  analytics: createPreloadable(() => import("./jobs-analytics")),
+  jobs: createPreloadable(() => import("./jobs-view")),
+  graph: createPreloadable(() => import("./graph-view")),
+  library: createPreloadable(() => import("./library-view")),
+  timeline: createPreloadable(() => import("./timeline-view")),
+};
+const InterviewReview = lazy(VIEW_MODULES.review.load);
+const InterviewInsights = lazy(VIEW_MODULES.insights.load);
+const InterviewPractice = lazy(VIEW_MODULES.practice.load);
+const InterviewPrep = lazy(VIEW_MODULES.prep.load);
+const InterviewSession = lazy(VIEW_MODULES.session.load);
+const JapaneseTraining = lazy(VIEW_MODULES.language.load);
+const LanguageExpressionCourses = lazy(VIEW_MODULES.topics.load);
+const JobsAnalytics = lazy(VIEW_MODULES.analytics.load);
+const JobsView = lazy(VIEW_MODULES.jobs.load);
+const GraphView = lazy(VIEW_MODULES.graph.load);
+const LibraryView = lazy(VIEW_MODULES.library.load);
+const TimelineView = lazy(VIEW_MODULES.timeline.load);
+
+/** 日历是外壳的静态依赖，不在表里；其余页面按需预取，失败留给页面自己的错误边界。 */
+function viewModule(view: AppView) {
+  return view === "calendar" ? null : VIEW_MODULES[view];
+}
+
+function preloadView(view: AppView) {
+  void viewModule(view)?.preload();
+}
+
+/** 目标页已加载（或本来就是静态的）返回 null，否则返回预取的 Promise 供转场限时等待。 */
+function viewReady(view: AppView) {
+  const entry = viewModule(view);
+  return !entry || entry.isLoaded() ? null : entry.preload();
+}
+
+function prefersReducedMotion() {
+  return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+}
 
 export type { Note };
 
@@ -379,6 +421,14 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const vaultState = useSyncExternalStore(vaultReader.subscribe, vaultReader.getState, vaultReader.getState);
   const notes = vaultState.notes;
   const [view, setView] = useState<View>(initialView);
+  // 这一页是不是由页面转场带进来的。转场的新快照已经有淡入上移，容器自己的 view-enter 再播一遍就是双重入场；
+  // 挂在随 view 重挂的 .view-container 上，转场结束后也不会因为属性被移除而重播。
+  const [viewEnter, setViewEnter] = useState<ViewTransitionCommitMode>("instant");
+  const [viewNavigator] = useState(() => createViewTransitionNavigator({
+    canTransition: () => canStartViewTransition(document, prefersReducedMotion),
+    start: (update) => startViewTransition(document, update, document.documentElement),
+    scheduler: { wait: (ms) => new Promise<void>((resolve) => window.setTimeout(resolve, ms)) },
+  }));
   const [interviewRouteSearch, setInterviewRouteSearch] = useState(() =>
     typeof window === "undefined" ? "" : window.location.search,
   );
@@ -769,7 +819,6 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     };
     const onPopState = (event: PopStateEvent) => {
       wikiNavigator.cancel();
-      syncOverlays(event.state);
       // 只认浏览器真正的后退／前进（isTrusted）：日历补齐场次时自己派发的 popstate 不是「回来」。
       // 同一页内的回退（关 drawer・关回答库浮层）由各自的逻辑复位，这里不插手。
       const routedView = appViewFromPathname(window.location.pathname);
@@ -782,18 +831,43 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
       if (currentEntry.current) scrollByEntry.current.set(currentEntry.current, window.scrollY);
       currentEntry.current = entryId;
       const scrollY = (entryId ? scrollByEntry.current.get(entryId) : undefined) ?? stamped;
-      if (event.isTrusted && routedView && routedView !== currentView.current && typeof scrollY === "number") {
-        pendingScrollRestore.current = scrollY;
+      const changesView = event.isTrusted && routedView !== null && routedView !== currentView.current;
+      const commit = (mode: ViewTransitionCommitMode) => {
+        // 只在真的换页（容器随 key 重挂）时改 data-enter：同一页内的回退（关抽屉）若把它从 transition 摘掉，
+        // 容器的 animation 从 none 变回 view-enter，整页会再播一遍入场。合成的 popstate 也可能换页，单独判断。
+        const entersNewView = routedView !== null && routedView !== currentView.current;
+        syncOverlays(event.state);
+        // 滚动目标在提交时才交给 [view] effect：等转场期间若被新的点击导航顶掉，不能让它把新页面滚到旧位置。
+        if (changesView && typeof scrollY === "number") pendingScrollRestore.current = scrollY;
+        // 看板的「带筛选跳转」种子只属于那一次点击；从历史回到 /jobs 时以地址栏为准，不再套旧种子。
+        setJobsInitialFilters(null);
+        syncRoute();
+        if (entersNewView) setViewEnter(mode);
+      };
+      if (!event.isTrusted) {
+        commit("instant");
+        return;
       }
-      // 看板的「带筛选跳转」种子只属于那一次点击；从历史回到 /jobs 时以地址栏为准，不再套旧种子。
-      setJobsInitialFilters(null);
-      syncRoute();
+      // 浏览器已经换了地址：还在等 chunk 或等转场回调的点击导航必须作废，否则它会迟到地 pushState。
+      // 换页的后退／前进也走转场；目标页 chunk 没到（刷新后第一次后退）不值得等，直接切。
+      const transition = changesView && viewReady(routedView) === null;
+      if (transition) {
+        // 同文档的后退／前进会在派发 popstate 的同一任务里按 auto 恢复滚动，而这时 DOM 还是旧页面：
+        // 旧快照会先跳到目标条目的位置再淡出。截快照前的那一帧把旧页面放回离开时的位置。
+        // 不改全局 scrollRestoration：章节、岗位抽屉等同页条目的后退还靠浏览器自动恢复。
+        const leaveY = window.scrollY;
+        window.requestAnimationFrame(() => window.scrollTo({ left: 0, top: leaveY, behavior: "instant" }));
+      }
+      viewNavigator.navigate({
+        transition,
+        commit: (mode) => mode === "transition" ? flushSync(() => commit(mode)) : commit(mode),
+      });
     };
     syncOverlays(window.history.state);
     syncRoute();
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [wikiNavigator]);
+  }, [viewNavigator, wikiNavigator]);
 
   useEffect(() => {
     // rAF は非アクティブなタブでは発火しないため timer で初回ロードする。
@@ -1061,38 +1135,57 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const syncAged = syncedMinutes !== null && syncedMinutes >= 10 && !error;
   const sourceDetail = derivedState === "rebuilding" ? ui.rebuilding : derivedState === "stale" ? (locale === "ja" ? "集計の更新待ち" : "统计待重算") : syncedLabel;
 
+  /**
+   * 切到另一页。alongside 里放「跟着这次导航一起生效」的 state（保存的查询词、看板筛选种子）：
+   * 走转场时整段提交要等旧快照截完，提前 set 的 state 会先落在旧页面上（旧条目被改写、旧页被重挂）。
+   */
   const navigateToView = useCallback((
     nextView: View,
     search?: URLSearchParams | string,
     preserveJobsInitialFilters = false,
+    alongside?: () => void,
   ) => {
     wikiNavigator.cancel();
-    setInterviewRouteSearch(typeof search === "string" ? search : search?.toString() ?? "");
-    interviewNavigation.current = interviewNavigationKey(nextView, search?.toString() ?? "");
-    setInterviewRouteVersion((version) => version + 1);
-    // ナビから直接来た時は分析画面由来のフィルタを持ち越さない。
-    if (nextView === "jobs" && !preserveJobsInitialFilters) setJobsInitialFilters(null);
-    setSelectedPath(null);
-    setSelectedSection(null);
-    setMobileMoreOpen(false);
-    // 离开前把当前位置也盖在这一条历史上：刷新后内存里的表没了，还能靠它回到大致位置。
-    window.history.replaceState({ ...(window.history.state ?? {}), __echoScrollY: window.scrollY }, "");
-    if (currentEntry.current) scrollByEntry.current.set(currentEntry.current, window.scrollY);
-    const entry = newHistoryEntryId();
-    window.history.pushState({ __echoAppView: nextView, __echoEntry: entry }, "", appViewHref(nextView, search));
-    currentEntry.current = entry;
-    setView(nextView);
-    // 同一页上再点一次导航时，页内放进 URL 的状态要跟着新地址回到默认（pushState 不触发 popstate）。
-    notifyUrlChange();
-  }, [wikiNavigator]);
+    // 整段原子提交：只把 setView 放进转场回调的话，其余 state 会先提交，旧页面带着新参数重挂一次才被截图。
+    const commit = (mode: ViewTransitionCommitMode) => {
+      // 同 popstate：同一页上再点一次导航不重挂容器，data-enter 不能动，否则整页重播入场。
+      const entersNewView = nextView !== currentView.current;
+      alongside?.();
+      setInterviewRouteSearch(typeof search === "string" ? search : search?.toString() ?? "");
+      interviewNavigation.current = interviewNavigationKey(nextView, search?.toString() ?? "");
+      setInterviewRouteVersion((version) => version + 1);
+      // ナビから直接来た時は分析画面由来のフィルタを持ち越さない。
+      if (nextView === "jobs" && !preserveJobsInitialFilters) setJobsInitialFilters(null);
+      setSelectedPath(null);
+      setSelectedSection(null);
+      setMobileMoreOpen(false);
+      // 离开前把当前位置也盖在这一条历史上：刷新后内存里的表没了，还能靠它回到大致位置。
+      window.history.replaceState({ ...(window.history.state ?? {}), __echoScrollY: window.scrollY }, "");
+      if (currentEntry.current) scrollByEntry.current.set(currentEntry.current, window.scrollY);
+      const entry = newHistoryEntryId();
+      window.history.pushState({ __echoAppView: nextView, __echoEntry: entry }, "", appViewHref(nextView, search));
+      currentEntry.current = entry;
+      setView(nextView);
+      if (entersNewView) setViewEnter(mode);
+      // 同一页上再点一次导航时，页内放进 URL 的状态要跟着新地址回到默认（pushState 不触发 popstate）。
+      notifyUrlChange();
+    };
+    // 转场回调里用 flushSync 同步提交：新快照要截到已经换好、已滚回顶部的新页。
+    // 同一页上再点（重置页内筛选、资料库换查询词）不是「换页」：照原来同步提交，不截快照、不整页上移。
+    viewNavigator.navigate({
+      transition: nextView !== currentView.current,
+      ready: () => viewReady(nextView),
+      commit: (mode) => mode === "transition" ? flushSync(() => commit(mode)) : commit(mode),
+    });
+  }, [viewNavigator, wikiNavigator]);
 
   // 以下の遷移系コールバックは全部 useCallback：視圖側は React.memo で包んであり、
   // ここが毎レンダー新しい関数だと memo が一度も命中しない。
   const runSavedQuery = useCallback((savedQuery: string) => {
     const params = new URLSearchParams();
     params.set("q", savedQuery);
-    setLibraryQuery(savedQuery);
-    navigateToView("library", params);
+    // 查询词跟导航同一次提交：先 set 的话，正停在资料库时会被写进旧的历史条目。
+    navigateToView("library", params, false, () => setLibraryQuery(savedQuery));
     setSearchOpen(false);
   }, [navigateToView, setSearchOpen]);
 
@@ -1110,18 +1203,17 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
 
   // 分析页直接打开看板案件抽屉，跟进操作仍使用案件本身的表单。
   const openCase = useCallback((note: Note) => {
-    setJobsInitialFilters(null);
-    navigateToView("jobs", new URLSearchParams({ status: "all", case: note.path }), true);
+    navigateToView("jobs", new URLSearchParams({ status: "all", case: note.path }), true, () => setJobsInitialFilters(null));
   }, [navigateToView]);
 
+  // 筛选种子跟导航同一次提交（见 navigateToView 的 alongside），不先落在还没离开的页面上。
   const viewJobsWithFilters = useCallback((filters?: JobsInitialFilters) => {
-    setJobsInitialFilters(filters ?? null);
     const params = new URLSearchParams();
     if (filters?.statuses?.length) params.set("status", filters.statuses.join(","));
     if (filters?.ratings?.length) params.set("rating", filters.ratings.join(","));
     if (filters?.touch?.length) params.set("touch", filters.touch.join(","));
     if (filters?.waiting) params.set("waiting", "1");
-    navigateToView("jobs", params, true);
+    navigateToView("jobs", params, true, () => setJobsInitialFilters(filters ?? null));
   }, [navigateToView]);
 
   const openCalendarInterview = useCallback((commitment: Commitment) => {
@@ -1281,6 +1373,9 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   className={isActiveSection ? "active" : ""}
                   href={appViewHref(item.target)}
                   onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(item.target); } }}
+                  // 指针移上来或 Tab 聚焦时先拉目标页的 chunk：点下去时多半已就绪，转场不必等。
+                  onPointerEnter={() => preloadView(item.target)}
+                  onFocus={() => preloadView(item.target)}
                   // 有二级项时当前页是子项（左栏或顶部带子里那个），父项不该也自称 page。
                   aria-current={
                     isActiveSection && secondaryNavigation.length === 0 ? "page" : undefined
@@ -1312,6 +1407,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                         className={view === sub.id ? "active" : ""}
                         href={appViewHref(sub.id)}
                         onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(sub.id); } }}
+                        onPointerEnter={() => preloadView(sub.id)}
+                        onFocus={() => preloadView(sub.id)}
                         aria-current={view === sub.id ? "page" : undefined}
                         data-label={sub.label}
                       >
@@ -1424,6 +1521,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                       className={view === item.id ? "active" : ""}
                       href={appViewHref(item.id)}
                       onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(item.id); } }}
+                      onPointerEnter={() => preloadView(item.id)}
+                      onFocus={() => preloadView(item.id)}
                       aria-current={view === item.id ? "page" : undefined}
                     >
                       <i aria-hidden="true">{item.glyph}</i>
@@ -1436,7 +1535,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                 </div>
               </nav>
             )}
-            <div className="view-container">
+            <div className="view-container" data-enter={viewEnter === "transition" ? "transition" : undefined}>
               <Suspense fallback={<LoadingState view={view} />}>
               {calendarInterview && (!interviewScopeReady || calendarInterview.view !== view || (!calendarInterview.path && !calendarCompanyContext)) && (
                 <CalendarInterviewState

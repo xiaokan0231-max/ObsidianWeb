@@ -35,6 +35,22 @@ export function calendarWeekDays(start: string): string[] {
   return Array.from({ length: 7 }, (_, index) => shiftCalendarDay(start, index));
 }
 
+/**
+ * 周视图里按 ← / → 后应选中的日子。
+ *
+ * 选中日就在这一周里时逐日移动，越过周一／周日自然落到相邻周（调用方按结果翻周）。
+ * 还没选中、或选中日在别的周（用 [ ] 翻过来的）时，第一下先落到起点，让选中框先出现再开始走：
+ * 今天在这一周就是今天，否则往后走从周一、往前走从周日开始，不会一按就跳出当前看着的这一周。
+ */
+export function stepWeekSelection(weekStart: string, selectedDay: string, today: string, step: number): string {
+  const days = calendarWeekDays(weekStart);
+  if (!days.includes(selectedDay)) {
+    if (days.includes(today)) return today;
+    return step < 0 ? days[6] : days[0];
+  }
+  return shiftCalendarDay(selectedDay, step < 0 ? -1 : 1);
+}
+
 /** 场次的开始／结束分钟。没写结束或结束不晚于开始时按默认时长；跨过午夜的截在当天末尾。 */
 export function eventSpan(event: Pick<CalendarEvent, "time" | "endTime">, defaultMinutes = DEFAULT_EVENT_MINUTES) {
   const start = clockMinutes(event.time);
