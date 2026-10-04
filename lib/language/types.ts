@@ -284,6 +284,8 @@ export type LanguageLearningItem = {
   basePriority: number;
   listeningMark?: "×" | "△";
   strategyTags: string[];
+  /** 改错条目在整理稿 型:: 后自带的括注（例「丁寧形は名詞修飾に使わない」），快练的解释优先用它。 */
+  noteJa?: string;
 };
 
 export type LanguageIssueSummary = {
@@ -328,6 +330,13 @@ export type LanguageItemProgress = {
   nextDueAt?: string;
   rejected: boolean;
   postTrainingOccurrences: number;
+  /** 快练首答次数（含翻卡自评与「不知道」）。0 或缺省＝在快练里还是新题。 */
+  attemptCount?: number;
+  /** 翻卡连续「记得」的次数，决定自评条目的 3/7/30 天间隔。 */
+  selfStreak?: number;
+  /** 最近一次自动判分首答的 JST 日。 */
+  lastGradedDay?: string;
+  lastOutcome?: "pass" | "fail" | "self";
 };
 
 export type LanguageBatchPhase = "scan" | "compile" | "stress" | "completed";

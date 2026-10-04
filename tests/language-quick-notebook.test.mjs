@@ -1,0 +1,169 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { stableId } from "../lib/dojo/utils.ts";
+import { normalizeQuickAnswer } from "../lib/language/quick-text.ts";
+import { buildQuickPool, parseVocabNotebook } from "../lib/language/quick-items.ts";
+
+// 全部虚构内容：表格结构仿单語文法帳，词条与备注是测试自编的。
+const PATH = "20_求職/_素材/単語文法帳.md";
+const NOTEBOOK = `---
+type: material
+---
+# 単語・文法帳
+
+## A. 中国語式の日本語 → 自然な日本語
+
+| ✗ 出やすい言い方 | ✓ 自然な日本語 | 中文 |
+|---|---|---|
+| 拉通する | すり合わせる／調整する | 拉通 |
+| 工程（＝engineering の意で） | エンジニアリング | 工程 |
+
+## B-1. エージェント用語
+
+| 表記 | かな | 中文 | ★ |
+|---|---|---|---|
+| 求人票 | きゅうじんひょう | 招聘票 | ★ |
+| エージェント／リクルーター | ー | 猎头顾问 | ★★ |
+| 一次面接／最終面接 | いちじ／さいしゅうめんせつ | 一面/终面 | |
+
+## B-2. 面接用語（列の順番を入れ替えたテーブル）
+
+| 中文 | ★ | かな | 表記 |
+|---|---|---|---|
+| 反问环节 | ★ | ぎゃくしつもん | 逆質問 |
+
+## C. カタカナ発音
+
+| 表記 | 読み | ★ |
+|---|---|---|
+| Kafka | カフカ | ★ |
+| パイプライン | ー | ★ |
+| 冪等 | べきとう | ★（「べきどう」✗） |
+
+## D. 敬語
+
+| 表記 | かな | 用途 |
+|---|---|---|
+| 恐れ入りますが | おそれいりますが | 请求前缀 |
+| 差し支えなければ | さしつかえなければ | 提问缓冲 ★ |
+
+## E. 本人事実（読まない）
+
+| 表記 | かな | 中文 |
+|---|---|---|
+| 架空資格 | かくうしかく | 虚构资格 ★ |
+
+## F. 訓読みの動詞
+
+| 表記 | かな | 中文 |
+|---|---|---|
+| 担う | になう | 承担 ★ |
+
+## G. 数字（読まない）
+
+| 数字 | 読み | ★ |
+|---|---|---|
+| 99件 | きゅうじゅうきゅうけん | ★★ |
+
+## H. 構文の型
+
+- **結論（けつろん）から申（もう）し上（あ）げますと、〜です。** ★★（先に言い切る）
+- **〜と理解（りかい）しております。** ★
+
+## Z. 未知の小節
+
+| 表記 | かな | 中文 |
+|---|---|---|
+| 謎語 | なぞご | 谜语 |
+`;
+
+test("七张表都解析，E、G 与未知小节不产出任何条目", () => {
+  const { items, skipped } = parseVocabNotebook(NOTEBOOK, PATH);
+  const tables = new Set(items.map((item) => item.pattern));
+  assert.deepEqual([...tables].sort(), ["A", "B-1", "B-2", "C", "D", "F", "H"]);
+  const surfaces = items.map((item) => item.ja);
+  for (const forbidden of ["架空資格", "99件", "謎語"]) {
+    assert.ok(!surfaces.includes(forbidden), `${forbidden} 不应出现`);
+  }
+  assert.equal(skipped.notebook_section, 3, "E、G、Z 三个小节被跳过");
+  assert.equal(items.every((item) => item.source === "notebook"), true);
+});
+
+test("按表头名取列：列序调换的 B-2 仍能读对表記、かな、中文", () => {
+  const { items } = parseVocabNotebook(NOTEBOOK, PATH);
+  const item = items.find((value) => value.pattern === "B-2");
+  assert.equal(item.ja, "逆質問");
+  assert.equal(item.reading, "ぎゃくしつもん");
+  assert.equal(item.meaning, "反问环节");
+  assert.equal(item.stars, 1);
+  assert.equal(item.group, "nb_term");
+});
+
+test("かな「ー」＝无读音；C 表無読音的行跳过；表記多段时缩写注音不当完整读音", () => {
+  const { items, skipped } = parseVocabNotebook(NOTEBOOK, PATH);
+  const agent = items.find((value) => value.ja === "エージェント／リクルーター");
+  assert.equal(agent.reading, "");
+  assert.deepEqual(agent.jaAlts, ["エージェント／リクルーター", "エージェント", "リクルーター"]);
+  assert.ok(!items.some((value) => value.ja === "パイプライン"));
+  assert.equal(skipped.notebook_no_reading, 1);
+  const rounds = items.find((value) => value.ja === "一次面接／最終面接");
+  assert.equal(rounds.reading, "");
+  assert.match(rounds.note, /よみ：いちじ／さいしゅうめんせつ/u);
+});
+
+test("★ 计数与备注：★★ 记 2，★（注）的注进 note，用途/中文里的 ★ 被剥掉", () => {
+  const { items } = parseVocabNotebook(NOTEBOOK, PATH);
+  const byJa = new Map(items.map((value) => [value.ja, value]));
+  assert.equal(byJa.get("エージェント／リクルーター").stars, 2);
+  assert.equal(byJa.get("求人票").stars, 1);
+  assert.equal(byJa.get("一次面接／最終面接").stars, 0);
+  assert.equal(byJa.get("冪等").note, "「べきどう」✗");
+  assert.equal(byJa.get("差し支えなければ").meaning, "提问缓冲");
+  assert.equal(byJa.get("差し支えなければ").stars, 1);
+  assert.equal(byJa.get("担う").meaning, "承担");
+  assert.equal(byJa.get("求人票").priority, 80);
+});
+
+test("A 表：✗ 去括注作错形，✓ 按／切成可接受形，中文作释义", () => {
+  const { items } = parseVocabNotebook(NOTEBOOK, PATH);
+  const calque = items.find((value) => value.patch?.wrong === "拉通する");
+  assert.equal(calque.group, "nb_calque");
+  assert.equal(calque.meaning, "拉通");
+  assert.deepEqual(calque.patch.fixes, ["すり合わせる", "調整する"]);
+  assert.ok(calque.jaAlts.includes("調整する"));
+  const engineering = items.find((value) => value.patch?.wrong === "工程");
+  assert.equal(engineering.note, "＝engineering の意で");
+});
+
+test("H 表：去 ruby 得句型，ruby 换成假名得读音，括注进 note", () => {
+  const { items } = parseVocabNotebook(NOTEBOOK, PATH);
+  const pattern = items.find((value) => value.pattern === "H" && value.stars === 2);
+  assert.equal(pattern.ja, "結論から申し上げますと、〜です。");
+  assert.equal(pattern.reading, "けつろんからもうしあげますと、〜です。");
+  assert.equal(pattern.note, "先に言い切る");
+  assert.equal(pattern.hasSlot, true);
+  assert.equal(pattern.group, "nb_pattern");
+});
+
+test("ID 稳定：nb_ + hash(表|归一化键)，只看键，不随其它列变化", () => {
+  const { items } = parseVocabNotebook(NOTEBOOK, PATH);
+  const term = items.find((value) => value.ja === "求人票");
+  assert.equal(term.id, stableId("nb", `B-1|${normalizeQuickAnswer("求人票")}`));
+  const calque = items.find((value) => value.patch?.wrong === "工程");
+  assert.equal(calque.id, stableId("nb", `A|${normalizeQuickAnswer("工程")}`));
+  const pattern = items.find((value) => value.ja === "〜と理解しております。");
+  assert.equal(pattern.id, stableId("nb", `H|${normalizeQuickAnswer("〜と理解しております。")}`));
+
+  const edited = NOTEBOOK.replace("| 求人票 | きゅうじんひょう | 招聘票 | ★ |", "| 求人票 | きゅうじんひょう | 职位说明 | |");
+  const again = parseVocabNotebook(edited, PATH).items.find((value) => value.ja === "求人票");
+  assert.equal(again.id, term.id, "改释义与 ★ 不改 ID");
+  assert.equal(new Set(items.map((value) => value.id)).size, items.length, "ID 互不相同");
+});
+
+test("buildQuickPool：没有课程也能只用単語文法帳组题库，并报告解析条数", () => {
+  const pool = buildQuickPool(undefined, { path: PATH, content: NOTEBOOK });
+  assert.equal(pool.notebookParsed, pool.items.length);
+  assert.ok(pool.items.length >= 10);
+  assert.equal(pool.excludedJaMeaning, 0);
+  assert.equal(pool.items[0].evidence[0].label.startsWith("単語文法帳 · "), true);
+});
