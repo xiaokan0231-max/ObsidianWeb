@@ -129,11 +129,11 @@
 .calendar-agenda .agenda-source:hover { color: var(--commitment-tone); }
 
 /* 颜色与形状共同表示进展，避免小尺寸下等待与结束难以分辨。 */
-.calendar-view .status-active { --calendar-status-color: #087f5b; }
-.calendar-view .status-waiting { --calendar-status-color: #2563eb; }
-.calendar-view .status-closed { --calendar-status-color: #c52e38; }
-.calendar-view .status-paused { --calendar-status-color: #686276; }
-.calendar-view .status-unknown { --calendar-status-color: #6b7280; }
+.calendar-view .status-active { --calendar-status-color: var(--success); }
+.calendar-view .status-waiting { --calendar-status-color: var(--info); }
+.calendar-view .status-closed { --calendar-status-color: var(--danger); }
+.calendar-view .status-paused { --calendar-status-color: var(--text-tertiary); }
+.calendar-view .status-unknown { --calendar-status-color: var(--text-tertiary); }
 
 .calendar-view .calendar-status-dot {
   display: inline-block;
@@ -153,7 +153,7 @@
   content: "";
   position: absolute;
   border-radius: 1px;
-  background: #fff;
+  background: var(--surface-overlay);
 }
 
 .calendar-view .status-waiting .calendar-status-dot::before {
@@ -181,7 +181,7 @@
   left: 3px;
   width: 6px;
   height: 6px;
-  border-inline: 2px solid #fff;
+  border-inline: 2px solid var(--on-fill);
 }
 
 .calendar-view .status-closed .calendar-status-dot { border-radius: 3px; }
@@ -246,10 +246,10 @@
   flex: 0 0 22px;
   width: 22px;
   height: 22px;
-  border: 1px solid #aec7bb;
+  border: 1px solid var(--success-line);
   border-radius: 6px;
-  background: #f8fcf9;
-  color: #285442;
+  background: var(--surface);
+  color: var(--green-deep);
   font-family: var(--font-geist-mono), monospace;
   font-size: 13px;
   font-weight: 750;
@@ -258,25 +258,25 @@
 }
 
 .calendar-view .calendar-round-badge.round-casual {
-  border-color: #c8ceca;
-  background: #f4f5f2;
-  color: #5d6b64;
+  border-color: var(--line-strong);
+  background: var(--success-wash);
+  color: var(--text-tertiary);
 }
 
 .calendar-view .calendar-round-badge.round-unknown,
 .calendar-view .calendar-round-badge.round-agent {
-  border-color: #b6beb9;
+  border-color: var(--success-line);
   background: transparent;
-  color: #56615b;
+  color: var(--muted);
 }
 
 .calendar-view .calendar-round-badge.round-unknown { border-style: dashed; }
 .calendar-view .calendar-round-badge.round-agent { font-family: inherit; font-size: 12px; }
 
 .calendar-view .calendar-round-badge.round-final {
-  border-color: #a25033;
-  background: #a25033;
-  color: #fffaf3;
+  border-color: var(--interactive);
+  background: var(--interactive-fill);
+  color: var(--text-on-inverse);
   font-family: inherit;
   font-size: 12px;
 }

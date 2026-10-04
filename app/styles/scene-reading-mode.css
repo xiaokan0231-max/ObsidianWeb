@@ -1,9 +1,17 @@
 /* 星图与时间航道的阅读层仍属于舞台；只换呈现，不离开全屏、不重置场景。 */
 .novel-reader.reading-mode.scene-reader {
   --nr-ink: #dce4df;
+  --nr-ink-strong: #eef3ef;
+  --nr-text-2: #b6c2bb;
   --nr-muted: #93a49d;
+  --nr-faint: #6d7d76;
   --nr-line: #283630;
+  --nr-line-strong: #3a4a43;
   --nr-paper: #0c1211;
+  --nr-wash: #141d1a;
+  --nr-backdrop: #070c0b;
+  --nr-glow: #15201c;
+  --nr-selection: #2f4a3e;
   --scene-accent: #b0cbbb;
   color: var(--nr-ink);
   background:

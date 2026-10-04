@@ -25,7 +25,7 @@
 .prep-upcoming-grid button {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px;
   padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--green);
-  background: #fff; color: var(--ink); text-align: left; cursor: pointer;
+  background: var(--surface-overlay); color: var(--ink); text-align: left; cursor: pointer;
   font-family: inherit; transition: background .15s, border-color .15s;
 }
 .prep-upcoming-grid button:hover { background: var(--paper); border-color: var(--green); }
@@ -40,7 +40,7 @@
   padding: 20px 24px; border: 1px solid var(--line); background: var(--surface);
 }
 .prep-doc-back, .prep-doc-pager button, .prep-doc-nav button {
-  border: 1px solid var(--line); background: #fff; color: var(--ink);
+  border: 1px solid var(--line); background: var(--surface-overlay); color: var(--ink);
   font-family: inherit; cursor: pointer;
 }
 .prep-doc-back { padding: 7px 13px; font-size: 11px; }
@@ -50,7 +50,7 @@
 .prep-doc-meta { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
 .prep-doc-broken {
   padding: 11px 15px; border-left: 3px solid var(--orange);
-  background: #fdf1ec; color: #8a3c1d; font-size: 11px; line-height: 1.7;
+  background: var(--brand-wash); color: var(--danger-strong); font-size: 11px; line-height: 1.7;
 }
 
 /* 🔴 .topbar が sticky top:0 / z-index:25。ここを 0 にすると章ナビが
@@ -77,8 +77,8 @@
 .prep-doc-nav {
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
 }
-.prep-doc-nav button.active { border-color: var(--green); background: var(--green); color: #f7f4ea; }
-.prep-doc-nav button.active > b { background: rgba(255,255,255,.18); color: #fff; }
+.prep-doc-nav button.active { border-color: var(--green); background: var(--green); color: var(--on-fill); }
+.prep-doc-nav button.active > b { background: color-mix(in oklab, var(--highlight) 18%, transparent); color: var(--on-fill); }
 /* 検索ヒットのある章に印を出す。どの章を見ればよいかが一目で分かる */
 .prep-doc-nav button > i {
   position: absolute; top: 3px; right: 5px; width: 5px; height: 5px; border-radius: 50%;
@@ -86,7 +86,7 @@
 }
 .prep-doc-search {
   display: flex; align-items: center; gap: 7px; padding: 6px 12px;
-  border: 1px solid var(--line); border-radius: 999px; background: #fff;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface-overlay);
 }
 .prep-doc-search > span { color: var(--muted); font-size: 13px; }
 .prep-doc-search input {
@@ -119,17 +119,17 @@
 .prep-doc-nav button:focus-visible { outline-offset: 1px; }
 .prep-doc-hits {
   display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
-  padding: 9px 12px; background: #fdf6e4; border-left: 3px solid var(--gold); font-size: 11px;
+  padding: 9px 12px; background: var(--warning-wash-soft); border-left: 3px solid var(--gold); font-size: 11px;
 }
-.prep-doc-hits > span { color: #7a5c12; }
+.prep-doc-hits > span { color: var(--warning); }
 .prep-doc-hits > span.none { color: var(--muted); }
 .prep-doc-hits button {
-  padding: 4px 11px; border: 1px solid #e3d3a3; border-radius: 999px; background: #fff;
+  padding: 4px 11px; border: 1px solid var(--warning-line); border-radius: 999px; background: var(--surface-overlay);
   color: var(--ink); font-family: inherit; font-size: 11px; cursor: pointer;
 }
-.prep-doc-hits button.active { border-color: var(--gold); background: var(--gold); color: #fff; }
+.prep-doc-hits button.active { border-color: var(--gold); background: var(--gold); color: var(--on-fill); }
 .prep-doc-hits button b { font-variant-numeric: tabular-nums; opacity: .65; }
-.prep-doc-hit { background: #ffe9a8; color: inherit; padding: 0 1px; border-radius: 2px; }
+.prep-doc-hit { background: var(--warning-wash); color: inherit; padding: 0 1px; border-radius: 2px; }
 /* 目次と本文の器。狭い画面では目次が本文の上、広い画面では左の余白に常駐させる */
 .prep-doc-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
 
@@ -161,10 +161,10 @@
   transition: color .16s ease;
 }
 .prep-doc-subnav a > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.prep-doc-subnav a:hover { background: #fff; color: var(--green); }
+.prep-doc-subnav a:hover { background: var(--surface-overlay); color: var(--green); }
 .prep-doc-subnav a:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
 /* スクロール現在地。番号を橙に変え、読んでいる小節が目次側で分かる */
-.prep-doc-subnav a.active { background: #fff; color: var(--green); font-weight: 700; }
+.prep-doc-subnav a.active { background: var(--surface-overlay); color: var(--green); font-weight: 700; }
 .prep-doc-subnav a.active > b { color: var(--orange); }
 
 /* 広い画面：目次を左の余白に常駐させ、カード感を捨てて「巻物の欄外索引」にする。
@@ -193,14 +193,14 @@
       opacity .2s ease;
   }
   .prep-doc-subnav a { padding: 5px 8px 5px 15px; border-radius: 0 4px 4px 0; }
-  .prep-doc-subnav a:hover { background: rgba(47, 93, 63, 0.07); }
+  .prep-doc-subnav a:hover { background: color-mix(in oklab, var(--success) 7%, transparent); }
   .prep-doc-subnav a.active { background: none; }
 }
 /* 本文側の見出し番号。目次と同じ番号なので、長文の途中でも現在地が分かる */
 .prep-doc-body h3 .prep-h-no {
   display: inline-grid; place-items: center; min-width: 21px; height: 21px;
   margin-right: 9px; padding: 0 5px;
-  background: var(--green); color: #f7f4ea;
+  background: var(--green); color: var(--on-fill);
   font: 700 10.5px/1 var(--font-geist-mono), monospace; font-style: normal;
   vertical-align: 3px;
 }
@@ -212,7 +212,7 @@
 }
 
 .prep-doc-body {
-  padding: 26px 30px; border: 1px solid var(--line); background: #fff;
+  padding: 26px 30px; border: 1px solid var(--line); background: var(--surface-overlay);
   font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", var(--font-geist-sans), sans-serif;
 }
 .prep-doc-body h2 {
@@ -227,24 +227,24 @@
 .prep-doc-body rt { color: var(--green); font-size: 9px; font-weight: 400; }
 
 .prep-doc-say {
-  padding: 11px 14px; border-left: 3px solid var(--green); background: #eef4f0;
+  padding: 11px 14px; border-left: 3px solid var(--green); background: var(--success-wash);
   font-size: 14px; line-height: 2.1;
 }
-.prep-doc-say.interviewer { border-left-color: var(--violet); background: #f1eef7; }
+.prep-doc-say.interviewer { border-left-color: var(--violet); background: var(--info-wash); }
 .prep-doc-say > span {
   display: inline-block; margin-right: 9px; padding: 1px 8px;
-  background: var(--green); color: #f7f4ea; font-size: 9px; vertical-align: 2px;
+  background: var(--green); color: var(--on-fill); font-size: 9px; vertical-align: 2px;
 }
 .prep-doc-say.interviewer > span { background: var(--violet); }
 
 .prep-doc-note { padding: 9px 13px; font-size: 12px; line-height: 1.8; }
-.prep-doc-note.zh { background: #fdf6e4; border-left: 3px solid var(--gold); }
-.prep-doc-note.follow { background: #eef2f7; border-left: 3px solid #4a6d99; }
+.prep-doc-note.zh { background: var(--warning-wash-soft); border-left: 3px solid var(--gold); }
+.prep-doc-note.follow { background: var(--success-wash); border-left: 3px solid var(--info); }
 /* > 引用の大半は「当日そのまま口に出す内容」（開幕・救場・逆質問・締め）。
    以前の灰底＋灰文字は読み上げ本文を背景騒音に見せていた——離線 HTML の金框に合わせ、
    本文と同じ字色で読めるようにする。⚠️🔴 で始まる行だけが本当の注意書き＝警戒色 */
-.prep-doc-note.tip { background: #fffcf3; border-left: 3px solid var(--gold); }
-.prep-doc-note.tip.warn { background: #fdf1ec; border-left-color: var(--orange); }
+.prep-doc-note.tip { background: var(--surface-raised-solid); border-left: 3px solid var(--gold); }
+.prep-doc-note.tip.warn { background: var(--brand-wash); border-left-color: var(--orange); }
 /* 連続する引用（救場3句・逆質問1〜3）はひとつの塊に見せる。ぶつ切りの「方塊」を並べない */
 .prep-doc-body .prep-doc-note.tip:not(.warn) + .prep-doc-note.tip:not(.warn) {
   margin-top: -8px; padding-top: 4px;
@@ -275,7 +275,7 @@
   margin: 14px 0; border: 1px dashed var(--line); background: var(--paper);
   scroll-margin-top: 180px;
 }
-.prep-doc-embed.open { border-style: solid; background: #fff; }
+.prep-doc-embed.open { border-style: solid; background: var(--surface-overlay); }
 .prep-doc-embed-head { display: flex; align-items: center; gap: 8px; }
 .prep-doc-embed-toggle {
   flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
@@ -294,12 +294,12 @@
 }
 .prep-doc-embed-toggle .hit {
   flex: 0 0 auto; padding: 1px 7px; border-radius: 999px;
-  background: #ffe9a8; color: #7a5c12; font-size: 9.5px; font-style: normal;
+  background: var(--warning-wash); color: var(--warning); font-size: 9.5px; font-style: normal;
 }
 .prep-doc-embed-toggle:hover > b { color: var(--green); }
 .prep-doc-embed-open {
   flex: 0 0 auto; margin-right: 10px; padding: 4px 10px;
-  border: 1px solid var(--line); background: #fff; color: var(--muted);
+  border: 1px solid var(--line); background: var(--surface-overlay); color: var(--muted);
   font-family: inherit; font-size: 10px; cursor: pointer;
 }
 .prep-doc-embed-open:hover { color: var(--green); border-color: var(--green); }
@@ -318,32 +318,32 @@
 .kill-map-head > i em { display: block; height: 100%; background: var(--green); transition: width 200ms ease; }
 .kill-map-head button { padding: 5px 10px; border: 1px solid var(--line); color: var(--muted); font-size: 10px; }
 
-.kill-card { border: 1px solid var(--line); border-left: 3px solid var(--green); background: #fff; }
-.kill-card.done { border-left-color: #b9c8bf; opacity: .62; }
+.kill-card { border: 1px solid var(--line); border-left: 3px solid var(--green); background: var(--surface-overlay); }
+.kill-card.done { border-left-color: var(--success-line); opacity: .62; }
 .kill-card > header {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 12px;
-  padding: 14px 16px; border-bottom: 1px solid var(--line); background: #fbfaf6;
+  padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--surface);
 }
 .kill-card > header > b {
   width: 24px; height: 24px; display: grid; place-items: center;
-  background: var(--green); color: #f7f4ea;
+  background: var(--green); color: var(--on-fill);
   font-family: var(--font-geist-mono), monospace; font-size: 11px; font-weight: 500;
 }
-.kill-card.done > header > b { background: #b9c8bf; }
+.kill-card.done > header > b { background: var(--success-line); }
 .kill-card > header h3 { margin: 0; color: var(--ink); font-size: 15px; line-height: 1.5; }
 .kill-card > header small { display: block; margin-top: 3px; color: var(--muted); font-size: 10.5px; }
 .kill-card > header > button {
   padding: 6px 12px; border: 1px solid var(--line); background: transparent;
   color: var(--muted); font-size: 10.5px; white-space: nowrap; cursor: pointer;
 }
-.kill-card > header > button.on { border-color: var(--green); background: var(--green); color: #f7f4ea; }
+.kill-card > header > button.on { border-color: var(--green); background: var(--green); color: var(--on-fill); }
 
 /* 答案は「読み上げる文」なので、ここだけ本文より大きくルビの行送りも広く取る */
 .kill-answer { padding: 4px 16px 14px; }
 .kill-answer .prep-doc-say { font-size: 15px; line-height: 2.25; }
 .kill-answer h4 { margin: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 500; }
 .kill-answer > :first-child { margin-top: 12px; }
-.kill-missing { margin: 0; padding: 14px 16px; background: #fff1ec; color: #8d382b; font-size: 12px; line-height: 1.8; }
+.kill-missing { margin: 0; padding: 14px 16px; background: var(--brand-wash); color: var(--danger-strong); font-size: 12px; line-height: 1.8; }
 
 .kill-followup { margin: 0 16px 12px; border: 1px dashed var(--line); }
 .kill-followup > summary {
@@ -358,20 +358,20 @@
 
 .kill-mine {
   display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px;
-  margin: 0 16px 12px; padding: 9px 12px; background: #fff1ec;
+  margin: 0 16px 12px; padding: 9px 12px; background: var(--brand-wash);
   font-size: 12px; line-height: 1.8;
 }
-.kill-mine > span { color: #8d382b; font-size: 10px; font-weight: 600; }
+.kill-mine > span { color: var(--danger-strong); font-size: 10px; font-weight: 600; }
 
 .kill-why { margin: 0 16px 14px; }
 .kill-why > button {
-  width: 100%; padding: 8px 12px; border: 1px solid var(--line); background: #fdf6e4;
-  color: #7a5c12; font-size: 11.5px; text-align: left; cursor: pointer;
+  width: 100%; padding: 8px 12px; border: 1px solid var(--line); background: var(--warning-wash-soft);
+  color: var(--warning); font-size: 11.5px; text-align: left; cursor: pointer;
 }
 .kill-why > button i { float: right; font-style: normal; font-family: var(--font-geist-mono), monospace; }
 .kill-why > p {
   margin: 0; padding: 11px 13px; border: 1px solid var(--line); border-top: 0;
-  background: #fdf6e4; font-size: 12.5px; line-height: 1.95;
+  background: var(--warning-wash-soft); font-size: 12.5px; line-height: 1.95;
 }
 
 @media (max-width: 780px) {
@@ -418,10 +418,10 @@
 .prep-weakness-peek li {
   display: flex; align-items: center; gap: 6px;
   padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px;
-  background: #fff; color: var(--text-secondary); font-size: 11px;
+  background: var(--surface-overlay); color: var(--text-secondary); font-size: 11px;
 }
 /* 再発は塗りラベルではなく点で示す。語は行末の凡例に一度だけ置く */
-.prep-weakness-peek li.hot { border-color: #e9b9a5; color: var(--ink); }
+.prep-weakness-peek li.hot { border-color: var(--brand-line); color: var(--ink); }
 .prep-weakness-peek li i {
   width: 5px; height: 5px; border-radius: 50%; background: var(--orange);
 }
@@ -431,9 +431,9 @@
 .prep-weakness-body ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .prep-weakness-body li {
   display: flex; align-items: baseline; gap: 8px;
-  padding: 7px 12px; border: 1px solid var(--line); background: #fff;
+  padding: 7px 12px; border: 1px solid var(--line); background: var(--surface-overlay);
 }
-.prep-weakness-body li.hot { border-color: #e9b9a5; background: #fdf5f1; }
+.prep-weakness-body li.hot { border-color: var(--brand-line); background: var(--brand-wash); }
 .prep-weakness-body li strong { font-size: 12px; }
 .prep-weakness-body li span { color: var(--text-tertiary); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 /* 展開側も塗りラベルをやめる。行ごとに橙のブロックが並ぶと数字が読めない */

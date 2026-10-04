@@ -13,7 +13,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   background: var(--surface-soft);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .58);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--surface-overlay) 58%, transparent);
 }
 
 .page-stat-strip > div,
@@ -47,7 +47,7 @@
 }
 
 .feature-shell-light {
-  box-shadow: 0 10px 28px rgba(28, 37, 32, .055);
+  box-shadow: 0 10px 28px color-mix(in oklab, var(--shadow-color) 5.5%, transparent);
 }
 
 /* 一级、二级导航已经承担“我在哪里”的说明；模块首屏只保留可操作状态。 */
@@ -178,7 +178,7 @@
 .focus-language-now-action {
   min-height: 42px;
   border-radius: var(--radius-control);
-  box-shadow: 0 8px 18px rgba(24, 35, 30, .11);
+  box-shadow: 0 8px 18px color-mix(in oklab, var(--shadow-color) 11%, transparent);
 }
 
 .jobs-next-pick > button,
@@ -196,11 +196,11 @@
 .jobs-next-pick > button:hover,
 .focus-language-now-action:hover {
   transform: translateY(-1px);
-  box-shadow: 0 11px 24px rgba(24, 35, 30, .15);
+  box-shadow: 0 11px 24px color-mix(in oklab, var(--shadow-color) 15%, transparent);
 }
 
 .topbar {
-  border-color: rgba(200, 196, 184, .78);
+  border-color: color-mix(in oklab, var(--line-strong) 78%, transparent);
 }
 
 @media (max-width: 1050px) {
@@ -251,7 +251,7 @@
 @media (max-width: 780px) {
   .note-drawer--full .markdown-document h2 {
     background-size: 100% 1px;
-    background-image: linear-gradient(90deg, var(--orange) 0 40px, #dcd8cf 40px);
+    background-image: linear-gradient(90deg, var(--orange) 0 40px, var(--line) 40px);
   }
 }
 
@@ -275,7 +275,7 @@
   border: 1px dashed var(--line);
   border-radius: 10px;
   color: var(--muted);
-  background: rgba(255, 255, 255, .32);
+  background: color-mix(in oklab, var(--surface-overlay) 32%, transparent);
   font-size: 11px;
   text-align: center;
 }
@@ -284,27 +284,27 @@
 
 [data-semantic="fact"] {
   --semantic-tone: var(--green);
-  --semantic-wash: rgba(47, 107, 89, .045);
+  --semantic-wash: color-mix(in oklab, var(--green) 4.5%, transparent);
 }
 
 [data-semantic="analysis"] {
   --semantic-tone: var(--gold);
-  --semantic-wash: rgba(181, 132, 47, .085);
+  --semantic-wash: color-mix(in oklab, var(--gold) 8.5%, transparent);
 }
 
 [data-semantic="action"] {
   --semantic-tone: var(--orange);
-  --semantic-wash: rgba(230, 109, 69, .075);
+  --semantic-wash: color-mix(in oklab, var(--brand) 7.5%, transparent);
 }
 
 [data-semantic="waiting"] {
-  --semantic-tone: #78817d;
-  --semantic-wash: rgba(120, 129, 125, .075);
+  --semantic-tone: var(--text-faint);
+  --semantic-wash: color-mix(in oklab, var(--text-faint) 7.5%, transparent);
 }
 
 [data-semantic="risk"] {
-  --semantic-tone: #b64f42;
-  --semantic-wash: rgba(182, 79, 66, .095);
+  --semantic-tone: var(--danger);
+  --semantic-wash: color-mix(in oklab, var(--interactive) 9.5%, transparent);
 }
 
 .note-card[data-semantic] {
@@ -318,7 +318,7 @@
 }
 
 .note-card[data-semantic="analysis"] {
-  background: linear-gradient(115deg, rgba(181, 132, 47, .08), transparent 48%), #fffdf8;
+  background: linear-gradient(115deg, color-mix(in oklab, var(--gold) 8%, transparent), transparent 48%), var(--surface-raised-solid);
 }
 
 .note-card[data-semantic]::before {
@@ -359,12 +359,12 @@
 .note-card-decision {
   padding: 12px 13px;
   border: 1px solid color-mix(in srgb, var(--semantic-tone) 17%, var(--line));
-  background: rgba(255, 255, 255, .5);
+  background: color-mix(in oklab, var(--surface-overlay) 50%, transparent);
 }
 
 .note-card-decision > p {
   margin-top: 6px;
-  color: #626b66;
+  color: var(--text-tertiary);
   font-size: 9px;
   line-height: 1.65;
   -webkit-line-clamp: 2;
@@ -380,7 +380,7 @@
 }
 
 .note-card-decision dt {
-  color: #979c98;
+  color: var(--text-faint);
   font-size: 7px;
 }
 
@@ -423,7 +423,7 @@
 
 .calendar-history {
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, .34);
+  background: color-mix(in oklab, var(--surface-overlay) 34%, transparent);
 }
 
 .calendar-history > summary {

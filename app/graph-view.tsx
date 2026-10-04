@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from "react";
 import type {
   KnowledgeGraphSceneLink,
@@ -513,7 +514,7 @@ function CanvasKnowledgeGraph({
       <div className="graph-caption"><span>移动鼠标探索节点</span><strong>{nodes.length} 个节点 · {links.length} 条关系</strong></div>
       {hovered && (
         <div className="graph-tooltip">
-          <span style={{ color: hovered.node.color }}>{hovered.node.kindLabel} · {hovered.node.groupLabel}</span>
+          <span className="accent-ink" style={{ "--accent": hovered.node.color } as CSSProperties}>{hovered.node.kindLabel} · {hovered.node.groupLabel}</span>
           <strong>{hovered.node.title}</strong>
           <small>{hovered.degree} 条关系{hovered.node.openable ? " · 点击查看" : " · 派生实体"}</small>
         </div>

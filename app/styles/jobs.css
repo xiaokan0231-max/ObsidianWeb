@@ -3,18 +3,18 @@
 /* ===== AI 推荐岗位 ===== */
 
 /* 匹配度色阶：9+ 橙 / 7+ 绿 / 5+ 琥珀 / 其余灰 */
-.rate-high { --rate: var(--orange); --rate-soft: rgba(230, 109, 69, 0.12); }
-.rate-good { --rate: var(--green); --rate-soft: rgba(47, 107, 89, 0.12); }
-.rate-mid { --rate: var(--gold); --rate-soft: rgba(181, 132, 47, 0.12); }
-.rate-low { --rate: var(--muted); --rate-soft: rgba(111, 119, 114, 0.12); }
+.rate-high { --rate: var(--orange); --rate-soft: color-mix(in oklab, var(--brand) 12%, transparent); }
+.rate-good { --rate: var(--green); --rate-soft: color-mix(in oklab, var(--green) 12%, transparent); }
+.rate-mid { --rate: var(--gold); --rate-soft: color-mix(in oklab, var(--gold) 12%, transparent); }
+.rate-low { --rate: var(--muted); --rate-soft: color-mix(in oklab, var(--text-tertiary) 12%, transparent); }
 
 /* 应募状态配色：--tone 字色 / --tone-bg 底 / --tone-line 边 / --tone-bar 色条与圆点 */
-.tone-pending { --tone: var(--gold); --tone-bg: rgba(181, 132, 47, 0.08); --tone-line: rgba(181, 132, 47, 0.4); --tone-bar: var(--gold); }
-.tone-progress { --tone: var(--green); --tone-bg: rgba(47, 107, 89, 0.07); --tone-line: rgba(47, 107, 89, 0.4); --tone-bar: var(--green); }
+.tone-pending { --tone: var(--gold); --tone-bg: color-mix(in oklab, var(--gold) 8%, transparent); --tone-line: color-mix(in oklab, var(--gold) 40%, transparent); --tone-bar: var(--gold); }
+.tone-progress { --tone: var(--green); --tone-bg: color-mix(in oklab, var(--green) 7%, transparent); --tone-line: color-mix(in oklab, var(--green) 40%, transparent); --tone-bar: var(--green); }
 .tone-offer { --tone: var(--paper); --tone-bg: var(--green); --tone-line: var(--green); --tone-bar: var(--green); }
-.tone-reject { --tone: #8f938e; --tone-bg: transparent; --tone-line: var(--line); --tone-bar: #8f938e; }
+.tone-reject { --tone: var(--text-faint); --tone-bg: transparent; --tone-line: var(--line); --tone-bar: var(--text-faint); }
 .tone-neutral { --tone: var(--muted); --tone-bg: transparent; --tone-line: var(--line); --tone-bar: var(--muted); }
-.tone-interview { --tone: var(--orange); --tone-bg: rgba(230, 109, 69, 0.08); --tone-line: rgba(230, 109, 69, 0.4); --tone-bar: var(--orange); }
+.tone-interview { --tone: var(--orange); --tone-bg: color-mix(in oklab, var(--brand) 8%, transparent); --tone-line: color-mix(in oklab, var(--brand) 40%, transparent); --tone-bar: var(--orange); }
 
 .jobs-view {
   display: flex;
@@ -60,7 +60,7 @@
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgba(255, 255, 255, .46);
+  background: color-mix(in oklab, var(--surface-overlay) 46%, transparent);
 }
 
 .jobs-stat > button {
@@ -83,9 +83,9 @@
 .jobs-stat > button:last-child { border-right: 0; }
 
 /* 格子可点：点下去＝替换全部筛选，只看这个数字里的岗位。 */
-.jobs-stat > button:hover { background: rgba(255, 255, 255, .7); }
+.jobs-stat > button:hover { background: color-mix(in oklab, var(--surface-overlay) 70%, transparent); }
 .jobs-stat > button:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
-.jobs-stat > button[aria-pressed="true"] { background: rgba(255, 255, 255, .85); box-shadow: inset 0 -2px 0 var(--green); }
+.jobs-stat > button[aria-pressed="true"] { background: color-mix(in oklab, var(--surface-overlay) 85%, transparent); box-shadow: inset 0 -2px 0 var(--green); }
 
 .jobs-stat strong {
   grid-column: 2;
@@ -119,9 +119,9 @@
   border: 1px solid var(--line);
   border-radius: 14px;
   background:
-    radial-gradient(circle at 82% 0%, rgba(230, 109, 69, .1), transparent 26%),
-    linear-gradient(120deg, #fffaf3 0%, var(--surface) 62%);
-  box-shadow: 0 14px 36px rgba(31, 44, 37, .05);
+    radial-gradient(circle at 82% 0%, color-mix(in oklab, var(--brand) 10%, transparent), transparent 26%),
+    linear-gradient(120deg, var(--surface) 0%, var(--surface) 62%);
+  box-shadow: 0 14px 36px color-mix(in oklab, var(--shadow-color) 5%, transparent);
 }
 
 .jobs-next-score {
@@ -285,7 +285,7 @@
   font-family: var(--font-geist-mono), monospace;
   font-size: 10px;
   letter-spacing: 0.16em;
-  color: #959a96;
+  color: var(--text-faint);
 }
 
 .jobs-filter-reset {
@@ -297,7 +297,7 @@
   cursor: pointer;
 }
 
-.jobs-filter-reset:hover { color: #ee7c55; }
+.jobs-filter-reset:hover { color: var(--brand-on-inverse); }
 
 .jobs-filter-groups {
   display: grid;
@@ -339,20 +339,20 @@
 }
 
 .job-card:hover {
-  border-color: #b2b2ac;
-  box-shadow: 0 13px 28px rgba(32, 39, 35, 0.08);
+  border-color: var(--line-strong);
+  box-shadow: 0 13px 28px color-mix(in oklab, var(--shadow-color) 8%, transparent);
   transform: translateY(-3px);
 }
 
 .job-card.compared {
   border-color: var(--violet);
-  box-shadow: 0 0 0 1px rgba(116, 102, 169, 0.35);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--violet) 35%, transparent);
 }
 
 .job-card mark,
 .job-list mark,
 .job-kanban mark {
-  background: rgba(181, 132, 47, 0.28);
+  background: color-mix(in oklab, var(--gold) 28%, transparent);
   color: inherit;
   padding: 0 1px;
 }
@@ -422,14 +422,14 @@
 
 .job-verify.verify-verified {
   color: var(--green);
-  border-color: rgba(47, 107, 89, 0.4);
-  background: rgba(47, 107, 89, 0.07);
+  border-color: color-mix(in oklab, var(--green) 40%, transparent);
+  background: color-mix(in oklab, var(--green) 7%, transparent);
 }
 
 .job-verify.verify-warned {
   color: var(--orange);
-  border-color: rgba(230, 109, 69, 0.4);
-  background: rgba(230, 109, 69, 0.08);
+  border-color: color-mix(in oklab, var(--brand) 40%, transparent);
+  background: color-mix(in oklab, var(--brand) 8%, transparent);
 }
 
 .job-salary-row {
@@ -452,7 +452,7 @@
 }
 
 .job-rate-meta {
-  color: #959a96;
+  color: var(--text-faint);
   font-size: 11px;
 }
 
@@ -473,7 +473,7 @@
 
 .job-facts .job-remote {
   color: var(--violet);
-  border-color: rgba(116, 102, 169, 0.35);
+  border-color: color-mix(in oklab, var(--violet) 35%, transparent);
 }
 
 /* 入库日。桁を揃えないと「7/9」と「7/22」で幅が跳ねて、カードの並びがガタつく。 */
@@ -485,8 +485,8 @@
 /* 今日入ってきた分だけ塗る。ここが他のチップと同じ灰色だと探す意味がなくなる。 */
 .job-intake.tone-new {
   color: var(--gold);
-  border-color: rgba(181, 132, 47, 0.45);
-  background: rgba(181, 132, 47, 0.1);
+  border-color: color-mix(in oklab, var(--gold) 45%, transparent);
+  background: color-mix(in oklab, var(--gold) 10%, transparent);
   font-weight: 600;
 }
 
@@ -519,7 +519,7 @@
   font-family: var(--font-geist-mono), monospace;
   font-size: 11px;
   color: var(--violet);
-  background: rgba(116, 102, 169, 0.09);
+  background: color-mix(in oklab, var(--violet) 9%, transparent);
   padding: 3px 8px;
   letter-spacing: 0.02em;
 }
@@ -529,7 +529,7 @@
 }
 
 .job-block {
-  border-top: 1px solid #e4e0d7;
+  border-top: 1px solid var(--line-soft);
   padding-top: 11px;
 }
 
@@ -539,7 +539,7 @@
   font-family: var(--font-geist-mono), monospace;
   font-size: 9px;
   letter-spacing: 0.14em;
-  color: #959a96;
+  color: var(--text-faint);
 }
 
 .job-block p {
@@ -590,8 +590,8 @@
 }
 
 .job-official-link {
-  border: 1px solid rgba(42, 111, 78, 0.34);
-  background: rgba(42, 111, 78, 0.08);
+  border: 1px solid color-mix(in oklab, var(--green) 34%, transparent);
+  background: color-mix(in oklab, var(--green) 8%, transparent);
   color: var(--green);
   padding-inline: 10px;
 }
@@ -659,17 +659,17 @@
 
 .job-list-head {
   padding: 11px 18px;
-  border-bottom: 1px solid #e0dcd2;
+  border-bottom: 1px solid var(--line);
   font-family: var(--font-geist-mono), monospace;
   font-size: 9px;
   letter-spacing: 0.12em;
-  color: #959a96;
+  color: var(--text-faint);
 }
 
 .job-list-row {
   width: 100%;
   border: 0;
-  border-bottom: 1px solid #ece9e0;
+  border-bottom: 1px solid var(--line-soft);
   background: transparent;
   padding: 13px 18px;
   cursor: pointer;
@@ -681,7 +681,7 @@
 }
 
 .job-list-row:hover {
-  background: rgba(24, 35, 30, 0.03);
+  background: color-mix(in oklab, var(--ink) 3%, transparent);
 }
 
 .job-list-title {
@@ -734,7 +734,7 @@
   font-size: 10px;
   font-style: normal;
   color: var(--violet);
-  background: rgba(116, 102, 169, 0.09);
+  background: color-mix(in oklab, var(--violet) 9%, transparent);
   padding: 2px 6px;
 }
 
@@ -793,7 +793,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid #e0dcd2;
+  border: 1px solid var(--line);
   border-top: 3px solid var(--tone-bar);
   background: var(--surface);
 }
@@ -804,7 +804,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 12px 14px;
-  border-bottom: 1px solid #ece9e0;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .job-kanban-head strong {
@@ -819,7 +819,7 @@
 .job-kanban-head span {
   font-family: var(--font-geist-mono), monospace;
   font-size: 11px;
-  color: #959a96;
+  color: var(--text-faint);
 }
 
 .job-kanban-body {
@@ -834,9 +834,9 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  border: 1px solid #e0dcd2;
+  border: 1px solid var(--line);
   border-left: 3px solid var(--rate);
-  background: #fff;
+  background: var(--surface-overlay);
   padding: 11px 12px;
   text-align: left;
   cursor: pointer;
@@ -844,9 +844,9 @@
 }
 
 .job-kanban-card:hover {
-  border-color: #cfcbc0;
+  border-color: var(--line-strong);
   border-left-color: var(--rate);
-  box-shadow: 0 8px 18px rgba(32, 39, 35, 0.08);
+  box-shadow: 0 8px 18px color-mix(in oklab, var(--shadow-color) 8%, transparent);
 }
 
 .job-kanban-title {
@@ -888,7 +888,7 @@
 .job-kanban-empty {
   padding: 10px 0;
   text-align: center;
-  color: #b7b3a8;
+  color: var(--text-on-inverse-muted);
   font-size: 11px;
 }
 
@@ -939,7 +939,7 @@
   font-family: var(--font-geist-mono), monospace;
   font-size: 10px;
   letter-spacing: 0.08em;
-  color: #959a96;
+  color: var(--text-faint);
 }
 
 .job-week-kpis {
@@ -949,7 +949,7 @@
 }
 
 .job-week-kpi {
-  border: 1px solid #e0dcd2;
+  border: 1px solid var(--line);
   background: var(--surface);
   padding: 16px 18px;
 }
@@ -982,7 +982,7 @@
 }
 
 .job-week-panel {
-  border: 1px solid #e0dcd2;
+  border: 1px solid var(--line);
   background: var(--surface);
   padding: 20px 22px;
 }
@@ -992,7 +992,7 @@
   font-family: var(--font-geist-mono), monospace;
   font-size: 9px;
   letter-spacing: 0.16em;
-  color: #959a96;
+  color: var(--text-faint);
 }
 
 .job-week-timeline {
@@ -1007,7 +1007,7 @@
   gap: 12px;
   align-items: center;
   border: 0;
-  border-top: 1px solid #ece9e0;
+  border-top: 1px solid var(--line-soft);
   background: transparent;
   padding: 11px 0;
   text-align: left;
@@ -1017,7 +1017,7 @@
 .job-week-event time {
   font-family: var(--font-geist-mono), monospace;
   font-size: 11px;
-  color: #959a96;
+  color: var(--text-faint);
 }
 
 .job-week-event > span {
@@ -1078,7 +1078,7 @@
   width: 17px;
   height: 17px;
   margin-top: 1px;
-  border: 1px solid #c4c0b5;
+  border: 1px solid var(--line-strong);
   border-radius: 3px;
 }
 
@@ -1196,8 +1196,8 @@
 }
 
 .job-week-note {
-  border: 1px solid rgba(181, 132, 47, 0.35);
-  background: rgba(181, 132, 47, 0.06);
+  border: 1px solid color-mix(in oklab, var(--gold) 35%, transparent);
+  background: color-mix(in oklab, var(--gold) 6%, transparent);
   padding: 16px 18px;
 }
 
@@ -1209,7 +1209,7 @@
 
 .job-week-note p {
   margin: 8px 0 0;
-  color: #8a6f3a;
+  color: var(--gold-text);
   font-size: 11.5px;
   line-height: 1.7;
 }
@@ -1430,7 +1430,7 @@
 }
 
 .jobs-view-switch button + button {
-  border-left: 1px solid #e0dcd2;
+  border-left: 1px solid var(--line);
 }
 
 .jobs-view-switch button:hover {
@@ -1453,7 +1453,7 @@
   margin-bottom: 10px;
   font-size: 10.5px;
   letter-spacing: 0.12em;
-  color: #8e938f;
+  color: var(--text-faint);
 }
 
 .job-chips {
@@ -1492,7 +1492,7 @@
 }
 
 .job-chip:hover {
-  border-color: #b2b2ac;
+  border-color: var(--line-strong);
   color: var(--ink);
 }
 
@@ -1509,7 +1509,7 @@
  */
 .job-chip.empty {
   border-style: dashed;
-  border-color: #c9c5ba;
+  border-color: var(--line-strong);
 }
 
 .job-chip.empty:hover {
@@ -1542,7 +1542,7 @@
   font-family: var(--font-geist-mono), monospace;
   font-size: 10px;
   letter-spacing: 0.1em;
-  color: #959a96;
+  color: var(--text-faint);
 }
 
 /* 状态下拉：彩色 pill 上覆盖一个透明 select */
@@ -1709,7 +1709,7 @@
 
 .job-status-note-error {
   flex: 1 0 100%;
-  color: var(--red, #c0392b);
+  color: var(--red, var(--danger));
   font-size: 11.5px;
 }
 
@@ -1734,17 +1734,17 @@
   gap: 2px 8px;
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid var(--red, #c0392b);
+  border: 1px solid var(--red, var(--danger));
   border-left-width: 3px;
   background: var(--surface);
-  box-shadow: 0 6px 24px rgb(0 0 0 / 18%);
+  box-shadow: 0 6px 24px color-mix(in oklab, var(--shadow-color) 18%, transparent);
   color: var(--ink);
   font-size: 12px;
   line-height: 1.6;
 }
 
 .job-status-orphan-alerts b {
-  color: var(--red, #c0392b);
+  color: var(--red, var(--danger));
 }
 
 .job-status-orphan-alerts span {
@@ -1782,13 +1782,13 @@
 
 .job-compare-toggle.active {
   border-color: var(--violet);
-  background: rgba(116, 102, 169, 0.12);
+  background: color-mix(in oklab, var(--violet) 12%, transparent);
   color: var(--violet);
 }
 
 .job-compare-toggle:disabled {
   border-color: var(--line);
-  color: #c3c0b7;
+  color: var(--text-on-inverse-muted);
   cursor: not-allowed;
 }
 
@@ -1805,10 +1805,10 @@
   max-width: calc(100vw - 60px);
   border: 1px solid var(--ink);
   border-radius: 4px;
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--surface-inverse);
+  color: var(--text-on-inverse);
   padding: 12px 18px;
-  box-shadow: 0 18px 45px rgba(24, 35, 30, 0.4);
+  box-shadow: 0 18px 45px color-mix(in oklab, var(--shadow-color) 40%, transparent);
 }
 
 .job-compare-count {
@@ -1826,7 +1826,7 @@
 }
 
 .job-compare-items button {
-  border: 1px solid rgba(243, 240, 232, 0.35);
+  border: 1px solid color-mix(in oklab, var(--paper) 35%, transparent);
   border-radius: 2px;
   background: transparent;
   color: var(--paper);
@@ -1931,8 +1931,8 @@
 
 .job-detail-warning {
   border-left: 3px solid var(--orange);
-  background: rgba(230, 109, 69, 0.07);
-  color: #8a4a2b;
+  background: color-mix(in oklab, var(--brand) 7%, transparent);
+  color: var(--danger-strong);
   font-size: 12.5px;
   line-height: 1.7;
   margin: 0;
@@ -1970,7 +1970,7 @@
 }
 
 .job-detail-caution p {
-  color: #8a5a2b;
+  color: var(--warning);
 }
 
 /* 并排对比 */
@@ -1983,7 +1983,7 @@
   align-items: center;
   justify-content: center;
   padding: 32px;
-  background: rgba(14, 21, 17, 0.5);
+  background: color-mix(in oklab, var(--shade) 50%, transparent);
   backdrop-filter: blur(4px);
   animation: fade-in 180ms ease;
 }
@@ -1993,7 +1993,7 @@
   max-height: 100%;
   display: flex;
   flex-direction: column;
-  background: #f8f6ef;
+  background: var(--surface);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
 }
@@ -2044,7 +2044,7 @@
 .job-compare-table thead th {
   position: sticky;
   top: 0;
-  background: #f8f6ef;
+  background: var(--surface);
   z-index: 1;
 }
 
@@ -2114,7 +2114,7 @@
 .job-fit-access { color: var(--muted); }
 .job-fit-axes { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 18px; font-size: 12px; }
 .job-fit-axes li { display: grid; grid-template-columns: 5em minmax(0, 1fr) 3.4em; align-items: center; gap: 8px; }
-.job-fit-axes i { display: block; height: 6px; border-radius: 3px; background: rgba(47, 107, 89, 0.12); overflow: hidden; }
+.job-fit-axes i { display: block; height: 6px; border-radius: 3px; background: color-mix(in oklab, var(--green) 12%, transparent); overflow: hidden; }
 .job-fit-axes b { display: block; height: 100%; background: var(--green); }
 .job-fit-axes small { text-align: right; color: var(--muted); }
 .job-fit-gates { margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--muted); }

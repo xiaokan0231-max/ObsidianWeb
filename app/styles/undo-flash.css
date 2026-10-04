@@ -11,24 +11,24 @@
   max-width: min(720px, calc(100vw - 32px));
   padding: 10px 12px 10px 16px;
   border-radius: 4px;
-  background: #1f2a25;
-  color: #f4f1e8;
-  box-shadow: 0 8px 24px rgba(20, 28, 24, 0.24);
+  background: var(--surface-inverse-soft);
+  color: var(--text-on-inverse);
+  box-shadow: 0 8px 24px color-mix(in oklab, var(--shadow-color) 24%, transparent);
   font-size: 13px;
 }
 .undo-flash > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .undo-flash-action {
   flex: 0 0 auto;
   padding: 3px 10px;
-  border: 1px solid rgba(244, 241, 232, 0.5);
+  border: 1px solid color-mix(in oklab, var(--paper) 50%, transparent);
   border-radius: 2px;
   background: transparent;
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
-.undo-flash-action:hover:not(:disabled) { background: rgba(244, 241, 232, 0.12); }
+.undo-flash-action:hover:not(:disabled) { background: color-mix(in oklab, var(--paper) 12%, transparent); }
 .undo-flash-action:disabled { opacity: 0.6; cursor: default; }
-.undo-flash em { font-style: normal; color: #f3b89f; }
+.undo-flash em { font-style: normal; color: var(--brand-on-inverse); }
 .undo-flash-close { flex: 0 0 auto; border: 0; background: transparent; color: inherit; font-size: 16px; line-height: 1; cursor: pointer; opacity: 0.7; }
 .undo-flash-close:hover { opacity: 1; }

@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { stripMarkdown, getTitle, type Note } from "@/lib/notes";
@@ -200,8 +201,8 @@ export default function SearchPalette({
             onClick={() => onOpen(note)}
           >
             <span
-              className="result-group"
-              style={{ background: GROUPS[getGroup(note.path)].tint, color: GROUPS[getGroup(note.path)].color }}
+              className="result-group accent-chip"
+              style={{ "--accent": GROUPS[getGroup(note.path)].color } as CSSProperties}
             >
               {text.groups[getGroup(note.path)]}
             </span>

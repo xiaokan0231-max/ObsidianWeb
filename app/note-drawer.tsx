@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import MarkdownDocument from "./markdown-document";
 import NoteReader from "./note-reader";
 import { captureReadingPosition, restoreReadingPosition, type ReadingPosition } from "./reading-mode";
@@ -125,7 +125,7 @@ export default function NoteDrawer({
     <div className="drawer-backdrop drawer-backdrop--full" inert={readerOpen} aria-hidden={readerOpen || undefined}>
       <aside ref={dialogRef} tabIndex={-1} className="note-drawer note-drawer--full" aria-label="记忆详情" aria-modal="true" role="dialog">
         <header className="drawer-header">
-          <div><span style={{ color: GROUPS[group].color }}>{GROUPS[group].label}</span><small>{note.path}</small></div>
+          <div><span className="accent-ink" style={{ "--accent": GROUPS[group].color } as CSSProperties}>{GROUPS[group].label}</span><small>{note.path}</small></div>
           <button className="reader-entry" onClick={() => {
             if (scrollRef.current) setReaderPosition({ path: note.path, position: captureReadingPosition(scrollRef.current) });
             setReaderOpen(true);

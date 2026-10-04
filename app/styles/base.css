@@ -33,6 +33,10 @@
   --brand-on-inverse: #e8a48d;
   --gold-on-inverse: #e6ce95;
   --violet-on-inverse: #d8cdec;
+  --green-on-inverse: #78b594;
+  --info-on-inverse: #7f9fb5;
+  --danger-on-inverse: #df7d61;
+  --gold-on-inverse-strong: #d6b35c;
 
   --ink: #18231e;
   --text-primary: #18231e;
@@ -89,6 +93,8 @@
   --gold: #b5842f;
   /* --gold 作文字只有 2.9:1；金色文字走这个。 */
   --gold-text: #8a6320;
+  /* 面谈（非选考）的青绿：公司卷宗与本场面试 v2 的强调色。 */
+  --teal: #12646a;
 
   --shadow-color: #1c2520;
   --shadow: 0 18px 55px color-mix(in oklab, var(--shadow-color) 12%, transparent);
@@ -192,8 +198,10 @@
   --text-secondary: #b5bfb8;
   --muted: #a2aca5;
   --text-tertiary: #8f9a93;
-  --text-faint: #78847d;
-  --text-disabled: #64706a;
+  /* 浅色里大量小标签（10–12px 的计数、表头）用的是这两档灰；暗色下若照浅色的比例压暗，
+     在卡面上只剩 3:1。所以暗色把它们抬到对凸起面 ≥4.5（faint）/ ≥3.8（disabled）。 */
+  --text-faint: #8a958f;
+  --text-disabled: #76827b;
   --text-display: #f0e4d2;
 
   --line: #253630;
@@ -232,6 +240,7 @@
   --violet-wash: color-mix(in oklab, var(--violet) 16%, var(--surface));
   --gold: #d9ac52;
   --gold-text: #e0b96a;
+  --teal: #5fb7bd;
 
   --shadow-color: #000000;
   --shadow: 0 18px 55px color-mix(in oklab, var(--shadow-color) 55%, transparent);
@@ -282,6 +291,16 @@ a { color: inherit; }
   background: var(--selection-bg);
 }
 
+/*
+ * 分区色（lib/memory-atlas-data.ts 的 GROUPS，3D 也在用，所以 JS 里的值不改）直接当文字色时，
+ * 墨绿・灰在暗色底上读不清：经 --accent 传进来，暗色下往正文色方向提亮。
+ */
+.accent-ink { color: var(--accent); }
+.accent-chip { background: color-mix(in oklab, var(--accent) 16%, var(--surface-overlay)); color: var(--accent); }
+:root:not([data-theme="light"]) :is(.accent-ink, .accent-chip) {
+  color: color-mix(in oklab, var(--accent) 58%, var(--ink));
+}
+
 button,
 input,
 textarea,
@@ -312,7 +331,7 @@ button {
   display: flex;
   flex-direction: column;
   padding: 30px 22px 24px;
-  background: #ede9df;
+  background: var(--surface-sunken);
   border-right: 1px solid var(--line);
   z-index: 30;
   transition: padding 200ms ease;
@@ -340,7 +359,7 @@ button {
   display: grid;
   place-items: center;
   background: var(--ink);
-  color: #f7f4ea;
+  color: var(--on-fill);
   font-family: "Songti SC", "Noto Serif CJK SC", serif;
   font-size: 20px;
   border-radius: 50% 50% 50% 12%;
@@ -362,7 +381,7 @@ button {
 .brand-copy small {
   margin-top: 6px;
   font-family: var(--font-geist-mono), monospace;
-  color: #7c827e;
+  color: var(--text-faint);
   font-size: 8px;
   letter-spacing: 0.16em;
 }
@@ -407,12 +426,12 @@ button {
 
 .side-nav a:hover {
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.58);
+  background: color-mix(in oklab, var(--surface-overlay) 58%, transparent);
   transform: translateX(2px);
 }
 
 .side-nav a.active {
-  color: #fff;
+  color: var(--on-fill);
   background: var(--ink);
 }
 
@@ -443,7 +462,7 @@ button {
   min-height: 34px;
   gap: 9px;
   padding: 0 9px;
-  color: #7c837e;
+  color: var(--text-faint);
 }
 
 .side-subnav .nav-glyph {
@@ -462,7 +481,7 @@ button {
  * 必须排在 .side-nav a.active 之后：两者特异性相同，靠顺序取胜。
  */
 .side-subnav a.active {
-  background: rgba(255, 255, 255, 0.66);
+  background: color-mix(in oklab, var(--surface-overlay) 66%, transparent);
   color: var(--ink);
 }
 
