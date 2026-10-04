@@ -701,6 +701,7 @@ function InterviewReview({
       <>
         <InterviewNovelReader
           key={doc.key}
+          documentKey={`review-novel:${doc.key}`}
           company={doc.company}
           date={doc.date}
           round={doc.round}
@@ -710,8 +711,9 @@ function InterviewReview({
           onLanguageChange={switchNovelLang}
           onExit={() => switchMode(previousMode.current)}
           onBack={backToList}
+          // 阅读层 portal 到 body 并把外壳设为 inert，写入提示留在外壳里就关不掉，所以随阅读层一起挂。
+          overlay={<ReviewWriteAlerts alerts={writeAlerts} onDismiss={dismissWriteAlert} />}
         />
-        <ReviewWriteAlerts alerts={writeAlerts} onDismiss={dismissWriteAlert} />
       </>
     );
   }

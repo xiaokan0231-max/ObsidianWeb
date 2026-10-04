@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState, type CSSProperties } from "react";
 import { formatDate, getString, getTitle, getType, noteBasename, type Note } from "@/lib/notes";
-import { backlinkContext, findHeadingBySection, getGroup, GROUPS, noteOutlinks, trustLayer, typeLabel } from "@/lib/memory-atlas-data";
+import { backlinkContext, findHeadingBySection, getGroup, GROUPS, localizedGroupLabel, localizedTrustLabel, localizedTypeLabel, noteOutlinks } from "@/lib/memory-atlas-data";
 import { headingPlainText, scanReadingHeadings } from "@/lib/reading-document";
 import { resolveNoteLink } from "@/lib/wiki-target";
 import type { SnippetPart } from "@/lib/search-snippet";
@@ -70,12 +70,13 @@ export function SnippetText({ parts }: { parts: readonly SnippetPart[] }) {
   return <>{parts.map((part, index) => part.hit ? <mark key={index}>{part.text}</mark> : <span key={index}>{part.text}</span>)}</>;
 }
 
-function RelatedGroup({ title, notes, context, onOpen, copy }: {
+function RelatedGroup({ title, notes, context, onOpen, copy, locale }: {
   title: string;
   notes: Note[];
   context?: (source: Note) => SnippetPart[] | null;
   onOpen?: (note: Note) => void;
   copy: (typeof RELATED_COPY)[UiLocale];
+  locale: UiLocale;
 }) {
   const [expanded, setExpanded] = useState(false);
   if (!notes.length) return null;
@@ -89,7 +90,7 @@ function RelatedGroup({ title, notes, context, onOpen, copy }: {
           return (
             <button key={item.path} type="button" onClick={() => onOpen?.(item)}
               style={{ "--related-accent": GROUPS[getGroup(item.path)].color } as CSSProperties}>
-              <small>{GROUPS[getGroup(item.path)].label}<span aria-hidden="true"> · </span>{typeLabel(getType(item))}</small>
+              <small>{localizedGroupLabel(getGroup(item.path), locale)}<span aria-hidden="true"> · </span>{localizedTypeLabel(getType(item), locale)}</small>
               <strong>{headingPlainText(getTitle(item))}</strong>
               {snippet && <span className="reader-related-context"><SnippetText parts={snippet} /></span>}
             </button>
@@ -118,9 +119,9 @@ function ReaderRelated({ note, backlinks, outlinks, onOpen }: {
   if (!backlinks.length && !outlinks.length) return null;
   return (
     <nav className="reader-related" aria-label={copy.label}>
-      <RelatedGroup title={copy.mentionedBy(backlinks.length)} notes={backlinks} copy={copy} onOpen={onOpen}
+      <RelatedGroup title={copy.mentionedBy(backlinks.length)} notes={backlinks} copy={copy} locale={locale} onOpen={onOpen}
         context={(source) => backlinkContext(source, basename)} />
-      <RelatedGroup title={copy.linksTo(outlinks.length)} notes={outlinks} copy={copy} onOpen={onOpen} />
+      <RelatedGroup title={copy.linksTo(outlinks.length)} notes={outlinks} copy={copy} locale={locale} onOpen={onOpen} />
     </nav>
   );
 }
@@ -139,10 +140,10 @@ export default function NoteReader({ note, section, onClose, onOpenWiki, backlin
   /** allNotes 是否为全库：局部范围里查不到的双链不能标成「找不到」，只有全库时才做悬浮预览与断链标记。 */
   wikiIndexComplete?: boolean;
 }) {
-  const copy = NOTE_READER_COPY[useUiLocale().locale];
+  const { locale } = useUiLocale();
+  const copy = NOTE_READER_COPY[locale];
   const headings = useMemo(() => scanReadingHeadings(note.content), [note.content]);
   const heading = findHeadingBySection(headings, section);
-  const trust = trustLayer(note);
   const outlinks = useMemo(() => (allNotes ? noteOutlinks(allNotes, note) : []), [allNotes, note]);
   const resolveWiki = useCallback(
     (target: string, heading?: string) => (allNotes ? resolveNoteLink(allNotes, target, heading)?.note ?? null : null),
@@ -151,8 +152,8 @@ export default function NoteReader({ note, section, onClose, onOpenWiki, backlin
   return <ReadingMode key={`${note.path}#${section ?? ""}`} documentKey={`note:${note.path}`}
     presentation={scene ? "scene" : "page"}
     backLabel={copy.back[scene ?? "page"]}
-    title={headingPlainText(getTitle(note))} eyebrow={scene ? copy.eyebrow[scene] : typeLabel(getType(note))}
-    metadata={[trust.label, copy.updated(formatDate(note.stat.mtime, true))]}
+    title={headingPlainText(getTitle(note))} eyebrow={scene ? copy.eyebrow[scene] : localizedTypeLabel(getType(note), locale)}
+    metadata={[localizedTrustLabel(note, locale), copy.updated(formatDate(note.stat.mtime, true))]}
     headerNote={scene ? <p className="nr-reading-note">{copy.sceneNote}<span> / </span>{copy.sceneHint}</p> : undefined}
     headings={headings} initialHeadingId={heading?.id} initialPosition={initialPosition} onClose={onClose}
     footerActions={<ReaderRelated note={note} backlinks={backlinks} outlinks={outlinks} onOpen={onOpen} />}

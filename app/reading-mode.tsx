@@ -233,11 +233,14 @@ export function useReadingProgress(scrollRef: RefObject<HTMLElement | null>, {
   return active;
 }
 
-/** 阅读工具与文档内容分离；语言选择只由真实存在的对应版本提供。 */
+/**
+ * 全站唯一的阅读层：笔记、准备材料／临场卡、回答库、面试实录全文都只给正文，外壳都在这里。
+ * 阅读工具与文档内容分离；语言选择只由真实存在的对应版本提供。
+ */
 export default function ReadingMode({
   documentKey, title, eyebrow: eyebrowProp, metadata = [], headings = [], children,
   onClose, backLabel: backLabelProp, presentation = "page", languageSwitch, headerNote, information,
-  initialHeadingId, initialPosition, endLabel: endLabelProp, endNote, footerActions,
+  initialHeadingId, initialPosition, endLabel: endLabelProp, endNote, footerActions, overlay,
 }: {
   documentKey: string;
   title: string;
@@ -257,6 +260,11 @@ export default function ReadingMode({
   endLabel?: string;
   endNote?: string;
   footerActions?: ReactNode;
+  /**
+   * 挂在阅读层里、正文之外的固定层（例如复盘页的写入结果提示）。
+   * 阅读层打开时 .app-shell 整体 inert，留在外壳里的提示看得见却点不了、读屏也不播报，所以要放进来。
+   */
+  overlay?: ReactNode;
 }) {
   const copy = READER_COPY[useUiLocale().locale];
   // 不传时的默认文字跟界面语言走；默认参数里取不到 hook，所以放到这里补。
@@ -377,7 +385,7 @@ export default function ReadingMode({
       }}>
       <header ref={toolbarRef} className="nr-toolbar">
         <div className="nr-toolbar-start">
-          <button className="nr-exit" onClick={close}><span aria-hidden="true">←</span>{backLabel}</button>
+          <button className="nr-exit" title={`${backLabel}（Esc）`} onClick={close}><span aria-hidden="true">←</span>{backLabel}</button>
           <span className="nr-toolbar-title">{presentation === "stage" ? eyebrow : copy.fullText}</span>
         </div>
         <div className="nr-controls">
@@ -401,7 +409,7 @@ export default function ReadingMode({
         </div>
       </header>
       <div className="nr-progress-track" aria-hidden="true"><i /></div>
-      {menu === "toc" && <nav id={`${id}-toc`} className="nr-toc reader-menu" aria-label={copy.tocLabel}>
+      {menu === "toc" && <nav id={`${id}-toc`} className="nr-toc" aria-label={copy.tocLabel}>
         <header><span>{copy.tocTitle}</span><button aria-label={copy.closeToc} onClick={closeMenu}>×</button></header>
         <p>{copy.tocSummary(headings.length)}</p>
         {headings.map((heading, index) => <button key={heading.id} data-level={heading.level ?? 2} aria-current={activeHeading === heading.id ? "location" : undefined} onClick={() => {
@@ -409,7 +417,7 @@ export default function ReadingMode({
           closeMenu();
         }}><span>{String(index + 1).padStart(2, "0")}</span><span lang={heading.lang}>{heading.text}</span></button>)}
       </nav>}
-      {menu === "info" && <aside id={`${id}-info`} className="nr-toc reader-menu reader-information" aria-label={copy.information}>
+      {menu === "info" && <aside id={`${id}-info`} className="nr-toc reader-information" aria-label={copy.information}>
         <header><span>{copy.information}</span><button aria-label={copy.closeInformation} onClick={closeMenu}>×</button></header>{information}
       </aside>}
       <div ref={scrollRef} className="nr-scroll" tabIndex={0} aria-label={copy.article} onClick={() => { if (menu) setMenu(null); }}>
@@ -425,6 +433,7 @@ export default function ReadingMode({
         </article>
       </div>
       <footer className="nr-status"><span>{headings.length > 0 ? `${String(currentIndex + 1).padStart(2, "0")} / ${String(headings.length).padStart(2, "0")}` : copy.whole}<i>{headings[currentIndex]?.text ?? title}</i></span><span role="progressbar" aria-label={copy.progress} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>{progress}%</span></footer>
+      {overlay}
     </div>, sceneHost ?? document.body,
   );
 }

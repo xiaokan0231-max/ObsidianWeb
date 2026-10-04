@@ -1,13 +1,9 @@
-/* 与面试实录共用书页视觉；正文不继承业务页的警戒色和卡片背景。 */
-/* 高于详情层的 100，且不能被后加载的 .novel-reader 基础样式覆盖。 */
-.novel-reader.reading-mode { z-index: 200; }
-.reading-mode .nr-paper { overflow-wrap: anywhere; }
-.reading-mode .nr-toolbar { padding-top: max(12px, env(safe-area-inset-top)); }
-.reading-mode .reader-menu {
-  top: calc(var(--reader-toolbar-height, 72px) + 10px);
-  max-height: calc(100dvh - var(--reader-toolbar-height, 72px) - 65px);
-  overscroll-behavior: contain;
-}
+/*
+ * 阅读层的正文排版（Markdown、准备稿、回答库）与信息面板、文末去向、临场卡变体。
+ * 外框（工具栏、目录弹层、进度、书页、状态栏）、书页色板与面试实录正文在 interview-novel-reader.css，
+ * 它在文件开头 @import 本文件，所以这里的规则都带 .reading-mode 前缀，靠特异性而不是先后压过外框。
+ * 正文不继承业务页的警戒色和卡片背景。
+ */
 .reading-mode .nr-toc > button[data-level="3"] { padding-left: 30px; }
 .reading-mode .nr-toolbar .reader-info-toggle {
   display: flex;
@@ -78,16 +74,6 @@
 .shared-asset-tools > p { flex: 1; min-width: 0; }
 .drawer-header > div { min-width: 0; }
 .drawer-header > div small { overflow: hidden; text-overflow: ellipsis; }
-
-/*
- * 进度条：useReadingProgress 把 0–1 写到阅读层根元素的 --reading-progress，不经过 React state。
- * 用 scaleX 而不是 width，滚动时只走合成层。
- */
-.reading-mode .nr-progress-track > i {
-  width: 100%;
-  transform: scaleX(var(--reading-progress, 0));
-  transform-origin: left center;
-}
 
 /*
  * 页面版（不嵌在 3D 舞台里）的入场：整层淡入 + 书页上移 12px。
@@ -439,9 +425,7 @@
 }
 .reading-mode .reader-prose .md-table:focus-visible { outline: 2px solid var(--nr-muted); outline-offset: 3px; }
 .reading-mode .reader-prose hr { margin: 2.3em 0; border: 0; border-top: 1px solid var(--nr-line); }
-.reading-mode .reader-section { padding-top: 30px; border-top: 1px solid var(--nr-line); scroll-margin-top: 26px; }
-.reading-mode .reader-section + .reader-section { margin-top: 48px; }
-.reading-mode .reader-section > header { display: flex; align-items: baseline; gap: 17px; margin-bottom: 24px; }
+/* 章节框（顶线、章号与标题并排）与面试实录的 .nr-chapter 合在 interview-novel-reader.css。 */
 .reading-mode .reader-section > header h2 { margin: 0; font-weight: 500; }
 .reading-mode .reader-prose .reader-section-meta {
   margin: -10px 0 28px;
@@ -489,8 +473,6 @@
 .reading-mode .reader-stage-empty { color: var(--nr-muted); font-size: 15px; }
 
 @media (max-width: 700px) {
-  .reading-mode .nr-controls { gap: 10px; }
-  .reading-mode .nr-toolbar { padding-top: max(10px, env(safe-area-inset-top)); }
   .reading-mode .reader-prose { letter-spacing: .015em; line-height: 2; }
   .reading-mode .reader-prose pre { padding: 15px; }
   .reading-mode .reader-information { font-size: 13px; }
@@ -505,7 +487,5 @@
   .reading-mode:not(.has-language-switch) .nr-controls { width: auto; justify-content: flex-end; gap: 7px; }
   .reading-mode .nr-font-controls button { width: 30px; }
   .reading-mode .nr-toolbar .nr-toc-toggle { gap: 5px; padding-left: 9px; }
-  .reading-mode .reader-section + .reader-section { margin-top: 38px; }
-  .reading-mode .reader-section > header { gap: 12px; }
   .reading-mode .reader-information dl > div { grid-template-columns: minmax(60px, 1fr) minmax(0, 2fr); gap: 10px; }
 }

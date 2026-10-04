@@ -16,6 +16,7 @@ import {
 } from "./notes.ts";
 import { JOB_CASE_TYPE } from "./vault-boundary.mjs";
 import type { SnippetPart } from "./search-snippet.ts";
+import type { UiLocale } from "./ui-locale.ts";
 import { interviewContext, interviewNoteTime, matchingInterviewPrep, matchingInterviewContext, resolveCalendarRoundBadge } from "./calendar-interview.ts";
 import { calendarRoundBadge, interviewRound } from "./interview-round.ts";
 
@@ -155,6 +156,94 @@ export function trustLayer(note: Note) {
     return { label: "分析 / 假设", className: "trust-analysis" };
   }
   return { label: "导航 / 素材", className: "trust-reference" };
+}
+
+/*
+ * 阅读层等界面按界面语言显示的标签。typeLabel / trustLayer 保持原样只出中文：
+ * 搜索、资料库与统计都按那份中文口径比对，改它们的返回值会波及无关视图。
+ * 这里中文分支直接回落到原函数，逐字不变；日文只补译，未收录的类型仍按原函数的写法显示。
+ */
+const TYPE_LABELS_JA: Record<string, string> = {
+  self: "本人確認済み",
+  company: "企業ファイル",
+  review: "振り返りの証拠",
+  transcript: "文字起こし",
+  "transcript-study": "文字起こしの学習",
+  "study-annotation": "文字起こしの注釈",
+  study: "学習資料",
+  "ai-report": "AI の見解",
+  "ai_review_request": "AI レビュー依頼",
+  "ai_review_result": "AI レビュー結果",
+  analysis: "総合分析",
+  "deep-thought-evidence": "深掘りの証拠",
+  "deep-thought-opinion": "独立した分析",
+  "interview-answer-review": "回答の振り返り",
+  "interview-answer-practice": "回答の練習キュー",
+  "interview-answer-feedback": "回答への注釈",
+  "interview-prep-library": "面接標準回答集",
+  "interview-prep": "面接回の準備",
+  policy: "ルール",
+  "policy-change": "ルール変更",
+  material: "素材",
+  "training-profile": "トレーニング像",
+  "training-lesson": "トレーニング教材",
+  "training-log": "トレーニング記録",
+  "language-curriculum": "トレーニング課程",
+  "language-bank": "言語素材集",
+  "language-session-log": "トレーニングセッション",
+  "language-coach-log": "コーチ記録",
+  "language-batch-log": "トレーニングバッチ",
+  "language-expression-course-progress": "表現トレーニングの進捗",
+  "practice-log": "コーチ練習",
+  "exam-log": "試験記録",
+  [JOB_CASE_TYPE]: "応募案件",
+  "excluded-job": "除外した求人",
+  "job-audit": "案件の監査",
+  "job-queue": "求人キュー",
+  job_platform_sync: "媒体同期",
+  application_log: "応募記録",
+  "outbound-draft": "連絡の下書き",
+  application_documents: "応募書類",
+  application_documents_review: "書類レビュー",
+  application_documents_changelog: "書類の変更履歴",
+  application_document_strategy: "書類の方針",
+  mail: "メールの証拠",
+  "review-request": "振り返り依頼",
+  ledger: "台帳",
+  todo: "TODO",
+  moc: "索引",
+  note: "ノート",
+};
+
+/** 与资料库、双链预览同一套日文信任层译名（library-view / wiki-preview 的 trust 表）。 */
+const TRUST_LABELS_JA: Record<string, string> = {
+  "trust-authority": "確定情報",
+  "trust-evidence": "証拠",
+  "trust-analysis": "分析 / 仮説",
+  "trust-reference": "案内 / 素材",
+};
+
+/** 与资料库、双链预览同一套日文分区名。 */
+const GROUP_LABELS_JA: Record<GroupKey, string> = {
+  self: "自己紹介",
+  career: "就職活動",
+  study: "日本語学習",
+  analysis: "AI 分析",
+  system: "システム",
+};
+
+export function localizedGroupLabel(group: GroupKey, locale: UiLocale) {
+  return locale === "ja" ? GROUP_LABELS_JA[group] : GROUPS[group].label;
+}
+
+export function localizedTypeLabel(type: string, locale: UiLocale) {
+  if (locale !== "ja") return typeLabel(type);
+  return TYPE_LABELS_JA[type] ?? typeLabel(type);
+}
+
+export function localizedTrustLabel(note: Note, locale: UiLocale) {
+  const trust = trustLayer(note);
+  return locale === "ja" ? TRUST_LABELS_JA[trust.className] ?? trust.label : trust.label;
 }
 
 export function libraryScopeMatches(note: Note, scope: LibraryScope) {

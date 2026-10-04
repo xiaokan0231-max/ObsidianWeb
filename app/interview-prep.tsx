@@ -31,6 +31,21 @@ const PREP_MENU_JA: Record<string, string> = {
   "答案分类": "回答の分類",
   "全部": "すべて",
   "面试问题": "面接の質問",
+  // 以下是回答库「全文阅读」阅读层的文案：眉题、返回、元数据与每篇回答的栏目名。
+  "面试标准回答库": "面接標準回答集",
+  "准备材料": "準備資料",
+  "返回回答库": "回答集に戻る",
+  "{n} 篇回答": "{n} 件の回答",
+  "全部分类 · 连续阅读": "全分類 · 通して読む",
+  "优先必练": "最優先で練習",
+  "{p}级": "{p} ランク",
+  "问题": "質問",
+  "回答目的": "回答の目的",
+  "标准参考答案": "標準の参考回答",
+  "30秒版": "30 秒版",
+  "回答结构": "回答の構成",
+  "使用边界": "使える範囲",
+  "事实与证据": "事実と証拠",
 };
 
 function GuidanceBlock({
@@ -273,12 +288,12 @@ export default function InterviewPrep({
       {readerOpen && (
         <ReadingMode
           documentKey={`prep-library:${library.note.path}`}
-          title="面试标准回答库"
-          eyebrow="准备材料"
-          metadata={[`${library.items.length} 篇回答`, "全部分类 · 连续阅读"]}
+          title={ui("面试标准回答库")}
+          eyebrow={ui("准备材料")}
+          metadata={[ui("{n} 篇回答").replace("{n}", String(library.items.length)), ui("全部分类 · 连续阅读")]}
           headings={readingHeadings}
           onClose={() => setReaderOpen(false)}
-          backLabel="返回回答库"
+          backLabel={ui("返回回答库")}
         >
           {library.items.map((item, index) => (
             <section className="reader-section reader-prose" id={`reader-answer-${item.id}`} key={item.id}>
@@ -287,7 +302,7 @@ export default function InterviewPrep({
                 <h2>{headingPlainText(item.title)}</h2>
               </header>
               <p className="reader-section-meta">
-                {item.category} · {item.priority === "S" ? "优先必练" : `${item.priority}级`}
+                {item.category} · {item.priority === "S" ? ui("优先必练") : ui("{p}级").replace("{p}", item.priority)}
                 {item.tags.length > 0 ? ` · ${item.tags.join(" / ")}` : ""}
               </p>
               {[
@@ -300,7 +315,7 @@ export default function InterviewPrep({
                 ["事实与证据", item.evidence, undefined],
               ].map(([label, content, lang], fieldIndex) => content ? (
                 <section className="reader-answer-field" data-reading-anchor={`reader-answer-${item.id}-${fieldIndex}`} key={label}>
-                  <h3>{label}</h3>
+                  <h3>{label ? ui(label) : label}</h3>
                   <p lang={lang}><Inlines nodes={parseInline(content)} /></p>
                 </section>
               ) : null)}
