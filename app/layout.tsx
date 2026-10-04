@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies, headers } from "next/headers";
 import { APP_BRANDING, resolveUiLocale, UI_LOCALE_COOKIE } from "@/lib/ui-locale";
+import { resolveUiTheme, UI_THEME_COOKIE } from "@/lib/ui-theme";
 import { UiLocaleProvider } from "./ui-locale";
+import { UiThemeProvider } from "./ui-theme";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -51,10 +53,13 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const locale = resolveUiLocale((await cookies()).get(UI_LOCALE_COOKIE)?.value);
+  const cookieStore = await cookies();
+  const locale = resolveUiLocale(cookieStore.get(UI_LOCALE_COOKIE)?.value);
+  // 主题和语言一样由服务端按 cookie 定好：第一帧就是对的颜色，没有先亮后暗的闪烁。
+  const theme = resolveUiTheme(cookieStore.get(UI_THEME_COOKIE)?.value);
   // suppressHydrationWarning：下面的内联脚本会在 hydration 前给 <html> 加 data-rail，属性差异是预期内的。
   return (
-    <html lang={locale} suppressHydrationWarning>
+    <html lang={locale} data-theme={theme} style={{ colorScheme: theme }} suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
@@ -64,7 +69,9 @@ export default async function RootLayout({
             __html: `try{if(localStorage.getItem("echo:rail")==="collapsed"){document.documentElement.dataset.rail="collapsed"}}catch(e){}`,
           }}
         />
-        <UiLocaleProvider initialLocale={locale}>{children}</UiLocaleProvider>
+        <UiLocaleProvider initialLocale={locale}>
+          <UiThemeProvider initialTheme={theme}>{children}</UiThemeProvider>
+        </UiLocaleProvider>
       </body>
     </html>
   );

@@ -1,39 +1,99 @@
 /* デザイントークン・:root・全局リセット（globals.css から分割） */
 
 :root {
+  /*
+   * ===== 颜色 token：浅色（data-theme="light"） =====
+   * 浅色块必须排在暗色块前面：tests/desktop-ux-contracts 用正则取「第一个」
+   * --paper / --text-secondary / --interactive 校验浅色对比度。
+   * 新写的样式只用这里的语义名，不再直接写 #hex——两套主题靠同名 token 切换。
+   */
   --paper: #f3f0e8;
   --paper-deep: #e9e5da;
+  --surface-sunken: #ede9df;
   --surface: #fbfaf6;
+  --surface-raised: rgba(251, 250, 246, 0.88);
+  --surface-raised-solid: #fffefa;
+  --surface-overlay: #ffffff;
+  --surface-soft: rgba(255, 255, 255, 0.46);
+  /* 原来散落的「半透明白块」（hover/选中底）。暗色下不能还是白，所以统一走浮层色。 */
+  --surface-lift: color-mix(in oklab, var(--surface-overlay) 58%, transparent);
+  /* 只经 color-mix 使用的基色：白高光描边、黑影。 */
+  --highlight: #ffffff;
+  --shade: #000000;
+
+  /* 反相面：浅色里本来就是深底的面板（复盘报告、代码块、撤销条…）。 */
+  --surface-inverse: #18231e;
+  --surface-inverse-soft: #202c27;
+  --surface-inverse-violet: #2a2438;
+  --inverse-ring: 0 0 0 0 transparent;
+  --text-on-inverse: #f7f4ea;
+  --text-on-inverse-muted: #b9c9bf;
+  --line-on-inverse: color-mix(in oklab, var(--highlight) 14%, transparent);
+  /* 只出现在深底上的亮色点缀，两套主题同值。 */
+  --brand-on-inverse: #e8a48d;
+  --gold-on-inverse: #e6ce95;
+  --violet-on-inverse: #d8cdec;
+
   --ink: #18231e;
-  --muted: #56615b;
-  --line: #d8d5ca;
-  --orange: #e66d45;
-  --brand: #e66d45;
-  --interactive: #a84325;
   --text-primary: #18231e;
   --text-secondary: #46524c;
+  --muted: #56615b;
   --text-tertiary: #5f6a64;
-  --success: #23624f;
-  --warning: #8a5b10;
-  --danger: #a33d32;
-  --info: #3f5f8f;
-  --green: #2f6b59;
-  --violet: #7466a9;
-  --gold: #b5842f;
-  --shadow: 0 18px 55px rgba(28, 37, 32, 0.12);
-  --surface-raised: rgba(251, 250, 246, 0.88);
-  --surface-soft: rgba(255, 255, 255, 0.46);
+  /* 装饰灰（注音、角标、占位）：对底不足 4.5，不许用于正文。 */
+  --text-faint: #80877f;
+  --text-disabled: #9aa39d;
+  --text-display: #18231e;
+
+  --line: #d8d5ca;
   --line-strong: #c8c4b8;
-  --radius-control: 8px;
-  --radius-card: 12px;
-  --radius-feature: 16px;
-  --shadow-soft: 0 12px 34px rgba(28, 37, 32, 0.07);
-  --page-title-size: clamp(38px, 3.4vw, 50px);
-  --page-copy-size: 13px;
-  --font-body: 14px;
-  --font-compact: 12.5px;
-  --font-support: 11.5px;
-  --control-height: 40px;
+  --line-soft: #e6e3da;
+  --line-cool: #d7ded5;
+
+  --orange: #e66d45;
+  --brand: #e66d45;
+  --brand-wash: #fff1ec;
+  --brand-line: #f3c2af;
+  /*
+   * 可点击色原来一名两用：文字链接和实心按钮底都用 --interactive。暗色下文字要提亮、
+   * 填充要保持饱和，所以拆成三个：文字 / 填充 / 填充上的字。焦点环单独一个。
+   */
+  --interactive: #a84325;
+  --interactive-fill: #a84325;
+  --on-interactive: #ffffff;
+  --focus-ring: #a84325;
+  /* 墨・绿・紫・危险等实心填充上的字。 */
+  --on-fill: #ffffff;
+
+  --success: #23624f;
+  --success-wash: #edf4ef;
+  --success-line: #a5bdb3;
+  --warning: #8a5b10;
+  --warning-strong: #725311;
+  --warning-wash: #f5e8c9;
+  --warning-wash-soft: #fdf6e4;
+  --warning-line: #ceba9a;
+  --danger: #a33d32;
+  --danger-strong: #8d382b;
+  --danger-wash: #f8dfd7;
+  --danger-line: #d8aea8;
+  --info: #3f5f8f;
+  --info-wash: #e8edf4;
+  --info-line: #b0bccd;
+
+  --green: #2f6b59;
+  --green-deep: #203a33;
+  /* #7466a9 对凹陷面只有 4.11:1，压暗一点到 4.75。 */
+  --violet: #6a5c9f;
+  --violet-deep: #574b85;
+  --violet-wash: #ece7f5;
+  --gold: #b5842f;
+  /* --gold 作文字只有 2.9:1；金色文字走这个。 */
+  --gold-text: #8a6320;
+
+  --shadow-color: #1c2520;
+  --shadow: 0 18px 55px color-mix(in oklab, var(--shadow-color) 12%, transparent);
+  --shadow-soft: 0 12px 34px color-mix(in oklab, var(--shadow-color) 7%, transparent);
+  --selection-bg: color-mix(in oklab, var(--brand) 28%, transparent);
 
   /*
    * チャート専用トークン。UI の --orange/--green とは別に持つ理由：
@@ -53,6 +113,144 @@
   --chart-step-3: #a64a29;
   --chart-step-4: #88371c;
   --chart-step-5: #622813;
+
+  /* ===== 与主题无关的 token ===== */
+  --radius-xs: 4px;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-feature: 16px;
+  --radius-pill: 999px;
+
+  --page-title-size: clamp(38px, 3.4vw, 50px);
+  --page-copy-size: 13px;
+  --font-body: 14px;
+  --font-compact: 12.5px;
+  --font-support: 11.5px;
+  --control-height: 40px;
+  /* 字号阶梯。11px 是全大写等宽小标签的下限，正文不低于 13px。 */
+  --fs-micro: 11px;
+  --fs-support: 12px;
+  --fs-compact: 13px;
+  --fs-body: 14px;
+  --fs-lead: 16px;
+  --fs-title: 22px;
+  --fs-display: clamp(34px, 3.4vw, 50px);
+  --font-serif: "Songti SC", "Noto Serif CJK SC", serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --ruby-size: max(10px, 0.56em);
+
+  /* 动效：时长三档、缓动两条（取自 3D 舞台已在用的曲线）。减弱动效的全局兜底见文件末尾。 */
+  --dur-fast: 140ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.18, 0.86, 0.18, 1);
+
+  /* 层级：按现有取值命名，不改数值。 */
+  --z-sticky: 20;
+  --z-rail: 30;
+  --z-drawer: 60;
+  --z-toast: 80;
+  --z-overlay: 90;
+  --z-top: 200;
+}
+
+/*
+ * ===== 颜色 token：暗色（墨夜作战室） =====
+ * 不带 data-theme 或 data-theme="dark" 时生效；特异性 (0,2,0) 压过上面的 :root。
+ * 取色依据：public/og.jpg 实测（底 #0b1611、纸色字 #f0e4d2）与 3D 舞台（#030807 / #07110d）——
+ * 页面底比舞台亮一级，进出 3D 时是「更深的洞」而不是换了一个产品。
+ * 正文 / 次要 / 弱文字对五种面全部 ≥4.5:1；--text-tertiary 是下限，不能再暗。
+ */
+:root:not([data-theme="light"]) {
+  color-scheme: dark;
+
+  --paper: #0d1612;
+  --paper-deep: #090f0c;
+  --surface-sunken: #090f0c;
+  --surface: #131f19;
+  --surface-raised: rgba(26, 40, 33, 0.92);
+  --surface-raised-solid: #1a2821;
+  --surface-overlay: #20302a;
+  --surface-soft: color-mix(in oklab, var(--surface-overlay) 46%, transparent);
+  --surface-lift: color-mix(in oklab, var(--surface-overlay) 58%, transparent);
+  --highlight: #dff7ec;
+  --shade: #000000;
+
+  /* 反相面在暗色下比浮层再亮一级，加一圈高光描边与微光保持「这里是重点」。 */
+  --surface-inverse: #26392f;
+  --surface-inverse-soft: #30463b;
+  --surface-inverse-violet: #2e2a44;
+  --inverse-ring:
+    0 0 0 1px color-mix(in oklab, var(--highlight) 12%, transparent),
+    0 0 28px color-mix(in oklab, var(--highlight) 6%, transparent);
+  --text-on-inverse: #eee9dd;
+  --text-on-inverse-muted: #a9bbb1;
+
+  --ink: #ebe6d9;
+  --text-primary: #ebe6d9;
+  --text-secondary: #b5bfb8;
+  --muted: #a2aca5;
+  --text-tertiary: #8f9a93;
+  --text-faint: #78847d;
+  --text-disabled: #64706a;
+  --text-display: #f0e4d2;
+
+  --line: #253630;
+  --line-strong: #36493f;
+  --line-soft: #1d2b25;
+  --line-cool: #2a3b33;
+
+  --brand-wash: color-mix(in oklab, var(--brand) 16%, var(--surface));
+  --brand-line: #673e2b;
+  --interactive: #f29a76;
+  --interactive-fill: #e66d45;
+  --on-interactive: #17110e;
+  --focus-ring: #f29a76;
+  --on-fill: #0d1612;
+
+  --success: #7cc9a2;
+  --success-wash: color-mix(in oklab, var(--success) 16%, var(--surface));
+  --success-line: #3d6350;
+  --warning: #e3b55d;
+  --warning-strong: #f0c87a;
+  --warning-wash: color-mix(in oklab, var(--warning) 16%, var(--surface));
+  --warning-wash-soft: color-mix(in oklab, var(--warning) 9%, var(--surface));
+  --warning-line: #665b34;
+  --danger: #f0907f;
+  --danger-strong: #f7a899;
+  --danger-wash: color-mix(in oklab, var(--danger) 16%, var(--surface));
+  --danger-line: #6b4c42;
+  --info: #93b6e8;
+  --info-wash: color-mix(in oklab, var(--info) 16%, var(--surface));
+  --info-line: #465b6c;
+
+  --green: #6fb994;
+  --green-deep: #cfe3d8;
+  --violet: #ab9ddc;
+  --violet-deep: #cfc5ea;
+  --violet-wash: color-mix(in oklab, var(--violet) 16%, var(--surface));
+  --gold: #d9ac52;
+  --gold-text: #e0b96a;
+
+  --shadow-color: #000000;
+  --shadow: 0 18px 55px color-mix(in oklab, var(--shadow-color) 55%, transparent);
+  --shadow-soft: 0 12px 34px color-mix(in oklab, var(--shadow-color) 40%, transparent);
+  --selection-bg: color-mix(in oklab, var(--brand) 34%, transparent);
+
+  /* 暗色图表色阶：同色相 41°，序号越大越亮（弱→强的语义与浅色一致），相邻 ΔL 0.07，
+     最暗一段对 --surface 2.45:1。 */
+  --chart-bar: #db7b56;
+  --chart-step-0: #983e18;
+  --chart-step-1: #af532f;
+  --chart-step-2: #c66844;
+  --chart-step-3: #de7e59;
+  --chart-step-4: #f6936e;
+  --chart-step-5: #fdb397;
+}
+
+html[lang="ja"] {
+  --font-serif: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif CJK JP", serif;
 }
 
 * {
@@ -80,6 +278,10 @@ html[lang="ja"] body,
 
 a { color: inherit; }
 
+::selection {
+  background: var(--selection-bg);
+}
+
 button,
 input,
 textarea,
@@ -92,7 +294,7 @@ button {
 }
 
 :where(a, button, input, textarea, select, canvas, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--interactive);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }
 

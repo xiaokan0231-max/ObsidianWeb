@@ -164,7 +164,8 @@
 }
 
 /* 两种语言始终可见，切换后保留当前页面与筛选状态。 */
-.language-switch {
+.language-switch,
+.theme-switch {
   flex: 0 0 auto;
   display: flex;
   gap: 2px;
@@ -174,7 +175,8 @@
   background: var(--surface-soft);
 }
 
-.language-switch button {
+.language-switch button,
+.theme-switch button {
   padding: 5px 8px;
   border: 0;
   border-radius: 5px;
@@ -185,12 +187,22 @@
   cursor: pointer;
 }
 
-.language-switch button[aria-pressed="true"] {
+.language-switch button[aria-pressed="true"],
+.theme-switch button[aria-pressed="true"] {
   background: var(--ink);
   color: var(--paper);
 }
 
-.language-switch button:hover:not([aria-pressed="true"]) {
+/* 主题开关只放一个符号，按钮做成方的，和语言开关并排时不抢眼。 */
+.theme-switch button {
+  min-width: 26px;
+  padding-inline: 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.language-switch button:hover:not([aria-pressed="true"]),
+.theme-switch button:hover:not([aria-pressed="true"]) {
   background: var(--surface-raised);
   color: var(--ink);
 }
