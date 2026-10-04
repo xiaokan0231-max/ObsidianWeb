@@ -63,11 +63,15 @@ export function InsightsReportView({ report, coverage, filter, selected, notes, 
     {modules.map((module) => <section className="ia-section" id={`insight-${module.key}`} key={module.key}>
       <header><h2>{module.titleZh}</h2>{!filtering && <AdvisoryParagraphs text={module.commentaryZh} />}</header>
       {!module.findings.length && <p className="ii-no-match">{filtering ? "当前筛选没有对应发现。" : "目前还没有足够证据形成这一类横向判断。"}</p>}
-      {module.findings.map((finding) => <article className="ii-finding" key={finding.id}><h3>{finding.titleZh}</h3><AdvisoryParagraphs text={finding.bodyZh} />
-        <div className="ii-boundary"><h4>这项判断的适用范围</h4><AdvisoryParagraphs text={finding.boundaryZh} /></div>
-        <AdvisoryEvidence {...finding} notes={notes} onOpenEvidence={onOpenEvidence} />
-        <AdvisoryFeedback key={`${report.generatedAt}:${finding.id}`} notePath={INSIGHTS_NOTE} notes={notes}
-          target={{ type: "insight", id: finding.id, revision: report.generatedAt, snapshot: JSON.stringify(finding) }} onSaved={onFeedbackSaved} />
+      {/* 正文限宽 42em 保证好读；适用范围、证据与反馈放进右栏，宽屏上不留半张卡的空白。 */}
+      {module.findings.map((finding) => <article className="ii-finding" key={finding.id}>
+        <div className="ii-finding-main"><h3>{finding.titleZh}</h3><AdvisoryParagraphs text={finding.bodyZh} /></div>
+        <div className="ii-finding-side">
+          <div className="ii-boundary"><h4>这项判断的适用范围</h4><AdvisoryParagraphs text={finding.boundaryZh} /></div>
+          <AdvisoryEvidence {...finding} notes={notes} onOpenEvidence={onOpenEvidence} />
+          <AdvisoryFeedback key={`${report.generatedAt}:${finding.id}`} notePath={INSIGHTS_NOTE} notes={notes}
+            target={{ type: "insight", id: finding.id, revision: report.generatedAt, snapshot: JSON.stringify(finding) }} onSaved={onFeedbackSaved} />
+        </div>
       </article>)}
     </section>)}
     <p className="ia-report-meta">分析更新于 {report.generatedAt.replace("T", " ").slice(0, 16)} · {report.model}</p>

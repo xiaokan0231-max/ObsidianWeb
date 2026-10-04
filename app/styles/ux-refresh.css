@@ -105,7 +105,8 @@
 .practice-queue small { color: var(--text-tertiary); font-size: 11px; text-transform: uppercase; }
 .practice-queue strong { font-size: 14px; line-height: 1.45; }
 .practice-queue span { color: var(--text-secondary); font-size: 12px; }
-.practice-card { display: flex; flex-direction: column; padding: clamp(26px, 4vw, 56px); }
+/* 切题时整张卡以 key 重挂，从下方滑进来；只在约 200ms 里带 transform。 */
+.practice-card { display: flex; flex-direction: column; padding: clamp(26px, 4vw, 56px); animation: rise-in var(--dur-base) var(--ease-out); }
 .practice-card > header { display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 12px; }
 .practice-question { margin: 64px 0 28px; }
 .practice-question small,
@@ -115,12 +116,20 @@
 .practice-reveal { align-self: flex-start; min-height: 46px; padding: 0 20px; border: 0; background: var(--interactive); color: var(--on-interactive); cursor: pointer; }
 .practice-answer { padding: 22px 24px; border-left: 3px solid var(--brand); background: var(--paper); }
 .practice-answer p { font-size: 17px; line-height: 1.95; }
-.practice-answer > span { color: var(--text-tertiary); font-size: 11.5px; }
+.practice-answer > span { color: var(--text-tertiary); font-size: 12px; }
+.practice-evidence { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; }
+.practice-evidence a { color: var(--interactive); font-family: var(--font-mono); text-underline-offset: 3px; }
+.practice-evidence a:hover { color: var(--ink); }
+/* 快捷键印在按钮里：键帽色跟着按钮自己的字色走，实心按钮上也读得出。 */
+:is(.practice-actions, .practice-reveal) kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-right: 7px; padding: 0 5px; border: 1px solid color-mix(in oklab, currentColor 32%, transparent); border-radius: var(--radius-xs); font-family: var(--font-mono); font-size: 11px; line-height: 1; opacity: .78; }
+.practice-reveal kbd { margin: 0 0 0 10px; }
+.practice-progress { margin-bottom: 12px; }
+.practice-progress .practice-keys { color: var(--text-tertiary); font-size: 12px; white-space: nowrap; }
 .practice-actions { display: flex; justify-content: space-between; gap: 18px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
 .practice-actions > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .practice-actions button { min-height: 38px; padding: 0 14px; border: 1px solid var(--line-strong); background: transparent; cursor: pointer; }
 .practice-actions .practice-complete { border-color: var(--success); background: var(--success); color: var(--on-fill); }
-.practice-message { margin-top: 14px; color: var(--success); font-size: 12.5px; }
+.practice-message { margin-top: 14px; color: var(--success); font-size: 13px; }
 .practice-empty { padding: 70px; border: 1px dashed var(--line-strong); text-align: center; }
 
 .jobs-decision-workspace { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); min-height: 680px; border: 1px solid var(--line); background: var(--surface); }
@@ -130,7 +139,7 @@
 .jobs-decision-queue > button.active { background: var(--surface); box-shadow: inset 3px 0 var(--interactive); }
 .jobs-decision-queue > button > span:last-child { min-width: 0; display: flex; flex-direction: column; }
 .jobs-decision-queue small { color: var(--text-tertiary); font-size: 11px; }
-.jobs-decision-queue strong { overflow: hidden; font-size: 13.5px; text-overflow: ellipsis; white-space: nowrap; }
+.jobs-decision-queue strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .jobs-decision-queue em { overflow: hidden; color: var(--text-secondary); font-size: 12px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .jobs-decision-detail { padding: clamp(24px, 3vw, 44px); }
 .jobs-decision-detail > header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
@@ -151,14 +160,14 @@
 
 .job-case-workspace { margin-top: 22px; padding: 18px; border: 1px solid var(--line); background: var(--paper); }
 .job-case-workspace-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
-.job-case-workspace-head span { color: var(--interactive); font-size: 10px; font-weight: 750; letter-spacing: .13em; }
+.job-case-workspace-head span { color: var(--interactive); font-size: 11px; font-weight: 750; letter-spacing: .13em; }
 .job-case-workspace-head h2 { margin: 4px 0 0; font-size: 18px; }
 .job-case-workspace-head small { max-width: 55%; color: var(--text-secondary); font-size: 12px; }
 .job-follow-up-form { display: grid; grid-template-columns: 1fr 1fr 1.4fr auto; gap: 9px; margin-top: 16px; }
 .job-follow-up-form label { display: flex; flex-direction: column; gap: 5px; }
 .job-follow-up-form label > span { color: var(--text-tertiary); font-size: 11px; }
 .job-follow-up-form input,
-.job-follow-up-form select { min-height: 38px; min-width: 0; border: 1px solid var(--line-strong); background: var(--surface); padding: 0 9px; font-size: 12.5px; }
+.job-follow-up-form select { min-height: 38px; min-width: 0; border: 1px solid var(--line-strong); background: var(--surface); padding: 0 9px; font-size: 13px; }
 .job-follow-up-form > button { align-self: end; min-height: 38px; border: 0; background: var(--interactive); color: var(--on-interactive); padding: 0 14px; }
 .job-follow-up-success { color: var(--success); font-size: 12px; }
 .job-case-related { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
@@ -173,31 +182,49 @@
 .agenda-main time strong { font-family: "Songti SC", serif; font-size: 20px; }
 .agenda-main time span,
 .agenda-copy small { color: var(--text-tertiary); font-size: 11px; }
-.agenda-copy > strong { font-size: 12.5px; }
+.agenda-copy > strong { font-size: 13px; }
 .agenda-copy em { color: var(--text-secondary); font-size: 11px; font-style: normal; }
-.agenda-prepare { margin: 0 0 10px 52px; padding: 6px 10px; border: 1px solid var(--interactive); background: transparent; color: var(--interactive); font-size: 11.5px; cursor: pointer; }
+.agenda-prepare { margin: 0 0 10px 52px; padding: 6px 10px; border: 1px solid var(--interactive); background: transparent; color: var(--interactive); font-size: 12px; cursor: pointer; }
 .calendar-more { border: 0; background: transparent; color: var(--interactive); font-size: 11px; cursor: pointer; }
 
-.command-shortcuts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; padding: 8px; }
-.command-shortcuts button { display: flex; flex-direction: column; gap: 3px; padding: 11px; border: 1px solid var(--line); background: var(--paper); text-align: left; cursor: pointer; }
-.command-shortcuts button.active { border-color: var(--interactive); background: var(--brand-wash); box-shadow: inset 0 0 0 1px var(--interactive); }
-.command-shortcuts strong { font-size: 12.5px; }
-.command-shortcuts small { color: var(--text-secondary); font-size: 11px; }
+/* ⌘K 的页面与动作：和笔记结果同一种单列行，行首是二级菜单同款的汉字印章。 */
+.command-shortcuts { display: flex; flex-direction: column; padding: 0 8px 6px; }
+.command-shortcuts button {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.command-shortcuts button > i {
+  width: 28px; height: 28px; display: grid; place-items: center;
+  border: 1px solid var(--line-strong); border-radius: 50% 50% 50% 12%;
+  color: var(--text-secondary); font-family: var(--font-serif); font-size: 14px; font-style: normal;
+}
+.command-shortcuts button.is-action > i { font-family: var(--font-mono); font-size: 12px; }
+.command-shortcuts strong { font-size: 13px; white-space: nowrap; }
+.command-shortcuts small { overflow: hidden; color: var(--text-tertiary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 
-.calendar-actions button { min-width: 38px; height: 36px; font-size: 11.5px; }
+.calendar-actions button { min-width: 38px; height: 36px; font-size: 12px; }
 .calendar-weekday { font-size: 11px; color: var(--text-secondary); }
-.calendar-day-number time { font-size: 11px; }
-.calendar-day-number span { font-size: 10px; }
+.calendar-day-number time { font-size: 12px; }
+.calendar-day-number span { font-size: 11px; }
 .calendar-event { min-height: 39px; padding: 6px 7px; }
 .calendar-event span { font-size: 11px; color: var(--text-secondary); }
-.calendar-event strong { font-size: 11.5px; }
-.calendar-day-events > small { font-size: 10.5px; }
+.calendar-event strong { font-size: 12px; }
+.calendar-day-events > small { font-size: 11px; }
 .agenda-heading span { font-size: 11px; }
 .agenda-main time span,
 .agenda-copy small,
 .agenda-copy em,
 .agenda-empty { font-size: 11px; }
-.agenda-copy > strong { font-size: 12.5px; }
+.agenda-copy > strong { font-size: 13px; }
 
 .timeline-date span,
 .timeline-type,
@@ -305,14 +332,20 @@ body:has(.stale-data-banner) {
 .graph-start header { max-width: 700px; }
 .graph-start header > span { color: var(--brand-on-inverse); font-size: 11px; font-weight: 750; letter-spacing: .14em; }
 .graph-start h2 { margin: 10px 0; font-family: "Songti SC", serif; font-size: clamp(30px, 4vw, 48px); font-weight: 520; }
-.graph-start header p { color: color-mix(in oklab, var(--text-on-inverse) 68%, transparent); font-size: 13px; line-height: 1.7; }
+.graph-start header p { color: var(--text-on-inverse-muted); font-size: 13px; line-height: 1.7; }
 .graph-start-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr)); gap: 9px; margin-top: 26px; }
 .graph-start-results button { min-width: 0; display: grid; grid-template-columns: 44px minmax(0,1fr) auto; align-items: center; gap: 12px; min-height: 62px; border: 1px solid color-mix(in oklab, var(--highlight) 14%, transparent); border-radius: 9px; background: color-mix(in oklab, var(--highlight) 5.5%, transparent); padding: 11px 15px; color: var(--text-on-inverse); font-family: inherit; text-align: left; cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
 .graph-start-results button:hover { border-color: var(--brand); background: color-mix(in oklab, var(--brand) 12%, transparent); }
 .graph-start-results button > span { color: var(--brand-on-inverse); font-size: 11px; }
 .graph-start-results button > strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.graph-start-results button > small { color: color-mix(in oklab, var(--text-on-inverse) 55%, transparent); font-size: 11px; }
-.search-results > button.active { outline: 2px solid var(--interactive); outline-offset: -2px; background: var(--paper); }
+.graph-start-results button > small { color: var(--text-on-inverse-muted); font-size: 11px; }
+/* 选中行：凸起面 + 左侧 3px 朱线，与顶栏「最近安排」同一种标记。 */
+.command-shortcuts button.active,
+.search-results > button.active {
+  background: var(--surface-raised-solid);
+  box-shadow: inset 3px 0 0 var(--brand), 0 1px 0 var(--line-soft);
+}
+.command-shortcuts button.active > i { border-color: var(--brand); background: var(--brand); color: var(--on-fill); }
 
 .note-card-summary { min-height: 118px; padding: 14px 0; border-top: 1px solid var(--line); }
 .note-card-summary p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.65; }

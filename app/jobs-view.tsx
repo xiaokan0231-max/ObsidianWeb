@@ -4,8 +4,10 @@ import ScopeLoading from "./scope-loading";
 import {
   memo,
   Fragment,
+  type CSSProperties,
   type ReactNode,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -70,8 +72,11 @@ import {
   JOB_FIT_SCORE_LABEL,
   UNRATED_V2_LABEL,
   type JobFit,
+  jobFilterRelaxations,
+  withoutJobFilter,
 } from "@/lib/jobs";
 import { ACCESS_STATE_VALUES, FIT_BANDS, HARD_GATE_VALUES } from "@/lib/job-case-schema";
+import { kanbanAcceptsDrop, kanbanDropDecision } from "@/lib/job-kanban";
 import { isTypingTarget } from "@/lib/keyboard";
 import { ConflictError, postJson } from "@/lib/client-api";
 import { parseAppliedLedger } from "@/lib/job-stats.mjs";
@@ -87,6 +92,7 @@ import {
 } from "@/lib/notes";
 import { OPEN_NOTE_LABEL, changedToLabel } from "@/lib/ui-labels";
 import MarkdownDocument from "./markdown-document";
+import { RadarChart } from "./radar-chart";
 import type { UndoAction } from "./undo-flash";
 import { useDialogFocus } from "./use-dialog-focus";
 import { URL_CHANGE_EVENT } from "./use-url-state";
@@ -242,6 +248,27 @@ const JOB_MENU_COPY = {
   "入库日 {date}": ["入库日 {date}", "登録日 {date}"],
   "応募日 {date}": ["应募日 {date}", "応募日 {date}"],
   "笔记 frontmatter 里没有 date": ["笔记 frontmatter 里没有 date", "ノートの frontmatter に date がありません"],
+  "官网直投": ["官网直投", "公式サイトから応募"],
+  "官网相近职位": ["官网相近职位", "公式サイトの関連求人"],
+  "官网招聘": ["官网招聘", "公式採用サイト"],
+  "官": ["官", "公"],
+  "票": ["票", "票"],
+  "放到这里": ["放到这里", "ここへドロップ"],
+  "拖动可改状态": ["拖到其他列可改状态", "別の列へドラッグで状況を変更"],
+  "把「{company}」移到「不採用」？": ["把「{company}」移到「不採用」？", "「{company}」を「不採用」へ移しますか？"],
+  "会同时清空等待对象、跟进日期与下一场日程。": ["会同时清空等待对象、跟进日期与下一场日程。", "返答待ちの相手・確認する日・次回の日程も消えます。"],
+  "确认移动": ["确认移动", "移動する"],
+  "没有写入。{message}": ["没有写入。{message}", "保存できませんでした。{message}"],
+  "去掉后可得 {count} 条": ["去掉后可得 {count} 条", "外すと {count} 件"],
+  "逐项放宽": ["逐项放宽", "条件を一つずつ外す"],
+  "快捷判断": ["快捷判断", "クイック判断"],
+  "投了": ["投了", "応募した"],
+  "见送": ["见送", "見送り"],
+  "j / k 或 ↑↓ 切换": ["j / k 或 ↑↓ 切换", "j / k・↑↓ で切替"],
+  "v2 六轴雷达": ["v2 六轴雷达", "v2 六軸レーダー"],
+  "六轴叠加对比": ["六轴叠加对比", "六軸の重ね合わせ"],
+  "Gate（v2）": ["Gate（v2）", "Gate（v2）"],
+  "Band（v2）": ["Band（v2）", "Band（v2）"],
 } as const satisfies Record<string, readonly [string, string]>;
 
 type JobMenuKey = keyof typeof JOB_MENU_COPY;
@@ -270,6 +297,32 @@ const BAND_FILTER_VALUES: readonly string[] = [...FIT_BANDS, UNRATED_FIT];
 const ACCESS_FILTER_VALUES: readonly string[] = [...ACCESS_STATE_VALUES, UNRATED_FIT];
 const TOUCH_VALUES: readonly JobTouch[] = JOB_TOUCHES.map((touch) => touch.id);
 const fitFilterLabel = (value: string, labels: Record<string, string>) => (value === UNRATED_FIT ? UNRATED_V2_LABEL : labels[value] ?? value);
+
+/** 「去掉后可得 N 条」里每组的名字，与筛选面板的分组标题同一套文案。 */
+const FILTER_GROUP_LABEL: Record<FilterKey, JobMenuKey> = {
+  query: "关键词",
+  statuses: "应募状态",
+  rating: "応募优先度",
+  salary: "年収上限",
+  stacks: "技術スタック",
+  regions: "勤務地",
+  sources: "来源",
+  verifications: "原文核对",
+  intakes: "入库时期",
+  touches: "动手状态",
+  gates: "Gate（v2）",
+  bands: "Band（v2）",
+  accesses: "到達（v2）",
+  remote: "リモート可",
+  waiting: "只看等对方",
+};
+
+/** 决策台头部的快捷判断。「见送」也落到保留（没投过的岗位不能写不採用），但先让本人补一句理由。 */
+const QUICK_DECISIONS = [
+  { id: "applied", label: "投了", status: "応募済" },
+  { id: "hold", label: "保留", status: "保留" },
+  { id: "pass", label: "见送", status: "保留", withNote: true },
+] as const;
 
 const WAITING_FOR_OPTIONS = [
   { value: "", label: "没有外部等待" },
@@ -517,15 +570,26 @@ function eventLabel(job: JobCard) {
   }
 }
 
-/** 命中的搜索词在卡片文本里高亮，便于确认为什么这条被搜出来。 */
-function Highlight({ text, query }: { text: string; query: string }) {
+type Matcher = { tokens: string[]; pattern: RegExp } | null;
+
+/**
+ * 搜索词的高亮规则。由父级按关键词 useMemo 一次，卡片几百张时不必每张各编译一遍正则，
+ * 也让 memo 过的卡片在关键词不变时拿到同一个引用。
+ */
+function buildMatcher(query: string): Matcher {
   const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return <>{text}</>;
+  if (tokens.length === 0) return null;
   // 正则交替是最左优先而不是最长优先，先排长词，`java javascript` 才不会把 JavaScript 切成两半。
   const alternatives = [...tokens]
     .sort((left, right) => right.length - left.length)
     .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const pattern = new RegExp(`(${alternatives.join("|")})`, "gi");
+  return { tokens, pattern: new RegExp(`(${alternatives.join("|")})`, "gi") };
+}
+
+/** 命中的搜索词在卡片文本里高亮，便于确认为什么这条被搜出来。 */
+function Highlight({ text, matcher }: { text: string; matcher: Matcher }) {
+  if (!matcher) return <>{text}</>;
+  const { tokens, pattern } = matcher;
   return (
     <>
       {text.split(pattern).map((piece, index) =>
@@ -551,6 +615,10 @@ function FitChip({ fit }: { fit: JobFit }) {
   );
 }
 
+/** 六軸は満点がそれぞれ違う（25 / 10 / 15…）。雷达は満点比に揃えて形だけを比べる。 */
+const FIT_RADAR_AXES = JOB_FIT_AXES.map((key) => ({ key, label: JOB_FIT_SCORE_LABEL[key].label }));
+const fitRadarValues = (fit: JobFit) => JOB_FIT_AXES.map((key) => fit.scores[key] / JOB_FIT_SCORE_LABEL[key].max);
+
 /** 抽屉の v2 六軸。未採点は文言のまま出す——0 のバーを 6 本並べると「全部最低」に見える。 */
 function FitPanel({ fit }: { fit: JobFit | null }) {
   const { t, label: menuLabel } = useJobMenu();
@@ -564,18 +632,30 @@ function FitPanel({ fit }: { fit: JobFit | null }) {
         <em className={`job-fit-gate gate-${fit.hardGate}`}>Gate {HARD_GATE_LABEL[fit.hardGate]}</em>
         {fit.accessState && <span className="job-fit-access">{ACCESS_STATE_LABEL[fit.accessState]}</span>}
       </header>
-      <ul className="job-fit-axes">
-        {JOB_FIT_AXES.map((key) => {
-          const { label, max } = JOB_FIT_SCORE_LABEL[key];
-          return (
-            <li key={key}>
-              <span>{label}</span>
-              <i><b style={{ width: `${(fit.scores[key] / max) * 100}%` }} /></i>
-              <small>{fit.scores[key]}/{max}</small>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="job-fit-body">
+        {/* 雷达只看形状（哪一轴拖后腿），原始分数留在右侧条形里——各轴满分不同，雷达上标原值会误读。 */}
+        <RadarChart
+          className="job-fit-radar"
+          axes={FIT_RADAR_AXES}
+          series={[{ id: "fit", label: `Fit ${fit.score}`, values: fitRadarValues(fit) }]}
+          max={1}
+          size={240}
+          showValues={false}
+          title={t("v2 六轴雷达")}
+        />
+        <ul className="job-fit-axes">
+          {JOB_FIT_AXES.map((key) => {
+            const { label, max } = JOB_FIT_SCORE_LABEL[key];
+            return (
+              <li key={key}>
+                <span>{label}</span>
+                <i><b style={{ width: `${(fit.scores[key] / max) * 100}%` }} /></i>
+                <small>{fit.scores[key]}/{max}</small>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
       <p className="job-fit-gates">
         {gateKeys.map((key) => fit.gates[key] && (
           <span key={key} className={`gate-${fit.gates[key]}`}>{JOB_FIT_GATE_LABEL[key]} {HARD_GATE_LABEL[fit.gates[key]]}</span>
@@ -708,8 +788,16 @@ function JobsView({
    * どれでも閉じられ、どれも書込み中を待たない。
    */
   const [statusErrors, setStatusErrors] = useState<Record<string, string>>({});
+  /**
+   * 看板拖到「応募済」等列、但案件还没有 channel：不写，打开抽屉并让状态控件直接摊开渠道选择。
+   * 只对这一次打开有效，普通打开详情时清掉，免得下次打开同一案件又莫名弹出渠道面板。
+   */
+  const [channelRequest, setChannelRequest] = useState<{ path: string; status: string } | null>(null);
+  /** 决策台里刚改了状态的那一条与它在队列里的位置：写完离开队列时选中原位置的下一条。 */
+  const [advanceFrom, setAdvanceFrom] = useState<{ path: string; index: number } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const openDetail = useCallback((path: string) => {
+  const openDetail = useCallback((path: string, requestStatus?: string) => {
+    setChannelRequest(requestStatus ? { path, status: requestStatus } : null);
     const params = new URLSearchParams(window.location.search);
     params.set("case", path);
     window.history.pushState(
@@ -720,6 +808,7 @@ function JobsView({
     setDetailPath(path);
   }, []);
   const closeDetail = useCallback(() => {
+    setChannelRequest(null);
     if (window.history.state?.__echoJob) {
       window.history.back();
       return;
@@ -766,12 +855,18 @@ function JobsView({
    * facet 计数是「联动」的：每组的数字都算在**其它所有条件已生效**的前提下。
    * 每组要排除自己，否则多选组里没选中的项会全变 0，就再也加不上第二个值了。
    */
+  /*
+   * 筛选与 facet 计数跟着「延后」的关键词走：输入框本身用 query 即时回显，
+   * 几百张卡的重算让到空闲时做，连续打字不卡键。
+   */
+  const deferredQuery = useDeferredValue(query);
+  const matcher = useMemo(() => buildMatcher(deferredQuery), [deferredQuery]);
   const narrow = useCallback(
     (except?: FilterKey) => {
-      return jobs.filter((job) => jobMatchesFilters(job, filters, { query, today, except }));
+      return jobs.filter((job) => jobMatchesFilters(job, filters, { query: deferredQuery, today, except }));
     },
     // today 进依赖是必须的：跨天后「今日」那一档要重算，否则面板挂一夜就永远停在昨天。
-    [jobs, query, filters, today],
+    [jobs, deferredQuery, filters, today],
   );
 
   const facets = useMemo(() => {
@@ -920,9 +1015,12 @@ function JobsView({
 
   // 笔记被删掉 / 移出 AI 推薦目录后，comparePaths 里会留下失效路径；
   // 一切判断都走这份已对账的 compared，免得幽灵岗位占着对比名额。
-  const compared = comparePaths
-    .map((path) => jobs.find((job) => job.path === path))
-    .filter((job): job is JobCard => Boolean(job));
+  const compared = useMemo(
+    () => comparePaths
+      .map((path) => jobs.find((job) => job.path === path))
+      .filter((job): job is JobCard => Boolean(job)),
+    [comparePaths, jobs],
+  );
   const compareFull = compared.length >= COMPARE_LIMIT;
 
   const activeFilterCount =
@@ -946,7 +1044,8 @@ function JobsView({
     setQuery("");
   };
 
-  const toggleCompare = (path: string) => {
+  // 稳定引用：卡片是 memo 的，每次渲染都换一个新函数就等于没有 memo。
+  const toggleCompare = useCallback((path: string) => {
     // 每次都先按现有笔记对账一遍，被删掉的岗位不该继续占着 COMPARE_LIMIT 的名额。
     setComparePaths((current) => {
       const live = current.filter((item) => jobPaths.has(item));
@@ -955,7 +1054,7 @@ function JobsView({
       return [...live, path];
     });
     if (compared.length <= 2 && compared.some((job) => job.path === path)) setCompareOpen(false);
-  };
+  }, [compared, jobPaths]);
 
   /**
    * 🔴 楽観更新はしない。以前は即座に新 status を当てていたが、既定のフィルタが
@@ -1119,6 +1218,8 @@ function JobsView({
       setViewMode(next.viewMode);
       setWeekOffset(next.weekOffset);
       setDetailPath(next.detailPath);
+      // 看板「缺渠道」的那次打开只对那一次有效；前进后退回到同一案件时不该再自动摊开渠道面板。
+      setChannelRequest(null);
     };
     window.addEventListener("popstate", syncFromUrl);
     // 在看板上再点一次左栏「岗位机会」：外壳 pushState 回到不带参数的 /jobs，筛选要跟着回到默认。
@@ -1162,13 +1263,17 @@ function JobsView({
 
   // 统计格从全部案件数（不随筛选变），口径与点开后的筛选在 lib/jobs.ts 里成对定义、由测试钉住。
   // 已经动过手的不再算「待判断」——本人这边没有下一步，催也没用。
-  const tilePools = jobStatTilePools(jobs, today);
-  const untouchedJobs = tilePools.untouched;
-  const readyJobs = [...tilePools.ready].sort((left, right) => compareJobs(left, right, "rating"));
-  const nextPick =
-    readyJobs[0] ??
-    [...untouchedJobs].sort((left, right) => compareJobs(left, right, "rating"))[0] ??
-    null;
+  const tilePools = useMemo(() => jobStatTilePools(jobs, today), [jobs, today]);
+  const readyJobs = useMemo(
+    () => [...tilePools.ready].sort((left, right) => compareJobs(left, right, "rating")),
+    [tilePools],
+  );
+  const nextPick = useMemo(
+    () => readyJobs[0] ??
+      [...tilePools.untouched].sort((left, right) => compareJobs(left, right, "rating"))[0] ??
+      null,
+    [readyJobs, tilePools],
+  );
   const highlightedNextPick =
     viewMode === "card" &&
     sort === "rating" &&
@@ -1196,7 +1301,39 @@ function JobsView({
   // 结果条的条数和空态都要跟画面上实际画出的那一池对齐：看板用的是不含状态筛选的池子。
   const listedJobs = viewMode === "kanban" ? kanbanJobs : resultVisible;
   const matchedJobs = viewMode === "kanban" ? kanbanJobs : visible;
+
+  /*
+   * 决策台里改完状态，这一条多半会因为默认只看未応募而离开队列。不跟着走的话右栏还停在
+   * 已经处理完的岗位上，本人得回队列里再找下一条。所以等写入结束（savingPaths 里没有它）再看：
+   * 离开了就选原位置上的下一条；还在（写入失败、或新状态仍满足筛选）就什么都不动。
+   * 在渲染期按条件 setState（与 FilterChips 收起展开的做法相同），不必等一轮 effect 才跳。
+   */
+  if (advanceFrom && !savingPaths.includes(advanceFrom.path)) {
+    if (detailPath === advanceFrom.path && !visible.some((job) => job.path === advanceFrom.path)) {
+      setDetailPath(visible[Math.min(advanceFrom.index, visible.length - 1)]?.path ?? null);
+    }
+    setAdvanceFrom(null);
+  }
   const decisionDetail = viewMode === "decision" ? detail ?? visible[0] ?? null : null;
+  const decisionStatus = useCallback(
+    (path: string, index: number, status: string, note: string, channel?: string, expectedMtime?: number) => {
+      setAdvanceFrom({ path, index });
+      return changeStatus(path, status, note, channel, expectedMtime);
+    },
+    [changeStatus],
+  );
+
+  // 筛选把结果清空时，逐组告诉本人「去掉这一组能拿回几条」。看板不受状态筛选影响，这一组不列。
+  const relaxations = useMemo(() => {
+    if (!isJobList || matchedJobs.length > 0 || jobs.length === 0) return [];
+    const base = viewMode === "kanban" ? { ...filters, statuses: [] } : filters;
+    // 去掉后仍是 0 条的组也列出（按钮禁用）：「单独放宽这一组没用」本身就是本人要知道的事。
+    return jobFilterRelaxations(jobs, base, { query: deferredQuery, today });
+  }, [deferredQuery, filters, isJobList, jobs, matchedJobs.length, today, viewMode]);
+  const relaxFilter = (key: FilterKey) => {
+    if (key === "query") setQuery("");
+    else setFilters((current) => withoutJobFilter(current, key));
+  };
 
   return (
     <section className="jobs-view">
@@ -1504,86 +1641,106 @@ function JobsView({
             </div>
           )}
 
-          {jobs.length > 0 && isJobList && matchedJobs.length === 0 && (
-            <div className="jobs-empty">
-              <p>没有岗位同时满足这些条件。</p>
-              <button type="button" className="job-detail" onClick={resetFilters}>{t("清空筛选")}</button>
-            </div>
-          )}
+          {/* 只让结果区随视图重挂并播入场，工具栏不动：整块重挂会把焦点从刚点的视图按钮上弹走。 */}
+          <div className="jobs-view-pane" key={viewMode}>
+            {jobs.length > 0 && isJobList && matchedJobs.length === 0 && (
+              <div className="jobs-empty">
+                <p>没有岗位同时满足这些条件。</p>
+                {relaxations.length > 0 && (
+                  <ul className="jobs-empty-relax" aria-label={t("逐项放宽")}>
+                    {relaxations.map((item) => (
+                      <li key={item.key}>
+                        <button type="button" disabled={item.count === 0} onClick={() => relaxFilter(item.key)}>
+                          <b>{t(FILTER_GROUP_LABEL[item.key])}</b>
+                          <span>{t("去掉后可得 {count} 条", { count: item.count })}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <button type="button" className="job-detail" onClick={resetFilters}>{t("清空筛选")}</button>
+              </div>
+            )}
 
-          {jobs.length > 0 && highlightedNextPick && resultVisible.length === 0 && (
-            <div className="jobs-featured-only">当前筛选下只有上方这一项需要判断。</div>
-          )}
+            {jobs.length > 0 && highlightedNextPick && resultVisible.length === 0 && (
+              <div className="jobs-featured-only">当前筛选下只有上方这一项需要判断。</div>
+            )}
 
-          {jobs.length > 0 && viewMode === "card" && resultVisible.length > 0 && (
-            <div className="jobs-grid">
-              {resultVisible.map((job) => (
-                <JobCardView
-                  key={job.path}
-                  job={job}
-                  query={query}
-                  today={today}
-                  compared={comparePaths.includes(job.path)}
-                  compareFull={compareFull}
-                  saving={savingPaths.includes(job.path)}
-                  onDetail={() => openDetail(job.path)}
-                  onCompare={() => toggleCompare(job.path)}
-                  onStatus={(status, note, channel) => changeStatus(
-                    job.path,
-                    status,
-                    note,
-                    channel,
-                    job.note.stat.mtime,
-                  )}
-                />
-              ))}
-            </div>
-          )}
+            {jobs.length > 0 && viewMode === "card" && resultVisible.length > 0 && (
+              <div className="jobs-grid">
+                {resultVisible.map((job, index) => (
+                  <JobCardView
+                    key={job.path}
+                    job={job}
+                    matcher={matcher}
+                    today={today}
+                    stagger={index < 12 ? index : undefined}
+                    compared={comparePaths.includes(job.path)}
+                    compareFull={compareFull}
+                    saving={savingPaths.includes(job.path)}
+                    onDetail={openDetail}
+                    onCompare={toggleCompare}
+                    onStatus={changeStatus}
+                  />
+                ))}
+              </div>
+            )}
 
-          {jobs.length > 0 && viewMode === "decision" && visible.length > 0 && decisionDetail && (
-            <JobDecisionWorkspace
-              jobs={visible}
-              selected={decisionDetail}
-              today={today}
-              saving={savingPaths.includes(decisionDetail.path)}
-              onSelect={setDetailPath}
-              onStatus={(status, note, channel) => changeStatus(
-                decisionDetail.path,
-                status,
-                note,
-                channel,
-                decisionDetail.note.stat.mtime,
-              )}
-              onOpenNote={() => onOpen(decisionDetail.note)}
-            />
-          )}
+            {jobs.length > 0 && viewMode === "decision" && visible.length > 0 && decisionDetail && (
+              <JobDecisionWorkspace
+                jobs={visible}
+                selected={decisionDetail}
+                today={today}
+                saving={savingPaths.includes(decisionDetail.path)}
+                keyboard={!compareOpen}
+                onSelect={setDetailPath}
+                onStatus={(status, note, channel) => decisionStatus(
+                  decisionDetail.path,
+                  visible.findIndex((job) => job.path === decisionDetail.path),
+                  status,
+                  note,
+                  channel,
+                  decisionDetail.note.stat.mtime,
+                )}
+                onOpenNote={() => onOpen(decisionDetail.note)}
+              />
+            )}
 
-          {jobs.length > 0 && viewMode === "list" && resultVisible.length > 0 && (
-            <JobListView jobs={resultVisible} query={query} today={today} onDetail={openDetail} />
-          )}
+            {jobs.length > 0 && viewMode === "list" && resultVisible.length > 0 && (
+              <JobListView jobs={resultVisible} matcher={matcher} today={today} onDetail={openDetail} />
+            )}
 
-          {jobs.length > 0 && viewMode === "kanban" && kanbanJobs.length > 0 && (
-            <JobKanbanView columns={kanbanColumns} query={query} onDetail={openDetail} />
-          )}
+            {jobs.length > 0 && viewMode === "kanban" && kanbanJobs.length > 0 && (
+              <JobKanbanView
+                columns={kanbanColumns}
+                matcher={matcher}
+                savingPaths={savingPaths}
+                statusErrors={statusErrors}
+                onDetail={openDetail}
+                onStatus={changeStatus}
+              />
+            )}
 
-          {jobs.length > 0 && viewMode === "weekly" && (
-            <JobWeeklyView
-              offset={weekOffset}
-              range={week.label}
-              kpis={weekKpis}
-              events={weekEvents}
-              focus={nextFocus}
-              review={weekReview}
-              onShift={(delta) => setWeekOffset((current) => current + delta)}
-              onDetail={openDetail}
-              onOpenReview={onOpen}
-              onWiki={openWikiLink}
-            />
-          )}
+            {jobs.length > 0 && viewMode === "weekly" && (
+              <JobWeeklyView
+                offset={weekOffset}
+                range={week.label}
+                kpis={weekKpis}
+                events={weekEvents}
+                focus={nextFocus}
+                review={weekReview}
+                onShift={(delta) => setWeekOffset((current) => current + delta)}
+                onDetail={openDetail}
+                onOpenReview={onOpen}
+                onWiki={openWikiLink}
+              />
+            )}
+          </div>
         </div>
       </div>
 
       {compared.length > 0 && (
+        // 托盘从底边升起只播一次：key 不随选中项变化，加减候选时不重播。
         <div className="job-compare-tray" role="region" aria-label={t("对比候选")}>
           <span className="job-compare-count">{compared.length} / {COMPARE_LIMIT} {t("已选")}</span>
           <div className="job-compare-items">
@@ -1614,14 +1771,15 @@ function JobsView({
           saving={savingPaths.includes(detail.path)}
           compared={comparePaths.includes(detail.path)}
           compareFull={compareFull}
+          requestedStatus={channelRequest?.path === detail.path ? channelRequest.status : undefined}
           onClose={closeDetail}
-              onStatus={(status, note, channel) => changeStatus(
-                detail.path,
-                status,
-                note,
-                channel,
-                detail.note.stat.mtime,
-              )}
+          onStatus={(status, note, channel) => changeStatus(
+            detail.path,
+            status,
+            note,
+            channel,
+            detail.note.stat.mtime,
+          )}
           onFollowUp={(values) => changeFollowUp(detail.path, values, detail.note.stat.mtime)}
           onCompare={() => toggleCompare(detail.path)}
           onOpenNote={(note) => onOpen(note ?? detail.note)}
@@ -1658,6 +1816,12 @@ function JobsView({
   );
 }
 
+/** source 表記は channel の語彙と少しずれる（RA だけ日英が逆）。一致した時だけ初期値にする。 */
+function channelFromSource(source: string) {
+  if ((KNOWN_CHANNELS as readonly string[]).includes(source)) return source;
+  return source === "リクルートエージェント" ? "Recruit Agent" : "";
+}
+
 /**
  * 状態と**その理由**を1つの操作にまとめる。7 枚举だけでは「募集終了」「推薦不可」「取扱終了」が
  * 全部ただの `不採用` に潰れ、後から死因を追えなくなる（2026-07-30 ミロク情報サービスの
@@ -1671,10 +1835,16 @@ function StatusPicker({
   today,
   saving,
   expectedMtime,
+  requestedStatus,
+  quick = false,
   onChange,
 }: {
   value: string;
   note: string;
+  /** 打开时就摊开渠道选择（看板把缺 channel 的卡拖到応募済以降的列）。 */
+  requestedStatus?: string;
+  /** 决策台头部的「投了 / 保留 / 见送」。与下拉共用同一套渠道与注记流程，不另写一份。 */
+  quick?: boolean;
   /** ノートの frontmatter `channel`。空なら応募記録なし＝応募済系へ変える時に選ばせる。 */
   channel: string;
   /** 求人の source。既知の渠道と一致すればセレクトの初期値に使う（Findy 起点なら Findy が既定）。 */
@@ -1692,36 +1862,38 @@ function StatusPicker({
 }) {
   const { t } = useJobMenu();
   const customValue = value && !isJobStatus(value) ? value : null;
+  const needsChannel = (next: string) => statusRequiresChannel(next) && !channel;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  // 注記エディタが保存時に使う状態。通常は今の状態だが、「见送」は保留へ変えつつ理由を書かせる。
+  const [noteStatus, setNoteStatus] = useState<string | null>(null);
   // 応募済系を選んだが channel が無い：即座に拒否せず、ここに保留して渠道を選ばせる。
-  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
-  const [channelDraft, setChannelDraft] = useState("");
+  const [pendingStatus, setPendingStatus] = useState<string | null>(
+    () => (requestedStatus && needsChannel(requestedStatus) ? requestedStatus : null),
+  );
+  const [channelDraft, setChannelDraft] = useState(() => (requestedStatus ? channelFromSource(sourceGuess) : ""));
   const draftError = jobStatusNoteError(draft);
 
-  const openEditor = () => {
+  const openEditor = (nextStatus: string | null = null, prefill?: string) => {
     // 既存注記があれば編集、無ければ vault 表記（日付が先頭）の書き出しを置いておく。
     // channel パネルとは排他：どちらの操作が進行中か読めなくなるので同時には開かない。
     setPendingStatus(null);
-    setDraft(note || `${today}・`);
+    setNoteStatus(nextStatus);
+    setDraft(prefill ?? (note || `${today}・`));
     setEditing(true);
   };
 
   const submit = async () => {
     if (draftError) return;
-    if (!(await onChange(value, draft, undefined, expectedMtime))) setEditing(false);
+    if (!(await onChange(noteStatus ?? value, draft, undefined, expectedMtime))) setEditing(false);
   };
 
   const pickStatus = (next: string) => {
     // channel 必須の状態（応募済〜不採用）へ、応募記録の無い案件を動かす時だけ渠道を聞く。
     // API はどのみち拒否するので、先に聞く方が「ボタンがあるのに使えない」を消せる。
-    if (statusRequiresChannel(next) && !channel) {
+    if (needsChannel(next)) {
       setEditing(false);
-      // source 表記は channel の語彙と少しずれる（RA だけ日英が逆）。一致した時だけ初期値にする。
-      const guess = (KNOWN_CHANNELS as readonly string[]).includes(sourceGuess)
-        ? sourceGuess
-        : sourceGuess === "リクルートエージェント" ? "Recruit Agent" : "";
-      setChannelDraft(guess);
+      setChannelDraft(channelFromSource(sourceGuess));
       setPendingStatus(next);
       return;
     }
@@ -1766,6 +1938,23 @@ function StatusPicker({
           {note ? "✎" : "＋"}
         </button>
       </div>
+
+      {/* 只在还没投的时候出：对面接中的案件按「投了」是倒退。 */}
+      {quick && (value === "未応募" || customValue) && (
+        <div className="job-quick-decisions" role="group" aria-label={t("快捷判断")}>
+          {QUICK_DECISIONS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`job-quick-${item.id}`}
+              disabled={saving}
+              onClick={() => ("withNote" in item ? openEditor(item.status, `${today}・見送り`) : pickStatus(item.status))}
+            >
+              {t(item.label)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {note && !editing && <p className="job-status-note">{note}</p>}
 
@@ -1823,10 +2012,23 @@ function StatusPicker({
   );
 }
 
-function JobCardView({
+type StatusWriter = (
+  path: string,
+  status: string,
+  note: string,
+  channel?: string,
+  expectedMtime?: number,
+) => Promise<string | null>;
+
+/*
+ * 卡片按路径回调（onDetail(path) 等），父级把同一个稳定函数传给每一张：
+ * 每张卡各自包一层闭包的话 memo 就形同虚设，打一个字整列卡片全部重渲染。
+ */
+const JobCardView = memo(function JobCardView({
   job,
-  query,
+  matcher,
   today,
+  stagger,
   compared,
   compareFull,
   saving,
@@ -1835,23 +2037,32 @@ function JobCardView({
   onStatus,
 }: {
   job: JobCard;
-  query: string;
+  matcher: Matcher;
   today: string;
+  /** 前 12 张的入场错峰序号；之后的卡不错峰，免得长列表最后一张要等一秒才出现。 */
+  stagger?: number;
   compared: boolean;
   compareFull: boolean;
   saving: boolean;
-  onDetail: () => void;
-  onCompare: () => void;
-  onStatus: (
-    status: string,
-    note: string,
-    channel?: string,
-    expectedMtime?: number,
-  ) => Promise<string | null>;
+  onDetail: (path: string) => void;
+  onCompare: (path: string) => void;
+  onStatus: StatusWriter;
 }) {
   const { t, label: menuLabel } = useJobMenu();
+  const { path } = job;
+  const mtime = job.note.stat.mtime;
+  const onChange = useCallback(
+    (status: string, note: string, channel?: string) => onStatus(path, status, note, channel, mtime),
+    [mtime, onStatus, path],
+  );
+  const officialLabel = job.officialApplyStatus === "exact" ? t("官网直投") : job.officialApplyStatus === "related" ? t("官网相近职位") : t("官网招聘");
+  const intake = intakeTone(jobIntake(job.date, today));
   return (
-    <article className={`job-card${compared ? " compared" : ""}`} onClick={onDetail}>
+    <article
+      className={`job-card rate-${rateTone(job.rating)}${compared ? " compared" : ""}`}
+      style={stagger === undefined ? undefined : { "--stagger": stagger } as CSSProperties}
+      onClick={() => onDetail(path)}
+    >
       <header className="job-card-head">
         <div className="job-card-id">
           <span
@@ -1863,29 +2074,56 @@ function JobCardView({
             {rateText(job)}
           </span>
           <div className="job-card-titles">
-            <h2><Highlight text={job.company} query={query} /></h2>
-            {job.position && <p className="job-position"><Highlight text={job.position} query={query} /></p>}
+            <h2><Highlight text={job.company} matcher={matcher} /></h2>
+            {job.position && <p className="job-position"><Highlight text={job.position} matcher={matcher} /></p>}
           </div>
         </div>
         <span className="job-card-marks">
           {job.fit && <FitChip fit={job.fit} />}
           <span className={`job-verify verify-${job.verification}`} title={t("求人原文：{label}", { label: menuLabel(VERIFICATION_LABEL[job.verification]) })}>{menuLabel(VERIFICATION_LABEL[job.verification])}</span>
+          {/* 外链收成右上角的印章：底部只留操作，两枚链接不再和状态控件抢一行。 */}
+          {job.officialApplyUrl && (
+            <a
+              className="job-icon-link job-icon-official"
+              href={job.officialApplyUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={officialLabel}
+              aria-label={`${officialLabel} ↗`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {t("官")}
+            </a>
+          )}
+          {job.url && job.url !== job.officialApplyUrl && (
+            <a
+              className="job-icon-link"
+              href={job.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="求人票"
+              aria-label={t("求人票 ↗")}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {t("票")}
+            </a>
+          )}
         </span>
       </header>
 
       <div className="job-salary-row">
         {/* 解析不出年収区间时退回笔记原文，字号跟着降下来，免得一行长文顶掉卡片的层级。 */}
         <span className={`job-salary-figure${job.salary.min === null ? " is-text" : ""}`}>{salaryLabel(job)}</span>
-        <span className="job-rate-meta">応募优先度 {job.rating}/10</span>
       </div>
 
-      {/* 入库日は常に出す：欠けている（＝「入库日不明」）ことも読み取れる情報なので黙って消さない。 */}
+      {/* 事实只是上下文，用「·」连成一行；只有「今天入库」与「可远程」两项值得上色成标签。
+          入库日は常に出す：欠けている（＝「入库日不明」）ことも読み取れる情報なので黙って消さない。 */}
       <div className="job-facts">
         <span
-          className={`job-intake tone-${intakeTone(jobIntake(job.date, today))}`}
+          className={`job-intake tone-${intake}`}
           title={job.date ? t("入库日 {date}", { date: job.date }) : t("笔记 frontmatter 里没有 date")}
         >
-          入库 {intakeLabel(job.date, today)}
+          {intake === "new" ? "NEW" : `入库 ${intakeLabel(job.date, today)}`}
         </span>
         {/* 応募日は「投げてから何日たったか」を出すために入库日とは別に見せる。
             入库日で代用すると 7/20 に入って 7/24 に投げた案件が4日ずれる。 */}
@@ -1896,13 +2134,13 @@ function JobCardView({
           </span>
         )}
         {job.employment && <span>{job.employment}</span>}
-        {job.location && <span><Highlight text={job.location} query={query} /></span>}
+        {job.location && <span><Highlight text={job.location} matcher={matcher} /></span>}
         {job.remote && <span className="job-remote">{t("リモート可")}</span>}
       </div>
 
       {job.stack.length > 0 && (
         <div className="job-stack">
-          {job.stack.slice(0, 7).map((tag) => <span key={tag}><Highlight text={tag} query={query} /></span>)}
+          {job.stack.slice(0, 7).map((tag) => <span key={tag}><Highlight text={tag} matcher={matcher} /></span>)}
           {job.stack.length > 7 && <span className="job-stack-more">+{job.stack.length - 7}</span>}
         </div>
       )}
@@ -1910,64 +2148,43 @@ function JobCardView({
       {job.reason && (
         <div className="job-block">
           <span className="job-block-label">推荐理由</span>
-          <p><Highlight text={clip(job.reason, 92)} query={query} /></p>
+          <p><Highlight text={clip(job.reason, 92)} matcher={matcher} /></p>
         </div>
       )}
 
       <footer className="job-card-foot" onClick={(event) => event.stopPropagation()}>
         <StatusPicker
-              value={job.status}
-              note={job.statusNote}
-              channel={job.channel}
-              sourceGuess={job.sourceGroup}
-              today={today}
-              saving={saving}
-              expectedMtime={job.note.stat.mtime}
-              onChange={onStatus}
-            />
+          value={job.status}
+          note={job.statusNote}
+          channel={job.channel}
+          sourceGuess={job.sourceGroup}
+          today={today}
+          saving={saving}
+          expectedMtime={mtime}
+          onChange={onChange}
+        />
         <button
           type="button"
           className={compared ? "job-compare-toggle active" : "job-compare-toggle"}
           aria-pressed={compared}
           disabled={!compared && compareFull}
           title={!compared && compareFull ? t("最多同时对比 {count} 个岗位", { count: COMPARE_LIMIT }) : t("加入对比")}
-          onClick={onCompare}
+          onClick={() => onCompare(path)}
         >
           {compared ? t("已加入对比") : t("对比")}
         </button>
-        <button type="button" className="job-detail" onClick={onDetail}>{t("详情")}</button>
-        {job.officialApplyUrl && (
-          <a
-            className="job-link job-official-link"
-            href={job.officialApplyUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(event) => event.stopPropagation()}
-          >
-            {job.officialApplyStatus === "exact" ? t("官网直投 ↗") : job.officialApplyStatus === "related" ? t("官网相近职位 ↗") : t("官网招聘 ↗")}
-          </a>
-        )}
-        {job.url && job.url !== job.officialApplyUrl && (
-          <a
-            className="job-link"
-            href={job.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(event) => event.stopPropagation()}
-          >
-            求人票 ↗
-          </a>
-        )}
+        <button type="button" className="job-detail" onClick={() => onDetail(path)}>{t("详情")}</button>
       </footer>
     </article>
   );
-}
+});
 
 function JobDecisionWorkspace({
   jobs,
   selected,
   today,
   saving,
+  keyboard = true,
   onSelect,
   onStatus,
   onOpenNote,
@@ -1976,6 +2193,8 @@ function JobDecisionWorkspace({
   selected: JobCard;
   today: string;
   saving: boolean;
+  /** 对比浮层开着时让出方向键（浮层是模态的，背后的队列不该跟着动）。 */
+  keyboard?: boolean;
   onSelect: (path: string) => void;
   onStatus: (
     status: string,
@@ -1986,13 +2205,41 @@ function JobDecisionWorkspace({
   onOpenNote: () => void;
 }) {
   const { t, label: menuLabel } = useJobMenu();
+  const queueRef = useRef<HTMLElement>(null);
+
+  // j/k 与 ↑↓ 在队列里逐条走。打字、下拉框里的方向键（isTypingTarget）与别处已处理的按键都让出去。
+  useEffect(() => {
+    if (!keyboard) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
+      // 外壳的原笔记抽屉、⌘K 面板等模态层盖在决策台上时，方向键属于那一层（滚动正文、移动选项），
+      // 背后的队列不该跟着换岗位。
+      if (document.querySelector('[aria-modal="true"]')) return;
+      const step = event.key === "j" || event.key === "ArrowDown" ? 1 : event.key === "k" || event.key === "ArrowUp" ? -1 : 0;
+      if (step === 0) return;
+      const index = jobs.findIndex((job) => job.path === selected.path);
+      const next = jobs[Math.min(jobs.length - 1, Math.max(0, index + step))];
+      if (!next) return;
+      event.preventDefault();
+      onSelect(next.path);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [jobs, keyboard, onSelect, selected.path]);
+
+  // 键盘切换与改完状态后的自动下一条都可能落到队列可视区外；nearest 只在需要时滚，点击不会跳。
+  useEffect(() => {
+    queueRef.current?.querySelector<HTMLElement>("button.active")?.scrollIntoView({ block: "nearest" });
+  }, [selected.path]);
+
   return (
     <div className="jobs-decision-workspace">
-      <aside className="jobs-decision-queue" aria-label={t("机会队列")}>
-        <header><strong>{t("待判断机会")}</strong><span>{jobs.length}</span></header>
+      <aside ref={queueRef} className="jobs-decision-queue" aria-label={t("机会队列")}>
+        <header><strong>{t("待判断机会")}</strong><span>{jobs.length}</span><kbd>{t("j / k 或 ↑↓ 切换")}</kbd></header>
         {jobs.map((job, index) => (
           <button
             key={job.path}
+            aria-current={job.path === selected.path ? "true" : undefined}
             className={job.path === selected.path ? "active" : ""}
             onClick={() => onSelect(job.path)}
           >
@@ -2025,6 +2272,7 @@ function JobDecisionWorkspace({
             today={today}
             saving={saving}
             expectedMtime={selected.note.stat.mtime}
+            quick
             onChange={onStatus}
           />
         </header>
@@ -2035,6 +2283,13 @@ function JobDecisionWorkspace({
           <div><dt>原文</dt><dd>{VERIFICATION_LABEL[selected.verification]}</dd></div>
           <div><dt>入库</dt><dd>{selected.date || "—"}</dd></div>
         </dl>
+        {/* 判断要看的六轴与技术栈原来只在抽屉里，决策台为了它们还得另开一层。 */}
+        <FitPanel fit={selected.fit} />
+        {selected.stack.length > 0 && (
+          <div className="job-stack jobs-decision-stack" aria-label={t("技術スタック")}>
+            {selected.stack.map((tag) => <span key={tag}>{tag}</span>)}
+          </div>
+        )}
         {selected.reason && <section><h3>为什么值得判断</h3><p>{selected.reason}</p></section>}
         {selected.caution && <section className="is-caution"><h3>应募前确认</h3><p>{selected.caution}</p></section>}
         {selected.matches.length > 0 && (
@@ -2057,16 +2312,16 @@ function JobDecisionWorkspace({
 /** 列表视图：一行一个岗位，密度最高，用来快速扫全量结果。 */
 function JobListView({
   jobs,
-  query,
+  matcher,
   today,
   onDetail,
 }: {
   jobs: JobCard[];
-  query: string;
+  matcher: Matcher;
   today: string;
   onDetail: (path: string) => void;
 }) {
-  const { t, label: menuLabel } = useJobMenu();
+  const { t } = useJobMenu();
   return (
     <div className="job-list">
       <div className="job-list-head" aria-hidden="true">
@@ -2078,72 +2333,226 @@ function JobListView({
         <span>{t("状态")}</span>
         <span>{t("核对")}</span>
       </div>
-      {jobs.map((job) => (
-        <button key={job.path} type="button" className="job-list-row" onClick={() => onDetail(job.path)}>
-          <span className="job-list-title">
-            <strong><Highlight text={job.company} query={query} /></strong>
-            <small><Highlight text={job.position || "—"} query={query} /></small>
-          </span>
-          <span className={`job-list-rate rate-${rateTone(job.rating)}`} title={job.rated ? undefined : t("未採点（求人原文を読んでいない）")}>{rateText(job)}</span>
-          <span className="job-list-salary">{salaryLabel(job)}</span>
-          <span className="job-list-stack">
-            {job.stack.map((tag) => <i key={tag}>{tag}</i>)}
-          </span>
-          {/* 「入库时间」で並べ替えても列がないと順序の根拠が読めないので、リストにも出す。 */}
-          <span
-            className={`job-list-intake tone-${intakeTone(jobIntake(job.date, today))}`}
-            title={job.date ? t("入库日 {date}", { date: job.date }) : t("笔记 frontmatter 里没有 date")}
-          >
-            {intakeLabel(job.date, today)}
-          </span>
-          <span className={`job-status-pill tone-${statusTone(job.status)}`} title={job.status}>{job.status}</span>
-          <span className={`job-verify verify-${job.verification}`} title={t("求人原文：{label}", { label: menuLabel(VERIFICATION_LABEL[job.verification]) })}>{menuLabel(VERIFICATION_LABEL[job.verification])}</span>
-        </button>
-      ))}
+      {jobs.map((job) => <JobListRow key={job.path} job={job} matcher={matcher} today={today} onDetail={onDetail} />)}
     </div>
   );
 }
 
-/** 看板视图：按 `status` 分列，列顺序即 `JOB_STATUSES`。结构按拖拽改状态预留。 */
-function JobKanbanView({
-  columns,
-  query,
+const JobListRow = memo(function JobListRow({
+  job,
+  matcher,
+  today,
   onDetail,
 }: {
-  columns: { status: string; jobs: JobCard[] }[];
-  query: string;
+  job: JobCard;
+  matcher: Matcher;
+  today: string;
   onDetail: (path: string) => void;
 }) {
-  const { t } = useJobMenu();
+  const { t, label: menuLabel } = useJobMenu();
   return (
-    <div className="job-kanban">
-      {columns.map((column) => (
-        <section key={column.status} className={`job-kanban-col tone-${statusTone(column.status)}`}>
-          <header className="job-kanban-head">
-            <strong title={column.status}>{column.status}</strong>
-            <span>{column.jobs.length}</span>
-          </header>
-          <div className="job-kanban-body">
-            {column.jobs.map((job) => (
-              <button
-                key={job.path}
-                type="button"
-                className={`job-kanban-card rate-${rateTone(job.rating)}`}
-                onClick={() => onDetail(job.path)}
-              >
-                <span className="job-kanban-title">
-                  <strong><Highlight text={job.company} query={query} /></strong>
-                  <i title={job.rated ? undefined : t("未採点")}>{rateText(job)}</i>
-                </span>
-                <small><Highlight text={job.position || "—"} query={query} /></small>
-                <span className="job-kanban-salary">{salaryLabel(job)}</span>
-              </button>
-            ))}
-            {column.jobs.length === 0 && <span className="job-kanban-empty">—</span>}
-          </div>
-        </section>
-      ))}
-    </div>
+    <button type="button" className="job-list-row" onClick={() => onDetail(job.path)}>
+      <span className="job-list-title">
+        <strong><Highlight text={job.company} matcher={matcher} /></strong>
+        <small><Highlight text={job.position || "—"} matcher={matcher} /></small>
+      </span>
+      <span className={`job-list-rate rate-${rateTone(job.rating)}`} title={job.rated ? undefined : t("未採点（求人原文を読んでいない）")}>{rateText(job)}</span>
+      <span className="job-list-salary">{salaryLabel(job)}</span>
+      <span className="job-list-stack">
+        {job.stack.map((tag) => <i key={tag}>{tag}</i>)}
+      </span>
+      {/* 「入库时间」で並べ替えても列がないと順序の根拠が読めないので、リストにも出す。 */}
+      <span
+        className={`job-list-intake tone-${intakeTone(jobIntake(job.date, today))}`}
+        title={job.date ? t("入库日 {date}", { date: job.date }) : t("笔记 frontmatter 里没有 date")}
+      >
+        {intakeLabel(job.date, today)}
+      </span>
+      <span className={`job-status-pill tone-${statusTone(job.status)}`} title={job.status}>{job.status}</span>
+      <span className={`job-verify verify-${job.verification}`} title={t("求人原文：{label}", { label: menuLabel(VERIFICATION_LABEL[job.verification]) })}>{menuLabel(VERIFICATION_LABEL[job.verification])}</span>
+    </button>
+  );
+});
+
+/**
+ * 看板视图：按 `status` 分列，列顺序即 `JOB_STATUSES`。卡片可拖到别的列改状态。
+ *
+ * 落点规则全部在 lib/job-kanban.ts（同列・自定义列忽略、缺 channel 交给抽屉、不採用先确认）。
+ * 不做乐观更新：卡片留在原列，落点列只放一张「写入中…」占位，写完由新笔记把卡带过去——
+ * 写入失败时卡片本来就没动，失败原因挂在卡上，不会出现「弹回去了却不知道为什么」。
+ */
+function JobKanbanView({
+  columns,
+  matcher,
+  savingPaths,
+  statusErrors,
+  onDetail,
+  onStatus,
+}: {
+  columns: { status: string; jobs: JobCard[] }[];
+  matcher: Matcher;
+  savingPaths: string[];
+  statusErrors: Record<string, string>;
+  onDetail: (path: string, requestStatus?: string) => void;
+  onStatus: StatusWriter;
+}) {
+  const { t } = useJobMenu();
+  const [dragging, setDragging] = useState<JobCard | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<{ job: JobCard; status: string; statusNote: string } | null>(null);
+  // 落点列的占位：path → 目标列。写入的 Promise 结束就删，成功与否都由笔记本身说话。
+  const [dropping, setDropping] = useState<Record<string, { status: string; company: string }>>({});
+
+  const commit = async (job: JobCard, status: string, statusNote: string) => {
+    setDropping((current) => ({ ...current, [job.path]: { status, company: job.company } }));
+    try {
+      // 显式带上原括号注记：不传的话服务端会把「2026-09-25・一次面接」这类记录当成空注记写掉。
+      await onStatus(job.path, status, statusNote, undefined, job.note.stat.mtime);
+    } finally {
+      setDropping((current) => {
+        const next = { ...current };
+        delete next[job.path];
+        return next;
+      });
+    }
+  };
+
+  const drop = (job: JobCard, status: string) => {
+    const decision = kanbanDropDecision(job, status);
+    if (decision.kind === "ignore") return;
+    if (decision.kind === "need-channel") onDetail(job.path, decision.status);
+    else if (decision.kind === "confirm") setConfirm({ job, status: decision.status, statusNote: decision.statusNote });
+    else void commit(job, decision.status, decision.statusNote);
+  };
+
+  /*
+   * 拿起时的变淡、倾斜与列高亮推迟到下一个任务再上：React 在 dragstart 后的微任务里就会提交 DOM，
+   * 而浏览器是在 dragstart 派发完之后才截拖影——同步改的话拖影本身就是半透明、歪着的。
+   */
+  const liftTimer = useRef<number | null>(null);
+  const startDrag = (job: JobCard) => {
+    if (liftTimer.current !== null) window.clearTimeout(liftTimer.current);
+    liftTimer.current = window.setTimeout(() => {
+      liftTimer.current = null;
+      setDragging(job);
+    }, 0);
+  };
+  useEffect(() => () => {
+    if (liftTimer.current !== null) window.clearTimeout(liftTimer.current);
+  }, []);
+
+  const endDrag = () => {
+    // 极快的拖放可能在推迟的「拿起」之前就结束，不清掉的话看板会停在拖动态。
+    if (liftTimer.current !== null) window.clearTimeout(liftTimer.current);
+    liftTimer.current = null;
+    setDragging(null);
+    setOver(null);
+  };
+
+  return (
+    <>
+      {confirm && (
+        <div
+          className="job-kanban-confirm"
+          role="alertdialog"
+          aria-label={t("把「{company}」移到「不採用」？", { company: confirm.job.company })}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.stopPropagation();
+            setConfirm(null);
+          }}
+        >
+          <p>
+            <strong>{t("把「{company}」移到「不採用」？", { company: confirm.job.company })}</strong>
+            <span>{t("会同时清空等待对象、跟进日期与下一场日程。")}</span>
+          </p>
+          {/* 焦点先落在「取消」：误拖之后顺手一个 Enter 不该把案件写成不採用。 */}
+          <button type="button" autoFocus onClick={() => setConfirm(null)}>{t("取消")}</button>
+          <button
+            type="button"
+            className="job-kanban-confirm-danger"
+            onClick={() => {
+              const { job, status, statusNote } = confirm;
+              setConfirm(null);
+              void commit(job, status, statusNote);
+            }}
+          >
+            {t("确认移动")}
+          </button>
+        </div>
+      )}
+      <div className={`job-kanban${dragging ? " is-dragging" : ""}`}>
+        {columns.map((column) => {
+          const accepts = dragging !== null && kanbanAcceptsDrop(dragging, column.status);
+          const ghosts = Object.entries(dropping).filter(([path, item]) =>
+            item.status === column.status && savingPaths.includes(path) && !column.jobs.some((job) => job.path === path),
+          );
+          return (
+            <section
+              key={column.status}
+              className={`job-kanban-col tone-${statusTone(column.status)}${accepts ? " can-drop" : ""}${over === column.status ? " drop-target" : ""}`}
+              onDragOver={(event) => {
+                if (!accepts) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                if (over !== column.status) setOver(column.status);
+              }}
+              onDragLeave={(event) => {
+                // dragleave 在进入子元素时也会触发；只有真正离开这一列才收起高亮。
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null) && over === column.status) setOver(null);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                if (dragging) drop(dragging, column.status);
+                endDrag();
+              }}
+            >
+              <header className="job-kanban-head">
+                <strong title={column.status}>{column.status}</strong>
+                <span>{column.jobs.length}</span>
+              </header>
+              <div className="job-kanban-body">
+                {ghosts.map(([path, item]) => (
+                  <div key={path} className="job-kanban-ghost" role="status">
+                    <strong>{item.company}</strong>
+                    <small>{t("写入中…")}</small>
+                  </div>
+                ))}
+                {column.jobs.map((job) => {
+                  const saving = savingPaths.includes(job.path);
+                  const error = statusErrors[job.path];
+                  return (
+                    <button
+                      key={job.path}
+                      type="button"
+                      draggable={!saving}
+                      title={t("拖动可改状态")}
+                      className={`job-kanban-card rate-${rateTone(job.rating)}${dragging?.path === job.path ? " is-dragged" : ""}${saving ? " saving" : ""}`}
+                      onClick={() => onDetail(job.path)}
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData("text/plain", job.path);
+                        event.dataTransfer.effectAllowed = "move";
+                        startDrag(job);
+                      }}
+                      onDragEnd={endDrag}
+                    >
+                      <span className="job-kanban-title">
+                        <strong><Highlight text={job.company} matcher={matcher} /></strong>
+                        <i title={job.rated ? undefined : t("未採点")}>{rateText(job)}</i>
+                      </span>
+                      <small><Highlight text={job.position || "—"} matcher={matcher} /></small>
+                      <span className="job-kanban-salary">{salaryLabel(job)}</span>
+                      {error && <em className="job-kanban-error">{t("没有写入。{message}", { message: error })}</em>}
+                    </button>
+                  );
+                })}
+                {column.jobs.length === 0 && ghosts.length === 0 && <span className="job-kanban-empty">{t("放到这里")}</span>}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
@@ -2282,6 +2691,7 @@ function JobDrawer({
   saving,
   compared,
   compareFull,
+  requestedStatus,
   onClose,
   onStatus,
   onFollowUp,
@@ -2294,6 +2704,8 @@ function JobDrawer({
   saving: boolean;
   compared: boolean;
   compareFull: boolean;
+  /** 从看板拖过来但缺 channel 的目标状态：打开时直接摊开渠道选择。 */
+  requestedStatus?: string;
   onClose: () => void;
   onStatus: (
     status: string,
@@ -2371,6 +2783,7 @@ function JobDrawer({
               today={today}
               saving={saving}
               expectedMtime={job.note.stat.mtime}
+              requestedStatus={requestedStatus}
               onChange={onStatus}
             />
             {/* 列表 / 看板 / 周复盘视图里没有对比按钮，都从详情这里加入。 */}
@@ -2520,6 +2933,9 @@ const COMPARE_ROWS: { label: string; render: (job: JobCard) => ReactNode }[] = [
   },
 ];
 
+/** 第一个岗位是填色的主角，其余只描边；三色取 radar-chart 已有的系列色，不另起一套。 */
+const COMPARE_RADAR_TONES = ["primary", "tertiary", "quaternary"] as const;
+
 function JobCompare({
   jobs,
   onClose,
@@ -2532,6 +2948,7 @@ function JobCompare({
   const { t } = useJobMenu();
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(dialogRef);
+  const scored = jobs.filter((job) => job.fit);
   return (
     <div
       className="job-compare-backdrop"
@@ -2543,6 +2960,23 @@ function JobCompare({
           <button onClick={onClose} aria-label={t("关闭对比")}>×</button>
         </header>
         <div className="job-compare-scroll">
+          {/* 叠在一张雷达上看谁在哪一轴领先；未採点的岗位不画（没有分数就没有形状）。 */}
+          {scored.length > 0 && (
+            <RadarChart
+              className="job-compare-radar"
+              axes={FIT_RADAR_AXES}
+              series={scored.map((job, index) => ({
+                id: job.path,
+                label: job.company,
+                values: fitRadarValues(job.fit!),
+                tone: COMPARE_RADAR_TONES[index],
+              }))}
+              max={1}
+              size={300}
+              showValues={false}
+              title={t("六轴叠加对比")}
+            />
+          )}
           <table className="job-compare-table">
             <thead>
               <tr>

@@ -811,3 +811,67 @@ export function jobStatTilePools<T extends JobCard>(jobs: T[], today: string): R
     verified: notApplied.filter((job) => job.verification === "verified"),
   };
 }
+
+/** 「去掉后可得 N 条」里按哪一组放宽。query 也算一组：关键词常常才是把结果筛空的那一个。 */
+export type JobFilterRelaxation = { key: JobFilterKey; count: number };
+
+/** 每一组筛选此刻是否在起作用（空数组・0・false 都不算）。 */
+export function activeJobFilterKeys(filters: JobBoardFilters, query = ""): JobFilterKey[] {
+  const active: [JobFilterKey, boolean][] = [
+    ["query", query.trim() !== ""],
+    ["statuses", filters.statuses.length > 0],
+    ["rating", filters.ratings.length > 0],
+    ["salary", filters.minSalary > 0],
+    ["stacks", filters.stacks.length > 0],
+    ["regions", filters.regions.length > 0],
+    ["sources", filters.sources.length > 0],
+    ["verifications", filters.verifications.length > 0],
+    ["intakes", filters.intakes.length > 0],
+    ["touches", filters.touches.length > 0],
+    ["gates", filters.gates.length > 0],
+    ["bands", filters.bands.length > 0],
+    ["accesses", filters.accesses.length > 0],
+    ["remote", filters.remoteOnly],
+    ["waiting", filters.waitingOnly],
+  ];
+  return active.filter(([, on]) => on).map(([key]) => key);
+}
+
+/**
+ * 筛选结果为空时，逐组算「只去掉这一组能拿回几条」。计数与 facet 联动同一个口径
+ * （jobMatchesFilters 的 except），所以按钮上的数字就是点下去之后的条数。
+ * 结果按可得条数降序：最该先放宽的那组排在最前。
+ */
+export function jobFilterRelaxations<T extends JobCard>(
+  jobs: readonly T[],
+  filters: JobBoardFilters,
+  { query = "", today }: { query?: string; today: string },
+): JobFilterRelaxation[] {
+  return activeJobFilterKeys(filters, query)
+    .map((key) => ({
+      key,
+      count: jobs.filter((job) => jobMatchesFilters(job, filters, { query, today, except: key })).length,
+    }))
+    .sort((left, right) => right.count - left.count);
+}
+
+/** 只清空某一组筛选（「去掉后可得 N 条」的落点），其余条件原样保留。query 不在 filters 里，由调用方自己清。 */
+export function withoutJobFilter(filters: JobBoardFilters, key: JobFilterKey): JobBoardFilters {
+  switch (key) {
+    case "statuses": return { ...filters, statuses: [] };
+    case "rating": return { ...filters, ratings: [] };
+    case "salary": return { ...filters, minSalary: 0 };
+    case "stacks": return { ...filters, stacks: [] };
+    case "regions": return { ...filters, regions: [] };
+    case "sources": return { ...filters, sources: [] };
+    case "verifications": return { ...filters, verifications: [] };
+    case "intakes": return { ...filters, intakes: [] };
+    case "touches": return { ...filters, touches: [] };
+    case "gates": return { ...filters, gates: [] };
+    case "bands": return { ...filters, bands: [] };
+    case "accesses": return { ...filters, accesses: [] };
+    case "remote": return { ...filters, remoteOnly: false };
+    case "waiting": return { ...filters, waitingOnly: false };
+    default: return filters;
+  }
+}

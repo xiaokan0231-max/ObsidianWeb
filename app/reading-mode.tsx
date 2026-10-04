@@ -3,6 +3,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ReadingHeading } from "@/lib/reading-document";
+import { isTypingTarget } from "@/lib/keyboard";
 import { useDialogFocus } from "./use-dialog-focus";
 import { copySelectionWithoutRuby } from "./ruby-copy";
 
@@ -10,6 +11,25 @@ export type ReadingPosition = { anchor: string | null; offset: number; scrollTop
 const positions = new Map<string, ReadingPosition>();
 const ANCHORS = "[data-reading-anchor], [data-novel-sentence], [data-md-heading]";
 const FONT_KEY = "reading:font-size";
+const STAGE_LINES = "[data-stage-line]";
+
+/**
+ * 临场卡的 ←/→：以「视口中线以上最后一句」为当前句，跳到相邻一句并居中。
+ * 不记一个下标 state：读者会自己滚动，记下的下标很快就和眼睛看着的那句对不上。
+ */
+function stepStageLine(scroller: HTMLElement, delta: 1 | -1) {
+  const lines = [...scroller.querySelectorAll<HTMLElement>(STAGE_LINES)];
+  if (lines.length === 0) return;
+  const middle = scroller.getBoundingClientRect().top + scroller.clientHeight / 2;
+  let current = -1;
+  lines.forEach((line, index) => { if (line.getBoundingClientRect().top <= middle) current = index; });
+  const target = lines[Math.max(0, Math.min(lines.length - 1, current < 0 && delta > 0 ? 0 : current + delta))];
+  lines.forEach((line) => line.removeAttribute("data-stage-current"));
+  target.setAttribute("data-stage-current", "");
+  // JS 里显式写 smooth 会绕过 CSS 的减弱动效兜底，所以这里自己问一次。
+  const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  target.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
+}
 
 export function captureReadingPosition(scroller: HTMLElement): ReadingPosition {
   const top = scroller.getBoundingClientRect().top;
@@ -51,7 +71,8 @@ export default function ReadingMode({
   children: ReactNode;
   onClose: (position: ReadingPosition) => void;
   backLabel?: string;
-  presentation?: "page" | "scene";
+  /** stage：临场卡（更宽的纸、放大的台词、←/→ 在台词间跳）。 */
+  presentation?: "page" | "scene" | "stage";
   languageSwitch?: { value: string; options: { value: string; label: string }[]; onChange: (value: string) => void };
   headerNote?: ReactNode;
   information?: ReactNode;
@@ -170,18 +191,23 @@ export default function ReadingMode({
 
   if (typeof document === "undefined") return null;
   return createPortal(
-    <div ref={readerRef} className={`novel-reader reading-mode${hasLanguages ? " has-language-switch" : ""}${presentation === "scene" ? " scene-reader" : ""}${sceneHost ? " scene-reader--embedded" : ""}`} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} tabIndex={-1}
+    <div ref={readerRef} className={`novel-reader reading-mode${hasLanguages ? " has-language-switch" : ""}${presentation === "scene" ? " scene-reader" : ""}${presentation === "stage" ? " stage-reader" : ""}${sceneHost ? " scene-reader--embedded" : ""}`} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} tabIndex={-1}
       style={{ "--nr-font-size": `${fontSize}px` } as CSSProperties}
       onCopy={copySelectionWithoutRuby}
       onKeyDown={(event) => {
         // 阅读器位于原详情或准备页之上，快捷键不能穿透并关闭下面那一层。
         event.stopPropagation();
         if (event.key === "Escape") { event.preventDefault(); if (menu) closeMenu(); else close(); }
+        else if (presentation === "stage" && !menu && (event.key === "ArrowRight" || event.key === "ArrowLeft")
+          && !event.metaKey && !event.ctrlKey && !event.altKey && !isTypingTarget(event.target) && scrollRef.current) {
+          event.preventDefault();
+          stepStageLine(scrollRef.current, event.key === "ArrowRight" ? 1 : -1);
+        }
       }}>
       <header ref={toolbarRef} className="nr-toolbar">
         <div className="nr-toolbar-start">
           <button className="nr-exit" onClick={close}><span aria-hidden="true">←</span>{backLabel}</button>
-          <span className="nr-toolbar-title">全文阅读</span>
+          <span className="nr-toolbar-title">{presentation === "stage" ? eyebrow : "全文阅读"}</span>
         </div>
         <div className="nr-controls">
           {hasLanguages && languageSwitch && <div className="nr-language" role="group" aria-label="正文语言">
@@ -218,7 +244,7 @@ export default function ReadingMode({
       <div ref={scrollRef} className="nr-scroll" tabIndex={0} aria-label="文章全文" onClick={() => { if (menu) setMenu(null); }}>
         <article className="nr-paper">
           <header className="nr-book-heading">
-            <p className="nr-eyebrow">{eyebrow}<span>/</span>全文阅读</p>
+            <p className="nr-eyebrow">{eyebrow}{presentation !== "stage" && <><span>/</span>全文阅读</>}</p>
             <h1 id={`${id}-title`}>{title}</h1>
             {metadata.length > 0 && <p className="nr-book-meta">{metadata.filter(Boolean).map((value, index) => <span key={index}>{value}</span>)}</p>}
             {headerNote}

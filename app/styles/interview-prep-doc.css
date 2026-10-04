@@ -15,7 +15,7 @@
   padding-bottom: 12px; border-bottom: 1px solid var(--line);
 }
 .prep-upcoming > header span {
-  color: var(--muted); font-size: 9px; letter-spacing: 0.18em;
+  color: var(--muted); font-size: 11px; letter-spacing: 0.18em;
 }
 .prep-upcoming > header h2 { margin: 4px 0 0; font-size: 19px; }
 .prep-upcoming > header p { max-width: 46ch; color: var(--muted); font-size: 11px; line-height: 1.7; text-align: right; }
@@ -29,10 +29,10 @@
   font-family: inherit; transition: background .15s, border-color .15s;
 }
 .prep-upcoming-grid button:hover { background: var(--paper); border-color: var(--green); }
-.prep-upcoming-date { grid-column: 1; color: var(--green); font-size: 10px; letter-spacing: 0.08em; }
+.prep-upcoming-date { grid-column: 1; color: var(--green); font-size: 11px; letter-spacing: 0.08em; }
 .prep-upcoming-grid strong { grid-column: 1; font-size: 15px; }
 .prep-upcoming-grid em { grid-column: 1; color: var(--muted); font-size: 11px; font-style: normal; }
-.prep-upcoming-grid small { grid-column: 1; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.prep-upcoming-grid small { grid-column: 1; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .prep-upcoming-grid button > i { grid-row: 1 / span 4; grid-column: 2; align-self: center; color: var(--muted); font-style: normal; }
 
 .prep-doc-hero {
@@ -45,7 +45,7 @@
 }
 .prep-doc-back { padding: 7px 13px; font-size: 11px; }
 .prep-doc-back:hover { background: var(--paper); }
-.prep-doc-hero .eyebrow { color: var(--muted); font-size: 10px; letter-spacing: 0.12em; }
+.prep-doc-hero .eyebrow { color: var(--muted); font-size: 11px; letter-spacing: 0.12em; }
 .prep-doc-hero h1 { margin: 4px 0 0; font-size: 24px; }
 .prep-doc-meta { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
 .prep-doc-broken {
@@ -141,7 +141,7 @@
 }
 .prep-doc-subnav .subnav-label {
   display: block; margin-bottom: 7px;
-  color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .14em;
+  color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .14em;
 }
 .prep-doc-subnav .subnav-items {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 1px 20px;
@@ -152,7 +152,7 @@
 .prep-doc-subnav a {
   display: flex; align-items: baseline; gap: 8px; min-width: 0;
   padding: 3px 6px; border-radius: 3px;
-  color: var(--ink); font-size: 11.5px; text-decoration: none;
+  color: var(--ink); font-size: 12px; text-decoration: none;
   transition: color .16s ease, background-color .16s ease;
 }
 .prep-doc-subnav a > b {
@@ -224,7 +224,7 @@
 .prep-doc-body p { margin: 8px 0; font-size: 13px; line-height: 1.85; }
 /* ルビは行間を食うので、台詞ブロックだけ行送りを広げる */
 .prep-doc-body ruby { ruby-position: over; }
-.prep-doc-body rt { color: var(--green); font-size: 9px; font-weight: 400; }
+.prep-doc-body rt { color: var(--green); font-size: var(--ruby-size); font-weight: 400; }
 
 .prep-doc-say {
   padding: 11px 14px; border-left: 3px solid var(--green); background: var(--success-wash);
@@ -233,7 +233,7 @@
 .prep-doc-say.interviewer { border-left-color: var(--violet); background: var(--info-wash); }
 .prep-doc-say > span {
   display: inline-block; margin-right: 9px; padding: 1px 8px;
-  background: var(--green); color: var(--on-fill); font-size: 9px; vertical-align: 2px;
+  background: var(--green); color: var(--on-fill); font-size: 11px; vertical-align: 2px;
 }
 .prep-doc-say.interviewer > span { background: var(--violet); }
 
@@ -280,27 +280,27 @@
 .prep-doc-embed-toggle {
   flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
   padding: 10px 13px; border: 0; background: transparent; color: var(--ink);
-  font-family: inherit; font-size: 11.5px; text-align: left; cursor: pointer;
+  font-family: inherit; font-size: 12px; text-align: left; cursor: pointer;
 }
-.prep-doc-embed-toggle > i { color: var(--muted); font-style: normal; font-size: 10px; }
+.prep-doc-embed-toggle > i { color: var(--muted); font-style: normal; font-size: 11px; }
 .prep-doc-embed-toggle > b { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
 .prep-doc-embed-toggle .section {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--muted); font-size: 10.5px;
+  color: var(--muted); font-size: 11px;
 }
 .prep-doc-embed-toggle .scope {
   flex: 0 0 auto; padding: 2px 8px; border-radius: 999px;
-  background: var(--paper-deep); color: var(--muted); font-size: 9px; letter-spacing: .06em;
+  background: var(--paper-deep); color: var(--muted); font-size: 11px; letter-spacing: .06em;
 }
 .prep-doc-embed-toggle .hit {
   flex: 0 0 auto; padding: 1px 7px; border-radius: 999px;
-  background: var(--warning-wash); color: var(--warning); font-size: 9.5px; font-style: normal;
+  background: var(--warning-wash); color: var(--warning); font-size: 11px; font-style: normal;
 }
 .prep-doc-embed-toggle:hover > b { color: var(--green); }
 .prep-doc-embed-open {
   flex: 0 0 auto; margin-right: 10px; padding: 4px 10px;
   border: 1px solid var(--line); background: var(--surface-overlay); color: var(--muted);
-  font-family: inherit; font-size: 10px; cursor: pointer;
+  font-family: inherit; font-size: 11px; cursor: pointer;
 }
 .prep-doc-embed-open:hover { color: var(--green); border-color: var(--green); }
 .prep-doc-embed-body { padding: 2px 16px 14px; border-top: 1px dashed var(--line); }
@@ -313,10 +313,10 @@
 }
 .kill-map-head > div { display: flex; align-items: baseline; gap: 8px; }
 .kill-map-head strong { color: var(--green); font-family: var(--font-geist-mono), monospace; font-size: 17px; }
-.kill-map-head span { color: var(--muted); font-size: 10.5px; }
+.kill-map-head span { color: var(--muted); font-size: 11px; }
 .kill-map-head > i { display: block; height: 4px; background: var(--line); }
 .kill-map-head > i em { display: block; height: 100%; background: var(--green); transition: width 200ms ease; }
-.kill-map-head button { padding: 5px 10px; border: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.kill-map-head button { padding: 5px 10px; border: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 
 .kill-card { border: 1px solid var(--line); border-left: 3px solid var(--green); background: var(--surface-overlay); }
 .kill-card.done { border-left-color: var(--success-line); opacity: .62; }
@@ -331,10 +331,10 @@
 }
 .kill-card.done > header > b { background: var(--success-line); }
 .kill-card > header h3 { margin: 0; color: var(--ink); font-size: 15px; line-height: 1.5; }
-.kill-card > header small { display: block; margin-top: 3px; color: var(--muted); font-size: 10.5px; }
+.kill-card > header small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
 .kill-card > header > button {
   padding: 6px 12px; border: 1px solid var(--line); background: transparent;
-  color: var(--muted); font-size: 10.5px; white-space: nowrap; cursor: pointer;
+  color: var(--muted); font-size: 11px; white-space: nowrap; cursor: pointer;
 }
 .kill-card > header > button.on { border-color: var(--green); background: var(--green); color: var(--on-fill); }
 
@@ -347,31 +347,31 @@
 
 .kill-followup { margin: 0 16px 12px; border: 1px dashed var(--line); }
 .kill-followup > summary {
-  padding: 9px 12px; color: var(--muted); font-size: 11.5px; cursor: pointer; list-style: none;
+  padding: 9px 12px; color: var(--muted); font-size: 12px; cursor: pointer; list-style: none;
 }
 .kill-followup > summary::-webkit-details-marker { display: none; }
 .kill-followup > summary i { font-style: normal; transition: transform 150ms ease; display: inline-block; }
 .kill-followup[open] > summary i { transform: rotate(180deg); }
 .kill-followup[open] > summary { border-bottom: 1px dashed var(--line); }
 .kill-followup > *:not(summary) { padding-inline: 12px; }
-.kill-followup .prep-doc-say { font-size: 13.5px; line-height: 2.05; }
+.kill-followup .prep-doc-say { font-size: 14px; line-height: 2.05; }
 
 .kill-mine {
   display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px;
   margin: 0 16px 12px; padding: 9px 12px; background: var(--brand-wash);
   font-size: 12px; line-height: 1.8;
 }
-.kill-mine > span { color: var(--danger-strong); font-size: 10px; font-weight: 600; }
+.kill-mine > span { color: var(--danger-strong); font-size: 11px; font-weight: 600; }
 
 .kill-why { margin: 0 16px 14px; }
 .kill-why > button {
   width: 100%; padding: 8px 12px; border: 1px solid var(--line); background: var(--warning-wash-soft);
-  color: var(--warning); font-size: 11.5px; text-align: left; cursor: pointer;
+  color: var(--warning); font-size: 12px; text-align: left; cursor: pointer;
 }
 .kill-why > button i { float: right; font-style: normal; font-family: var(--font-geist-mono), monospace; }
 .kill-why > p {
   margin: 0; padding: 11px 13px; border: 1px solid var(--line); border-top: 0;
-  background: var(--warning-wash-soft); font-size: 12.5px; line-height: 1.95;
+  background: var(--warning-wash-soft); font-size: 13px; line-height: 1.95;
 }
 
 @media (max-width: 780px) {
@@ -408,11 +408,11 @@
 }
 .prep-weakness > summary::-webkit-details-marker { display: none; }
 .prep-weakness > summary::before {
-  content: "▸"; color: var(--text-tertiary); font-size: 10px;
+  content: "▸"; color: var(--text-tertiary); font-size: 11px;
 }
 .prep-weakness[open] > summary::before { content: "▾"; }
 .prep-weakness > summary > span { font-size: 12px; font-weight: 650; }
-.prep-weakness > summary > em { color: var(--text-secondary); font-size: 11.5px; font-style: normal; }
+.prep-weakness > summary > em { color: var(--text-secondary); font-size: 12px; font-style: normal; }
 .prep-weakness > summary > em b { color: var(--interactive); font-weight: 650; }
 .prep-weakness-peek { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .prep-weakness-peek li {
@@ -425,7 +425,7 @@
 .prep-weakness-peek li i {
   width: 5px; height: 5px; border-radius: 50%; background: var(--orange);
 }
-.prep-weakness-legend { margin-left: auto; color: var(--text-tertiary); font-size: 10.5px; }
+.prep-weakness-legend { margin-left: auto; color: var(--text-tertiary); font-size: 11px; }
 .prep-weakness-body { padding: 0 16px 14px 34px; }
 .prep-weakness-body > p { margin: 0 0 10px; color: var(--muted); font-size: 11px; }
 .prep-weakness-body ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
@@ -435,10 +435,10 @@
 }
 .prep-weakness-body li.hot { border-color: var(--brand-line); background: var(--brand-wash); }
 .prep-weakness-body li strong { font-size: 12px; }
-.prep-weakness-body li span { color: var(--text-tertiary); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.prep-weakness-body li span { color: var(--text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
 /* 展開側も塗りラベルをやめる。行ごとに橙のブロックが並ぶと数字が読めない */
 .prep-weakness-body li i {
-  color: var(--interactive); font-size: 10.5px; font-style: normal; font-weight: 650;
+  color: var(--interactive); font-size: 11px; font-style: normal; font-weight: 650;
 }
 @media (max-width: 780px) {
   .prep-weakness { grid-template-columns: minmax(0, 1fr); gap: 14px; }

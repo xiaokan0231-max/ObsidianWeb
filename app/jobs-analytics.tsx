@@ -1,6 +1,7 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useState, type CSSProperties } from "react";
+import { CountUp } from "./count-up";
 import ScopeLoading from "./scope-loading";
 import { enumCodec, useUrlState } from "./use-url-state";
 import {
@@ -25,6 +26,7 @@ import {
   SMALL_SAMPLE_THRESHOLD,
 } from "@/lib/job-stats.mjs";
 import { explicitNextEventDate, explicitNextEventTime } from "@/lib/job-progress";
+import { funnelSteps, pipelineSegments, type FunnelStep } from "@/lib/job-funnel";
 import { getString, getType, type Note } from "@/lib/notes";
 import { useUiLocale } from "./ui-locale";
 
@@ -63,6 +65,10 @@ const ANALYTICS_MENU_COPY = {
   "案件を開く": ["打开案件", "案件を開く"],
   "状態の分布": ["状态分布", "状態の分布"],
   "応募・結果・待機の推移": ["应募、结果与等待趋势", "応募・結果・待機の推移"],
+  "选考管线": ["选考管线", "選考パイプライン"],
+  "暂无进行中的案件": ["暂无进行中的案件", "進行中の案件はありません"],
+  "{status} {count} 件の案件を見る": ["查看{status}的 {count} 件案件", "{status} {count} 件の案件を見る"],
+  "選考ファネル": ["选考漏斗", "選考ファネル"],
 } as const satisfies Record<string, readonly [string, string]>;
 
 type AnalyticsMenuKey = keyof typeof ANALYTICS_MENU_COPY;
@@ -292,6 +298,7 @@ function BarRow({
   step,
   title,
   flag,
+  index = 0,
 }: {
   label: string;
   valueLabel: string;
@@ -299,15 +306,18 @@ function BarRow({
   step?: number;
   title: string;
   flag?: string;
+  /** 第几根：入场按 40ms 递进生长。只是装饰，减弱动效时全局兜底把延迟归零。 */
+  index?: number;
 }) {
   return (
-    <div className="chart-bar-row" tabIndex={0} title={title}>
+    // data-tip 是立刻出现的自绘气泡；title 留着给读屏与不悬停的人（键盘聚焦时气泡同样出现）。
+    <div className="chart-bar-row" tabIndex={0} title={title} data-tip={title}>
       <span className="chart-bar-label">{label}</span>
       <div className="chart-bar-track">
         <i
           className="chart-bar-fill"
           data-step={step ?? ""}
-          style={{ width: `${Math.max(ratio * 100, ratio > 0 ? 1.5 : 0)}%` }}
+          style={{ width: `${Math.max(ratio * 100, ratio > 0 ? 1.5 : 0)}%`, "--i": index } as CSSProperties}
         />
       </div>
       <span className="chart-bar-value">
@@ -315,6 +325,58 @@ function BarRow({
         {flag ? <em>{flag}</em> : null}
       </span>
     </div>
+  );
+}
+
+const pctOrDash = (value: number | null) => (value === null ? "—" : pct1(value));
+
+/**
+ * 真正的漏斗：居中梯形逐级收窄，级间标相邻转化率。原来是四根左对齐横条，
+ * 只能读出「占応募的几成」，看不出卡在哪一级——那恰恰是漏斗要回答的问题。
+ * 宽度按占首段比例画，0 件的段留一条细缝而不是消失（「这一级是 0」本身就是信息）。
+ */
+function FunnelChart({ steps, label }: { steps: FunnelStep[]; label: string }) {
+  const W = 720;
+  const PAD = { left: 8, right: 8, top: 6, bottom: 6 };
+  const LABEL_W = 130;
+  const VALUE_W = 72;
+  const ROW = 40;
+  const GAP = 24;
+  const x0 = PAD.left + LABEL_W;
+  const x1 = W - PAD.right - VALUE_W;
+  const cx = (x0 + x1) / 2;
+  const maxW = x1 - x0;
+  const H = PAD.top + PAD.bottom + steps.length * ROW + Math.max(0, steps.length - 1) * GAP;
+  // 观测口径下后段偶尔会大于首段（funnelSteps 不截断）；画面上封顶到满宽，免得梯形压到左侧的段名上。
+  const widthOf = (step: FunnelStep) => Math.max(6, Math.min(1, step.ofTop) * maxW);
+  return (
+    <svg className="chart-funnel" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label}>
+      {steps.map((step, index) => {
+        const y = PAD.top + index * (ROW + GAP);
+        const top = widthOf(step);
+        // 下底收到下一级的宽度，相邻两级在视觉上连成一个漏斗；最后一级略收一点收尾。
+        const bottom = index < steps.length - 1 ? widthOf(steps[index + 1]) : top * 0.9;
+        const points = [
+          [cx - top / 2, y],
+          [cx + top / 2, y],
+          [cx + bottom / 2, y + ROW],
+          [cx - bottom / 2, y + ROW],
+        ].map((point) => point.join(",")).join(" ");
+        return (
+          <g key={step.stage} className="chart-funnel-stage" tabIndex={0} style={{ "--i": index } as CSSProperties}>
+            <title>{`${step.stage}：${step.value} 件（応募比 ${pct1(step.ofTop)}${index > 0 ? `・前段比 ${pctOrDash(step.ofPrevious)}` : ""}）`}</title>
+            <polygon className="chart-funnel-shape" data-step={index + 1} points={points} />
+            <text className="chart-funnel-label" x={PAD.left} y={y + ROW / 2} dominantBaseline="middle">{step.stage}</text>
+            <text className="chart-funnel-value" x={W - PAD.right} y={y + ROW / 2} textAnchor="end" dominantBaseline="middle">{step.value}</text>
+            {index > 0 && (
+              <text className="chart-funnel-rate" x={cx} y={y - GAP / 2} textAnchor="middle" dominantBaseline="middle">
+                → {pctOrDash(step.ofPrevious)}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 
@@ -431,6 +493,9 @@ function JobsAnalytics({
   }, [jobs]);
 
   const inFlight = glanceCounts.active;
+  // 选考管线：KPI 下常驻的一条分段条。与「面试阶段」「结果等待」同源（案件 status），段可点进看板。
+  const pipeline = useMemo(() => pipelineSegments(jobs, ACTIVE_SELECTION), [jobs]);
+  const pipelineTotal = pipeline.reduce((sum, segment) => sum + segment.count, 0);
   const focusJobs = useMemo(
     () =>
       jobs
@@ -536,13 +601,12 @@ function JobsAnalytics({
   const passedNow = jobs.filter((job) => PASSED_SCREENING.includes(job.status)).length;
   const interviewNow = jobs.filter((job) => ["面接中", "内定"].includes(job.status)).length;
   const offers = jobs.filter((job) => job.status === "内定").length;
-  const funnel = [
+  const funnel = funnelSteps([
     { stage: "応募（観測済）", value: stats.rejections.total + inFlight },
     { stage: "書類通過", value: stats.rejections.reachedInterview + passedNow },
     { stage: "面接実施", value: stats.rejections.reachedInterview + interviewNow },
     { stage: "内定", value: offers },
-  ];
-  const funnelTop = funnel[0].value || 1;
+  ]);
 
   const bands = JOB_RATING_BANDS.filter((band) => band.id !== "7plus").map((band) => ({
     ...band,
@@ -598,7 +662,7 @@ function JobsAnalytics({
           return (
             <div key={card.key} data-tone={card.tone} data-zero={count === 0}>
               <dt>{menuLabel(card.label)}</dt>
-              <dd><strong>{count}</strong><small>件</small></dd>
+              <dd><CountUp as="strong" value={count} /><small>件</small></dd>
               {/* カード全体を覆う透明ボタン。dt/dd の入れ子（定義リストの意味）を壊さずに
                   押せるようにする。0 件は背景情報なので操作対象にしない。 */}
               <button
@@ -613,7 +677,34 @@ function JobsAnalytics({
         })}
       </dl>
 
-      <details className="analytics-command analytics-command-disclosure">
+      <div className="analytics-pipeline" role="group" aria-label={t("选考管线")}>
+        <span className="analytics-pipeline-label">{t("选考管线")}</span>
+        <div className="analytics-pipeline-track">
+          {pipelineTotal === 0 ? (
+            <span className="analytics-pipeline-empty">{t("暂无进行中的案件")}</span>
+          ) : (
+            // 0 件的段不画（宽度为 0 的按钮点不到），件数仍在上面的 KPI 里。
+            pipeline.filter((segment) => segment.count > 0).map((segment, index) => (
+              <button
+                key={segment.status}
+                type="button"
+                data-tone={statusTone(segment.status)}
+                data-status={segment.status}
+                style={{ flexGrow: segment.count, "--i": index } as CSSProperties}
+                title={`${segment.status}：${segment.count} 件（${pct1(segment.share)}）`}
+                aria-label={t("{status} {count} 件の案件を見る", { status: segment.status, count: segment.count })}
+                onClick={() => onViewJobs({ statuses: [segment.status] })}
+              >
+                <span>{segment.status}</span>
+                <b>{segment.count}</b>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* 「当前推进」是这一页每天要看的那一段，默认展开；其余两段只在比较时才看，仍然收起。 */}
+      <details className="analytics-command analytics-command-disclosure" open>
         <summary>
           <strong>{t("当前推进")}</strong>
           <span>{t("{active} 件进行中 · {priority} 件优先处理 · {watch} 件观察", { active: inFlight, priority: priorityJob ? 1 : 0, watch: watchJobs.length })}</span>
@@ -745,6 +836,7 @@ function JobsAnalytics({
             {bands.map((band, index) => (
               <BarRow
                 key={band.id}
+                index={index}
                 label={band.label}
                 ratio={band.count / bandMax}
                 step={bands.length - 1 - index}
@@ -765,19 +857,22 @@ function JobsAnalytics({
           }
         >
           <div className="chart-stack" role="img" aria-label={t("状態の分布")}>
-            {statuses.map((row, index) => (
+            {/* 状态是类别不是大小：颜色跟着状态走（与看板的状态色同一色相），不按排序位置取色阶。 */}
+            {statuses.map((row) => (
               <i
                 key={row.status}
-                data-step={index}
+                data-tone={statusTone(row.status)}
+                data-status={row.status}
+                data-tip={`${row.status}：${row.count} 件`}
                 style={{ width: `${(row.count / statusTotal) * 100}%` }}
                 title={`${row.status}：${row.count} 件`}
               />
             ))}
           </div>
           <ul className="chart-legend">
-            {statuses.map((row, index) => (
+            {statuses.map((row) => (
               <li key={row.status}>
-                <b data-step={index} /> {row.status} <small>{row.count}</small>
+                <b data-tone={statusTone(row.status)} data-status={row.status} /> {row.status} <small>{row.count}</small>
               </li>
             ))}
           </ul>
@@ -797,9 +892,10 @@ function JobsAnalytics({
         }
       >
         <div className="chart-bars">
-          {stacks.map((row) => (
+          {stacks.map((row, index) => (
             <BarRow
               key={row.name}
+              index={index}
               label={row.name}
               ratio={row.count / stackMax}
               valueLabel={`${row.count}`}
@@ -858,9 +954,10 @@ function JobsAnalytics({
             {hasHistory ? (
               <>
                 <div className="chart-bars">
-                  {channels.map((row) => (
+                  {channels.map((row, index) => (
                     <BarRow
                       key={row.channel}
+                      index={index}
                       label={row.channel}
                       ratio={row.rate}
                       valueLabel={pct1(row.rate)}
@@ -910,22 +1007,10 @@ function JobsAnalytics({
             title="選考ファネル（観測できている範囲）"
             caption="台帳は不採用しか記録していないため、総応募数は直接には分からない。"
           >
-            <div className="chart-bars">
-              {funnel.map((row, index) => (
-                <BarRow
-                  key={row.stage}
-                  label={row.stage}
-                  ratio={row.value / funnelTop}
-                  step={index}
-                  valueLabel={`${row.value}`}
-                  title={`${row.stage}：${row.value} 件（応募比 ${pct1(row.value / funnelTop)}）`}
-                  flag={index === 0 ? undefined : pct1(row.value / funnelTop)}
-                />
-              ))}
-            </div>
+            <FunnelChart steps={funnel} label={t("選考ファネル")} />
             <TableView
-              head={["段階", "件数", "応募比"]}
-              rows={funnel.map((row) => [row.stage, row.value, pct1(row.value / funnelTop)])}
+              head={["段階", "件数", "応募比", "前段比"]}
+              rows={funnel.map((row, index) => [row.stage, row.value, pct1(row.ofTop), index === 0 ? "—" : pctOrDash(row.ofPrevious)])}
             />
           </Card>
 
@@ -947,8 +1032,8 @@ function JobsAnalytics({
                   <li><b data-step="4" /> 落ちた <small>不採用</small></li>
                 </ul>
                 <div className="chart-months">
-                  {timeline.map((row) => (
-                    <div className="chart-month" key={row.month}>
+                  {timeline.map((row, index) => (
+                    <div className="chart-month" key={row.month} style={{ "--i": index } as CSSProperties}>
                       <div className="chart-month-bars">
                         {row.applied === null ? (
                           <i className="chart-month-unknown" title={`${row.month}：応募数は不明（未走査）`} />
@@ -1012,6 +1097,7 @@ function JobsAnalytics({
                     <polyline
                       key={key}
                       className="chart-line-path"
+                      pathLength={1}
                       data-step={step}
                       points={flow
                         .map((d, i) => {
@@ -1028,6 +1114,8 @@ function JobsAnalytics({
                     return (
                       <g key={d.date} tabIndex={0}>
                         <title>{`${d.date}：投げた計 ${d.appliedCum}・結果 ${d.resolvedCum}・待ち ${d.pending}`}</title>
+                        {/* 悬停时的竖向参考线：三条线在同一天的读数靠它对齐。 */}
+                        <line className="chart-guide" x1={x} x2={x} y1={PAD.top} y2={PAD.top + plotH} />
                         <circle className="chart-hit" cx={x} cy={y} r={12} />
                         {(d.applied > 0 || d.resolved > 0) && <circle className="chart-dot" data-step="2" cx={x} cy={y} r={4} />}
                       </g>

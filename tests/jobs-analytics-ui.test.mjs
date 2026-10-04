@@ -69,3 +69,24 @@ test("没有选考中的案件时不出优先卡，改为空态", () => {
   assert.doesNotMatch(html, /analytics-priority-card/);
   assert.match(html, /当前没有处于选考中的案件。/);
 });
+
+test("选考管线：KPI 下常驻分段条，每段按状态上色、可点进看板只看这一段", () => {
+  const seen = [];
+  const html = render({ onViewJobs: (filters) => seen.push(filters) });
+  const track = html.match(/<div class="analytics-pipeline-track">([\s\S]*?)<\/div>/)?.[1] ?? "";
+  assert.match(track, /data-tone="progress" data-status="応募済"[^>]*><span>応募済<\/span><b>1<\/b><\/button>/);
+  assert.match(track, /data-tone="interview" data-status="面接中"[^>]*><span>面接中<\/span><b>1<\/b><\/button>/);
+  assert.doesNotMatch(track, /書類通過|内定/, "0 件的段不画");
+  const empty = render({ notes: [jobCase("株式会社ダミー", { status: "未応募", rating: 7 })] });
+  assert.match(empty, /<span class="analytics-pipeline-empty">暂无进行中的案件<\/span>/);
+});
+
+test("「当前推进」默认展开；漏斗画成梯形并标相邻转化率，表格多一列前段比", () => {
+  const html = render({});
+  assert.match(html, /<details class="analytics-command analytics-command-disclosure" open="">/);
+  assert.match(html, /<svg class="chart-funnel"[^>]*role="img"/);
+  assert.equal((html.match(/class="chart-funnel-shape"/g) ?? []).length, 4);
+  // 応募（観測済）＝不採用 0 ＋ 进行中 2；書類通過＝面接中 1 → 前段比 50.0%。
+  assert.match(html, /class="chart-funnel-rate"[^>]*>→ (?:<!-- -->)?50\.0%<\/text>/);
+  assert.match(html, /<th>段階<\/th><th>件数<\/th><th>応募比<\/th><th>前段比<\/th>/);
+});

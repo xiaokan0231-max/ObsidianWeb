@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { postJson } from "@/lib/client-api";
 import type { Note } from "@/lib/notes";
 import type { InsightsState } from "./interview-insights-state";
@@ -35,7 +35,8 @@ export function useInterviewAdvisorySync(notes: Note[]) {
   const queued = useRef(false);
   const queuedForce = useRef(false);
   // 企业、本人事实和后续结果同样会改变判断；是否需要重算由服务端指纹决定。
-  const signature = notes.map((note) => `${note.path}:${note.stat.mtime}`).sort().join("|");
+  // 全库几千篇时这串要拼、要排序：只在 notes 换了引用时算一次，复盘页里敲字、展开不再重算。
+  const signature = useMemo(() => notes.map((note) => `${note.path}:${note.stat.mtime}`).sort().join("|"), [notes]);
 
   const synchronize = useCallback(async (force = false): Promise<void> => {
     if (running.current) { queued.current = true; queuedForce.current ||= force; return; }

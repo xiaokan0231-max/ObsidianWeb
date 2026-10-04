@@ -25,6 +25,14 @@
 .focus-language-panel-page { padding: 0; }
 .focus-stage-grid article { min-height: 0; }
 .focus-issue-compact strong { font-size: 14px; }
+/* 问题清单每条只有一行标题加一行计数，单列铺在半屏宽里右侧大半是空的；改成两列并排。 */
+.focus-language-two-column > div:has(> .focus-issue-compact) {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  column-gap: 18px;
+  align-content: start;
+}
+.focus-language-two-column > div:has(> .focus-issue-compact) > header { grid-column: 1 / -1; }
 .focus-issue-compact span,
 .focus-profile-summary span,
 .focus-stage-grid small,

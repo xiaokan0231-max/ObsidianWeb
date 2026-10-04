@@ -28,7 +28,7 @@
 .session-v2 .v2-logistics time { color: var(--v2-ink); font-weight: 650; }
 .session-v2 .v2-meeting { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; color: var(--v2-accent); font-weight: 650; text-decoration: none; }
 .session-v2 .v2-nav { position: sticky; top: var(--chrome-top, 76px); z-index: 12; display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--surface-raised-solid); border-top: 1px solid var(--v2-line); border-bottom: 1px solid var(--v2-line); scroll-margin-top: var(--chrome-top, 76px); }
-.session-v2 .v2-nav > div { display: flex; flex-wrap: wrap; gap: 20px; }
+.session-v2 .v2-nav > div { position: relative; display: flex; flex-wrap: wrap; gap: 20px; }
 .session-v2 .v2-nav [role="tab"] { display: inline-flex; gap: 7px; align-items: baseline; padding: 17px 2px 15px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--v2-muted); font-size: .9375rem; }
 .session-v2 .v2-nav [aria-selected="true"] { border-bottom-color: var(--v2-accent); color: var(--v2-accent); font-weight: 700; }
 .session-v2 .v2-tab-number { font-size: .8125rem; opacity: .6; font-variant-numeric: tabular-nums; }
@@ -60,7 +60,7 @@
 .session-v2 .v2-body .prep-doc-tablewrap th { background: var(--success-wash); color: var(--v2-ink); }
 .session-v2 .v2-body hr { margin: 32px 0; border: 0; border-top: 1px solid var(--v2-line); }
 .session-v2 ruby { ruby-position: over; }
-.session-v2 rt { font-size: .58em; color: var(--muted); font-weight: 400; }
+.session-v2 rt { font-size: var(--ruby-size); color: var(--muted); font-weight: 400; }
 .session-v2 .v2-rail { position: sticky; top: calc(var(--chrome-top, 76px) + 85px); min-width: 0; max-height: calc(100dvh - var(--chrome-top, 76px) - 100px); overflow-y: auto; scrollbar-width: thin; padding: 0 0 8px 24px; border-left: 1px solid var(--v2-line); }
 .session-v2 .v2-rail :is(section, nav) { margin: 26px 0 0; }
 .session-v2 .v2-rail h3 { margin: 0 0 12px; font-size: .8125rem; color: var(--v2-muted); letter-spacing: .04em; font-weight: 650; }
@@ -69,6 +69,7 @@
 .session-v2 .v2-quick button + button { background: transparent; color: var(--v2-accent); }
 .session-v2 .v2-quick span { font-size: .8125rem; }
 .session-v2 .v2-toc ol, .session-v2 .v2-source-list { margin: 0; padding: 0; list-style: none; }
+.session-v2 .v2-toc { position: relative; }
 .session-v2 .v2-toc li { margin: 9px 0; }
 .session-v2 .v2-toc a { display: block; padding-left: 10px; border-left: 2px solid transparent; text-decoration: none; color: var(--v2-muted); font-size: .875rem; line-height: 1.6; }
 .session-v2 .v2-toc a[aria-current] { color: var(--v2-accent); border-left-color: var(--v2-accent); font-weight: 650; }
@@ -88,10 +89,65 @@
   .session-v2 .v2-nav > div { gap: 12px; }
   .session-v2 .v2-tab-number { display: none; }
 }
+/* 页头倒计时：今天/明天朱橙并放大，三天内描边提醒，更远的只是一枚安静的标签。 */
+.session-v2 .v2-countdown { display: inline-flex; align-items: center; padding: 1px 9px; border: 1px solid var(--v2-line); border-radius: var(--radius-pill); color: var(--v2-muted); font-size: .8125rem; font-weight: 600; line-height: 1.6; }
+/* 朱橙作小字/填充底要走 interactive 那一对：--brand 本色对纸面、对白字都不到 4.5:1。 */
+.session-v2 .v2-countdown.near { border-color: var(--brand-line); color: var(--interactive); }
+.session-v2 .v2-countdown.hot { padding: 2px 12px; border-color: var(--interactive-fill); background: var(--interactive-fill); color: var(--on-interactive); font-size: .9375rem; animation: pop-in var(--dur-slow) var(--ease-spring); }
+.session-v2 .v2-countdown.past { opacity: .7; }
+
+/*
+ * 滑动指示条：SlidingIndicator 把自己量到选中项的位置，这里只画样子。
+ * 宿主打上 data-indicator="ready" 之后才有过渡（首次落位不飞），同时把原来逐项的下划线/左线让给它。
+ */
+.session-v2 .v2-tab-indicator,
+.session-v2 .v2-toc-indicator { position: absolute; top: 0; left: 0; pointer-events: none; opacity: 0; }
+.session-v2 .v2-tab-indicator { border-bottom: 3px solid var(--v2-accent); }
+.session-v2 .v2-toc-indicator { border-left: 2px solid var(--v2-accent); }
+.session-v2 [data-indicator="ready"] > :is(.v2-tab-indicator, .v2-toc-indicator) {
+  transition: transform var(--dur-base) var(--ease-spring), width var(--dur-base) var(--ease-spring), height var(--dur-base) var(--ease-spring), opacity var(--dur-fast) var(--ease-out);
+}
+.session-v2 .v2-nav [data-indicator="ready"] > [aria-selected="true"] { border-bottom-color: transparent; }
+.session-v2 .v2-toc[data-indicator="ready"] a[aria-current] { border-left-color: transparent; }
+.session-v2 .v2-nav [role="tab"] { transition: color var(--dur-fast) var(--ease-out); }
+
+/* 切标签：正文区以 key 重挂，淡入即可（位移会和刚恢复的滚动位置打架）。 */
+.session-v2 #v2-panel { animation: fade-in var(--dur-base) var(--ease-out); }
+.session-v2 .v2-quick .v2-stage-entry { border-style: dashed; }
+
+/*
+ * 打印：只留正文一栏。外壳、标签条、右侧栏都不进纸；台词块加框，注音保留。
+ * 选择器挂在 body:has(.session-v2) 下，别的页面打印时不受影响。
+ */
+@media print {
+  body:has(.session-v2) :is(.sidebar, .topbar, .section-nav, .mobile-nav, .stale-data-banner, .global-write-banner) { display: none !important; }
+  body:has(.session-v2) { background: none; }
+  /* 侧栏收起后外壳的两列网格还在，正文会被塞进 218px 的第一列。 */
+  body:has(.session-v2) :is(.app-shell, .main-stage) { display: block; }
+  /*
+   * 纸是白的：暗色主题下的亮字 token 印出来几乎看不见。本页的局部色和正文直接引用的全局文字色
+   * 都在这一层收回到墨色（自定义属性向下继承，子元素里的 var(--ink) 等跟着变）。
+   */
+  .session-v2 {
+    --v2-ink: black; --v2-muted: dimgray; --v2-accent: black; --v2-line: silver;
+    --ink: black; --text-display: black; --text-secondary: dimgray; --muted: dimgray; --text-tertiary: dimgray; --text-faint: gray;
+    --line: silver; --line-strong: gray; --line-soft: silver;
+    padding: 0; border-top: 0; background: none; color: black;
+  }
+  .session-v2 .v2-countdown { border-color: currentColor; background: none; color: inherit; animation: none; }
+  .session-v2 :is(.v2-nav, .v2-rail, .v2-switches, .v2-section-head button, .v2-meeting) { display: none !important; }
+  .session-v2 .v2-header { grid-template-columns: 1fr; }
+  .session-v2 .v2-layout { display: block; padding-top: 12px; }
+  .session-v2 .v2-body { max-width: none; font-size: 12pt; line-height: 1.8; }
+  .session-v2 #v2-panel { animation: none; }
+  .session-v2 .v2-body .prep-doc-say { break-inside: avoid; border: 1px solid; border-left-width: 3px; background: none; color: inherit; }
+  .session-v2 .v2-body h3 { break-after: avoid; }
+  .session-v2 rt { color: inherit; }
+}
 /* 新稿的专属话术与阅读层也隔离旧的 speaker 徽标规则，普通日语不得被当成徽标。 */
 .shared-asset-v2 .prep-doc-body .prep-doc-say > span,
 .reading-mode .reader-prep-v2 .prep-doc-say > span { display: inline; margin: 0; padding: 0; background: transparent; color: inherit; font-size: inherit; vertical-align: baseline; }
 .shared-asset-v2 .prep-doc-body .prep-doc-say > span:first-child,
 .reading-mode .reader-prep-v2 .prep-doc-say > span:first-child { display: block; margin-bottom: 8px; color: var(--text-tertiary); font-size: 13px; }
 .shared-asset-v2 .prep-doc-body .prep-doc-say { font-size: 18px; line-height: 2.2; }
-.shared-asset-v2 .prep-doc-body rt { font-size: 11px; }
+.shared-asset-v2 .prep-doc-body rt { font-size: var(--ruby-size); }

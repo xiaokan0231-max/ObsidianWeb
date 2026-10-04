@@ -3,10 +3,22 @@ import { IN_PROGRESS_STATUSES, jobStatusNote, normalizeJobStatus, waitsOnCounter
 import type { CalendarEvent } from "./memory-atlas-data.ts";
 import { getString, getType, type Note } from "./notes.ts";
 
+/**
+ * 判定分支的稳定编号。label / detail 是中文正本（aria-label、title 依赖它们的原文），
+ * 日语界面按 code 取译文；waitingFor / waitingLabel / reason 是译文需要拼回的原始值。
+ */
+export type CalendarProgressCode =
+  | "rejected" | "paused" | "offer" | "meeting-closed" | "scheduled"
+  | "waiting-case" | "active-self" | "active-case" | "meeting-waiting" | "unrecorded";
+
 export type CalendarProgress = {
   tone: "active" | "waiting" | "closed" | "paused" | "unknown";
+  code: CalendarProgressCode;
   label: string;
   detail: string;
+  waitingFor?: string;
+  waitingLabel?: string;
+  reason?: string;
 };
 
 /** 日程是否已过和选考是否结束是两回事；状态点读当前正本，不从正文或公司名推测。 */
@@ -30,32 +42,32 @@ export function calendarProgress(
   const waitingDetail = waitingLabel ? `：${waitingLabel}` : "";
 
   // 已知结果盖过未清理的 waiting_for 和旧预约，避免拒信之后仍闪着等待提示。
-  if (status === "不採用") return { tone: "closed", label: "已结束", detail: "当前案件已记录不採用，选考已结束。" };
+  if (status === "不採用") return { tone: "closed", code: "rejected", label: "已结束", detail: "当前案件已记录不採用，选考已结束。" };
   if (status === "保留") {
     const reason = jobStatusNote(getString(owner?.frontmatter.status));
-    return { tone: "paused", label: "暂停推进", detail: `当前案件已保留，暂不继续推进。${reason ? `记录原因：${reason}。` : ""}` };
+    return { tone: "paused", code: "paused", label: "暂停推进", detail: `当前案件已保留，暂不继续推进。${reason ? `记录原因：${reason}。` : ""}`, reason };
   }
-  if (status === "内定") return { tone: "active", label: "已获内定", detail: "当前案件已记录内定。" };
-  if (selection === "closed") return { tone: "closed", label: "已结束", detail: "这场独立面谈的后续已明确结束。" };
+  if (status === "内定") return { tone: "active", code: "offer", label: "已获内定", detail: "当前案件已记录内定。" };
+  if (selection === "closed") return { tone: "closed", code: "meeting-closed", label: "已结束", detail: "这场独立面谈的后续已明确结束。" };
 
   const interview = target ?? resolveCalendarInterview(event, notes);
   const occurred = event.phase === "past" || interview?.view === "review";
-  if (!occurred) return { tone: "active", label: "待进行", detail: "已确认的日程，尚未记录完成。" };
+  if (!occurred) return { tone: "active", code: "scheduled", label: "待进行", detail: "已确认的日程，尚未记录完成。" };
 
   if (owner && status) {
     const waitingFor = getString(owner.frontmatter.waiting_for);
     if (waitsOnCounterpart(status, waitingFor)) {
       const counterpart = WAITING_FOR_LABEL[waitingFor] ?? "对方";
-      return { tone: "waiting", label: "等回复", detail: `日程已过，当前案件仍在等待${counterpart}回复${waitingDetail}。` };
+      return { tone: "waiting", code: "waiting-case", label: "等回复", detail: `日程已过，当前案件仍在等待${counterpart}回复${waitingDetail}。`, waitingFor, waitingLabel };
     }
     if (IN_PROGRESS_STATUSES.includes(status)) {
-      return { tone: "active", label: "进行中", detail: waitingFor === "self"
-        ? "日程已过，当前案件仍在推进，下一步由本人处理。"
-        : "日程已过，当前案件仍在选考中。" };
+      return waitingFor === "self"
+        ? { tone: "active", code: "active-self", label: "进行中", detail: "日程已过，当前案件仍在推进，下一步由本人处理。" }
+        : { tone: "active", code: "active-case", label: "进行中", detail: "日程已过，当前案件仍在选考中。" };
     }
   }
-  if (selection === "waiting") return { tone: "waiting", label: "等回复", detail: `日程已过，这场独立面谈仍在等待后续回复${waitingDetail}。` };
+  if (selection === "waiting") return { tone: "waiting", code: "meeting-waiting", label: "等回复", detail: `日程已过，这场独立面谈仍在等待后续回复${waitingDetail}。`, waitingLabel };
 
   // 准备 TODO 的完了只说明行动已完成，不是企业给出了选考结果。
-  return { tone: "unknown", label: "资料待核对", detail: "缺少这场日程的后续状态记录，需要核对资料才能判断当前进展。" };
+  return { tone: "unknown", code: "unrecorded", label: "资料待核对", detail: "缺少这场日程的后续状态记录，需要核对资料才能判断当前进展。" };
 }

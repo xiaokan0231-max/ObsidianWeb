@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AdvisoryEvidenceRef, InterviewAdvisory } from "@/lib/interview-advisory";
 import { getString, type Note } from "@/lib/notes";
 import { parseAnnotations, parseSeirikou, plainSei } from "@/lib/review";
@@ -10,6 +10,7 @@ import { postJson } from "@/lib/client-api";
 import { appViewHref, reviewEvidenceSearch } from "./app-route";
 import { ADVISORY_STAGE_LABELS } from "./interview-insights-state";
 import { useInterviewAdvisorySync } from "./interview-advisory-sync";
+import { useUiLocale } from "./ui-locale";
 
 type FeedbackTarget = { type: "advisory" | "insight"; id: string; revision: string; snapshot: string };
 type EvidenceProps = { notes: Note[]; onOpenEvidence: (ref: AdvisoryEvidenceRef) => void };
@@ -100,20 +101,60 @@ export function AdvisoryFeedback({ notePath, target, notes, onSaved }: {
   </div>;
 }
 
+/**
+ * 报告右栏的本页目录。长报告（观察 + 表达 + 下一步）往往三四屏，读到一半要回看「目前建议」时
+ * 不必滚回顶部。点目录用 scrollIntoView 而不是改 hash：hash 变化会触发外壳的路由监听。
+ */
+function AdvisoryToc({ entries, rootRef }: { entries: { id: string; label: string }[]; rootRef: { current: HTMLElement | null } }) {
+  const { locale } = useUiLocale();
+  const [current, setCurrent] = useState<string | null>(entries[0]?.id ?? null);
+  const ids = entries.map((entry) => entry.id).join("|");
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || typeof IntersectionObserver === "undefined") return;
+    const sections = ids.split("|").map((id) => root.querySelector<HTMLElement>(`#${CSS.escape(id)}`)).filter((item): item is HTMLElement => Boolean(item));
+    const update = () => {
+      const passed = sections.filter((section) => section.getBoundingClientRect().top < 200);
+      setCurrent((passed.at(-1) ?? sections[0])?.id ?? null);
+    };
+    const observer = new IntersectionObserver(update, { rootMargin: "-120px 0px -55% 0px" });
+    sections.forEach((section) => observer.observe(section));
+    update();
+    return () => observer.disconnect();
+  }, [ids, rootRef]);
+  if (entries.length < 2) return null;
+  return <nav className="ia-report-toc" aria-label={locale === "ja" ? "このページの目次" : "本页目录"}>
+    <h3>{locale === "ja" ? "このページの目次" : "本页目录"}</h3>
+    <ol>{entries.map((entry) => <li key={entry.id}><a href={`#${entry.id}`} aria-current={current === entry.id ? "location" : undefined} onClick={(event) => {
+      event.preventDefault();
+      // 显式 smooth 会绕过 CSS 的减弱动效兜底，自己问一次系统设置。
+      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      rootRef.current?.querySelector<HTMLElement>(`#${CSS.escape(entry.id)}`)?.scrollIntoView({ block: "start", behavior: still ? "auto" : "smooth" });
+    }}>{entry.label}</a></li>)}</ol>
+  </nav>;
+}
+
 export function AdvisoryReportPanel({ report, notes, notePath, onOpenEvidence, onFeedbackSaved }: EvidenceProps & {
   report: InterviewAdvisory; notePath: string; onFeedbackSaved: (note?: Note) => void | Promise<void>;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const feedback = (id: string, snapshot: unknown) => <AdvisoryFeedback key={`${report.generatedAt}:${id}`} notePath={notePath} notes={notes}
     target={{ type: "advisory", id, revision: report.generatedAt, snapshot: JSON.stringify(snapshot) }} onSaved={onFeedbackSaved} />;
-  return <div className="ia-report">
-    <section className="ia-overview"><span className="ia-eyebrow">{ADVISORY_STAGE_LABELS[report.stage] || "面谈"} · 综合判断</span>
+  const toc = [
+    { id: "ia-sec-overview", label: "综合判断" },
+    ...(report.observations.length > 0 ? [{ id: "ia-sec-observations", label: "值得读懂的细节" }] : []),
+    ...(report.answerOptions.length > 0 ? [{ id: "ia-sec-answers", label: "可使用的表达" }] : []),
+    ...(report.nextSteps.length > 0 ? [{ id: "ia-sec-next", label: "值得准备与确认的事" }] : []),
+  ];
+  return <div className="ia-report" ref={rootRef}><div className="ia-report-main">
+    <section className="ia-overview" id="ia-sec-overview"><span className="ia-eyebrow">{ADVISORY_STAGE_LABELS[report.stage] || "面谈"} · 综合判断</span>
       <h2>这场面谈，双方谈到了哪一步</h2><AdvisoryParagraphs text={report.commentaryZh} />
       <div className="ia-fit"><h3>双方的匹配</h3><AdvisoryParagraphs text={report.fitZh} /></div>
       <div className="ia-recommendation"><h3>目前建议</h3><AdvisoryParagraphs text={report.recommendationZh} />
         {report.changeConditionsZh && <><h4>什么情况会改变这个判断</h4><AdvisoryParagraphs text={report.changeConditionsZh} /></>}</div>
       <AdvisoryEvidence evidence={report.evidence} contextPaths={report.contextPaths} notes={notes} onOpenEvidence={onOpenEvidence} />
     </section>
-    {report.observations.length > 0 && <section className="ia-section"><header><span className="ia-eyebrow">对方原话与互动</span><h2>值得读懂的细节</h2></header>
+    {report.observations.length > 0 && <section className="ia-section" id="ia-sec-observations"><header><span className="ia-eyebrow">对方原话与互动</span><h2>值得读懂的细节</h2></header>
       {report.observations.map((item) => <article className="ia-observation" key={item.id}><h3>{item.titleZh}</h3>
         <dl><div><dt>现场发生了什么</dt><dd><AdvisoryParagraphs text={item.observationZh} /></dd></div>
           <div><dt>怎样理解</dt><dd><AdvisoryParagraphs text={item.interpretationZh} /></dd></div>
@@ -122,17 +163,17 @@ export function AdvisoryReportPanel({ report, notes, notePath, onOpenEvidence, o
         <AdvisoryEvidence {...item} notes={notes} onOpenEvidence={onOpenEvidence} />{feedback(item.id, item)}
       </article>)}
     </section>}
-    {report.answerOptions.length > 0 && <section className="ia-section"><header><span className="ia-eyebrow">未来可以怎么说</span><h2>可使用的表达</h2></header>
+    {report.answerOptions.length > 0 && <section className="ia-section" id="ia-sec-answers"><header><span className="ia-eyebrow">未来可以怎么说</span><h2>可使用的表达</h2></header>
       {report.answerOptions.map((item) => <article className="ia-answer" key={item.id}><h3>{item.titleZh}<small>{item.scope === "company" ? "本公司适用" : "可用于类似面谈"}</small></h3>
         <p>{item.situationZh}</p><AdvisoryParagraphs text={item.whyZh} /><blockquote lang="ja">{item.answerJa}</blockquote>
         <AdvisoryEvidence {...item} notes={notes} onOpenEvidence={onOpenEvidence} />{feedback(item.id, item)}</article>)}
     </section>}
-    {report.nextSteps.length > 0 && <section className="ia-section"><header><span className="ia-eyebrow">下一步</span><h2>值得准备与确认的事</h2></header>
+    {report.nextSteps.length > 0 && <section className="ia-section" id="ia-sec-next"><header><span className="ia-eyebrow">下一步</span><h2>值得准备与确认的事</h2></header>
       {report.nextSteps.map((item) => <article className="ia-next" key={item.id}><h3>{item.titleZh}</h3><AdvisoryParagraphs text={item.detailZh} />
         <p className="ia-trigger">适用时机：{item.triggerZh}</p><AdvisoryEvidence {...item} notes={notes} onOpenEvidence={onOpenEvidence} />{feedback(item.id, item)}</article>)}
     </section>}
     <p className="ia-report-meta">分析更新于 {report.generatedAt.replace("T", " ").slice(0, 16)} · {report.model}</p>
-  </div>;
+  </div><AdvisoryToc entries={toc} rootRef={rootRef} /></div>;
 }
 
 export default function InterviewAdvisory({ report: initialReport, notes, notePath, onOpenEvidence, onVaultChanged, onNoteWritten, onOpenInsights }: EvidenceProps & {

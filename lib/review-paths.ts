@@ -33,6 +33,18 @@ export function reviewSiblingPath(seirikouPath: string, kind: ReviewDerivedKind)
 }
 
 /**
+ * 派生ノートのパスから同じ回の整理稿へ戻る（reviewSiblingPath の逆）。
+ * 重练カードの証拠句リンクは練習ノートしか持っていないので、ここで整理稿に戻してから原文へ飛ぶ。
+ * 接尾辞が合わなければ null：推測で別のノートへ飛ばすより、リンクを出さない方がよい。
+ */
+export function reviewSourcePath(derivedPath: string, kind: ReviewDerivedKind): string | null {
+  const suffix = REVIEW_NOTE_SUFFIX[kind];
+  return derivedPath.endsWith(suffix)
+    ? `${derivedPath.slice(0, -suffix.length)}${REVIEW_NOTE_SUFFIX.seirikou}`
+    : null;
+}
+
+/**
  * 受け取った notePath が「書き込んでよいノート」かの検査。ブラウザから来た文字列が
  * そのまま Obsidian REST API の URL に載るので、3条件はどれ一つ欠けても穴になる：
  * 20_求職/ 配下に限る・種別を接尾辞で限る・`..` で vault 外へ抜ける経路を塞ぐ。**緩めないこと**。

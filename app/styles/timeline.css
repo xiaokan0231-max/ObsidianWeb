@@ -170,7 +170,7 @@
   bottom: 15px;
   display: flex;
   justify-content: space-between;
-  color: color-mix(in oklab, var(--text-on-inverse) 44%, transparent);
+  color: var(--text-on-inverse-muted);
   font-family: var(--font-geist-mono), monospace;
   font-size: 9px;
   letter-spacing: 0.1em;
@@ -218,7 +218,7 @@
 .graph-legend > span {
   margin-bottom: 12px;
   padding-inline: 6px;
-  color: color-mix(in oklab, var(--highlight) 45%, transparent);
+  color: var(--text-on-inverse-muted);
   font-family: var(--font-geist-mono), monospace;
   font-size: 9px;
   letter-spacing: 0.15em;
@@ -234,7 +234,7 @@
   border-radius: 6px;
   background: transparent;
   padding: 11px 6px;
-  color: color-mix(in oklab, var(--highlight) 72%, transparent);
+  color: var(--text-on-inverse-muted);
   text-align: left;
   font-family: inherit;
   font-size: 11px;
@@ -267,7 +267,7 @@
   margin-top: 4px;
   border-top: 1px solid color-mix(in oklab, var(--highlight) 8%, transparent);
   padding: 12px 6px;
-  color: color-mix(in oklab, var(--text-on-inverse) 50%, transparent);
+  color: var(--text-on-inverse-muted);
   font-size: 10px;
 }
 
@@ -282,7 +282,7 @@
   gap: 6px;
   margin-top: auto;
   padding: 14px 6px 0;
-  color: color-mix(in oklab, var(--text-on-inverse) 40%, transparent);
+  color: var(--text-on-inverse-muted);
   font-size: 9px;
 }
 
@@ -296,51 +296,15 @@
 .legend-rule i:nth-of-type(2) { width: 7px; height: 7px; }
 .legend-rule i:nth-of-type(3) { width: 11px; height: 11px; }
 
-.calendar-intro {
-  align-items: flex-end;
-}
-
-.calendar-summary {
-  display: flex;
-  gap: 8px;
-}
-
-.calendar-summary span {
-  min-width: 118px;
-  padding: 11px 13px;
-  border: 1px solid var(--line);
-  background: color-mix(in oklab, var(--surface-overlay) 35%, transparent);
-  color: var(--text-faint);
-  font-size: 9px;
-}
-
-.calendar-summary strong {
-  margin-right: 4px;
-  color: var(--ink);
-  font-family: "Songti SC", serif;
-  font-size: 18px;
-  font-weight: 520;
-}
-
-/* 类型色由月历、图例和议程共用，日期阶段只调整底色，避免过去的记录失去分类。 */
+/* 日历只剩面谈・面试一类（行动期限与跟进不进日历），这里是默认色；按进展的色调在 calendar-density.css 覆盖。 */
 .calendar-view .kind-event {
   --commitment-tone: var(--green);
   --commitment-wash: var(--success-wash);
 }
 
-.calendar-view .kind-action {
-  --commitment-tone: var(--info);
-  --commitment-wash: var(--info-wash);
-}
-
-.calendar-view .kind-follow-up {
-  --commitment-tone: var(--warning);
-  --commitment-wash: var(--warning-wash-soft);
-}
-
 .calendar-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 270px;
+  grid-template-columns: minmax(0, 1fr) 320px;
   align-items: start;
   gap: 18px;
 }
@@ -380,7 +344,7 @@
   border-right: 1px solid var(--line);
   background: transparent;
   padding: 0 10px;
-  font-size: 9px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -439,7 +403,7 @@
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 11px;
   text-align: center;
 }
 
@@ -479,12 +443,12 @@
 
 .calendar-day-number time {
   font-family: var(--font-geist-mono), monospace;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .calendar-day-number span {
   color: var(--orange);
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -535,7 +499,7 @@
 .calendar-event span {
   color: var(--text-faint);
   font-family: var(--font-geist-mono), monospace;
-  font-size: 7px;
+  font-size: 11px;
 }
 
 .calendar-event .calendar-event-meta {
@@ -556,13 +520,13 @@
 }
 
 .calendar-event strong {
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 650;
 }
 
 .calendar-day-events > small {
   color: var(--text-faint);
-  font-size: 7px;
+  font-size: 11px;
 }
 
 .calendar-agenda {
@@ -639,7 +603,7 @@
   place-items: center;
   background: var(--paper-deep);
   font-family: var(--font-geist-mono), monospace;
-  font-size: 8px;
+  font-size: 11px;
   border-radius: 50%;
 }
 
@@ -676,7 +640,7 @@
 .agenda-list time span {
   margin-top: 4px;
   color: var(--text-faint);
-  font-size: 7px;
+  font-size: 11px;
 }
 
 .agenda-copy {
@@ -695,11 +659,11 @@
 .agenda-copy small {
   margin-bottom: 5px;
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .agenda-copy > strong {
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .agenda-dot {
@@ -718,7 +682,7 @@
   margin: 0;
   padding: 18px 0 4px;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.7;
 }
 

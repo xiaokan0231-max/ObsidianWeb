@@ -129,7 +129,7 @@
 .reading-mode .reader-prose a:hover,
 .reading-mode .reader-prose button:hover { text-decoration-color: var(--nr-ink-strong); }
 .reading-mode .reader-prose ruby { ruby-align: center; }
-.reading-mode .reader-prose rt { color: var(--nr-muted); font-size: .5em; }
+.reading-mode .reader-prose rt { color: var(--nr-muted); font-size: var(--ruby-size); }
 .reading-mode .reader-prose :is(blockquote, .md-callout, .prep-doc-note) {
   margin: 1.5em 0;
   padding: .25em 0 .25em 1.15em;
@@ -154,7 +154,7 @@
   margin-bottom: 5px;
   color: var(--nr-muted);
   font-family: var(--font-geist-sans), sans-serif;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   letter-spacing: .12em;
 }
@@ -260,6 +260,34 @@
   font-weight: 500;
   letter-spacing: .08em;
 }
+
+/*
+ * 注音是读音提示，不是正文：复制、拖选时不该把读音一起带走（复制另有 copySelectionWithoutRuby 兜底）。
+ * 全局的 rt 规则属于 base.css，这里只收本组页面的几处。
+ */
+:is(.reading-mode, .session-v2, .prep-doc-body, .prep-standard, .review-view) rt { user-select: none; }
+
+/*
+ * 临场卡（presentation="stage"）：面试开始前最后几分钟用。纸更宽，台词放大到正文的 1.35 倍、行距放松，
+ * ←/→ 在台词之间跳，当前那句左侧亮一条细线。只剩台词与它紧邻的小标题，别的都在准备页里。
+ */
+.reading-mode.stage-reader .nr-paper { width: min(100%, 1000px); }
+.reading-mode.stage-reader .reader-prose .prep-doc-say {
+  font-size: calc(var(--nr-font-size, 18px) * 1.35);
+  line-height: 2.3;
+}
+.reading-mode.stage-reader .reader-stage-line {
+  margin: 0 0 1.1em;
+  padding-left: 18px;
+  border-left: 2px solid transparent;
+  scroll-margin-block: 30vh;
+  transition: border-color var(--dur-base) var(--ease-out);
+}
+.reading-mode.stage-reader .reader-stage-line[data-stage-current] { border-left-color: var(--brand); }
+.reading-mode.stage-reader .reader-stage-line .prep-doc-say { margin: 0; }
+.reading-mode.stage-reader .reader-prose h3,
+.reading-mode.stage-reader .reader-prose h4 { margin-top: 1.6em; color: var(--nr-muted); font-size: .9em; }
+.reading-mode .reader-stage-empty { color: var(--nr-muted); font-size: 15px; }
 
 @media (max-width: 700px) {
   .reading-mode .nr-controls { gap: 10px; }

@@ -3,8 +3,10 @@
 .rv-section-tabs button { border: 0; background: transparent; padding: 10px 18px; color: var(--muted); cursor: pointer; }
 .rv-section-tabs button[aria-pressed="true"] { background: var(--green); color: var(--on-fill); border-radius: 3px; }
 .rv-section-tabs .rv-cross-link { margin-left: auto; color: var(--green); }
-.rv-insights-entry { display: flex; align-items: center; justify-content: space-between; gap: 30px; padding: 24px 28px; margin-bottom: 24px; border: 1px solid var(--line); background: var(--surface); }
-.rv-insights-entry h2 { margin: 0 0 8px; font-size: 22px; font-family: "Songti SC", serif; }
+/* 入口只是一条引导：标题与说明排成一行，别占一块 110px 高、中间全空的横幅。 */
+.rv-insights-entry { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 12px 18px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
+.rv-insights-entry > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; min-width: 0; }
+.rv-insights-entry h2 { margin: 0; font-size: 17px; font-family: var(--font-serif); }
 .rv-insights-entry p { margin: 0; color: var(--muted); font-size: 13px; }
 .ia-view, .interview-insights-view { max-width: 1280px; margin: 0 auto; color: var(--ink); }
 .ia-actions { display: flex; gap: 12px; align-items: center; margin: 0 0 24px; }
@@ -17,24 +19,48 @@
 .ia-eyebrow { color: var(--green); font-size: 11px; letter-spacing: .06em; }
 .ia-overview { padding: 32px 40px; border: 1px solid var(--line); background: var(--surface); margin-bottom: 36px; }
 .ia-overview h2, .ia-section > header h2 { margin: 10px 0 24px; font-family: "Songti SC", serif; font-size: 27px; font-weight: 600; }
-.ia-report p, .ii-report p { margin: 0 0 14px; font-size: 14px; line-height: 1.95; overflow-wrap: anywhere; }
+/* 正文限在约 42 个汉字一行：宽屏下一行拉到 80 字，读到行尾再找下一行的开头很费眼。 */
+.ia-report p, .ii-report p { max-width: 42em; margin: 0 0 14px; font-size: 15px; line-height: 1.95; overflow-wrap: anywhere; }
+/* 报告两栏：左正文、右栏本页目录（写法同本场面试页的 .v2-toc）。 */
+.ia-report { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 36px; align-items: start; }
+.ia-report-main { min-width: 0; }
+/* 目录跳转落在吸顶的顶栏与标签带下面，标题不被盖住。 */
+.ia-report-main > :is(.ia-overview, .ia-section) { scroll-margin-top: calc(var(--chrome-top, 76px) + 24px); }
+.ia-report-toc { position: sticky; top: calc(var(--chrome-top, 76px) + 20px); padding-left: 18px; border-left: 1px solid var(--line); }
+.ia-report-toc h3 { margin: 0 0 12px; color: var(--muted); font-size: 13px; font-weight: 650; letter-spacing: .04em; }
+.ia-report-toc ol { margin: 0; padding: 0; list-style: none; }
+.ia-report-toc li { margin: 9px 0; }
+.ia-report-toc a { display: block; padding-left: 10px; border-left: 2px solid transparent; color: var(--muted); font-size: 14px; line-height: 1.6; text-decoration: none; transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-base) var(--ease-out); }
+.ia-report-toc a:hover { color: var(--ink); }
+.ia-report-toc a[aria-current] { border-left-color: var(--green); color: var(--green); font-weight: 650; }
 .ia-fit { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 20px; }
 .ia-fit h3, .ia-recommendation h3 { font-size: 16px; margin: 0 0 12px; }
 .ia-recommendation { padding: 20px 24px; margin: 22px 0; background: color-mix(in srgb, var(--green) 6%, transparent); border-left: 3px solid var(--green); }
 .ia-recommendation h4 { font-size: 12px; margin: 18px 0 8px; color: var(--muted); }
 .ia-recommendation p:last-child, .ia-fit p:last-child { margin-bottom: 0; }
 .ia-section { margin: 0 0 40px; scroll-margin-top: 100px; }
+/*
+ * 观察・回答・下一步卡片两张一行：正文限宽 42em 是为了好读，但整行一张时右侧近半是空的。
+ * auto-fit 让只有一张时仍占满整行；小标题、说明和其他非卡片内容横跨所有列。
+ */
+.ia-section:has(> :is(.ia-observation, .ia-answer, .ia-next)) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  column-gap: 16px;
+  align-items: start;
+}
+.ia-section:has(> :is(.ia-observation, .ia-answer, .ia-next)) > :not(.ia-observation, .ia-answer, .ia-next) { grid-column: 1 / -1; }
 .ia-section > header { margin: 0 0 22px; }
 .ia-section > header > p { max-width: 900px; color: var(--muted); }
-.ia-observation, .ia-answer, .ia-next, .ii-finding { border: 1px solid var(--line); padding: 28px 32px; margin-bottom: 16px; background: var(--surface); }
+.ia-observation, .ia-answer, .ia-next, .ii-finding { border: 1px solid var(--line); border-radius: var(--radius-card); padding: 22px 24px; margin-bottom: 16px; background: var(--surface); }
 .ia-observation h3, .ia-answer h3, .ia-next h3, .ii-finding h3 { font-size: 18px; margin: 0 0 18px; }
 .ia-observation dl { margin: 0; }
 .ia-observation dl > div { display: grid; grid-template-columns: 125px 1fr; column-gap: 24px; padding: 12px 0; }
 .ia-observation dt { color: var(--muted); font-size: 12px; line-height: 1.9; }
-.ia-observation dd { margin: 0; }
+.ia-observation dd { max-width: 42em; margin: 0; }
 .ia-observation dd p:last-child { margin-bottom: 0; }
 .ia-answer h3 small { font-weight: 400; margin-left: 18px; color: var(--muted); font-size: 11px; }
-.ia-answer > blockquote { margin: 18px 0; padding: 20px 24px; background: color-mix(in srgb, var(--green) 5%, transparent); font-size: 16px; line-height: 2; white-space: pre-wrap; }
+.ia-answer > blockquote { max-width: 42em; margin: 18px 0; padding: 20px 24px; background: color-mix(in srgb, var(--green) 5%, transparent); font-size: 16px; line-height: 2; white-space: pre-wrap; }
 .ia-next .ia-trigger { font-size: 12px; color: var(--muted); }
 .ia-evidence { margin: 20px 0 0; }
 .ia-evidence-links { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -46,7 +72,7 @@
 .ia-evidence-grid h4 small { display: block; color: var(--muted); font-size: 11px; font-weight: 400; margin-top: 6px; }
 .ia-evidence-grid .ia-source-title { color: var(--muted); font-size: 11px; }
 .ia-source-sentence { border-top: 1px solid var(--line); padding-top: 12px; margin: 12px 0; }
-.ia-source-sentence > b { font-size: 10px; color: var(--muted); font-weight: 500; }
+.ia-source-sentence > b { font-size: 11px; color: var(--muted); font-weight: 500; }
 .ia-source-sentence blockquote { margin: 8px 0; font-size: 13px; line-height: 1.85; white-space: pre-wrap; }
 .ia-source-sentence p { font-size: 12px; margin-bottom: 8px; }
 .ia-source-sentence .ia-source-note { border-left: 2px solid var(--line); padding-left: 10px; color: var(--muted); font-size: 11px; }
@@ -63,7 +89,7 @@
 .ia-feedback > p, .ia-feedback details { margin-top: 10px; font-size: 12px; color: var(--muted); }
 .ia-feedback p[role="alert"] { color: var(--danger-strong); }
 .ia-report-meta { color: var(--muted); font-size: 11px !important; margin-top: 28px; }
-.ia-empty { padding: 56px 40px; border: 1px dashed var(--line); max-width: 960px; margin: 30px auto; }
+.ia-empty { padding: 32px 36px; border: 1px dashed var(--line); max-width: 760px; margin: 24px auto; }
 .ia-empty h2 { font-family: "Songti SC", serif; font-size: 26px; margin: 0 0 18px; }
 .ia-empty p { max-width: 760px; line-height: 1.9; font-size: 14px; color: var(--muted); }
 .ii-hero { margin-bottom: 32px; }
@@ -86,17 +112,33 @@
 .ii-coverage li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--line); }
 .ii-coverage label { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 170px; cursor: pointer; }
 .ii-coverage b { font-size: 12px; font-weight: 500; }
-.ii-coverage small { display: block; font-size: 10px; margin-top: 5px; color: var(--muted); }
+.ii-coverage small { display: block; font-size: 11px; margin-top: 5px; color: var(--muted); }
 .ii-coverage li > p { flex-basis: 100%; font-size: 11px; color: var(--muted); margin: 0; line-height: 1.6; }
-.ii-status { font-size: 10px; color: var(--muted); }
+.ii-status { font-size: 11px; color: var(--muted); }
 .ii-status.ready { color: var(--green); }
 .ii-status.blocked { color: var(--gold-text); }
-.ii-coverage button { padding: 5px 7px; font-size: 10px; }
-.ii-modules-nav { display: flex; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 20px; margin-bottom: 28px; }
+.ii-coverage button { padding: 5px 7px; font-size: 11px; }
+/* 横向分析的模块导航钉在顶栏下：模块之间来回跳是这一页的主要读法。 */
+.ii-modules-nav { position: sticky; top: var(--chrome-top, 76px); z-index: 6; display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--line); padding: 12px 0; margin-bottom: 28px; background: color-mix(in oklab, var(--paper) 92%, transparent); backdrop-filter: blur(12px); }
+.ii-modules-nav a { transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out); }
+.ii-modules-nav a:hover { border-color: var(--green); background: var(--surface); }
 .ii-modules-nav a { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border: 1px solid var(--line); text-decoration: none; color: var(--green); font-size: 12px; }
-.ii-modules-nav small { color: var(--muted); font-size: 10px; }
+.ii-modules-nav small { color: var(--muted); font-size: 11px; }
+.ii-finding { display: grid; grid-template-columns: minmax(0, 42em) minmax(260px, 1fr); column-gap: 36px; align-items: start; }
+.ii-finding-main, .ii-finding-side { min-width: 0; }
+.ii-finding-side { padding-left: 24px; border-left: 1px solid var(--line-soft); }
+.ii-finding-side > .ii-boundary:first-child { margin-top: 0; }
+@media (max-width: 1100px) {
+  .ii-finding { grid-template-columns: minmax(0, 1fr); }
+  .ii-finding-side { padding-left: 0; border-left: 0; }
+}
 .ii-boundary { padding: 12px 18px; border-left: 2px solid var(--line); margin: 18px 0; }
 .ii-boundary h4 { font-size: 11px; color: var(--muted); margin: 0 0 8px; }
 .ii-boundary p { font-size: 12px; color: var(--muted); }
 .ii-filter-note, .ii-no-match { font-size: 12px !important; color: var(--muted); padding: 14px 0; }
 .prep-insights-entry { display: flex; gap: 20px; align-items: center; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.interview-insights-view .ia-section { scroll-margin-top: 170px; }
+@media (max-width: 1000px) {
+  .ia-report { grid-template-columns: minmax(0, 1fr); }
+  .ia-report-toc { display: none; }
+}

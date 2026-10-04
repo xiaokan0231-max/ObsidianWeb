@@ -110,3 +110,30 @@ export function renderInterviewPracticeAction(options: {
 export function interviewPracticeKey(practicePath: string, blockId: string) {
   return `${practicePath}#${blockId}`;
 }
+
+const TOKYO_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" });
+
+/**
+ * 記録時刻を東京の暦日へ。追記 route は `+09:00` 付きで書くのでそのまま切り出せるが、
+ * 旧データには UTC の ISO が混ざる——それを slice すると JST 未明の練習が前日に数えられる。
+ */
+export function practiceTokyoDay(at: string) {
+  if (/^\d{4}-\d{2}-\d{2}T[^Z]*\+09:00$/.test(at)) return at.slice(0, 10);
+  const time = Date.parse(at);
+  return Number.isNaN(time) ? at.slice(0, 10) : TOKYO_DAY.format(time);
+}
+
+/** 「今日完成した題数」：その日に complete を記録した題。後日やり直しても同じ題は一つと数える。 */
+export function practiceCompletedOn(entries: Pick<InterviewPracticeEntry, "attempts">[], day: string) {
+  return entries.filter((entry) =>
+    entry.attempts.some((attempt) => attempt.action === "complete" && practiceTokyoDay(attempt.at) === day),
+  ).length;
+}
+
+/** ↑↓ で隣の題へ。端で止める（巡回させると、最後の題で↓を押した人が先頭へ飛ばされて位置を見失う）。 */
+export function stepPracticeKey(keys: string[], current: string | null | undefined, delta: 1 | -1) {
+  if (keys.length === 0) return null;
+  const index = current ? keys.indexOf(current) : -1;
+  if (index < 0) return keys[0];
+  return keys[Math.max(0, Math.min(keys.length - 1, index + delta))];
+}

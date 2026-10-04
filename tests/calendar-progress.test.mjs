@@ -120,3 +120,24 @@ test("无关联旧复盘借唯一当轮准备稿定位独立面谈，有失效�
   const otherPrep = { ...prep, path: "20_求職/テスト/另一场准备.md", frontmatter: { ...prep.frontmatter, meeting: "[[其他面谈]]" } };
   assert.equal(calendarProgress(event(review), [...notes, otherPrep]).tone, "unknown");
 });
+
+test("每个判定分支带稳定 code，日语界面按 code 翻译而不改中文正本", () => {
+  const cases = [
+    [job(undefined, { status: "不採用" }), "upcoming", "rejected"],
+    [job(undefined, { status: "保留（本人判断）" }), "past", "paused"],
+    [job(undefined, { status: "内定" }), "past", "offer"],
+    [job(), "upcoming", "scheduled"],
+    [job(undefined, { waiting_label: "結果連絡" }), "past", "waiting-case"],
+    [job(undefined, { waiting_for: "self" }), "past", "active-self"],
+    [note("未关联.md", "review", { date: "2026-08-10" }), "past", "unrecorded"],
+  ];
+  for (const [source, phase, code] of cases) {
+    const progress = calendarProgress(event(source, { phase }), [source]);
+    assert.equal(progress.code, code, code);
+  }
+  const waiting = calendarProgress(event(job(undefined, { waiting_label: "結果連絡" })), [job(undefined, { waiting_label: "結果連絡" })]);
+  assert.equal(waiting.waitingFor, "company");
+  assert.equal(waiting.waitingLabel, "結果連絡");
+  const paused = job(undefined, { status: "保留（本人判断）" });
+  assert.equal(calendarProgress(event(paused), [paused]).reason, "本人判断");
+});

@@ -66,9 +66,9 @@
 .prep-card-overlay-bar > div { min-width: 0; text-align: center; }
 .prep-card-overlay-bar small {
   display: block;
-  color: color-mix(in oklab, var(--highlight) 46%, transparent);
+  color: var(--text-on-inverse-muted);
   font-family: var(--font-geist-mono), monospace;
-  font-size: 7.5px;
+  font-size: 11px;
   letter-spacing: 0.13em;
 }
 .prep-card-overlay-bar strong {
@@ -81,15 +81,15 @@
   white-space: nowrap;
 }
 .prep-card-overlay-bar > span {
-  color: color-mix(in oklab, var(--highlight) 58%, transparent);
-  font-size: 9px;
+  color: var(--text-on-inverse-muted);
+  font-size: 11px;
   white-space: nowrap;
 }
 .prep-card-overlay-bar kbd {
   padding: 2px 5px;
   border: 1px solid color-mix(in oklab, var(--highlight) 22%, transparent);
   font-family: var(--font-geist-mono), monospace;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .prep-card-overlay-content {
@@ -97,70 +97,6 @@
   margin: 0 auto;
   padding: 24px 38px 70px;
 }
-
-.prep-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 28px;
-  padding: 24px 30px;
-  color: var(--text-on-inverse);
-  background:
-    radial-gradient(circle at 78% 8%, color-mix(in oklab, var(--brand) 25%, transparent), transparent 30%),
-    linear-gradient(125deg, var(--surface-inverse) 0%, var(--surface-inverse-soft) 48%, var(--surface-inverse-violet) 100%);
-  box-shadow: var(--shadow);
-}
-
-.prep-hero .eyebrow {
-  margin: 0;
-  color: color-mix(in oklab, var(--highlight) 54%, transparent);
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 8.5px;
-  letter-spacing: 0.14em;
-}
-
-.prep-hero .eyebrow i {
-  display: inline-block;
-  width: 18px;
-  height: 2px;
-  margin-right: 8px;
-  vertical-align: middle;
-  background: var(--orange);
-}
-
-.prep-hero h1 {
-  margin: 7px 0 6px;
-  font-family: "Songti SC", "Noto Serif CJK SC", serif;
-  font-size: clamp(31px, 3vw, 43px);
-  font-weight: 620;
-  line-height: 1.08;
-  letter-spacing: -0.03em;
-}
-
-.prep-hero > div > p:last-child {
-  max-width: 760px;
-  margin: 0;
-  color: color-mix(in oklab, var(--highlight) 68%, transparent);
-  font-size: 12px;
-  line-height: 1.7;
-}
-
-.prep-hero dl {
-  display: grid;
-  grid-template-columns: repeat(3, 88px);
-  margin: 0;
-  border: 1px solid color-mix(in oklab, var(--highlight) 15%, transparent);
-  background: color-mix(in oklab, var(--highlight) 5.5%, transparent);
-}
-
-.prep-hero dl div {
-  padding: 12px 11px;
-  border-right: 1px solid color-mix(in oklab, var(--highlight) 12%, transparent);
-}
-
-.prep-hero dl div:last-child { border-right: 0; }
-.prep-hero dt { color: color-mix(in oklab, var(--highlight) 48%, transparent); font-size: 8.5px; }
-.prep-hero dd { margin: 4px 0 0; font-family: var(--font-geist-mono), monospace; font-size: 20px; }
 
 .prep-command {
   display: grid;
@@ -197,7 +133,7 @@
   border: 1px solid var(--line);
   background: transparent;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -244,8 +180,8 @@
 
 .prep-question-list > header > div { display: flex; align-items: baseline; gap: 5px; }
 .prep-question-list > header span { font-family: var(--font-geist-mono), monospace; font-size: 18px; }
-.prep-question-list > header small, .prep-question-list > header p { margin: 0; color: var(--muted); font-size: 9px; }
-.prep-question-list kbd { padding: 2px 5px; background: var(--paper-deep); border: 1px solid var(--line); font-family: var(--font-geist-mono), monospace; font-size: 8px; }
+.prep-question-list > header small, .prep-question-list > header p { margin: 0; color: var(--muted); font-size: 11px; }
+.prep-question-list kbd { padding: 2px 5px; background: var(--paper-deep); border: 1px solid var(--line); font-family: var(--font-geist-mono), monospace; font-size: 11px; }
 
 .prep-question-list > button {
   display: grid;
@@ -264,11 +200,11 @@
 .prep-question-list > button:last-child { border-bottom: 0; }
 .prep-question-list > button:hover { background: var(--success-wash); }
 .prep-question-list > button.active { background: var(--success-wash); box-shadow: inset 3px 0 var(--green); }
-.prep-index { color: var(--muted); font-family: var(--font-geist-mono), monospace; font-size: 9px; text-align: center; }
+.prep-index { color: var(--muted); font-family: var(--font-geist-mono), monospace; font-size: 11px; text-align: center; }
 .prep-question-copy { display: flex; min-width: 0; flex-direction: column; }
-.prep-question-copy small { color: var(--orange); font-size: 8px; }
+.prep-question-copy small { color: var(--orange); font-size: 11px; }
 .prep-question-copy strong { overflow: hidden; margin-top: 3px; font-family: "Songti SC", serif; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
-.prep-question-copy em { overflow: hidden; margin-top: 3px; color: var(--muted); font-style: normal; font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.prep-question-copy em { overflow: hidden; margin-top: 3px; color: var(--muted); font-style: normal; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .prep-question-list > button > i { color: var(--green); font-style: normal; opacity: 0; transform: translateX(-4px); transition: 150ms ease; }
 .prep-question-list > button.active > i { opacity: 1; transform: translateX(0); }
 
@@ -290,7 +226,7 @@
 }
 
 .prep-answer-meta { display: flex; flex-wrap: wrap; gap: 6px; }
-.prep-answer-meta span { padding: 3px 8px; background: var(--paper-deep); color: var(--muted); font-family: var(--font-geist-mono), monospace; font-size: 8px; }
+.prep-answer-meta span { padding: 3px 8px; background: var(--paper-deep); color: var(--muted); font-family: var(--font-geist-mono), monospace; font-size: 11px; }
 .prep-answer-meta span.priority { background: var(--danger-wash); color: var(--danger); }
 .prep-answer h2 { margin: 8px 0 4px; font-family: "Songti SC", serif; font-size: clamp(24px, 2.5vw, 32px); line-height: 1.25; }
 .prep-answer > header p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
@@ -308,7 +244,7 @@
   line-height: 1.7;
 }
 
-.prep-purpose span { color: var(--gold-text); font-size: 9.5px; font-weight: 650; }
+.prep-purpose span { color: var(--gold-text); font-size: 11px; font-weight: 650; }
 
 .prep-standard {
   margin-top: 16px;
@@ -327,15 +263,15 @@
   gap: 14px;
 }
 
-.prep-standard > header span { color: var(--green); font-family: var(--font-geist-mono), monospace; font-size: 8px; letter-spacing: 0.12em; }
+.prep-standard > header span { color: var(--green); font-family: var(--font-geist-mono), monospace; font-size: 11px; letter-spacing: 0.12em; }
 .prep-standard h3 { margin: 3px 0 0; font-family: "Songti SC", serif; font-size: 19px; }
-.prep-standard button { padding: 6px 10px; border: 1px solid var(--success-line); background: transparent; color: var(--green); font-size: 9px; cursor: pointer; }
+.prep-standard button { padding: 6px 10px; border: 1px solid var(--success-line); background: transparent; color: var(--green); font-size: 11px; cursor: pointer; }
 .prep-standard button:hover { background: var(--green); color: var(--on-fill); }
-.prep-standard > p { margin: 15px 0 0; color: var(--green-deep); font-size: 14.5px; line-height: 2.15; white-space: pre-wrap; }
+.prep-standard > p { margin: 15px 0 0; color: var(--green-deep); font-size: 15px; line-height: 2.15; white-space: pre-wrap; }
 .prep-standard ruby { ruby-position: over; }
 .prep-standard rt {
   color: var(--green);
-  font-size: 9px;
+  font-size: var(--ruby-size);
   font-weight: 400;
   pointer-events: none;
   -webkit-user-select: none;
@@ -349,8 +285,8 @@
   color: var(--text-on-inverse);
 }
 
-.prep-short > span { color: var(--violet-on-inverse); font-size: 9px; }
-.prep-short > p { margin: 6px 0 0; font-size: 13.5px; line-height: 1.85; white-space: pre-wrap; }
+.prep-short > span { color: var(--violet-on-inverse); font-size: 11px; }
+.prep-short > p { margin: 6px 0 0; font-size: 14px; line-height: 1.85; white-space: pre-wrap; }
 
 .prep-guidance-grid {
   display: grid;
@@ -366,7 +302,7 @@
 }
 
 .prep-guidance-card.warm { border-top-color: var(--orange); }
-.prep-guidance-card h3 { margin: 0 0 8px; color: var(--muted); font-size: 10px; }
+.prep-guidance-card h3 { margin: 0 0 8px; color: var(--muted); font-size: 11px; }
 .prep-guidance-card p, .prep-evidence p { margin: 0; font-size: 12px; line-height: 1.75; white-space: pre-wrap; }
 
 .prep-evidence {
@@ -375,7 +311,7 @@
   border: 1px dashed var(--line-strong);
 }
 
-.prep-evidence > span { display: block; margin-bottom: 6px; color: var(--green); font-size: 9px; font-weight: 650; }
+.prep-evidence > span { display: block; margin-bottom: 6px; color: var(--green); font-size: 11px; font-weight: 650; }
 .prep-evidence p { color: var(--muted); }
 
 .prep-empty,
@@ -386,7 +322,7 @@
   text-align: center;
 }
 
-.prep-empty > span { color: var(--green); font-family: var(--font-geist-mono), monospace; font-size: 9px; letter-spacing: 0.14em; }
+.prep-empty > span { color: var(--green); font-family: var(--font-geist-mono), monospace; font-size: 11px; letter-spacing: 0.14em; }
 .prep-empty h1 { margin: 8px 0; font-family: "Songti SC", serif; font-size: 30px; }
 .prep-empty p, .prep-no-result { color: var(--muted); font-size: 12px; }
 
@@ -407,8 +343,6 @@
   .prep-card-overlay-bar > span { display: none; }
   .prep-card-overlay-bar > div { text-align: right; }
   .prep-card-overlay-content { padding: 16px 16px 50px; }
-  .prep-hero { grid-template-columns: 1fr; padding: 22px 20px; }
-  .prep-hero dl { grid-template-columns: repeat(3, 1fr); }
   .prep-workbench { grid-template-columns: 1fr; }
   .prep-question-list { position: static; max-height: 360px; }
   .prep-purpose { grid-template-columns: 1fr; gap: 4px; }

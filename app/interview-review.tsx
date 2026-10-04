@@ -3,7 +3,7 @@
 import { menuLabel } from "@/lib/ui-menu-labels";
 import { useUiLocale } from "./ui-locale";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { ClientApiError, postJson } from "@/lib/client-api";
 import ScopeLoading from "./scope-loading";
 import { isTypingTarget } from "@/lib/keyboard";
@@ -48,6 +48,17 @@ import {
 // タグのラベルも「何場で癖とみなすか」の判定も、vault の 面接傾向_横断 を生成する側と
 // 同じものを使う。二重に持つと Web の表示と generated ノートが黙って割れる
 import { STRATEGY_TREND_META, isRepeatedAcrossInterviews } from "@/lib/interview-trends.mjs";
+import {
+  groupReviewsByCompany,
+  historicalDimensionAverages,
+  reviewScoreBand,
+  reviewScoreTimeline,
+  type DimensionAverages,
+  type ReviewScorePoint,
+  type ReviewVisualEntry,
+} from "@/lib/review-visual";
+import { CountUp } from "./count-up";
+import { RadarChart, type RadarSeries } from "./radar-chart";
 
 // 面接復盤：整理稿（派生層）を読む・批注（事実層）へ追記する、の2操作だけを持つ。
 // 整理稿の中身をここで書き換える経路は意図的に存在しない（唯一writer表を参照）。
@@ -67,6 +78,8 @@ type ReviewDoc = {
   bySentence: Map<string, ReviewAnnotation[]>;
   listeningMarks: Map<string, "×" | "△">;
   decisionTasks: ReviewDecisionTask[];
+  /** 句卡ごとに decisionTasks を filter し直さない：一場 200 句なら 200 回の全走査が毎描画に乗る。 */
+  decisionTasksBySentence: Map<string, ReviewDecisionTask[]>;
   deepReview?: InterviewAnswerReview;
   practiceBlockIds: Set<string>;
   feedbackByBlock: Map<string, ReviewFeedbackEntry[]>;
@@ -149,6 +162,31 @@ const FILTER_LABELS: { id: Filter; label: string; shortcut: string }[] = [
   { id: "go", label: "聴解・語彙", shortcut: "9" },
 ];
 
+// 这一轮新加的界面文案。共用的菜单词表（lib/ui-menu-labels）照旧兜底，这里只放本页独有的。
+const REVIEW_COPY_JA: Record<string, string> = {
+  "准备稿 ↗": "準備資料 ↗",
+  "原笔记 ↗": "元のノート ↗",
+  "译文": "訳文",
+  "回答分走势": "回答スコアの推移",
+  "点任一场进入复盘": "点を押すとその回の振り返りへ",
+  "按公司": "企業別",
+  "全部场次": "すべての回",
+  "复盘一览排列方式": "振り返り一覧の並べ方",
+  "本场": "今回",
+  "历史平均": "過去の平均",
+  "五维评分雷达": "五項目スコアのレーダー",
+  "轮": "回",
+  "未复盘": "未評価",
+};
+
+function useReviewCopy() {
+  const { locale } = useUiLocale();
+  return useCallback(
+    (label: string) => (locale === "ja" ? REVIEW_COPY_JA[label] ?? menuLabel(label, locale) : label),
+    [locale],
+  );
+}
+
 function toggleSet(current: Set<string>, key: string) {
   const next = new Set(current);
   if (next.has(key)) next.delete(key);
@@ -179,6 +217,12 @@ function buildDocs(notes: Note[]): ReviewDoc[] {
         list.push(feedback);
         feedbackByBlock.set(feedback.blockId, list);
       }
+      const decisionTasksBySentence = new Map<string, ReviewDecisionTask[]>();
+      for (const task of joined.decisionTasks) {
+        const list = decisionTasksBySentence.get(task.sentenceId) ?? [];
+        list.push(task);
+        decisionTasksBySentence.set(task.sentenceId, list);
+      }
       return {
         key: note.path,
         note,
@@ -194,6 +238,7 @@ function buildDocs(notes: Note[]): ReviewDoc[] {
         bySentence,
         listeningMarks: latestListeningMarks(annotations),
         decisionTasks: joined.decisionTasks,
+        decisionTasksBySentence,
         deepReview: joined.deepReviewNote
           ? parseInterviewAnswerReview(joined.deepReviewNote.content) ?? undefined
           : undefined,
@@ -244,9 +289,15 @@ function InterviewReview({
   onOpenEvidence,
   onOpenInsights,
   onSelectionChange,
+  onOpenNote,
+  onOpenSession,
   loading = false,
 }: {
   notes: Note[];
+  /** 标题行「原笔记 ↗」：外壳打开整理稿抽屉。不传就不出按钮（旧调用处行为不变）。 */
+  onOpenNote?: (note: Note) => void;
+  /** 标题行「准备稿 ↗」：外壳跳到这一场的本场面试页。不传就不出按钮。 */
+  onOpenSession?: (target: { company: string; date: string; round: string; notePath: string }) => void;
   /** この視図の scope がまだ届いていない：「还没有整理稿」ではなく読取中を出す。 */
   loading?: boolean;
   onVaultChanged: () => void | Promise<void>;
@@ -260,9 +311,13 @@ function InterviewReview({
   onOpenInsights: () => void;
   onSelectionChange?: (key: string | null) => void;
 }) {
-  const { locale } = useUiLocale();
-  const t = (label: string) => menuLabel(label, locale);
+  const t = useReviewCopy();
   const docs = useMemo(() => buildDocs(notes), [notes]);
+  // 雷达的「历史平均」描边：与 vault 的 面接傾向_横断 同一套平均算法，只是去掉了本场。
+  const trendEntries = useMemo(
+    () => docs.map((item) => ({ key: item.key, company: item.company, date: item.date, round: item.round, review: item.deepReview })),
+    [docs],
+  );
 
   const [selectedKey, setSelectedKey] = useState<string | null>(initialSelectedKey);
   const [panel, setPanel] = useState<"advisory" | "quality" | "source">(initialPanel);
@@ -281,13 +336,13 @@ function InterviewReview({
   const [errOpen, setErrOpen] = useState<Set<string>>(new Set());
   const [rawOpen, setRawOpen] = useState<Set<string>>(new Set());
   /**
-   * 「正在批注哪一句」和草稿正文合成一个对象，是为了让清空只能是原子的。
-   * 句子 ID 形如 s1/s2/s5，每场整理稿都从 s1 重新编号，**跨场必然重号**；
-   * 拆成两个 state 时漏清任何一个，B 场的同号句就会顶着 A 场的草稿把编辑器打开。
+   * 「正在批注哪一句」只记一个 `场次 key + 句子 ID` 的组合键，草稿正文在 SentenceCard 自己的 state 里。
+   * 草稿放在这一层时，每敲一个字整页几百张句卡都要重渲染，长场次里输入会明显跟不上。
+   *
+   * 句子 ID 形如 s1/s2/s5，每场整理稿都从 s1 重新编号，**跨场必然重号**——所以键里带场次，
+   * 句卡的 React key 也带场次：换场时旧句卡整张卸载，草稿跟着消失，不会顶着 A 场的草稿打开 B 场的同号句。
    */
-  const [annotationDraft, setAnnotationDraft] = useState<
-    { sentenceId: string; draft: string } | null
-  >(null);
+  const [notingKey, setNotingKey] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [deepBusy, setDeepBusy] = useState(false);
   const [practiceBusy, setPracticeBusy] = useState<string | null>(null);
@@ -341,9 +396,11 @@ function InterviewReview({
    * 写入走 `submitAnnotation(target, ...)` 里的 `target.annotationPath`，
    * 而 target 永远是**当前显示的那场**——换场时草稿不清，A 场没保存的文字就会被
    * 送进 B 场的 _批注.md，挂到一个同号但毫不相干的句子上。
+   * 草稿本体随句卡卸载已经清掉了（key 带场次），这里收的是「哪张卡开着编辑器」：
+   * 留着它，回到 A 场时那张卡会自己弹开一个空编辑器。
    * 两组语义不同，但要求一样：换场的入口两个都得调。
    */
-  const resetAnnotationDraft = () => setAnnotationDraft(null);
+  const resetAnnotationDraft = () => setNotingKey(null);
 
   // 回一覧的入口有好几个（顶栏按钮・连读模式的返回），滚动恢复与筛选清理集中在这里。
   // 筛选只对详情有意义；留在 URL 上会让一覧页的链接带着看不见的条件。
@@ -359,6 +416,36 @@ function InterviewReview({
 
   const doc = docs.find((item) => item.key === selectedKey) ?? null;
   const docKey = doc?.key;
+
+  /*
+   * 分数揭晓（维度条生长、分数滚动）只在每场第一次进入「回答质量」时播一次。
+   * 面板靠 hidden 切换，display 从 none 恢复会让 CSS 动画重播，所以动画类只在这一秒里挂着；
+   * round 让数字组件重挂一次——它在面板还隐藏时就挂载了，那次滚动没人看得见。
+   */
+  const [qualityReveal, setQualityReveal] = useState<{ docKey: string | null; round: number; active: boolean }>(
+    { docKey: null, round: 0, active: false },
+  );
+  if (panel === "quality" && docKey && qualityReveal.docKey !== docKey) {
+    setQualityReveal((current) => ({ docKey, round: current.round + 1, active: true }));
+  }
+  useEffect(() => {
+    if (!qualityReveal.active) return;
+    const timer = window.setTimeout(() => setQualityReveal((current) => ({ ...current, active: false })), 1000);
+    return () => window.clearTimeout(timer);
+  }, [qualityReveal.active, qualityReveal.round]);
+
+  const historyAverages = useMemo(
+    () => (selectedKey ? historicalDimensionAverages(trendEntries, selectedKey) : null),
+    [trendEntries, selectedKey],
+  );
+
+  // 只带 block 的深链（趋势页、顾问证据）落地时闪一下那一问，1.5 秒后撤掉，免得一直像被选中。
+  const [landingBlockId, setLandingBlockId] = useState<string | null>(initialSentenceId ? null : initialBlockId);
+  useEffect(() => {
+    if (!landingBlockId) return;
+    const timer = window.setTimeout(() => setLandingBlockId(null), 1500);
+    return () => window.clearTimeout(timer);
+  }, [landingBlockId]);
 
   useEffect(() => {
     if (!doc || mode === "novel" || panel !== "source") return;
@@ -459,7 +546,7 @@ function InterviewReview({
           },
           "写入失败",
         );
-        setAnnotationDraft(null);
+        setNotingKey(null);
         if (payload.note && onNoteWritten) onNoteWritten(payload.note);
         else await onVaultChanged();
       } catch (error) {
@@ -476,6 +563,13 @@ function InterviewReview({
     },
     [dismissWriteAlert, noteWriteFailure, onNoteWritten, onVaultChanged],
   );
+
+  // 句卡是 memo 的：回调一律按句子 ID 取参、引用稳定，否则父级任何一次渲染都会让几百张卡全部重画。
+  const toggleRevealed = useCallback((sentenceId: string) => setRevealed((current) => toggleSet(current, sentenceId)), []);
+  const toggleErrors = useCallback((sentenceId: string) => setErrOpen((current) => toggleSet(current, sentenceId)), []);
+  const toggleRaw = useCallback((sentenceId: string) => setRawOpen((current) => toggleSet(current, sentenceId)), []);
+  const startNote = useCallback((key: string) => setNotingKey(key), []);
+  const cancelNote = useCallback(() => setNotingKey(null), []);
 
   const generateDeepReview = useCallback(
     async (target: ReviewDoc) => {
@@ -575,6 +669,7 @@ function InterviewReview({
         <ReviewIndex
           loading={loading}
           docs={docs}
+          trendEntries={trendEntries}
           onOpenInsights={onOpenInsights}
           onSelect={(key, reviewBlockId) => {
             setSelectedKey(key);
@@ -739,6 +834,17 @@ function InterviewReview({
         <div className="rv-title">
           <h1>{doc.company}</h1>
           <span>{doc.round} · {doc.date}{doc.result ? ` · ${doc.result}` : ""}</span>
+          {(onOpenSession || onOpenNote) && (
+            <span className="rv-title-links">
+              {onOpenSession && (
+                <button
+                  type="button"
+                  onClick={() => onOpenSession({ company: doc.company, date: doc.date, round: doc.round, notePath: doc.note.path })}
+                >{t("准备稿 ↗")}</button>
+              )}
+              {onOpenNote && <button type="button" onClick={() => onOpenNote(doc.note)}>{t("原笔记 ↗")}</button>}
+            </span>
+          )}
         </div>
         <div className="rv-mode-wrap" hidden={panel !== "source"}>
           <div className="rv-mode" role="tablist" aria-label={t("阅读模式")}>
@@ -754,13 +860,14 @@ function InterviewReview({
               className={mode === "compare" ? "active" : ""}
               onClick={() => switchMode("compare")}
             >{t("对照")}<small>{t("日中并排")}</small></button>
-            <button
-              role="tab"
-              aria-selected={false}
-              data-novel-entry
-              onClick={() => switchMode("novel")}
-            >{t("全文阅读")}<small>{t("中文 / 日本語")}</small></button>
           </div>
+          {/* 全文阅读会换掉整页，不是同一组里的另一张标签；放进 tablist 会让读屏把它报成「未选中的标签」。 */}
+          <button
+            type="button"
+            className="rv-mode-novel"
+            data-novel-entry
+            onClick={() => switchMode("novel")}
+          >{t("全文阅读")}<small>{t("中文 / 日本語")}</small></button>
         </div>
       </header>
 
@@ -775,10 +882,10 @@ function InterviewReview({
         {doc.deepReview.overviewZh.split(/\n\s*\n/).filter(Boolean).map((paragraph, index) => <p key={index}>{paragraph}</p>)}
       </section>}
 
-      <div hidden={panel !== "advisory"}><InterviewAdvisory key={doc.key} report={doc.deepReview?.advisory} notes={notes} notePath={doc.note.path}
+      <div className="rv-panel" hidden={panel !== "advisory"}><InterviewAdvisory key={doc.key} report={doc.deepReview?.advisory} notes={notes} notePath={doc.note.path}
         onOpenEvidence={onOpenEvidence} onVaultChanged={onVaultChanged} onNoteWritten={onNoteWritten} onOpenInsights={onOpenInsights} /></div>
 
-      <div hidden={panel !== "source"}>
+      <div className="rv-panel" hidden={panel !== "source"}>
 
       <section className="rv-stats">
         <div className="rv-counts">
@@ -855,7 +962,7 @@ function InterviewReview({
       </section>
 
       </div>
-      <div hidden={panel !== "quality"}>
+      <div className="rv-panel" hidden={panel !== "quality"}>
       <section className={`rv-deep-stage ${unresolvedDecisionTasks.length > 0 ? "locked" : "ready"}`}>
         <div className="rv-deep-stage-copy">
           <span>第二阶段 · 回答质量</span>
@@ -890,7 +997,10 @@ function InterviewReview({
           </button>
         </div>
         {doc.deepReview?.dimensions && (
-          <section className="rv-score-glance" aria-label="五维评分概览">
+          <section
+            className={`rv-score-glance${qualityReveal.active ? " rv-reveal" : ""}`}
+            aria-label="五维评分概览"
+          >
             <header>
               <strong>五维评分</strong>
               <span>
@@ -899,11 +1009,17 @@ function InterviewReview({
                   : "各占 20% · 旧格式报告没有扣分明细，重新生成后可见"}
               </span>
             </header>
+            <FiveDimensionRadar
+              key={qualityReveal.round}
+              review={doc.deepReview}
+              averages={historyAverages}
+              t={t}
+            />
             <div>
-              {(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).map((key) => {
+              {(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).map((key, index) => {
                 const dimension = doc.deepReview?.dimensions?.[key];
                 const score = Math.round(dimension?.score ?? 0);
-                const band = score >= 80 ? "high" : score >= 65 ? "mid" : "low";
+                const band = reviewScoreBand(score);
                 const deductions = dimension?.deductions;
                 const top = (deductions ?? []).slice(0, 2);
                 return (
@@ -919,10 +1035,10 @@ function InterviewReview({
                     >
                       <div>
                         <span>{REVIEW_DIMENSION_META[key].label}</span>
-                        <strong>{score}</strong>
+                        <CountUp key={qualityReveal.round} as="strong" value={score} />
                       </div>
                       <i className="rv-dimension-track" aria-hidden="true">
-                        <em className={band} style={{ width: `${score}%` }} />
+                        <em className={band} style={{ width: `${score}%`, "--rv-index": index } as CSSProperties} />
                       </i>
                       {deductions && (deductions.length === 0 ? (
                         <p className="rv-glance-clean">没有找到扣分点</p>
@@ -958,6 +1074,7 @@ function InterviewReview({
           feedbackBusy={feedbackBusy}
           focusBlockId={deepFocusBlockId}
           focusDimension={deepFocusDimension}
+          revealRound={qualityReveal.round}
           onEvidenceClick={jumpToEvidence}
           onQueuePractice={(blockId) => void queuePractice(doc, blockId)}
           onFeedback={(blockId, kind, feedbackText) =>
@@ -966,7 +1083,7 @@ function InterviewReview({
       )}
 
       </div>
-      <div hidden={panel !== "source"}>
+      <div className="rv-panel" hidden={panel !== "source"}>
 
       {!doc.annotationExists && (
         <p className="rv-message">这场面试还没有批注文件（{doc.annotationPath}）。先在 vault 里建好再批注。</p>
@@ -1028,7 +1145,7 @@ function InterviewReview({
           return (
           <section
             key={block.id}
-            className={`rv-block ${isOpen ? "open" : "collapsed"}`}
+            className={`rv-block ${isOpen ? "open" : "collapsed"}${landingBlockId === block.id ? " landing" : ""}`}
             id={`rvb-${block.id}`}
           >
             <header>
@@ -1054,26 +1171,23 @@ function InterviewReview({
               <div className="rv-block-body" id={`rvb-body-${block.id}`}>
                 {sentences.map((sentence) => (
                   <SentenceCard
-                    key={sentence.id}
+                    key={`${doc.key}:${sentence.id}`}
                     doc={doc}
                     sentence={sentence}
                     mode={mode === "novel" ? "study" : mode}
                     revealed={revealed.has(sentence.id)}
                     errored={errOpen.has(sentence.id)}
                     rawShown={rawOpen.has(sentence.id)}
-                    noting={annotationDraft?.sentenceId === sentence.id}
-                    noteDraft={annotationDraft?.draft ?? ""}
+                    noting={notingKey === `${doc.key}:${sentence.id}`}
                     busy={busy === sentence.id}
                     evidenceFocused={evidenceFocus === sentence.id}
-                    onReveal={() => setRevealed((current) => toggleSet(current, sentence.id))}
-                    onToggleErrors={() => setErrOpen((current) => toggleSet(current, sentence.id))}
-                    onToggleRaw={() => setRawOpen((current) => toggleSet(current, sentence.id))}
-                    onStartNote={() => setAnnotationDraft({ sentenceId: sentence.id, draft: "" })}
-                    onCancelNote={() => setAnnotationDraft(null)}
-                    onDraft={(draft) => setAnnotationDraft({ sentenceId: sentence.id, draft })}
-                    onSubmit={(kind, text, decisionTarget) =>
-                      void submitAnnotation(doc, sentence.id, kind, text, decisionTarget)
-                    }
+                    revealLabel={t("译文")}
+                    onReveal={toggleRevealed}
+                    onToggleErrors={toggleErrors}
+                    onToggleRaw={toggleRaw}
+                    onStartNote={startNote}
+                    onCancelNote={cancelNote}
+                    onSubmit={submitAnnotation}
                   />
                 ))}
               </div>
@@ -1157,6 +1271,44 @@ function ReviewWriteAlerts({
 }
 
 
+/**
+ * 五维雷达：填色是本场，虚线描边是其他已复盘场次的平均。
+ * 只是给五个按钮配一张「形状」，数字与扣分入口仍在右侧按钮里——按钮的顺序和选择器被测试钉着，不挪。
+ */
+function FiveDimensionRadar({
+  review,
+  averages,
+  t,
+}: {
+  review: InterviewAnswerReview;
+  averages: DimensionAverages | null;
+  t: (label: string) => string;
+}) {
+  const keys = Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[];
+  const series: RadarSeries[] = [{
+    id: "current",
+    label: t("本场"),
+    values: keys.map((key) => {
+      const score = review.dimensions?.[key]?.score;
+      return typeof score === "number" ? Math.round(score) : null;
+    }),
+    tone: "primary",
+  }];
+  if (averages) {
+    series.push({ id: "history", label: t("历史平均"), values: keys.map((key) => averages[key]), tone: "secondary" });
+  }
+  return (
+    <RadarChart
+      className="rv-score-radar"
+      axes={keys.map((key) => ({ key, label: REVIEW_DIMENSION_META[key].label }))}
+      series={series}
+      max={100}
+      size={240}
+      title={t("五维评分雷达")}
+    />
+  );
+}
+
 /** 一条扣分：多少分・什么档・哪一题・为什么・下次怎么办・证据句。 */
 function DeductionRow({
   item,
@@ -1210,6 +1362,7 @@ function DeepReviewPanel({
   feedbackBusy,
   focusBlockId,
   focusDimension,
+  revealRound = 0,
   onEvidenceClick,
   onQueuePractice,
   onFeedback,
@@ -1221,6 +1374,8 @@ function DeepReviewPanel({
   feedbackBusy: string | null;
   focusBlockId: string | null;
   focusDimension: ReviewDimensionKey | null;
+  /** 与概览同一个揭晓轮次：面板隐藏时挂载的那次滚动没人看见，进「回答质量」时靠它重挂再滚一次。 */
+  revealRound?: number;
   onEvidenceClick: (sentenceId: string) => void;
   onQueuePractice: (blockId: string) => void;
   onFeedback: (
@@ -1288,7 +1443,7 @@ function DeepReviewPanel({
     <section className="rv-deep-report">
       <header>
         <div className="rv-deep-score">
-          <strong>{Math.round(review.overallScore)}</strong>
+          <CountUp key={revealRound} as="strong" value={Math.round(review.overallScore)} />
           <span>/ 100</span>
         </div>
         <div>
@@ -1316,7 +1471,7 @@ function DeepReviewPanel({
                   <strong>{Math.round(dimension?.score ?? 0)}</strong>
                   <i className="rv-dimension-track" aria-hidden="true">
                     <em
-                      className={(dimension?.score ?? 0) >= 80 ? "high" : (dimension?.score ?? 0) >= 65 ? "mid" : "low"}
+                      className={reviewScoreBand(dimension?.score ?? 0)}
                       style={{ width: `${Math.round(dimension?.score ?? 0)}%` }}
                     />
                   </i>
@@ -1614,18 +1769,177 @@ function DeepReviewPanel({
   );
 }
 
+/** 一览的排列方式跟阅读模式一个做法：localStorage + useSyncExternalStore，回到一览时还是上次那种。 */
+const INDEX_GROUP_KEY = "review:index-group";
+type IndexGroup = "company" | "all";
+
+function readIndexGroup(): IndexGroup {
+  try {
+    return window.localStorage.getItem(INDEX_GROUP_KEY) === "all" ? "all" : "company";
+  } catch {
+    return "company";
+  }
+}
+
+function saveIndexGroup(next: IndexGroup) {
+  try {
+    window.localStorage.setItem(INDEX_GROUP_KEY, next);
+  } catch { /* 存储被禁用时只是记不住，切换本身照常。 */ }
+  window.dispatchEvent(new Event(MODE_EVENT));
+}
+
+/** 分数环：conic-gradient 按分数画一圈。没有分数时退回原来的空心圆。 */
+function ScoreRing({ score, label }: { score: number | null; label: string }) {
+  return (
+    <span
+      className={`rv-card-score ${reviewScoreBand(score)}`}
+      style={score === null ? undefined : ({ "--score": score } as CSSProperties)}
+    >
+      {score === null ? <b>—</b> : <b>{score}</b>}
+      {label && <small>{label}</small>}
+    </span>
+  );
+}
+
+/**
+ * 回答分走势：沿用分析页 chart-line 的画法（同一套类名与刻度）。
+ * 每个点是一个可聚焦的按钮——走势图只是入口，点哪一场就进哪一场的复盘。
+ */
+function ReviewScoreTrend({
+  points,
+  onSelect,
+  t,
+}: {
+  points: ReviewScorePoint[];
+  onSelect: (key: string) => void;
+  t: (label: string) => string;
+}) {
+  const W = 720;
+  const H = 168;
+  const PAD = { top: 16, right: 18, bottom: 30, left: 34 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+  const x = (index: number) => PAD.left + (points.length <= 1 ? plotW / 2 : (index / (points.length - 1)) * plotW);
+  const y = (score: number) => PAD.top + plotH - (Math.max(0, Math.min(100, score)) / 100) * plotH;
+  // 日期标注太密会叠在一起：点多时只标首尾。
+  const labelEvery = points.length <= 10;
+  return (
+    <section className="rv-score-trend" aria-label={t("回答分走势")}>
+      <header>
+        <h2>{t("回答分走势")}</h2>
+        <span>{t("点任一场进入复盘")}</span>
+      </header>
+      <svg className="chart-line" viewBox={`0 0 ${W} ${H}`} role="group" aria-label={t("回答分走势")}>
+        {[0, 50, 100].map((tick) => (
+          <g key={tick}>
+            <line className="chart-grid" x1={PAD.left} x2={W - PAD.right} y1={y(tick)} y2={y(tick)} />
+            <text className="chart-tick" x={PAD.left - 8} y={y(tick) + 4} textAnchor="end">{tick}</text>
+          </g>
+        ))}
+        {/* 65 / 80 是分数环与维度条换色的两条线，画淡虚线让「掉进哪一档」一眼可见。 */}
+        {[65, 80].map((band) => (
+          <line key={band} className="rv-trend-band" x1={PAD.left} x2={W - PAD.right} y1={y(band)} y2={y(band)} />
+        ))}
+        <polyline
+          className="chart-line-path"
+          pathLength={1}
+          points={points.map((point, index) => `${x(index)},${y(point.score)}`).join(" ")}
+        />
+        {points.map((point, index) => (
+          <g
+            key={point.key}
+            className={`rv-trend-point ${reviewScoreBand(point.score)}`}
+            role="button"
+            tabIndex={0}
+            aria-label={`${point.company} ${point.round} ${point.date} ${point.score}`}
+            onClick={() => onSelect(point.key)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              onSelect(point.key);
+            }}
+          >
+            <title>{`${point.company} · ${point.round} · ${point.date} · ${point.score}`}</title>
+            <circle className="chart-hit" cx={x(index)} cy={y(point.score)} r={14} />
+            <circle className="chart-dot" cx={x(index)} cy={y(point.score)} r={4.5} />
+            <text className="rv-trend-value" x={x(index)} y={y(point.score) - 10} textAnchor="middle">{point.score}</text>
+            {(labelEvery || index === 0 || index === points.length - 1) && (
+              <text className="chart-tick" x={x(index)} y={H - 8} textAnchor="middle">{point.date.slice(5)}</text>
+            )}
+          </g>
+        ))}
+      </svg>
+    </section>
+  );
+}
+
+/**
+ * 按公司分组：每家一条横向轮次线，节点是那一场的分数环，末端是最后一场的结果。
+ * 一眼看出「这家走到第几轮、每轮答得怎样」，比按日期平铺的卡片少翻很多。
+ */
+function ReviewCompanyTimeline({
+  docs,
+  onSelect,
+  t,
+}: {
+  docs: ReviewDoc[];
+  onSelect: (key: string) => void;
+  t: (label: string) => string;
+}) {
+  const groups = groupReviewsByCompany(docs);
+  return (
+    <div className="rv-company-lines">
+      {groups.map((group) => (
+        // 轮次多的公司横跨两列，一两轮的公司并排放：单轮也占满整行时右侧大半是空的。
+        <section key={group.company} className={`rv-company-line${group.rounds.length + (group.outcome ? 1 : 0) >= 3 ? " wide" : ""}`}>
+          <header>
+            <h3>{group.company}</h3>
+            <span>{group.rounds.length} {t("轮")} · {group.latestDate}</span>
+          </header>
+          <ol>
+            {group.rounds.map((item) => {
+              const score = item.deepReview ? Math.round(item.deepReview.overallScore) : null;
+              return (
+                <li key={item.key}>
+                  <button type="button" onClick={() => onSelect(item.key)}>
+                    <ScoreRing score={score} label={score === null ? t("未复盘") : ""} />
+                    <span className="rv-company-round">
+                      <strong>{item.round || "—"}</strong>
+                      <small>{item.date}</small>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+            {group.outcome && (
+              <li className="rv-company-outcome">
+                <span className={`rv-result ${group.outcome.startsWith("不採用") ? "bad" : ""}`}>{group.outcome}</span>
+              </li>
+            )}
+          </ol>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function ReviewIndex({
   docs,
+  trendEntries,
   onSelect,
   onOpenInsights,
   loading = false,
 }: {
   docs: ReviewDoc[];
+  trendEntries: ReviewVisualEntry[];
   onSelect: (key: string, reviewBlockId?: string) => void;
   onOpenInsights: () => void;
   /** 面接 scope がまだ届いていない：「还没有整理稿」ではなく読取中を出す。 */
   loading?: boolean;
 }) {
+  const t = useReviewCopy();
+  const group = useSyncExternalStore(subscribeMode, readIndexGroup, () => "company" as IndexGroup);
+  const scorePoints = useMemo(() => reviewScoreTimeline(trendEntries), [trendEntries]);
   const [selectedTrend, setSelectedTrend] = useState<AnswerStrategyTag | null>(null);
   const aggregate = useMemo(() => {
     const patterns = new Map<string, number>();
@@ -1745,6 +2059,7 @@ function ReviewIndex({
   return (
     <div className="review-view">
       <section className="rv-insights-entry"><div><h2>把不同公司的面谈放在一起看</h2><p>从企业关注、双方匹配和实际推进条件里，找到下一阶段的方向。</p></div><button type="button" onClick={onOpenInsights}>进入横向对照 →</button></section>
+      {scorePoints.length >= 2 && <ReviewScoreTrend points={scorePoints} onSelect={(key) => onSelect(key)} t={t} />}
       {aggregate.length > 0 && (
         <section className="rv-agg" aria-label="跨面试错误型摘要">
           <span>跨面试错误型 TOP</span>
@@ -1800,6 +2115,14 @@ function ReviewIndex({
           </p>
         </div>
       ) : (
+        <>
+        <div className="rv-index-switch" role="group" aria-label={t("复盘一览排列方式")}>
+          <button type="button" aria-pressed={group === "company"} onClick={() => saveIndexGroup("company")}>{t("按公司")}</button>
+          <button type="button" aria-pressed={group === "all"} onClick={() => saveIndexGroup("all")}>{t("全部场次")}</button>
+        </div>
+        {group === "company" ? (
+          <ReviewCompanyTimeline docs={docs} onSelect={(key) => onSelect(key)} t={t} />
+        ) : (
         <div className="rv-cards">
           {docs.map((doc) => {
             const open = doc.annotations.filter((item) => item.status === "open").length;
@@ -1810,18 +2133,15 @@ function ReviewIndex({
               ? Math.round((completedTasks / doc.decisionTasks.length) * 100)
               : 100;
             const score = doc.deepReview ? Math.round(doc.deepReview.overallScore) : null;
-            const scoreBand = score === null ? "none" : score >= 80 ? "high" : score >= 65 ? "mid" : "low";
+            const scoreBand = reviewScoreBand(score);
             return (
-              <button key={doc.key} className="rv-card" onClick={() => onSelect(doc.key)}>
+              <button key={doc.key} className={`rv-card band-${scoreBand}`} onClick={() => onSelect(doc.key)}>
                 <header>
                   <div>
                     <span className="rv-card-date">{doc.date}</span>
                     <h3>{doc.company}</h3>
                   </div>
-                  <span className={`rv-card-score ${scoreBand}`}>
-                    {score === null ? <b>—</b> : <b>{score}</b>}
-                    <small>{score === null ? "未复盘" : "回答分"}</small>
-                  </span>
+                  <ScoreRing score={score} label={score === null ? t("未复盘") : "回答分"} />
                 </header>
                 <div className="rv-card-meta">
                   <span>{doc.round}</span>
@@ -1847,12 +2167,14 @@ function ReviewIndex({
             );
           })}
         </div>
+        )}
+        </>
       )}
     </div>
   );
 }
 
-function SentenceCard({
+const SentenceCard = memo(function SentenceCard({
   doc,
   sentence,
   mode,
@@ -1860,16 +2182,15 @@ function SentenceCard({
   errored,
   rawShown,
   noting,
-  noteDraft,
   busy,
   evidenceFocused,
-  onReveal,
-  onToggleErrors,
-  onToggleRaw,
-  onStartNote,
+  revealLabel,
+  onReveal: revealSentence,
+  onToggleErrors: toggleSentenceErrors,
+  onToggleRaw: toggleSentenceRaw,
+  onStartNote: startSentenceNote,
   onCancelNote,
-  onDraft,
-  onSubmit,
+  onSubmit: submitSentence,
 }: {
   doc: ReviewDoc;
   sentence: ReviewSentence;
@@ -1878,27 +2199,42 @@ function SentenceCard({
   errored: boolean;
   rawShown: boolean;
   noting: boolean;
-  noteDraft: string;
   busy: boolean;
   evidenceFocused: boolean;
-  onReveal: () => void;
-  onToggleErrors: () => void;
-  onToggleRaw: () => void;
-  onStartNote: () => void;
+  revealLabel: string;
+  onReveal: (sentenceId: string) => void;
+  onToggleErrors: (sentenceId: string) => void;
+  onToggleRaw: (sentenceId: string) => void;
+  onStartNote: (notingKey: string) => void;
   onCancelNote: () => void;
-  onDraft: (value: string) => void;
   onSubmit: (
+    target: ReviewDoc,
+    sentenceId: string,
     kind: "批注" | "裁定" | "聴解",
     text: string,
     decisionTarget?: string,
-  ) => void;
+  ) => Promise<void>;
 }) {
+  // 草稿只活在这张卡里：父级不知道正文，敲字时只有这一张卡重渲染。
+  // 编辑器被关掉（取消、写入成功、换到别的句子）时一并清空，下次打开不会带着上一回的半句话。
+  const [noteDraft, setNoteDraft] = useState("");
+  const [wasNoting, setWasNoting] = useState(noting);
+  if (noting !== wasNoting) {
+    setWasNoting(noting);
+    if (!noting) setNoteDraft("");
+  }
+  const onReveal = () => revealSentence(sentence.id);
+  const onToggleErrors = () => toggleSentenceErrors(sentence.id);
+  const onToggleRaw = () => toggleSentenceRaw(sentence.id);
+  const onStartNote = () => startSentenceNote(`${doc.key}:${sentence.id}`);
+  const onSubmit = (kind: "批注" | "裁定" | "聴解", text: string, decisionTarget?: string) =>
+    void submitSentence(doc, sentence.id, kind, text, decisionTarget);
   const segments = segmentSei(sentence);
   const detailShown = mode === "compare" || revealed;
   const mark = doc.listeningMarks.get(sentence.id);
   const annotations = doc.bySentence.get(sentence.id) ?? [];
   const learnerCount = sentence.errors.filter((error) => error.kind === "学習者").length;
-  const sentenceDecisionTasks = doc.decisionTasks.filter((task) => task.sentenceId === sentence.id);
+  const sentenceDecisionTasks = doc.decisionTasksBySentence.get(sentence.id) ?? [];
   const pendingCount = sentenceDecisionTasks.filter((task) => !task.resolvedBy).length;
   const resolvedCount = sentenceDecisionTasks.length - pendingCount;
   const genText = sentence.gen ?? plainSei(sentence);
@@ -1922,6 +2258,16 @@ function SentenceCard({
         {pendingCount > 0 && <span className="rv-cnt pending">疑 {pendingCount}</span>}
         {resolvedCount > 0 && <span className="rv-cnt resolved">済 {resolvedCount}</span>}
         <span className="rv-tools">
+          {/* 点句子本身也能揭开，但那只是鼠标的捷径；键盘和读屏要有一个真按钮，并知道它控制的是哪一块。 */}
+          {mode === "study" && (
+            <button
+              type="button"
+              className={revealed ? "active" : ""}
+              aria-expanded={revealed}
+              aria-controls={`rvs-detail-${sentence.id}`}
+              onClick={onReveal}
+            >{revealLabel}</button>
+          )}
           <button className={rawShown ? "active" : ""} onClick={onToggleRaw}>原文</button>
           {(sentence.errors.length > 0 || sentence.uncertainSpeaker) && (
             <button className={errored ? "active" : ""} onClick={onToggleErrors}>
@@ -1971,7 +2317,7 @@ function SentenceCard({
       </p>
 
       {detailShown && (
-        <div className="rv-detail">
+        <div className="rv-detail" id={`rvs-detail-${sentence.id}`}>
           {sentence.yaku && <p className="rv-yaku" lang="zh-CN">{sentence.yaku}</p>}
           {sentence.go.map((item, index) => (
             <p key={index} className="rv-go" lang="ja">語 <span>{item}</span></p>
@@ -2094,7 +2440,7 @@ function SentenceCard({
             autoFocus
             rows={3}
             placeholder="写给 AI 的批注：这句怎么说更好？为什么？（会追记到批注笔记，AI 统一回答）"
-            onChange={(event) => onDraft(event.target.value)}
+            onChange={(event) => setNoteDraft(event.target.value)}
           />
           <div>
             <button
@@ -2107,7 +2453,7 @@ function SentenceCard({
       )}
     </article>
   );
-}
+});
 
 // 外壳的 UI state（⌘K・overlay）变化时不重渲染整个视圖。props 都是稳定引用。
 export default memo(InterviewReview);

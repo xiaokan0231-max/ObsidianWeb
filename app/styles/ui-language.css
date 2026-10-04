@@ -27,19 +27,6 @@
   border-right: 0;
 }
 
-.calendar-summary.page-stat-strip {
-  gap: 0;
-}
-
-.calendar-summary.page-stat-strip span {
-  min-width: 0;
-  padding: 14px 15px;
-  border-top: 0;
-  border-bottom: 0;
-  border-left: 0;
-  background: transparent;
-}
-
 .feature-shell {
   overflow: hidden;
   border-radius: var(--radius-feature);
@@ -416,7 +403,7 @@
   display: block;
   margin-top: 5px;
   color: var(--semantic-tone);
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 620;
 }
@@ -448,7 +435,7 @@
   place-items: center;
   border-radius: 50%;
   background: var(--paper-deep);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .calendar-history .agenda-group {

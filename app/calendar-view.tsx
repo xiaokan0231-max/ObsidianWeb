@@ -1,13 +1,17 @@
 "use client";
 
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { type Note } from "@/lib/notes";
 import { type UiLocale } from "@/lib/ui-locale";
 import { useUiLocale } from "./ui-locale";
+import { CountUp } from "./count-up";
+import { isTypingTarget } from "@/lib/keyboard";
 import { calendarMonthDays } from "@/lib/calendar-month";
 import { buildAiApplicationDays, type AiApplicationDay } from "@/lib/calendar-applications";
+import { calendarConflicts } from "@/lib/calendar-conflicts";
 import { isInterviewEvent, type CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { calendarProgress, type CalendarProgress } from "@/lib/calendar-progress";
+import { buildCalendarSummary, calendarDayOffset, shiftCalendarDay } from "@/lib/calendar-summary";
 import { calendarRoundBadge, interviewRound } from "@/lib/interview-round";
 import {
   calendarEventTime,
@@ -15,13 +19,20 @@ import {
   type CalendarEvent,
 } from "@/lib/memory-atlas-data";
 
+type ProgressTone = CalendarProgress["tone"];
+
+const WAITING_FOR_JA: Record<string, string> = { self: "本人", company: "企業", agent: "エージェント", platform: "媒体" };
+
 const calendarZh = {
   calendar: "日历",
   timezone: "日本时间（JST）",
   progressLegend: "当前进展图例",
   progress: {
     active: "进行中", waiting: "等回复", closed: "已结束", paused: "暂停推进", unknown: "资料待核对",
-  } satisfies Record<CalendarProgress["tone"], string>,
+  } satisfies Record<ProgressTone, string>,
+  // 中文是 lib 里的正本：aria-label 和 title 依赖原句（含 waiting_label 原文）。
+  progressDetail: (progress: CalendarProgress) => progress.detail,
+  focusTone: (label: string) => `只高亮「${label}」的日程，再点一次取消`,
   pending: "待进行",
   offer: "已获内定",
   previousMonth: "上一个月",
@@ -29,6 +40,7 @@ const calendarZh = {
   today: "今天",
   weekdays: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
   rounds: "面试轮次",
+  roundHelp: "面试轮次说明",
   roundLegend: "面试轮次：0 轻松面谈，1、2、3 等数字为正式轮次，终为最终面试，猎为猎头面谈，问号为轮次待确认",
   casual: "轻松面谈",
   numbered: "… 正式轮次",
@@ -48,16 +60,32 @@ const calendarZh = {
   review: "面试复盘",
   schedule: "查看安排",
   source: "查看原始记录",
+  conflict: "时间冲突",
   more: (count: number) => `另有 ${count} 项`,
+  collapse: "收起",
+  countdown: (days: number) => days === 0 ? "今天" : days === 1 ? "明天" : days > 1 ? `${days} 天后` : `${-days} 天前`,
   upcomingWeek: "未来 7 天",
   upcomingEmpty: "未来七天没有已确认的安排。",
   later: "稍后安排",
   recent: "最近记录",
   history: "历史事实",
   historyEmpty: "还没有历史日程。",
+  nextUp: "下一场",
+  nextNone: "暂无",
+  stats: "日历态势",
+  statWeek: "未来 7 天场次",
+  statWaiting: "等回复案件",
+  statUnknown: "资料待核对",
+  statMonthAi: "本月 AI 代投",
+  selectDay: (label: string) => `${label} · 查看当日详情`,
+  dayDetail: (label: string) => `${label} · 当日`,
+  dayEmpty: "这一天没有已确认的安排。",
+  closeDay: "收起当日详情",
   aiApplications: "AI 代投",
+  aiShort: "代投",
   aiApplicationsToday: "今天 AI 代投",
   applicationCompanyUnit: "家公司",
+  applicationCompanyShort: "家",
   applicationPositionCount: (count: number) => `${count} 个岗位`,
   applicationDayLabel: (date: string, companies: number, positions: number) => `${date} JST · AI 代投 ${companies} 家公司 · ${positions} 个岗位 · 展开申请详情`,
   applicationNoPosition: "岗位未记载",
@@ -68,24 +96,52 @@ const calendarZh = {
   applicationsEmpty: "今天暂无已确认的 AI 代投。",
 };
 type CalendarCopy = typeof calendarZh;
+
+function japaneseProgressDetail(progress: CalendarProgress) {
+  const waitingNote = progress.waitingLabel ? `：${progress.waitingLabel}` : "";
+  switch (progress.code) {
+    case "rejected": return "この案件は不採用と記録されており、選考は終了しています。";
+    case "paused": return `この案件は保留中で、当面は進めません。${progress.reason ? `記録された理由：${progress.reason}。` : ""}`;
+    case "offer": return "この案件は内定と記録されています。";
+    case "meeting-closed": return "この面談の後続は終了と明記されています。";
+    case "scheduled": return "確定済みの予定で、まだ完了の記録はありません。";
+    case "waiting-case": return `予定は過ぎ、この案件は${WAITING_FOR_JA[progress.waitingFor ?? ""] ?? "相手"}からの返信待ちです${waitingNote}。`;
+    case "active-self": return "予定は過ぎ、案件は進行中です。次の対応は本人側です。";
+    case "active-case": return "予定は過ぎ、案件はまだ選考中です。";
+    case "meeting-waiting": return `予定は過ぎ、この面談は後続の返信待ちです${waitingNote}。`;
+    case "unrecorded": return "この予定の後続状況が記録されていないため、現在の進捗を判断するには資料の確認が必要です。";
+  }
+}
+
 const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
   "zh-CN": calendarZh,
   ja: {
     calendar: "カレンダー", timezone: "日本時間（JST）", progressLegend: "現在の進捗",
     progress: { active: "進行中", waiting: "返信待ち", closed: "終了", paused: "一時保留", unknown: "資料の確認が必要" },
+    progressDetail: japaneseProgressDetail,
+    focusTone: (label) => `「${label}」の予定だけを強調（もう一度押すと解除）`,
     pending: "実施予定", offer: "内定獲得",
     previousMonth: "前の月", nextMonth: "次の月", today: "今日",
     weekdays: ["月", "火", "水", "木", "金", "土", "日"],
-    rounds: "面接の段階",
+    rounds: "面接の段階", roundHelp: "面接の段階の説明",
     roundLegend: "面接の段階：0 はカジュアル面談、1、2、3 などの数字は正式な面接回数、終は最終面接、エはエージェント面談、疑問符は段階未確認",
     casual: "カジュアル面談", numbered: "… 正式な面接", numberedRound: (mark) => `${mark} 次面接`,
     final: "最終面接", finalShort: "最終面接", finalMark: "終",
     agent: "エージェント面談", agentShort: "エージェント", agentMark: "エ", agentDetail: "エージェント面談：正式な選考回数には含まれません",
     unknownRound: "段階未確認", unknownShort: "未確認", unknownDetail: "段階未確認：この記録では選考段階が明示されていません",
     interview: "面接", meeting: "面談", review: "面接の振り返り", schedule: "予定を見る", source: "元の記録を見る",
-    more: (count) => `ほか ${count} 件`, upcomingWeek: "今後 7 日間", upcomingEmpty: "今後 7 日間に確定した予定はありません。",
+    conflict: "時間が重複",
+    more: (count) => `ほか ${count} 件`, collapse: "閉じる",
+    countdown: (days) => days === 0 ? "今日" : days === 1 ? "明日" : days > 1 ? `${days} 日後` : `${-days} 日前`,
+    upcomingWeek: "今後 7 日間", upcomingEmpty: "今後 7 日間に確定した予定はありません。",
     later: "その後の予定", recent: "最近の記録", history: "過去の記録", historyEmpty: "過去の予定はまだありません。",
-    aiApplications: "AI代行応募", aiApplicationsToday: "今日のAI代行応募", applicationCompanyUnit: "社",
+    nextUp: "次の予定", nextNone: "なし",
+    stats: "カレンダーの状況", statWeek: "今後 7 日間の予定", statWaiting: "返信待ちの案件",
+    statUnknown: "資料の確認が必要", statMonthAi: "今月のAI代行応募",
+    selectDay: (label) => `${label} · この日の詳細を見る`, dayDetail: (label) => `${label} · この日`,
+    dayEmpty: "この日に確定した予定はありません。", closeDay: "この日の詳細を閉じる",
+    aiApplications: "AI代行応募", aiShort: "代行", aiApplicationsToday: "今日のAI代行応募", applicationCompanyUnit: "社",
+    applicationCompanyShort: "社",
     applicationPositionCount: (count) => `${count} 求人`,
     applicationDayLabel: (date, companies, positions) => `${date} JST · AI代行応募 ${companies} 社 · ${positions} 求人 · 応募の詳細を開く`,
     applicationNoPosition: "職種未記載", applicationSubmission: (agent) => `${agent} が提出`, applicationRecord: "記録を見る",
@@ -93,6 +149,9 @@ const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
     applicationsLoading: "応募記録を読み込み中…", applicationsEmpty: "今日の確認済みAI代行応募はありません。",
   },
 };
+
+/** 侧栏每组默认露出的条数；更多的折进「另有 N 项」，首屏不被一长串议程推走。 */
+const AGENDA_LIMIT = 5;
 
 function interviewDestination(target: CalendarInterviewTarget, copy: CalendarCopy) {
   return target.view === "review" ? copy.review : copy.schedule;
@@ -139,12 +198,44 @@ function RoundLegend({ copy }: { copy: CalendarCopy }) {
   );
 }
 
-function eventActionLabel(event: CalendarEvent, progress: CalendarProgress, copy: CalendarCopy, target?: CalendarInterviewTarget) {
+/** 轮次说明收进工具栏的「?」：常驻一整行会把月格往下推，而它只在第一次看不懂徽标时才需要。 */
+function RoundHelp({ copy }: { copy: CalendarCopy }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) ref.current.open = false;
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+  return (
+    <details className="calendar-round-help" ref={ref} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary aria-label={copy.roundHelp} title={copy.roundHelp}>?</summary>
+      <RoundLegend copy={copy} />
+    </details>
+  );
+}
+
+function progressLabel(progress: CalendarProgress, copy: CalendarCopy) {
+  return progress.code === "scheduled" ? copy.pending : progress.code === "offer" ? copy.offer : copy.progress[progress.tone];
+}
+
+function eventActionLabel(event: CalendarEvent, progress: CalendarProgress, copy: CalendarCopy, target?: CalendarInterviewTarget, conflict = false) {
   const round = eventRoundBadge(event, copy);
   const context = [event.date, calendarEventTime(event), "JST", event.company, event.label,
     round?.kind === "unknown" ? copy.unknownRound : ""].filter(Boolean).join(" · ");
-  const progressLabel = progress.label === "待进行" ? copy.pending : progress.label === "已获内定" ? copy.offer : copy.progress[progress.tone];
-  return `${context} · ${progressLabel}：${progress.detail} · ${target ? interviewDestination(target, copy) : copy.source}`;
+  return `${context} · ${progressLabel(progress, copy)}：${copy.progressDetail(progress)} · ${target ? interviewDestination(target, copy) : copy.source}${conflict ? ` · ${copy.conflict}` : ""}`;
+}
+
+function monthOf(date: string) {
+  const [year, monthNumber] = date.split("-").map(Number);
+  return new Date(year, monthNumber - 1, 1);
+}
+
+function monthKeyOf(month: Date) {
+  return `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function CalendarView({
@@ -167,170 +258,330 @@ function CalendarView({
 }) {
   const { locale } = useUiLocale();
   const copy = CALENDAR_COPY[locale];
+  const sectionRef = useRef<HTMLElement>(null);
   const [month, setMonth] = useState(() => {
     const requested = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("month") ?? "";
-    if (/^20\d{2}-\d{2}$/.test(requested)) {
-      const [year, monthNumber] = requested.split("-").map(Number);
-      return new Date(year, monthNumber - 1, 1);
-    }
-    const [year, monthNumber] = today.split("-").map(Number);
-    return new Date(year, monthNumber - 1, 1);
+    return /^20\d{2}-\d{2}$/.test(requested) ? monthOf(`${requested}-01`) : monthOf(today);
   });
-  const [expandedDay, setExpandedDay] = useState("");
+  // 只记录用户翻月的方向；首次进入不带方向，入场交给视图转场，不和月格滑入叠在一起。
+  const [monthDir, setMonthDir] = useState<"prev" | "next" | "">("");
+  // 空串＝没有主动选中：键盘与「今天」以 today 为起点，但侧栏不常驻一块与「未来 7 天」重复的当日详情。
+  const [selectedDay, setSelectedDay] = useState("");
+  const [focusTone, setFocusTone] = useState<ProgressTone | "">("");
+  const focusDayRef = useRef("");
+  const monthKey = monthKeyOf(month);
   const monthLabel = new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "long",
   }).format(month);
-  const days = calendarMonthDays(month).map((date) => ({
+  const dayFormatter = new Intl.DateTimeFormat(locale, { month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Tokyo" });
+  const dayLabel = (key: string) => dayFormatter.format(new Date(`${key}T00:00:00+09:00`));
+  const days = calendarMonthDays(month).map((date, index) => ({
     date,
     key: localDateKey(date),
     inMonth: date.getMonth() === month.getMonth(),
+    weekend: index % 7 >= 5,
   }));
+  const weeks = Array.from({ length: days.length / 7 }, (_, index) => days.slice(index * 7, index * 7 + 7));
   const eventsByDate = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
     events.forEach((event) => map.set(event.date, [...(map.get(event.date) ?? []), event]));
     return map;
   }, [events]);
-  const applicationsByDate = useMemo(() => new Map(buildAiApplicationDays(notes, today)
-    .map((day) => [day.date, day])), [notes, today]);
+  const applicationDays = useMemo(() => buildAiApplicationDays(notes, today), [notes, today]);
+  const applicationsByDate = useMemo(() => new Map(applicationDays.map((day) => [day.date, day])), [applicationDays]);
   const progressByEvent = useMemo(() => new Map(events.map((event) => [
     event.id, calendarProgress(event, notes, interviewTargets.get(event.id)),
   ])), [events, notes, interviewTargets]);
-  const horizon = (() => {
-    const [year, monthNumber, day] = today.split("-").map(Number);
-    return localDateKey(new Date(year, monthNumber - 1, day + 6));
-  })();
+  // 已结束案件残留的旧预约不算撞期：拒信之后那一格不会再去。
+  const conflicts = useMemo(() => calendarConflicts(events.filter((event) =>
+    progressByEvent.get(event.id)?.tone !== "closed")), [events, progressByEvent]);
+  const summary = useMemo(() => buildCalendarSummary({ events, progressByEvent, applicationDays, today }),
+    [events, progressByEvent, applicationDays, today]);
+  const horizon = shiftCalendarDay(today, 6);
   const upcomingAll = events.filter((event) => event.phase === "upcoming");
   const upcomingWeek = upcomingAll.filter((event) => event.date <= horizon);
-  const upcomingLater = upcomingAll.filter((event) => event.date > horizon).slice(0, 5);
+  const upcomingLater = upcomingAll.filter((event) => event.date > horizon);
   const recent = events
     .filter((event) => event.phase === "past")
     .sort((left, right) => right.date.localeCompare(left.date) || right.time.localeCompare(left.time))
     .slice(0, 6);
+  const selectedEvents = selectedDay ? eventsByDate.get(selectedDay) ?? [] : [];
+  const selectedApplications = selectedDay && selectedDay !== today ? applicationsByDate.get(selectedDay) : undefined;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    params.set("month", `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`);
+    params.set("month", monthKeyOf(month));
     window.history.replaceState(window.history.state, "", `${window.location.pathname}?${params.toString()}`);
   }, [month]);
 
-  const moveMonth = (offset: number) => {
-    setMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
+  // 键盘跨月移动时月格整块重挂，焦点会掉回 body；渲染后把焦点还给新选中的那一天。
+  useLayoutEffect(() => {
+    const key = focusDayRef.current;
+    if (!key) return;
+    focusDayRef.current = "";
+    sectionRef.current?.querySelector<HTMLButtonElement>(`[data-day="${key}"] .calendar-day-select`)?.focus();
+  });
+
+  const goToMonth = (target: Date) => {
+    const next = new Date(target.getFullYear(), target.getMonth(), 1);
+    if (monthKeyOf(next) === monthKey) return;
+    setMonthDir(next > month ? "next" : "prev");
+    setMonth(next);
   };
+  const moveMonth = (offset: number) => goToMonth(new Date(month.getFullYear(), month.getMonth() + offset, 1));
+  const goToday = () => {
+    goToMonth(monthOf(today));
+    setSelectedDay("");
+  };
+  const selectDay = (key: string, focus = false) => {
+    setSelectedDay(key);
+    goToMonth(monthOf(key));
+    if (focus) focusDayRef.current = key;
+  };
+  const toggleFocusTone = (tone: ProgressTone) => setFocusTone((current) => current === tone ? "" : tone);
+  const openEvent = (event: CalendarEvent) => interviewTargets.get(event.id) ? onInterview(event) : onOpen(event.note);
+
+  const onCalendarKey = (event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
+    const section = sectionRef.current;
+    const target = event.target;
+    const fromPage = target === document.body || target === document.documentElement;
+    // 抽屉、⌘K 等浮层里的按键不归日历管；R / ⌘K / Esc 都留给外壳。
+    if (!section || (!fromPage && !(target instanceof Node && section.contains(target)))) return;
+    // 浮层开着而焦点掉回 body 时（关掉内层阅读层之类），方向键不能在浮层背后翻日历。
+    if (section.closest("[inert]") || document.querySelector('[aria-modal="true"]')) return;
+    const key = event.key;
+    if (key === "[" || key === "]") {
+      event.preventDefault();
+      moveMonth(key === "[" ? -1 : 1);
+    } else if (key.toLowerCase() === "t") {
+      event.preventDefault();
+      goToday();
+    } else if (key === "ArrowLeft" || key === "ArrowRight") {
+      event.preventDefault();
+      const step = key === "ArrowLeft" ? -1 : 1;
+      if (selectedDay) selectDay(shiftCalendarDay(selectedDay, step), true);
+      else moveMonth(step);
+    } else if ((key === "ArrowUp" || key === "ArrowDown") && selectedDay) {
+      event.preventDefault();
+      selectDay(shiftCalendarDay(selectedDay, key === "ArrowUp" ? -7 : 7), true);
+    } else if (key === "Enter" && selectedDay) {
+      // Tab 到另一天的日期按钮上按 Enter 是「选中那一天」，交给按钮自己的 click；
+      // 只有焦点就在已选中那天（或在 body）时，Enter 才是「打开当日第一场」。
+      const focusedDay = fromPage ? selectedDay
+        : target instanceof Element && target.classList.contains("calendar-day-select")
+          ? target.closest("[data-day]")?.getAttribute("data-day") : null;
+      if (focusedDay !== selectedDay) return;
+      const first = eventsByDate.get(selectedDay)?.[0];
+      if (!first) return;
+      event.preventDefault();
+      openEvent(first);
+    }
+  };
+  // 每次渲染换成最新闭包，监听只挂一次：免得依赖表漏项时按键读到旧的选中日。
+  const keyHandler = useRef(onCalendarKey);
+  useLayoutEffect(() => {
+    keyHandler.current = onCalendarKey;
+  });
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => keyHandler.current(event);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const nextProgress = summary.next ? progressByEvent.get(summary.next.event.id) : undefined;
 
   return (
-    <section className="calendar-view">
+    <section className="calendar-view" ref={sectionRef} data-focus-tone={focusTone || undefined}>
       <h1 className="sr-only">{copy.calendar}</h1>
+      <div className="calendar-stat page-stat-strip module-stat-strip" role="group" aria-label={copy.stats} aria-busy={loading || undefined}>
+        <div className="calendar-stat-tile">
+          <span>{copy.statWeek}</span>
+          {loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : <CountUp as="strong" value={summary.weekCount} />}
+        </div>
+        <div className="calendar-stat-tile calendar-stat-next" data-urgent={summary.next && summary.next.days <= 1 ? "" : undefined}>
+          <span>{copy.nextUp}</span>
+          {loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : summary.next ? (
+            <>
+              <strong>{copy.countdown(summary.next.days)}</strong>
+              <small>{summary.next.event.company}</small>
+            </>
+          ) : <strong>{copy.nextNone}</strong>}
+        </div>
+        {([["waiting", copy.statWaiting, summary.waitingCount], ["unknown", copy.statUnknown, summary.unknownCount]] as const).map(([tone, label, count]) => (
+          <button
+            key={tone}
+            type="button"
+            className={`calendar-stat-tile status-${tone}`}
+            aria-pressed={focusTone === tone}
+            title={copy.focusTone(copy.progress[tone])}
+            disabled={loading}
+            onClick={() => toggleFocusTone(tone)}
+          >
+            <span>{label}</span>
+            {loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : <CountUp as="strong" value={count} />}
+          </button>
+        ))}
+        <div className="calendar-stat-tile">
+          <span>{copy.statMonthAi}</span>
+          {loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : (
+            <><CountUp as="strong" value={summary.monthAiCompanies} /><small>{copy.applicationCompanyUnit}</small></>
+          )}
+        </div>
+      </div>
       <div className="calendar-layout">
         <div className="calendar-board">
           <div className="calendar-toolbar">
-            <h2>{monthLabel}<small className="calendar-timezone">{copy.timezone}</small></h2>
+            <h2>
+              <span className="calendar-month-label" key={monthKey} data-dir={monthDir || undefined}>{monthLabel}</span>
+              <small className="calendar-timezone">{copy.timezone}</small>
+            </h2>
             <ul className="calendar-legend calendar-progress-legend" aria-label={copy.progressLegend}>
-              {(Object.keys(copy.progress) as CalendarProgress["tone"][]).map((tone) => (
+              {(Object.keys(copy.progress) as ProgressTone[]).map((tone) => (
                 <li className={`calendar-legend-item status-${tone}`} key={tone}>
-                  <i className="calendar-status-dot" aria-hidden="true" />
-                  {copy.progress[tone]}
+                  <button type="button" aria-pressed={focusTone === tone} title={copy.focusTone(copy.progress[tone])} onClick={() => toggleFocusTone(tone)}>
+                    <i className="calendar-status-dot" aria-hidden="true" />
+                    {copy.progress[tone]}
+                  </button>
                 </li>
               ))}
             </ul>
-            <div className="calendar-actions">
-              <button onClick={() => moveMonth(-1)} aria-label={copy.previousMonth}>←</button>
-              <button
-                onClick={() => {
-                  const [year, monthNumber] = today.split("-").map(Number);
-                  setMonth(new Date(year, monthNumber - 1, 1));
-                }}
-              >
-                {copy.today}
-              </button>
-              <button onClick={() => moveMonth(1)} aria-label={copy.nextMonth}>→</button>
+            <div className="calendar-tools">
+              <RoundHelp copy={copy} />
+              <div className="calendar-actions">
+                <button type="button" onClick={() => moveMonth(-1)} aria-label={copy.previousMonth} aria-keyshortcuts="[">←</button>
+                <button type="button" onClick={goToday} aria-keyshortcuts="T">{copy.today}</button>
+                <button type="button" onClick={() => moveMonth(1)} aria-label={copy.nextMonth} aria-keyshortcuts="]">→</button>
+              </div>
             </div>
           </div>
-          <RoundLegend copy={copy} />
           <div className="calendar-grid-scroll">
-            <div className="calendar-grid">
-              {copy.weekdays.map((weekday) => (
-                <div className="calendar-weekday" key={weekday}>{weekday}</div>
-              ))}
-              {days.map((day) => {
-                const dayEvents = eventsByDate.get(day.key) ?? [];
-                const applications = applicationsByDate.get(day.key);
-                return (
-                  <div
-                    className={`calendar-day ${day.inMonth ? "" : "outside"} ${day.key === today ? "today" : ""}`}
-                    key={day.key}
-                  >
-                    <div className="calendar-day-number">
-                      <time dateTime={day.key}>{day.date.getDate()}</time>
-                      {day.key === today && <span>{copy.today}</span>}
-                    </div>
-                    <div className="calendar-day-events">
-                      {dayEvents.slice(0, expandedDay === day.key ? dayEvents.length : 3).map((event) => {
-                        const target = interviewTargets.get(event.id);
-                        const progress = progressByEvent.get(event.id)!;
-                        const round = eventRoundBadge(event, copy);
-                        const stage = !round || round.kind === "unknown" ? event.label
-                          : round.kind === "casual" || round.kind === "agent" ? copy.meeting : copy.interview;
-                        const actionLabel = eventActionLabel(event, progress, copy, target);
-                        return (
-                          <button
-                            className={`calendar-event ${event.phase} kind-${event.kind} status-${progress.tone}`}
-                            key={event.id}
-                            onClick={() => target ? onInterview(event) : onOpen(event.note)}
-                            title={actionLabel}
-                            aria-label={actionLabel}
-                          >
-                            <span className="calendar-status-dot" aria-hidden="true" />
-                            <span className="calendar-event-heading">
-                              {round && <RoundBadge round={round} />}
-                              <span className="calendar-event-stage">{stage}</span>
-                            </span>
-                            {event.time && <time className="calendar-event-time" dateTime={`${event.date}T${event.time}+09:00`}>{calendarEventTime(event)}</time>}
-                            <strong>{event.company}</strong>
-                            {target && <span className="calendar-interview-destination" aria-hidden="true">{interviewDestination(target, copy)} →</span>}
-                          </button>
-                        );
-                      })}
-                      {dayEvents.length > 3 && expandedDay !== day.key && (
-                        <button className="calendar-more" onClick={() => setExpandedDay(day.key)}>
-                          {copy.more(dayEvents.length - 3)}
-                        </button>
-                      )}
-                    </div>
-                    {applications && (
-                      <details className="calendar-ai-applications">
-                        <summary aria-label={copy.applicationDayLabel(day.key, applications.companyCount, applications.positionCount)}>
-                          <strong>{copy.aiApplications} · {applications.companyCount} {copy.applicationCompanyUnit}</strong>
-                          <small>{copy.applicationPositionCount(applications.positionCount)}</small>
-                        </summary>
-                        <ApplicationList day={applications} onOpen={onOpen} copy={copy} />
-                      </details>
-                    )}
+            <div className="calendar-grid-frame">
+              <div className="calendar-grid" role="grid" aria-label={monthLabel} key={monthKey} data-dir={monthDir || undefined}>
+                <div className="calendar-week" role="row">
+                  {copy.weekdays.map((weekday) => (
+                    <div className="calendar-weekday" role="columnheader" key={weekday}>{weekday}</div>
+                  ))}
+                </div>
+                {weeks.map((week) => (
+                  <div className="calendar-week" role="row" key={week[0].key}>
+                    {week.map((day) => {
+                      const dayEvents = eventsByDate.get(day.key) ?? [];
+                      const applications = applicationsByDate.get(day.key);
+                      const isToday = day.key === today;
+                      const className = ["calendar-day", !day.inMonth && "outside", isToday && "today",
+                        day.key < today && "past", day.weekend && "weekend", selectedDay === day.key && "selected"].filter(Boolean).join(" ");
+                      return (
+                        <div className={className} key={day.key} role="gridcell" data-day={day.key} aria-current={isToday ? "date" : undefined}>
+                          <div className="calendar-day-number">
+                            <button
+                              type="button"
+                              className="calendar-day-select"
+                              aria-pressed={selectedDay === day.key}
+                              aria-label={copy.selectDay(dayLabel(day.key))}
+                              onClick={() => selectedDay === day.key ? setSelectedDay("") : selectDay(day.key)}
+                            >
+                              <time dateTime={day.key}>{day.date.getDate()}</time>
+                            </button>
+                            {isToday && <span>{copy.today}</span>}
+                          </div>
+                          <div className="calendar-day-events">
+                            {dayEvents.slice(0, 3).map((event) => {
+                              const target = interviewTargets.get(event.id);
+                              const progress = progressByEvent.get(event.id)!;
+                              const round = eventRoundBadge(event, copy);
+                              const conflict = conflicts.has(event.id);
+                              const stage = !round || round.kind === "unknown" ? event.label
+                                : round.kind === "casual" || round.kind === "agent" ? copy.meeting : copy.interview;
+                              const actionLabel = eventActionLabel(event, progress, copy, target, conflict);
+                              return (
+                                <button
+                                  className={`calendar-event ${event.phase} kind-${event.kind} status-${progress.tone}${conflict ? " conflict" : ""}`}
+                                  key={event.id}
+                                  onClick={() => openEvent(event)}
+                                  title={actionLabel}
+                                  aria-label={actionLabel}
+                                >
+                                  <span className="calendar-status-dot" aria-hidden="true" />
+                                  <span className="calendar-event-heading">
+                                    {round && <RoundBadge round={round} />}
+                                    <span className="calendar-event-stage">{stage}</span>
+                                  </span>
+                                  {event.time && <time className="calendar-event-time" dateTime={`${event.date}T${event.time}+09:00`}>{calendarEventTime(event)}</time>}
+                                  <strong>{event.company}</strong>
+                                  {target && <span className="calendar-interview-destination" aria-hidden="true">{interviewDestination(target, copy)} →</span>}
+                                </button>
+                              );
+                            })}
+                            {dayEvents.length > 3 && (
+                              <button className="calendar-more" onClick={() => selectDay(day.key)}>
+                                {copy.more(dayEvents.length - 3)}
+                              </button>
+                            )}
+                          </div>
+                          {applications && (
+                            <details className="calendar-ai-applications">
+                              <summary
+                                aria-label={copy.applicationDayLabel(day.key, applications.companyCount, applications.positionCount)}
+                                data-heat={Math.min(applications.companyCount, 4)}
+                                onClick={() => setSelectedDay(day.key)}
+                              >
+                                <strong>{copy.aiShort} {applications.companyCount}{copy.applicationCompanyShort}</strong>
+                                <small>{copy.applicationPositionCount(applications.positionCount)}</small>
+                              </summary>
+                              <ApplicationList day={applications} onOpen={onOpen} copy={copy} />
+                            </details>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
           </div>
         </div>
 
         <aside className="calendar-agenda">
-          <section className="calendar-application-summary" aria-label={copy.aiApplicationsToday}>
-            <h2>{copy.aiApplicationsToday}</h2>
-            <time dateTime={today}>{today} · JST</time>
-            {loading ? <p className="agenda-empty">{copy.applicationsLoading}</p> : (
-              <>
-                <p className="calendar-application-count"><strong>{applicationsByDate.get(today)?.companyCount ?? 0}</strong> {copy.applicationCompanyUnit} · {copy.applicationPositionCount(applicationsByDate.get(today)?.positionCount ?? 0)}</p>
-                {applicationsByDate.has(today)
-                  ? <ApplicationList day={applicationsByDate.get(today)!} onOpen={onOpen} copy={copy} />
-                  : <p className="agenda-empty">{copy.applicationsEmpty}</p>}
-              </>
-            )}
-          </section>
+          {summary.next && nextProgress && (
+            <NextHero
+              event={summary.next.event}
+              days={summary.next.days}
+              progress={nextProgress}
+              target={interviewTargets.get(summary.next.event.id)}
+              copy={copy}
+              locale={locale}
+              onOpen={onOpen}
+              onInterview={onInterview}
+            />
+          )}
+          {selectedDay && (
+            <AgendaGroup
+              className="calendar-day-detail"
+              title={copy.dayDetail(dayLabel(selectedDay))}
+              empty={selectedApplications ? "" : copy.dayEmpty}
+              events={selectedEvents}
+              progressByEvent={progressByEvent}
+              conflicts={conflicts}
+              today={today}
+              detailed
+              onOpen={onOpen}
+              interviewTargets={interviewTargets}
+              onInterview={onInterview}
+              action={<button type="button" className="calendar-day-close" onClick={() => setSelectedDay("")} aria-label={copy.closeDay}>×</button>}
+            >
+              {selectedApplications && <ApplicationList day={selectedApplications} onOpen={onOpen} copy={copy} />}
+            </AgendaGroup>
+          )}
           <AgendaGroup
             title={copy.upcomingWeek}
             empty={copy.upcomingEmpty}
             events={upcomingWeek}
             progressByEvent={progressByEvent}
+            conflicts={conflicts}
+            today={today}
+            limit={AGENDA_LIMIT}
             onOpen={onOpen}
             interviewTargets={interviewTargets}
             onInterview={onInterview}
@@ -341,11 +592,26 @@ function CalendarView({
               empty=""
               events={upcomingLater}
               progressByEvent={progressByEvent}
+              conflicts={conflicts}
+              today={today}
+              limit={AGENDA_LIMIT}
               onOpen={onOpen}
               interviewTargets={interviewTargets}
               onInterview={onInterview}
             />
           )}
+          <section className="calendar-application-summary" aria-label={copy.aiApplicationsToday}>
+            <h2>{copy.aiApplicationsToday}</h2>
+            <time dateTime={today}>{today} · JST</time>
+            {loading ? <p className="agenda-empty">{copy.applicationsLoading}</p> : (
+              <>
+                <p className="calendar-application-count"><CountUp as="strong" value={applicationsByDate.get(today)?.companyCount ?? 0} /> {copy.applicationCompanyUnit} · {copy.applicationPositionCount(applicationsByDate.get(today)?.positionCount ?? 0)}</p>
+                {applicationsByDate.has(today)
+                  ? <ApplicationList day={applicationsByDate.get(today)!} onOpen={onOpen} copy={copy} limit={AGENDA_LIMIT} />
+                  : <p className="agenda-empty">{copy.applicationsEmpty}</p>}
+              </>
+            )}
+          </section>
           <details className="calendar-history">
             <summary>
               <span>{copy.recent}</span>
@@ -356,6 +622,8 @@ function CalendarView({
               empty={copy.historyEmpty}
               events={recent}
               progressByEvent={progressByEvent}
+              conflicts={conflicts}
+              today={today}
               onOpen={onOpen}
               interviewTargets={interviewTargets}
               onInterview={onInterview}
@@ -367,22 +635,72 @@ function CalendarView({
   );
 }
 
-function ApplicationList({ day, onOpen, copy }: { day: AiApplicationDay; onOpen: (note: Note) => void; copy: CalendarCopy }) {
+function NextHero({ event, days, progress, target, copy, locale, onOpen, onInterview }: {
+  event: CalendarEvent;
+  days: number;
+  progress: CalendarProgress;
+  target?: CalendarInterviewTarget;
+  copy: CalendarCopy;
+  locale: UiLocale;
+  onOpen: (note: Note) => void;
+  onInterview: (event: CalendarEvent) => void;
+}) {
+  const round = eventRoundBadge(event, copy);
+  const date = new Intl.DateTimeFormat(locale, { month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Tokyo" })
+    .format(new Date(`${event.date}T00:00:00+09:00`));
+  const when = event.time ? `${date} · ${calendarEventTime(event)} JST` : `${date} · JST`;
   return (
-    <ul className="calendar-application-list">
-      {day.applications.map((application) => (
-        <li key={application.id}>
-          <button
-            onClick={() => onOpen(application.note)}
-            aria-label={copy.applicationRecordLabel(day.date, application.company, application.position || copy.applicationNoPosition, application.agent)}
-          >
-            <strong>{application.company}</strong>
-            <span>{application.position || copy.applicationNoPosition}</span>
-            <small>{copy.applicationSubmission(application.agent)} · {copy.applicationRecord} →</small>
+    <section className="calendar-next-hero" aria-label={copy.nextUp} data-urgent={days <= 1 ? "" : undefined}>
+      <div className="calendar-next-head">
+        <span className="calendar-next-kicker">{copy.nextUp}</span>
+        <span className="calendar-next-countdown">{copy.countdown(days)}</span>
+      </div>
+      <strong className="calendar-next-company">{event.company}</strong>
+      <div className="calendar-next-meta">
+        {round && <RoundBadge round={round} />}
+        <span>{event.label}</span>
+      </div>
+      <time className="calendar-next-when" dateTime={event.time ? `${event.date}T${event.time}+09:00` : event.date}>{when}</time>
+      <div className="calendar-next-actions">
+        <button
+          type="button"
+          className="calendar-next-primary"
+          onClick={() => target ? onInterview(event) : onOpen(event.note)}
+          aria-label={eventActionLabel(event, progress, copy, target)}
+        >
+          {target ? interviewDestination(target, copy) : copy.source} <span aria-hidden="true">→</span>
+        </button>
+        {target && (
+          <button type="button" className="calendar-next-source" onClick={() => onOpen(event.note)}>
+            {copy.source}
           </button>
-        </li>
-      ))}
-    </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ApplicationList({ day, onOpen, copy, limit }: { day: AiApplicationDay; onOpen: (note: Note) => void; copy: CalendarCopy; limit?: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const hidden = limit && !expanded ? Math.max(0, day.applications.length - limit) : 0;
+  return (
+    <>
+      <ul className="calendar-application-list">
+        {day.applications.slice(0, hidden ? limit : undefined).map((application) => (
+          <li key={application.id}>
+            <button
+              onClick={() => onOpen(application.note)}
+              aria-label={copy.applicationRecordLabel(day.date, application.company, application.position || copy.applicationNoPosition, application.agent)}
+            >
+              <strong>{application.company}</strong>
+              <span>{application.position || copy.applicationNoPosition}</span>
+              <small>{copy.applicationSubmission(application.agent)} · {copy.applicationRecord} →</small>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {hidden > 0 && <button type="button" className="agenda-more" onClick={() => setExpanded(true)}>{copy.more(hidden)}</button>}
+    </>
   );
 }
 
@@ -391,6 +709,13 @@ function AgendaGroup({
   empty,
   events,
   progressByEvent,
+  conflicts,
+  today,
+  limit,
+  detailed = false,
+  className,
+  action,
+  children,
   onOpen,
   interviewTargets,
   onInterview,
@@ -399,24 +724,36 @@ function AgendaGroup({
   empty: string;
   events: CalendarEvent[];
   progressByEvent: ReadonlyMap<string, CalendarProgress>;
+  conflicts: ReadonlySet<string>;
+  today: string;
+  limit?: number;
+  /** 当日详情：每场下面直接写出进展原因，不用悬停 title 才看得到。 */
+  detailed?: boolean;
+  className?: string;
+  action?: ReactNode;
+  children?: ReactNode;
   onOpen: (note: Note) => void;
   interviewTargets: ReadonlyMap<string, CalendarInterviewTarget>;
   onInterview: (event: CalendarEvent) => void;
 }) {
   const { locale } = useUiLocale();
   const copy = CALENDAR_COPY[locale];
+  const [expanded, setExpanded] = useState(false);
   const dateFormatter = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "Asia/Tokyo" });
+  const shown = limit && !expanded ? events.slice(0, limit) : events;
   return (
-    <section className="agenda-group">
-      <div className="agenda-heading"><h2>{title}</h2><span>{events.length}</span></div>
+    <section className={className ? `agenda-group ${className}` : "agenda-group"}>
+      <div className="agenda-heading"><h2>{title}</h2><span>{events.length}</span>{action}</div>
       <div className="agenda-list">
-        {events.map((event) => {
+        {shown.map((event) => {
           const target = interviewTargets.get(event.id);
           const progress = progressByEvent.get(event.id)!;
           const round = eventRoundBadge(event, copy);
-          const actionLabel = eventActionLabel(event, progress, copy, target);
+          const conflict = conflicts.has(event.id);
+          const actionLabel = eventActionLabel(event, progress, copy, target, conflict);
+          const offset = calendarDayOffset(today, event.date);
           return (
-            <div className={`agenda-item ${event.phase} kind-${event.kind} status-${progress.tone}`} key={event.id}>
+            <div className={`agenda-item ${event.phase} kind-${event.kind} status-${progress.tone}${conflict ? " conflict" : ""}`} key={event.id}>
               <button
                 className="agenda-main"
                 onClick={() => target ? onInterview(event) : onOpen(event.note)}
@@ -431,12 +768,18 @@ function AgendaGroup({
                   <span className="agenda-event-meta">
                     {round && <RoundBadge round={round} />}
                     <small>{event.time ? `${calendarEventTime(event)} · ${event.label}` : event.label}</small>
+                    {offset !== null && <span className="agenda-when" data-soon={offset === 0 || offset === 1 ? "" : undefined}>{copy.countdown(offset)}</span>}
                   </span>
                   <strong>{event.company}</strong>
                   {target && <span className="calendar-interview-destination" aria-hidden="true">{interviewDestination(target, copy)} →</span>}
                 </span>
                 <span className="calendar-status-dot" aria-hidden="true" />
               </button>
+              {detailed && (
+                <p className="agenda-progress-detail">
+                  <b>{progressLabel(progress, copy)}</b>{copy.progressDetail(progress)}
+                </p>
+              )}
               {target && (
                 <button
                   className="agenda-source"
@@ -449,7 +792,13 @@ function AgendaGroup({
             </div>
           );
         })}
-        {events.length === 0 && <p className="agenda-empty">{empty}</p>}
+        {events.length === 0 && empty && <p className="agenda-empty">{empty}</p>}
+        {limit !== undefined && events.length > limit && (
+          <button type="button" className="agenda-more" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+            {expanded ? copy.collapse : copy.more(events.length - limit)}
+          </button>
+        )}
+        {children}
       </div>
     </section>
   );
