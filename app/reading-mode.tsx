@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { ReadingHeading } from "@/lib/reading-document";
 import { isTypingTarget } from "@/lib/keyboard";
@@ -10,7 +10,8 @@ import { copySelectionWithoutRuby } from "./ruby-copy";
 export type ReadingPosition = { anchor: string | null; offset: number; scrollTop: number };
 const positions = new Map<string, ReadingPosition>();
 const ANCHORS = "[data-reading-anchor], [data-novel-sentence], [data-md-heading]";
-const FONT_KEY = "reading:font-size";
+/** 正文字号的持久化键。阅读层与原笔记详情页共用：在一处调大，另一处也跟着变。 */
+export const FONT_KEY = "reading:font-size";
 const STAGE_LINES = "[data-stage-line]";
 
 /**
@@ -50,11 +51,115 @@ export function restoreReadingPosition(scroller: HTMLElement, position: ReadingP
   else scroller.scrollTop = position.scrollTop;
 }
 
-function readFontSize() {
+export function readFontSize() {
   try {
     const size = Number(window.localStorage.getItem(FONT_KEY));
     return [16, 18, 20, 22, 24].includes(size) ? size : 18;
   } catch { return 18; }
+}
+
+/**
+ * 阅读进度与目录高亮，原笔记详情页（NoteDrawer）与阅读层（ReadingMode，含场景内阅读）共用。
+ *
+ * 为什么不进 React state：以前每帧 setState 一个浮点进度，整个阅读层（头部、目录、属性、反链）
+ * 跟着滚动每帧 diff 一次，还要每帧 querySelectorAll 全部标题量位置。现在进度直接写到
+ * hostRef 元素的 --reading-progress（0–1）上，由 CSS 画条；需要显示百分数的地方用 onPercent，
+ * 只在整数变化时回调。
+ * 目录高亮用 IntersectionObserver：判定区是「滚动容器顶端 + threshold」这条线以上的半无限区域，
+ * 标题越线时才回调——快速跳转也不会跨过判定区漏掉（区域没有上界）。
+ */
+export function useReadingProgress(scrollRef: RefObject<HTMLElement | null>, {
+  headingIds, hostRef, threshold = 120, emptyProgress = 0, resetKey, onPercent, onSettle,
+}: {
+  headingIds: readonly string[];
+  /** --reading-progress 写在哪个元素上；省略时写在滚动容器上。 */
+  hostRef?: RefObject<HTMLElement | null>;
+  /** 标题越过「容器顶端 + threshold」这条线，就算正在读这一节。 */
+  threshold?: number;
+  /** 内容不足一屏、无从滚动时的进度：阅读层视为读完（1），详情页视为未开始（0）。 */
+  emptyProgress?: number;
+  /** 换了一篇文档时重新订阅。 */
+  resetKey?: string;
+  onPercent?: (percent: number) => void;
+  /** 滚动停下约 160ms 后回调一次（用来记阅读位置，不必每帧记）。 */
+  onSettle?: () => void;
+}): string | null {
+  const [active, setActive] = useState<string | null>(headingIds[0] ?? null);
+  const percentChanged = useEffectEvent((percent: number) => onPercent?.(percent));
+  const settled = useEffectEvent(() => onSettle?.());
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const host = hostRef?.current ?? scroller;
+    let frame = 0;
+    let settleTimer = 0;
+    let lastPercent = -1;
+    const measure = () => {
+      frame = 0;
+      const range = scroller.scrollHeight - scroller.clientHeight;
+      const ratio = range > 0 ? Math.min(1, Math.max(0, scroller.scrollTop / range)) : emptyProgress;
+      host.style.setProperty("--reading-progress", ratio.toFixed(4));
+      const percent = Math.round(ratio * 100);
+      if (percent !== lastPercent) {
+        lastPercent = percent;
+        percentChanged(percent);
+      }
+    };
+    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(measure); };
+    const onScroll = () => {
+      schedule();
+      window.clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(() => settled(), 160);
+    };
+
+    // 标题元素在订阅时取一次；正文重渲染换掉了节点时，调用方给的 headingIds 也会是新数组，这里随之重订阅。
+    const ids = headingIds;
+    const marks = ids.flatMap((id) => {
+      const element = scroller.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+      return element ? [{ id, element }] : [];
+    });
+    const passed = new Set<Element>();
+    const pick = () => {
+      let current = ids[0] ?? null;
+      for (const mark of marks) if (passed.has(mark.element)) current = mark.id;
+      setActive(current);
+    };
+    let observer: IntersectionObserver | null = null;
+    let observedHeight = -1;
+    const observe = () => {
+      if (!marks.length || typeof IntersectionObserver === "undefined") { pick(); return; }
+      if (scroller.clientHeight === observedHeight) return;
+      observedHeight = scroller.clientHeight;
+      observer?.disconnect();
+      passed.clear();
+      const bottom = Math.max(0, scroller.clientHeight - threshold);
+      observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) passed.add(entry.target);
+          else passed.delete(entry.target);
+        }
+        pick();
+      }, { root: scroller, rootMargin: `100000px 0px -${bottom}px 0px` });
+      for (const mark of marks) observer.observe(mark.element);
+    };
+
+    const resize = new ResizeObserver(() => { observe(); schedule(); });
+    resize.observe(scroller);
+    if (scroller.firstElementChild) resize.observe(scroller.firstElementChild);
+    observe();
+    schedule();
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      resize.disconnect();
+      observer?.disconnect();
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(settleTimer);
+      scroller.removeEventListener("scroll", onScroll);
+    };
+  }, [scrollRef, hostRef, headingIds, threshold, emptyProgress, resetKey]);
+
+  return active;
 }
 
 /** 阅读工具与文档内容分离；语言选择只由真实存在的对应版本提供。 */
@@ -96,7 +201,14 @@ export default function ReadingMode({
   const [fontSize, setFontSize] = useState(readFontSize);
   const [menu, setMenu] = useState<"toc" | "info" | null>(null);
   const [progress, setProgress] = useState(0);
-  const [activeHeading, setActiveHeading] = useState<string | null>(null);
+  // 按 id 内容而不是数组引用记忆：调用方不传 headings（默认参数每次是新数组）或每次现算时，
+  // 进度百分数一变就重渲染，若按引用比较会每次都拆掉重建 IntersectionObserver。
+  // 键里带上标题文字：章节内容换了（节点随之重建）时仍会重新订阅。
+  const headingKey = headings.map((heading) => `${heading.id}\t${heading.text}`).join("\n");
+  const headingIds = useMemo(
+    () => (headingKey ? headingKey.split("\n").map((line) => line.slice(0, line.indexOf("\t"))) : []),
+    [headingKey],
+  );
   const id = useId();
   const hasLanguages = Boolean(languageSwitch && languageSwitch.options.length > 1);
 
@@ -135,41 +247,24 @@ export default function ReadingMode({
     }
   }, [fontSize, languageSwitch?.value]);
 
+  const activeHeading = useReadingProgress(scrollRef, {
+    // 切换正文语言会换掉整段正文的节点，按语言重新订阅标题。
+    headingIds, hostRef: readerRef, emptyProgress: 1, resetKey: `${documentKey}\n${languageSwitch?.value ?? ""}`,
+    onPercent: setProgress,
+    onSettle: () => { if (scrollRef.current) positions.set(documentKey, captureReadingPosition(scrollRef.current)); },
+  });
+
+  // 工具栏会随语言切换、窄屏换行改变高度；弹出的目录与信息面板按它定位。
   useEffect(() => {
-    const scroller = scrollRef.current;
-    if (!scroller) return;
-    let frame = 0;
-    const measure = () => {
-      frame = 0;
-      const range = scroller.scrollHeight - scroller.clientHeight;
-      setProgress(range > 0 ? Math.round(Math.max(0, Math.min(1, scroller.scrollTop / range)) * 100) : 100);
-      const threshold = scroller.getBoundingClientRect().top + 120;
-      let current = headings[0]?.id ?? null;
-      for (const heading of headings) {
-        const element = scroller.querySelector<HTMLElement>(`#${CSS.escape(heading.id)}`);
-        if (element && element.getBoundingClientRect().top <= threshold) current = heading.id;
-      }
-      setActiveHeading(current);
-      positions.set(documentKey, captureReadingPosition(scroller));
-    };
-    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(measure); };
+    const toolbar = toolbarRef.current;
+    const reader = readerRef.current;
+    if (!toolbar || !reader) return;
     const observer = new ResizeObserver(() => {
-      if (toolbarRef.current && readerRef.current) {
-        readerRef.current.style.setProperty("--reader-toolbar-height", `${toolbarRef.current.offsetHeight}px`);
-      }
-      schedule();
+      reader.style.setProperty("--reader-toolbar-height", `${toolbar.offsetHeight}px`);
     });
-    if (toolbarRef.current) observer.observe(toolbarRef.current);
-    if (scroller.firstElementChild) observer.observe(scroller.firstElementChild);
-    observer.observe(scroller);
-    schedule();
-    scroller.addEventListener("scroll", schedule, { passive: true });
-    return () => {
-      observer.disconnect();
-      window.cancelAnimationFrame(frame);
-      scroller.removeEventListener("scroll", schedule);
-    };
-  }, [documentKey, headings]);
+    observer.observe(toolbar);
+    return () => observer.disconnect();
+  }, []);
 
   const close = () => {
     const position = scrollRef.current ? captureReadingPosition(scrollRef.current) : { anchor: null, offset: 0, scrollTop: 0 };
@@ -229,7 +324,7 @@ export default function ReadingMode({
           {presentation === "scene" && <button type="button" className="scene-reader-close" aria-label="关闭全文阅读" title={backLabel} onClick={close}>×</button>}
         </div>
       </header>
-      <div className="nr-progress-track" aria-hidden="true"><i style={{ width: `${progress}%` }} /></div>
+      <div className="nr-progress-track" aria-hidden="true"><i /></div>
       {menu === "toc" && <nav id={`${id}-toc`} className="nr-toc reader-menu" aria-label="全文目录">
         <header><span>本文目录</span><button aria-label="关闭目录" onClick={closeMenu}>×</button></header>
         <p>{headings.length} 个章节 · 全文连续呈现</p>

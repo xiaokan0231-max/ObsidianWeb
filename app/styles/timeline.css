@@ -80,7 +80,7 @@
   background: transparent;
   color: rgba(242, 244, 238, .5);
   font-family: var(--font-geist-mono), monospace;
-  font-size: 7px;
+  font-size: 11px;
   letter-spacing: .06em;
   white-space: nowrap;
   cursor: pointer;
@@ -120,7 +120,7 @@
 .space-graph-label-layer .time-corridor-date-label small {
   flex: 0 0 auto;
   color: rgba(238, 243, 239, .36);
-  font-size: 7px;
+  font-size: 11px;
   letter-spacing: .1em;
 }
 
@@ -141,7 +141,7 @@
   padding: 3px 6px;
   background: rgba(15, 29, 23, .78);
   color: rgba(255, 197, 168, .92);
-  font-size: 7px;
+  font-size: 11px;
   letter-spacing: .08em;
 }
 
@@ -810,7 +810,7 @@
 
 .library-facets {
   position: sticky;
-  top: 144px;
+  top: calc(var(--chrome-top, 76px) + var(--section-nav-h, 56px) + 24px);
   display: flex;
   flex-direction: column;
   gap: 23px;
@@ -907,7 +907,8 @@
 
 .library-group-list button.active strong,
 .library-scope-list button.active strong {
-  color: color-mix(in oklab, var(--on-fill) 55%, transparent);
+  /* 55% 在墨底上只有 3.8:1，计数是 12px 的小字，抬到 72% 才过 4.5。 */
+  color: color-mix(in oklab, var(--on-fill) 72%, transparent);
 }
 
 .library-query-help {
@@ -1002,9 +1003,10 @@
   cursor: pointer;
 }
 
+/* 宽屏自动加列：固定 2 列时 1440px 以上每张卡又宽又空，一屏只看得到 6–8 篇。 */
 .note-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 11px;
 }
 
@@ -1020,7 +1022,10 @@
   padding: 19px 19px 16px;
   text-align: left;
   cursor: pointer;
-  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
 
 .note-card::before {
@@ -1035,9 +1040,11 @@
 }
 
 .note-card:hover {
-  border-color: var(--text-faint);
-  box-shadow: 0 13px 28px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-  transform: translateY(-2px);
+  border-color: color-mix(in oklab, var(--note-accent, var(--brand)) 45%, var(--line-strong));
+  box-shadow:
+    0 16px 34px color-mix(in oklab, var(--shadow-color) 12%, transparent),
+    0 0 0 1px color-mix(in oklab, var(--note-accent, var(--brand)) 18%, transparent);
+  transform: translateY(-3px);
 }
 
 .note-card-top {
@@ -1338,14 +1345,8 @@
 
 /* 航道里的正文保持固定字号，不随透视缩小；舞台只负责提供时间的空间感。 */
 .timeline-view.stage-immersive .stage-toolbar { margin-bottom: 12px; }
-.space-graph-stage[data-view="corridor"] .space-graph-brand span { font-size: 11px; color: #a5b9ad; }
-.space-graph-stage[data-view="corridor"] .space-graph-brand strong { font-size: 20px; color: #eff4ee; }
+/* 品牌、搜索框、控制条、说明文字的字号已提升为 stage-3d.css 的共用基线；这里只留航道独有的布局。 */
 .space-graph-stage[data-view="corridor"] .space-graph-search { width: 308px; top: 84px; }
-.space-graph-stage[data-view="corridor"] .space-graph-search-field { height: 42px; border-radius: 7px; }
-.space-graph-stage[data-view="corridor"] .space-graph-search-field input { font-size: 14px; }
-.space-graph-stage[data-view="corridor"] .space-graph-controls { flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 370px); }
-.space-graph-stage[data-view="corridor"] .space-graph-controls button { min-height: 36px; height: auto; padding: 7px 10px; border-radius: 5px; font-size: 12px; color: #d4e1d8; }
-.space-graph-stage[data-view="corridor"] .space-graph-controls kbd { font-size: 10px; }
 .time-corridor-day-panel { position: absolute; z-index: 5; top: 146px; left: 22px; bottom: 114px; width: 308px; display: flex; flex-direction: column; padding: 20px; border: 1px solid #afccb533; border-radius: 10px; color: #eef4ef; background: rgba(17, 32, 25, .93); box-shadow: 0 20px 60px #0003; backdrop-filter: blur(18px); }
 .time-corridor-day-panel header { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: #adbfaf; font-size: 12px; }
 .time-corridor-day-panel header button { padding: 0; border: 0; background: transparent; color: #b6dfc9; font-size: 12px; cursor: pointer; }
@@ -1365,14 +1366,13 @@
 .time-corridor-day-entries [data-kind="event"] { border-left: 2px solid #d6946c; }
 .time-corridor-day-entries [data-kind="event"] small { color: #ecc7a6; }
 .space-graph-stage[data-view="corridor"] .space-graph-label-layer .time-corridor-date-label { padding: 4px 6px; border-radius: 4px; background: #0c1913b8; font-size: 12px; }
-.space-graph-stage[data-view="corridor"] .space-graph-label-layer .time-corridor-date-label small { font-size: 10px; color: #c0d0c5; }
+.space-graph-stage[data-view="corridor"] .space-graph-label-layer .time-corridor-date-label small { font-size: 11px; color: #c0d0c5; }
 .space-graph-stage[data-view="corridor"] .space-graph-label-layer .time-corridor-event-flag { max-width: 210px; padding: 5px 8px; border-radius: 4px; font-size: 11px; letter-spacing: 0; background: #15271ff2; }
 .space-graph-stage[data-view="corridor"] .space-graph-label-layer .time-corridor-date-label[data-visible="true"],
 .space-graph-stage[data-view="corridor"] .space-graph-label-layer .time-corridor-event-flag[data-visible="true"] { opacity: var(--label-depth-fade, 1); }
 .space-graph-stage[data-view="corridor"] .time-corridor-scrubber { bottom: 34px; max-width: calc(100% - 390px); left: calc(50% + 155px); border-radius: 8px; background: #12271de8; }
 .space-graph-stage[data-view="corridor"] .time-corridor-scrubber button { min-width: 68px; font-size: 11px; color: #c0d1c5; }
 .space-graph-stage[data-view="corridor"] .time-corridor-scrubber button[data-active="true"] { color: #ffb08d; }
-.space-graph-stage[data-view="corridor"] .space-graph-caption { font-size: 11px; }
 @media (max-width: 1100px) {
   .space-graph-stage[data-view="corridor"] .space-graph-controls { top: 132px; left: 22px; right: 22px; max-width: none; justify-content: flex-start; }
   .time-corridor-day-panel { top: 186px; padding: 16px; }

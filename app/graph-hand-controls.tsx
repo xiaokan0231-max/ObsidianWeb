@@ -21,6 +21,7 @@ import {
   type TwoHandMetrics,
   derivePinchThresholds,
   fistDragEngagement,
+  handUiFrameKey,
   gestureScoreThreshold,
   handPoseFromLandmarks,
   isPinchPose,
@@ -464,6 +465,62 @@ function seededEnvelope(seed: EnvelopeSeed | null, ratio: number, now: number): 
   return updatePinchEnvelope(primed, ratio, now);
 }
 
+// 光标、双手连线、菜单盘这些位置量每个识别帧都在变。JSX 渲染和识别循环里的
+// 命令式写入共用同一套格式化，避免两边算出来的位置差一个取整。
+function handCursorX(hand: { x: number }) {
+  return `${Math.min(96, Math.max(4, hand.x * 100))}%`;
+}
+
+function handCursorY(hand: { y: number }) {
+  return `${Math.min(92, Math.max(8, hand.y * 100))}%`;
+}
+
+function handPinchProgress(hand: { pinchProgress: number }) {
+  return `${Math.round(hand.pinchProgress * 360)}deg`;
+}
+
+function menuCenterX(centerX: number) {
+  return `${Math.min(90, Math.max(10, centerX * 100))}%`;
+}
+
+function menuCenterY(centerY: number) {
+  return `${Math.min(86, Math.max(14, centerY * 100))}%`;
+}
+
+function dualLinkVars(
+  primary: { x: number; y: number },
+  secondary: { x: number; y: number },
+): Record<string, string> {
+  return {
+    "--dual-x1": `${primary.x * 100}%`,
+    "--dual-y1": `${primary.y * 100}%`,
+    "--dual-x2": `${secondary.x * 100}%`,
+    "--dual-y2": `${secondary.y * 100}%`,
+    "--dual-distance": `${Math.hypot(secondary.x - primary.x, secondary.y - primary.y) * 100}vw`,
+    "--dual-angle": `${Math.atan2(secondary.y - primary.y, secondary.x - primary.x)}rad`,
+  };
+}
+
+function dualLinkLabel(transform: GraphHandTransform | null) {
+  return transform
+    ? `${Math.round(transform.scaleRatio * 100)}% · ${Math.round(transform.rotationDelta * 180 / Math.PI)}°`
+    : "双手已连接";
+}
+
+// 读数里的「暂用」值必须是真正生效的回退（存档校准），不能写死默认值。
+function pinchTriggerLabel(primary: GraphTrackedHandFrame) {
+  return primary.pinchConfident
+    ? `触发 ${primary.pinchCloseAt.toFixed(2)}`
+    : `学习中 · 暂用 ${primary.pinchCloseAt.toFixed(2)}`;
+}
+
+// 只改 React 自己建的那个文本节点的值：换成 textContent 会把节点整个替掉，
+// React 之后的更新就写到一个已经脱离文档的旧节点上，界面永远停在这一帧。
+function writeText(element: HTMLElement | null, text: string) {
+  const node = element?.firstChild;
+  if (node && node.nodeType === Node.TEXT_NODE && node.nodeValue !== text) node.nodeValue = text;
+}
+
 export function GraphHandControls({
   active,
   onFrame,
@@ -499,6 +556,17 @@ export function GraphHandControls({
   const envelopeResetRequestedRef = useRef(false);
   const onboardingRef = useRef({ visible: false, step: 0 });
   const calibrationSamplesRef = useRef({ open: [] as number[], closed: [] as number[] });
+  // 识别帧之间的连续量直接写进这些元素，React 只在离散状态变化时重渲染。
+  const cursorElementsRef = useRef(new Map<string, HTMLDivElement>());
+  const dualLinkRef = useRef<HTMLDivElement>(null);
+  const dualLabelRef = useRef<HTMLSpanElement>(null);
+  const radialRef = useRef<HTMLDivElement>(null);
+  const pinchRatioRef = useRef<HTMLSpanElement>(null);
+  const pinchTriggerRef = useRef<HTMLSpanElement>(null);
+  const diagRatioRef = useRef<HTMLSpanElement>(null);
+  const diagCloseRef = useRef<HTMLSpanElement>(null);
+  const diagTravelRef = useRef<HTMLSpanElement>(null);
+  const diagMoveRef = useRef<HTMLSpanElement>(null);
   const [enabled, setEnabled] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [detail, setDetail] = useState("");
@@ -625,6 +693,11 @@ export function GraphHandControls({
     };
     let menu: RadialMenuState = radialMenuRef.current;
     let singleMenuEmitted = false;
+    // 上一次交给 React 的 UI 键／菜单键／阶段。识别循环约 24Hz，之前每帧
+    // setUiFrame(新对象) + setPhase，整套手势界面（控制台、诊断、引导）跟着 24Hz 重渲染。
+    let publishedUiKey = "";
+    let publishedMenuKey = "";
+    let publishedFramePhase: Phase | null = null;
     let feedbackTimer = 0;
     let onboardingEvidence = 0;
     let onboardingGrabOrigin: { x: number; y: number } | null = null;
@@ -642,10 +715,48 @@ export function GraphHandControls({
 
     const closeMenu = () => {
       menu = { ...menu, open: false, selected: null, ownerHandId: null, cursorHandId: null };
+      publishedMenuKey = "closed";
       setRadialMenu(menu);
     };
 
-    const publishMenu = () => setRadialMenu({ ...menu });
+    // 菜单只有开合与选中项变化时才进 React；掌心盘跟着辅助手移动的中心位置直接写 DOM。
+    const publishMenu = () => {
+      const key = `${menu.open}:${menu.kind}:${menu.selected ?? ""}:${menu.openedAt}`;
+      if (key === publishedMenuKey) {
+        radialRef.current?.style.setProperty("--menu-x", menuCenterX(menu.centerX));
+        radialRef.current?.style.setProperty("--menu-y", menuCenterY(menu.centerY));
+        return;
+      }
+      publishedMenuKey = key;
+      setRadialMenu({ ...menu });
+    };
+
+    const writeLiveFrame = (frame: GraphHandNavigationFrame) => {
+      frame.hands.forEach((hand) => {
+        const element = cursorElementsRef.current.get(hand.id);
+        if (!element) return;
+        element.style.setProperty("--hand-x", handCursorX(hand));
+        element.style.setProperty("--hand-y", handCursorY(hand));
+        element.style.setProperty("--pinch-progress", handPinchProgress(hand));
+      });
+      const primary = frame.hands.find((hand) => hand.id === frame.primaryHandId) ?? null;
+      const secondary = frame.hands.find((hand) => hand.role === "secondary") ?? null;
+      if (dualLinkRef.current && primary && secondary) {
+        const vars = dualLinkVars(primary, secondary);
+        Object.entries(vars).forEach(([name, value]) => dualLinkRef.current?.style.setProperty(name, value));
+        writeText(dualLabelRef.current, dualLinkLabel(frame.transform));
+      }
+      if (primary) {
+        writeText(pinchRatioRef.current, primary.rawPinchRatio.toFixed(2));
+        writeText(pinchTriggerRef.current, pinchTriggerLabel(primary));
+      }
+      if (frame.diagnostics) {
+        writeText(diagRatioRef.current, frame.diagnostics.pinchRatio.toFixed(2));
+        writeText(diagCloseRef.current, frame.diagnostics.closeThreshold.toFixed(2));
+        writeText(diagTravelRef.current, frame.diagnostics.travel.toFixed(3));
+        writeText(diagMoveRef.current, frame.diagnostics.moveThreshold.toFixed(3));
+      }
+    };
 
     const advanceOnboarding = (step: number) => {
       if (!onboardingRef.current.visible || onboardingRef.current.step !== step) return;
@@ -1293,7 +1404,12 @@ export function GraphHandControls({
           }
 
           onFrameRef.current(frame);
-          setUiFrame(frame);
+          const uiKey = handUiFrameKey(frame, MIN_DUAL_SEPARATION);
+          if (uiKey !== publishedUiKey) {
+            publishedUiKey = uiKey;
+            setUiFrame(frame);
+          }
+          writeLiveFrame(frame);
           if (publishedAction) {
             setActionFeedback(publishedAction.type);
             window.clearTimeout(feedbackTimer);
@@ -1301,7 +1417,11 @@ export function GraphHandControls({
           }
           const canvas = canvasRef.current;
           if (canvas) drawHands(canvas, video, usableHands, primaryHandId);
-          setPhase(usableHands.length > 0 ? "tracking" : "ready");
+          const framePhase: Phase = usableHands.length > 0 ? "tracking" : "ready";
+          if (framePhase !== publishedFramePhase) {
+            publishedFramePhase = framePhase;
+            setPhase(framePhase);
+          }
         };
         animationFrame = window.requestAnimationFrame(detect);
       } catch (error) {
@@ -1374,6 +1494,10 @@ export function GraphHandControls({
         return (
           <div
             key={hand.id}
+            ref={(element) => {
+              if (element) cursorElementsRef.current.set(hand.id, element);
+              else cursorElementsRef.current.delete(hand.id);
+            }}
             className="graph-hand-cursor"
             data-role={hand.role}
             data-grabbed={hand.grabbed ? "true" : "false"}
@@ -1381,9 +1505,9 @@ export function GraphHandControls({
             data-target={target?.kind ?? "space"}
             data-interaction={uiFrame.mode}
             style={{
-              "--hand-x": `${Math.min(96, Math.max(4, hand.x * 100))}%`,
-              "--hand-y": `${Math.min(92, Math.max(8, hand.y * 100))}%`,
-              "--pinch-progress": `${Math.round(hand.pinchProgress * 360)}deg`,
+              "--hand-x": handCursorX(hand),
+              "--hand-y": handCursorY(hand),
+              "--pinch-progress": handPinchProgress(hand),
               "--target-color": target?.color ?? (hand.role === "primary" ? "#83f2c5" : "#76d9ff"),
             } as CSSProperties}
             aria-hidden="true"
@@ -1395,32 +1519,23 @@ export function GraphHandControls({
 
       {uiFrame?.mode === "dual-transform" && primary && secondary && (
         <div
+          ref={dualLinkRef}
           className="graph-hand-dual-link"
-          style={{
-            "--dual-x1": `${primary.x * 100}%`,
-            "--dual-y1": `${primary.y * 100}%`,
-            "--dual-x2": `${secondary.x * 100}%`,
-            "--dual-y2": `${secondary.y * 100}%`,
-            "--dual-distance": `${Math.hypot(secondary.x - primary.x, secondary.y - primary.y) * 100}vw`,
-            "--dual-angle": `${Math.atan2(secondary.y - primary.y, secondary.x - primary.x)}rad`,
-          } as CSSProperties}
+          style={dualLinkVars(primary, secondary) as CSSProperties}
           aria-hidden="true"
         >
-          <span>
-            {uiFrame.transform
-              ? `${Math.round(uiFrame.transform.scaleRatio * 100)}% · ${Math.round(uiFrame.transform.rotationDelta * 180 / Math.PI)}°`
-              : "双手已连接"}
-          </span>
+          <span ref={dualLabelRef}>{dualLinkLabel(uiFrame.transform)}</span>
         </div>
       )}
 
       {radialMenu.open && (
         <div
+          ref={radialRef}
           className="graph-hand-radial"
           data-kind={radialMenu.kind}
           style={{
-            "--menu-x": `${Math.min(90, Math.max(10, radialMenu.centerX * 100))}%`,
-            "--menu-y": `${Math.min(86, Math.max(14, radialMenu.centerY * 100))}%`,
+            "--menu-x": menuCenterX(radialMenu.centerX),
+            "--menu-y": menuCenterY(radialMenu.centerY),
           } as CSSProperties}
           aria-label="空间手势菜单"
         >
@@ -1482,11 +1597,9 @@ export function GraphHandControls({
               否则只能靠猜。左边是当前开合度，右边是这只手的触发线。 */}
           {primary && (
             <em className="graph-hand-pinch-readout" data-pinching={primary.pinching}>
-              捏合 {primary.rawPinchRatio.toFixed(2)}
+              捏合 <span ref={pinchRatioRef}>{primary.rawPinchRatio.toFixed(2)}</span>
               <i />
-              {primary.pinchConfident
-                ? `触发 ${primary.pinchCloseAt.toFixed(2)}`
-                : `学习中 · 暂用 ${primary.pinchCloseAt.toFixed(2)}`}
+              <span ref={pinchTriggerRef}>{pinchTriggerLabel(primary)}</span>
             </em>
           )}
         </div>
@@ -1508,8 +1621,8 @@ export function GraphHandControls({
               <div data-ok={uiFrame.diagnostics.pinchRatio <= uiFrame.diagnostics.closeThreshold ? "true" : "false"}>
                 <dt>捏合度</dt>
                 <dd>
-                  {uiFrame.diagnostics.pinchRatio.toFixed(2)}
-                  <i>需 ≤ {uiFrame.diagnostics.closeThreshold.toFixed(2)}</i>
+                  <span ref={diagRatioRef}>{uiFrame.diagnostics.pinchRatio.toFixed(2)}</span>
+                  <i>需 ≤ <span ref={diagCloseRef}>{uiFrame.diagnostics.closeThreshold.toFixed(2)}</span></i>
                 </dd>
               </div>
               <div data-ok={uiFrame.diagnostics.pinchPose ? "true" : "false"}>
@@ -1530,8 +1643,8 @@ export function GraphHandControls({
               <div>
                 <dt>位移</dt>
                 <dd>
-                  {uiFrame.diagnostics.travel.toFixed(3)}
-                  <i>≥ {uiFrame.diagnostics.moveThreshold} 转拖动</i>
+                  <span ref={diagTravelRef}>{uiFrame.diagnostics.travel.toFixed(3)}</span>
+                  <i>≥ <span ref={diagMoveRef}>{uiFrame.diagnostics.moveThreshold.toFixed(3)}</span> 转拖动</i>
                 </dd>
               </div>
               <div data-ok={uiFrame.diagnostics.lastEvent === "select" ? "true" : "false"}>

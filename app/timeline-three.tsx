@@ -17,14 +17,17 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { compareTimelineTimes, nearestTimelineDate } from "@/lib/timeline-browser";
 import type { TimelineScene, TimelineSceneNote } from "@/lib/timeline-scene";
+import { approachValues, createRenderGate, speedFeel } from "@/lib/stage-motion.mjs";
 import {
   NODE_FRAGMENT_SHADER,
   NODE_VERTEX_SHADER,
+  SEARCH_SHELL_LIMIT,
   createCometTexture,
   createFlightController,
   createFocusArtifact,
   createLabelLayer,
   createNebulaTexture,
+  createSearchShellMaterial,
   createStageBloom,
   createStageInteractionUniforms,
   createStagePointerEffects,
@@ -70,6 +73,10 @@ const SNAP_RATE = 4;
 const DATE_LABEL_POOL = 10;
 const MONTH_LABEL_POOL = 4;
 const EVENT_FLAG_POOL = 4;
+// 首次进场从更深的过去驶回当下：起点比「今天」再往里多少个单位。
+const ENTRY_DEPTH_LEAD = 18;
+// 滚轮速度到「满速感」的阈值（单位/秒）；速度感只是轻微拉伸，不是第二套飞行。
+const SPEED_FEEL_FULL = 40;
 
 export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -94,6 +101,8 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
   const dossierModeRef = useRef<"dock" | "focus">("dock");
   const viewModeRef = useRef<ViewMode>("overview");
   const applyViewModeRef = useRef<(mode: ViewMode) => void>(() => undefined);
+  // 开场运镜只在本次会话第一次装载航道时播放；场景数据刷新导致的重建不重播。
+  const entryPlayedRef = useRef(false);
   const onFallbackRef = useRef(onFallback);
   const [viewMode, setViewMode] = useState<ViewMode>("overview");
   const [activeDayIndex, setActiveDayIndex] = useState(0);
@@ -343,12 +352,15 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     const positions = new Float32Array(notes.length * 3);
     const colors = new Float32Array(notes.length * 3);
     const sizes = new Float32Array(notes.length);
+    const baseSizes = new Float32Array(notes.length);
     const phases = new Float32Array(notes.length);
     // 検索命中球の回転基値。決定的な値なのに、以前は帧内で命中ごとに
     // seeded(テンプレート文字列)×3 を回していた——命中数に上限が無いので、
     // 「面接」のような常用語では毎フレーム数百〜千回の文字列分配になる。
     const searchSpins = new Float32Array(notes.length * 3);
+    // 与星图同一套：nodeFocus 是目标明暗，nodeFocusCurrent 才上传 GPU，animate 里渐变过去。
     const nodeFocus = new Float32Array(notes.length);
+    const nodeFocusCurrent = new Float32Array(notes.length);
     const nodeSearch = new Float32Array(notes.length);
     const positionById = new Map<string, THREE.Vector3>();
     const indexById = new Map<string, number>();
@@ -370,7 +382,8 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       const color = new THREE.Color(note.color);
       positions.set(position.toArray(), index * 3);
       colors.set(color.toArray(), index * 3);
-      sizes[index] = 0.85 + seeded(`${note.id}:size`) * 0.25;
+      baseSizes[index] = 0.85 + seeded(`${note.id}:size`) * 0.25;
+      sizes[index] = baseSizes[index];
       phases[index] = seeded(`${note.id}:phase`) * Math.PI * 2;
       searchSpins[index * 3] = seeded(`${note.id}:search-x`) * Math.PI;
       searchSpins[index * 3 + 1] = seeded(`${note.id}:search-y`) * Math.PI;
@@ -384,7 +397,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     nodeGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     nodeGeometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
     nodeGeometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
-    nodeGeometry.setAttribute("aFocus", new THREE.BufferAttribute(nodeFocus, 1));
+    nodeGeometry.setAttribute("aFocus", new THREE.BufferAttribute(nodeFocusCurrent, 1));
     nodeGeometry.setAttribute("aSearch", new THREE.BufferAttribute(nodeSearch, 1));
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -406,20 +419,14 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     nodePoints.renderOrder = 4;
     root.add(nodePoints);
     const pointerEffects = createStagePointerEffects(host, canvas);
-    const bloom = createStageBloom(renderer);
+    const bloom = createStageBloom(renderer, { samples: scene.notes.length < 1500 ? 4 : 0 });
+    // 按需渲染的闸门：只在暂停或减弱动态、且一切都静止时才跳过 bloom 与标签投影。
+    const renderGate = createRenderGate();
 
-    // 搜索命中的实体能量球：与星图同一模式。
-    const searchSphereGeometry = new THREE.SphereGeometry(1, 32, 20);
-    // 同样不用 transmission：搜索一激活整个场景就要多渲染一遍。
-    const searchSphereMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.12,
-      metalness: 0.14,
-      transparent: true,
-      opacity: 0.76,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
+    // 搜索命中的标记与星图共用同一枚只亮边缘的薄壳（three-stage 的 SEARCH_SHELL）。
+    // 之前是实心发光球，搜常用词时沿航道叠成一串白团，再过一遍 bloom 更糊。
+    const searchSphereGeometry = new THREE.SphereGeometry(1, 28, 18);
+    const searchSphereMaterial = createSearchShellMaterial();
     const searchSpheres = new THREE.InstancedMesh(
       searchSphereGeometry,
       searchSphereMaterial,
@@ -428,8 +435,11 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     searchSpheres.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     searchSpheres.renderOrder = 3;
     const searchMatrix = new THREE.Object3D();
-    const searchFlags = new Float32Array(notes.length);
     let searchSphereScale = 0.24;
+    // 命中的下标列表：帧内只遍历命中，不再每帧扫全部笔记。
+    let searchHitIndices: number[] = [];
+    let searchTarget = 0;
+    let searchCurrent = 0;
     notes.forEach((note, index) => {
       const position = positionById.get(note.id)!;
       searchMatrix.position.copy(position);
@@ -448,19 +458,19 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     let searchActive = false;
     const applySearchMatches = (ids: string[], active: boolean) => {
       const matches = new Set(ids);
+      // 命中超过阈值就不画壳，只把命中的星放大——与星图同一条规则。
+      const showSearchShells = active && matches.size > 0 && matches.size <= SEARCH_SHELL_LIMIT;
       searchActive = active;
-      searchSphereScale = matches.size <= 8
-        ? 0.31
-        : matches.size <= 30
-          ? 0.25
-          : matches.size <= 80
-            ? 0.2
-            : 0.16;
-      nodeMaterial.uniforms.uSearchActive.value = active ? 1 : 0;
+      searchTarget = active ? 1 : 0;
+      searchSphereScale = matches.size <= 4 ? 0.3 : matches.size <= 7 ? 0.25 : 0.21;
+      searchHitIndices = [];
       notes.forEach((note, index) => {
         const matched = matches.has(note.id);
-        searchFlags[index] = active && matched ? 1 : 0;
         nodeSearch[index] = matched ? 1 : 0;
+        if (active && matched) searchHitIndices.push(index);
+        sizes[index] = baseSizes[index] * (active && matched
+          ? showSearchShells ? 1.22 : 1.5
+          : 1);
         searchMatrix.position.copy(positionById.get(note.id)!);
         searchMatrix.rotation.set(
           searchSpins[index * 3],
@@ -468,14 +478,16 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
           searchSpins[index * 3 + 2],
         );
         searchMatrix.scale.setScalar(
-          active && matched ? searchSphereScale : 0.0001,
+          showSearchShells && matched ? searchSphereScale : 0.0001,
         );
         searchMatrix.updateMatrix();
         searchSpheres.setMatrixAt(index, searchMatrix.matrix);
       });
-      searchSpheres.visible = active && matches.size > 0;
+      searchSpheres.visible = showSearchShells;
       searchSpheres.instanceMatrix.needsUpdate = true;
+      (nodeGeometry.getAttribute("aSize") as THREE.BufferAttribute).needsUpdate = true;
       (nodeGeometry.getAttribute("aSearch") as THREE.BufferAttribute).needsUpdate = true;
+      renderGate.invalidate();
     };
     updateSearchRef.current = applySearchMatches;
     applySearchMatches(
@@ -780,6 +792,29 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       },
     });
 
+    // 首次进场：镜头从更深的过去、略高的机位驶回「今天」，让第一秒就读出
+    // 「这是一条可以穿行的时间」。只播一次（场景重建不重播），减弱动态时跳过。
+    let entryFlight = false;
+    if (!entryPlayedRef.current) {
+      entryPlayedRef.current = true;
+      if (!reducedMotion) {
+        entryFlight = true;
+        const entryDepth = Math.min(deepestZ, homeDepth + ENTRY_DEPTH_LEAD);
+        const entryAnchor = flightAnchor(entryDepth);
+        camera.position.copy(entryAnchor).add(vantageFor(viewModeRef.current).multiplyScalar(1.3));
+        controls.target.copy(entryAnchor);
+        controls.update();
+        travel = entryDepth;
+        flightTargetTravel = homeDepth;
+        const homeAnchor = flightAnchor(homeDepth);
+        flightController.start(
+          homeAnchor.clone().add(vantageFor(viewModeRef.current)),
+          homeAnchor,
+          1400,
+        );
+      }
+    }
+
     // 切视角 = 一次到「当前深度对应机位」的飞行 + 雾密度渐变 + 姿态钳位换挡。
     const applyViewMode = (mode: ViewMode) => {
       viewModeRef.current = mode;
@@ -828,6 +863,9 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       return index;
     };
 
+    // 明暗目标写完后置位，animate 逐帧趋近；锁定物换了目标才重播出场。
+    let focusEasing = false;
+    let artifactTargetId: string | null = null;
     const focusAttributes = (id: string | null) => {
       const note = id ? noteById.get(id) : null;
       const sameDay = note
@@ -837,7 +875,8 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
         // 与星图不同：这里选中星最亮（0.42），同日的星次之（0.3）。
         nodeFocus[index] = item.id === id ? 0.42 : sameDay.has(item.id) ? 0.3 : 0;
       });
-      (nodeGeometry.getAttribute("aFocus") as THREE.BufferAttribute).needsUpdate = true;
+      focusEasing = true;
+      renderGate.invalidate();
 
       const lockedId = selectedRef.current;
       const focusPosition = lockedId ? positionById.get(lockedId) : undefined;
@@ -845,7 +884,9 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       if (focusPosition && lockedId) {
         focusArtifact.setPosition(focusPosition);
         focusArtifact.setAccent(noteById.get(lockedId)?.color ?? "#ffffff");
+        if (artifactTargetId !== lockedId) focusArtifact.reveal();
       }
+      artifactTargetId = focusPosition ? lockedId : null;
     };
 
     const selectNote = (id: string) => {
@@ -924,11 +965,10 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       goToStation(month.firstDayIndex);
     };
 
-    const hitTest = (event: PointerEvent | MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
+    const hitTestAt = (clientX: number, clientY: number, rect: DOMRect) => {
       pointer.set(
-        ((event.clientX - rect.left) / rect.width) * 2 - 1,
-        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+        ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1,
+        -((clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1,
       );
       raycaster.setFromCamera(pointer, camera);
       const noteHit = raycaster.intersectObject(nodePoints, false)[0];
@@ -943,13 +983,32 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       }
       return null;
     };
+    // 点击按当场的矩形算；悬停走指针层缓存的矩形，并合并到每帧最多一次射线检测。
+    const hitTest = (event: PointerEvent | MouseEvent) =>
+      hitTestAt(event.clientX, event.clientY, canvas.getBoundingClientRect());
+    let hoverPending = false;
+    let hoverClientX = 0;
+    let hoverClientY = 0;
 
     const onPointerDown = (event: PointerEvent) => {
       pointerStart = [event.clientX, event.clientY];
       pointerHeld = true;
+      renderGate.invalidate();
     };
     const onPointerMove = (event: PointerEvent) => {
-      const hit = hitTest(event);
+      hoverPending = true;
+      hoverClientX = event.clientX;
+      hoverClientY = event.clientY;
+      renderGate.invalidate();
+    };
+    const resolveHover = () => {
+      hoverPending = false;
+      const cachedRect = pointerEffects.rect;
+      const hit = hitTestAt(
+        hoverClientX,
+        hoverClientY,
+        cachedRect.width > 0 && cachedRect.height > 0 ? cachedRect : canvas.getBoundingClientRect(),
+      );
       pointerEffects.setAccent(
         hit?.kind === "note"
           ? noteById.get(hit.id)?.color ?? "#dff7ec"
@@ -965,6 +1024,8 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       focusAttributes(selectedRef.current ?? nextHover);
     };
     const onPointerLeave = () => {
+      hoverPending = false;
+      renderGate.invalidate();
       hoveredRef.current = null;
       setHoveredId(null);
       pointerHeld = false;
@@ -973,6 +1034,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     };
     const onPointerUp = (event: PointerEvent) => {
       pointerHeld = false;
+      renderGate.invalidate();
       if (!pointerStart) return;
       const moved = Math.hypot(
         event.clientX - pointerStart[0],
@@ -1002,10 +1064,18 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
+      renderGate.invalidate();
       if (selectedRef.current) clearSelection(false);
       const px = event.deltaY * (
         event.deltaMode === 1 ? 24 : event.deltaMode === 2 ? host.clientHeight : 1
       );
+      if (entryFlight && flightController.active) {
+        // 开场运镜途中只攒速度、不打断：取消会让相机停在插值半路，而 travel 已独立缓动到别处，
+        // 日期面板、标签窗口与画面长期错位。落地后 animate 接着消费这段速度。
+        travelVelocity = Math.min(72, Math.max(-72, travelVelocity + px * WHEEL_VELOCITY));
+        return;
+      }
+      entryFlight = false;
       flightController.cancel();
       flightTargetTravel = null;
       if (reducedMotion) {
@@ -1016,6 +1086,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       travelVelocity = Math.min(72, Math.max(-72, travelVelocity + px * WHEEL_VELOCITY));
     };
     const onKeyDown = (event: KeyboardEvent) => {
+      renderGate.invalidate();
       if (event.key === "Escape") {
         if (dossierModeRef.current === "focus") {
           event.preventDefault();
@@ -1081,6 +1152,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       const width = Math.max(1, entry.contentRect.width);
       const height = Math.max(1, entry.contentRect.height);
       pointerEffects.resize();
+      renderGate.invalidate();
       renderer.setSize(width, height, false);
       bloom?.setSize(width, height);
       camera.aspect = width / height;
@@ -1091,6 +1163,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     const visibilityObserver = new IntersectionObserver(
       ([entry]) => {
         visible = entry?.isIntersecting ?? true;
+        if (visible) renderGate.invalidate();
       },
       { threshold: 0.01 },
     );
@@ -1241,6 +1314,11 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
 
     let lastFrameAt = performance.now();
     let tiltWeight = 1;
+    // 滚轮穿行的速度感（0..1，渐变）。只在没有飞行时写 FOV／星场／时间流：
+    // createFlightController 飞行中逐帧写 fov、结束时写回基准，两边同时写会互相覆盖。
+    let speedFeelCurrent = 0;
+    let speedFeelApplied = false;
+    const BASE_FOV = 43;
     const animate = (now: number) => {
       if (!visible) {
         lastFrameAt = now;
@@ -1249,39 +1327,59 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       const dt = Math.min(0.1, (now - lastFrameAt) / 1000);
       lastFrameAt = now;
       const seconds = now / 1000;
-      pointerEffects.tick(now, !pauseRef.current && !reducedMotion);
+      const moving = !pauseRef.current && !reducedMotion;
+      pointerEffects.tick(now, moving);
+      if (hoverPending) resolveHover();
       nodeMaterial.uniforms.uTime.value = seconds;
-      nodeMaterial.uniforms.uMotion.value = pauseRef.current || reducedMotion ? 0 : 1;
+      nodeMaterial.uniforms.uMotion.value = moving ? 1 : 0;
       writeStageInteractionUniforms(nodeMaterial.uniforms, pointerEffects);
       // 站牌节点的雾轻一点：它们是要读的日期锚点；伴生尘埃全吃雾，远处沉下去。
       writeStageFogUniforms(nodeMaterial.uniforms, stageFog, 0.7);
       riverMaterial.uniforms.uTime.value = seconds;
-      riverMaterial.uniforms.uMotion.value = pauseRef.current || reducedMotion ? 0 : 1;
+      riverMaterial.uniforms.uMotion.value = moving ? 1 : 0;
       writeStageInteractionUniforms(riverMaterial.uniforms, pointerEffects);
       writeStageFogUniforms(riverMaterial.uniforms, stageFog, 1.4);
 
-      if (searchActive && searchSpheres.visible) {
-        notes.forEach((note, index) => {
-          if (searchFlags[index] !== 1) return;
-          const pulse = pauseRef.current || reducedMotion
-            ? 1
-            : 1 + Math.sin(seconds * 1.5 + phases[index]) * 0.055;
-          searchMatrix.position.copy(positionById.get(note.id)!);
+      // 明暗与搜索的渐变，写法同星图；减弱动态时一步到位。
+      const easeRate = reducedMotion ? 1 : 1 - Math.exp(-Math.max(0.001, dt) * 7);
+      let easing = false;
+      if (focusEasing) {
+        const state = approachValues(nodeFocusCurrent, nodeFocus, easeRate);
+        if (state > 0) (nodeGeometry.getAttribute("aFocus") as THREE.BufferAttribute).needsUpdate = true;
+        focusEasing = state === 2;
+        easing = focusEasing;
+      }
+      if (searchCurrent !== searchTarget) {
+        searchCurrent += (searchTarget - searchCurrent) * easeRate;
+        if (Math.abs(searchTarget - searchCurrent) < 0.002) searchCurrent = searchTarget;
+        nodeMaterial.uniforms.uSearchActive.value = searchCurrent;
+        easing = true;
+      }
+
+      if (searchActive && searchSpheres.visible && searchHitIndices.length > 0) {
+        for (const index of searchHitIndices) {
+          const pulse = moving
+            ? 1 + Math.sin(seconds * 1.5 + phases[index]) * 0.055
+            : 1;
+          searchMatrix.position.copy(positionById.get(notes[index].id)!);
           searchMatrix.rotation.set(
-            searchSpins[index * 3] + seconds * 0.04,
-            searchSpins[index * 3 + 1] + seconds * 0.065,
+            searchSpins[index * 3] + (moving ? seconds * 0.04 : 0),
+            searchSpins[index * 3 + 1] + (moving ? seconds * 0.065 : 0),
             searchSpins[index * 3 + 2],
           );
           searchMatrix.scale.setScalar(searchSphereScale * pulse);
           searchMatrix.updateMatrix();
           searchSpheres.setMatrixAt(index, searchMatrix.matrix);
-        });
+        }
         searchSpheres.instanceMatrix.needsUpdate = true;
       }
 
+      const flying = flightController.active;
       flightController.tick(now);
+      const fogSettling = Math.abs(fogTargetDensity - stageFog.density) > 0.00001;
       stageFog.density += (fogTargetDensity - stageFog.density) * Math.min(1, dt * 3);
 
+      const travelBefore = travel;
       if (flightController.active) {
         // 飞行途中 travel 独立向目的地缓动（注视点带 lead 偏移，不能反推），
         // scrubber 与标签窗口照样平滑随行，落点由 onComplete 精确校准。
@@ -1305,14 +1403,35 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
           }
         }
       }
+      const travelling = travel !== travelBefore || travelVelocity !== 0;
+
+      // 滚轮就是时间机器：速度越快，FOV 越张、星场越拉长、管内时间流越亮。
+      // 幅度只有飞行冲刺的一小半，读成「在加速」，不读成「在跳转」。
+      if (flightController.active) {
+        // 飞行接管 fov 与星场；时间流不归它管，这里顺手复位。
+        if (speedFeelApplied) flowMaterial.opacity = 0.5;
+        speedFeelCurrent = 0;
+        speedFeelApplied = false;
+      } else {
+        const feelTarget = speedFeel(travelVelocity, SPEED_FEEL_FULL);
+        speedFeelCurrent += (feelTarget - speedFeelCurrent) * (1 - Math.exp(-dt * 6));
+        if (feelTarget === 0 && speedFeelCurrent < 0.002) speedFeelCurrent = 0;
+        if (speedFeelCurrent > 0 || speedFeelApplied) {
+          camera.fov = BASE_FOV + speedFeelCurrent * 4;
+          camera.updateProjectionMatrix();
+          starfield.material.size = 0.042 + speedFeelCurrent * 0.04;
+          flowMaterial.opacity = 0.5 + speedFeelCurrent * 0.35;
+          speedFeelApplied = speedFeelCurrent > 0;
+        }
+      }
 
       // 航道的视差幅度只给星图的四成：站牌是规则圆环，歪多了会被读成变形而不是转头。
-      const tiltWanted = pauseRef.current || reducedMotion ? 0 : 1;
+      const tiltWanted = moving ? 1 : 0;
       tiltWeight += (tiltWanted - tiltWeight) * (1 - Math.exp(-dt * 5.5));
       root.rotation.x = pointerEffects.tiltX * 0.4 * tiltWeight;
       root.rotation.y = pointerEffects.tiltY * 0.4 * tiltWeight;
 
-      if (!pauseRef.current && !reducedMotion) {
+      if (moving) {
         river.rotation.z = seconds * 0.02;
         const flowAttribute = flowGeometry.getAttribute("position") as THREE.BufferAttribute;
         const center = -travel;
@@ -1325,7 +1444,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
         flowAttribute.needsUpdate = true;
       }
 
-      focusArtifact.tick(seconds, !pauseRef.current && !reducedMotion);
+      focusArtifact.tick(seconds, moving);
 
       starfield.points.position.copy(camera.position);
       starfield.setInteraction(
@@ -1335,8 +1454,24 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
         pointerEffects.dragEnergy > 0.12,
         pointerEffects.energy < 0.08,
       );
-      starfield.tick(seconds, !pauseRef.current && !reducedMotion);
-      controls.update(dt);
+      starfield.tick(seconds, moving);
+      const controlsMoved = controls.update(dt);
+
+      // 只有暂停或减弱动态、且飞行／滚轮行进／泊站吸附／阻尼／渐变／指针能量都停了，
+      // 才允许省掉这一帧；闸门还会再等 45 帧兜底。
+      const active = moving
+        || flying
+        || flightController.active
+        || travelling
+        || fogSettling
+        || controlsMoved
+        || easing
+        || speedFeelCurrent > 0
+        || pointerEffects.energy > 0.01
+        || pointerEffects.dragEnergy > 0.01
+        || pointerEffects.motion.active;
+      if (!renderGate.shouldRender(active)) return;
+
       stageScene.updateMatrixWorld(true);
       updateLabelWindow();
       projectLabelItems(activeLabelItems, root, camera, host);

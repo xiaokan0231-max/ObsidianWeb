@@ -48,3 +48,20 @@ export function createPointerMotionField(options?: Partial<{
   strokeWindow: number;
   impulseClamp: number;
 }>): PointerMotionField;
+
+export function approachValues(
+  current: Float32Array | number[],
+  target: ArrayLike<number>,
+  rate: number,
+  epsilon?: number,
+): 0 | 1 | 2;
+
+export type RenderGate = {
+  invalidate(): void;
+  shouldRender(active: boolean): boolean;
+  readonly quietFrames: number;
+};
+
+export function createRenderGate(settleFrames?: number): RenderGate;
+
+export function speedFeel(velocity: number, fullAt?: number): number;

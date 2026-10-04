@@ -67,9 +67,17 @@ export function stripMarkdown(content: string) {
     .trim();
 }
 
+// 标题排序的比较器、每张卡片、反链列表都会反复问同一篇的标题，而取标题是一次整篇正则。
+// 按 note 对象缓存：notes 整体替换或单条 patch 都会产生新对象，WeakMap 自然失效。
+const titleCache = new WeakMap<Note, string>();
+
 export function getTitle(note: Note) {
+  const cached = titleCache.get(note);
+  if (cached !== undefined) return cached;
   const heading = note.content.match(/^#\s+(.+)$/m)?.[1]?.trim();
-  return heading || getString(note.frontmatter.company) || noteBasename(note.path);
+  const title = heading || getString(note.frontmatter.company) || noteBasename(note.path);
+  titleCache.set(note, title);
+  return title;
 }
 
 export function getType(note: Note) {

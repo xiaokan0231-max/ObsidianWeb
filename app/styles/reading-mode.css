@@ -79,6 +79,101 @@
 .drawer-header > div { min-width: 0; }
 .drawer-header > div small { overflow: hidden; text-overflow: ellipsis; }
 
+/*
+ * 进度条：useReadingProgress 把 0–1 写到阅读层根元素的 --reading-progress，不经过 React state。
+ * 用 scaleX 而不是 width，滚动时只走合成层。
+ */
+.reading-mode .nr-progress-track > i {
+  width: 100%;
+  transform: scaleX(var(--reading-progress, 0));
+  transform-origin: left center;
+}
+
+/*
+ * 页面版（不嵌在 3D 舞台里）的入场：整层淡入 + 书页上移 12px。
+ * 240ms 与场景内阅读层的 scene-reader-enter 对齐，两种入口观感一致；减弱动效由 base.css 兜底压到近 0。
+ */
+@keyframes reading-enter {
+  from { opacity: 0; transform: translateY(12px); }
+}
+.novel-reader.reading-mode:not(.scene-reader--embedded) { animation: fade-in 240ms var(--ease-out) backwards; }
+.novel-reader.reading-mode:not(.scene-reader--embedded) .nr-paper { animation: reading-enter 240ms var(--ease-out) backwards; }
+
+/* 文末去向：「提到这篇的 N 篇」与「本文链接到的笔记」，多列卡片，读完直接接着走。 */
+.reading-mode .reader-related {
+  flex: 1 0 100%;
+  display: grid;
+  gap: 30px;
+  margin-top: 34px;
+  text-align: left;
+}
+.reading-mode .reader-related-group h3 {
+  margin: 0 0 12px;
+  color: var(--nr-muted);
+  font-family: var(--nr-serif);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: .08em;
+}
+.reading-mode .reader-related-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+/* 选择器带上 .nr-colophon：场景深色皮肤的 .scene-reader .nr-colophon button 在后面加载、特异性相同，
+   不抬一级就会把左侧分区色条和底色一起盖掉。 */
+.reading-mode .nr-colophon .reader-related-grid > button {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--nr-line);
+  border-left: 3px solid var(--related-accent, var(--nr-line-strong));
+  border-radius: 4px;
+  background: var(--nr-paper);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.reading-mode .nr-colophon .reader-related-grid > button:hover {
+  border-color: var(--nr-line-strong);
+  border-left-color: var(--related-accent, var(--nr-line-strong));
+  background: var(--nr-wash);
+  transform: translateY(-1px);
+}
+.reading-mode .reader-related-grid small { color: var(--nr-muted); font-size: 11px; letter-spacing: .04em; }
+.reading-mode .reader-related-grid strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--nr-ink);
+  font-family: var(--nr-serif);
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.reading-mode .reader-related-context {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--nr-text-2);
+  font-size: 12.5px;
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.reading-mode .reader-related-context mark {
+  padding: 0 2px;
+  border-radius: 2px;
+  background: var(--nr-selection);
+  color: var(--nr-ink-strong);
+}
+.reading-mode .reader-related-more { justify-self: start; margin-top: 10px; }
+
 .reading-mode .reader-prose {
   min-width: 0;
   color: var(--nr-ink);
@@ -142,6 +237,29 @@
   box-shadow: none;
 }
 .reading-mode .reader-prose blockquote p:last-child { margin-bottom: 0; }
+/*
+ * 书页把引用统一压成灰线，但 callout 的色调是语义（🔴 禁止、⚠️ 注意、[!tip] 提示…），
+ * 抹掉就分不出轻重。这里只补回低饱和底色与彩色左线，字色仍按书页走；
+ * 色调和 --nr-ink 混合，浅色书页与深色书页上都不会刺眼。
+ */
+.reading-mode .reader-prose blockquote[data-callout] {
+  padding: .65em 1em .65em 1.1em;
+  border-left: 3px solid color-mix(in oklab, var(--callout-tone) 72%, var(--nr-line-strong));
+  border-radius: 0 3px 3px 0;
+  background: color-mix(in oklab, var(--callout-tone) 7%, transparent);
+}
+.reading-mode .reader-prose blockquote[data-callout="danger"] { --callout-tone: var(--danger); }
+.reading-mode .reader-prose blockquote[data-callout="warn"] { --callout-tone: var(--gold); }
+.reading-mode .reader-prose blockquote[data-callout="key"] { --callout-tone: var(--brand); }
+.reading-mode .reader-prose blockquote[data-callout="data"] { --callout-tone: var(--violet); }
+.reading-mode .reader-prose blockquote[data-callout="info"] { --callout-tone: var(--info); }
+.reading-mode .reader-prose blockquote:is([data-callout="aim"], [data-callout="idea"]) { --callout-tone: var(--green); }
+.reading-mode .reader-prose blockquote[data-callout] > .md-callout-title {
+  margin-bottom: .2em;
+  color: color-mix(in oklab, var(--callout-tone) 55%, var(--nr-ink));
+  font-weight: 600;
+}
+.reading-mode .reader-prose blockquote:not([data-callout]) > .md-callout-title { color: var(--nr-ink); font-weight: 600; }
 .reading-mode .reader-prose .prep-doc-say {
   padding: 0;
   border: 0;
@@ -183,6 +301,31 @@
   text-align: right;
 }
 .reading-mode .reader-prose .md-list-item > span { min-width: 0; }
+/* 书页里的列表标记是文字（· 与序号），不要正文样式表给嵌套项加的空心圈。 */
+.reading-mode .reader-prose .md-list-item[data-depth] > i { box-shadow: none; }
+/* 任务框随字号缩放；底边贴着基线，和首行文字对齐。 */
+.reading-mode .reader-prose .md-list-item[data-task] > i {
+  position: relative;
+  width: .82em;
+  min-width: 0;
+  height: .82em;
+  border: 1.5px solid var(--nr-line-strong);
+  border-radius: 3px;
+  background: transparent;
+}
+.reading-mode .reader-prose .md-list-item[data-task="done"] > i { border-color: var(--nr-ink); background: var(--nr-ink); }
+.reading-mode .reader-prose .md-list-item[data-task="done"] > i::after {
+  top: .06em;
+  left: .24em;
+  width: .2em;
+  height: .42em;
+  border-color: var(--nr-paper);
+  border-width: 0 .1em .1em 0;
+}
+.reading-mode .reader-prose .md-list-item[data-task="done"] > span {
+  color: var(--nr-muted);
+  text-decoration-color: var(--nr-faint);
+}
 .reading-mode .reader-prose pre {
   max-width: 100%;
   margin: 1.5em 0;
@@ -207,6 +350,42 @@
   font-size: .8em;
 }
 .reading-mode .reader-prose pre code { padding: 0; background: transparent; font-size: inherit; }
+/* 代码块外框给 figure：工具条与代码同一个框，pre 只负责横向滚动。 */
+.reading-mode .reader-prose .md-code {
+  max-width: 100%;
+  margin: 1.5em 0;
+  overflow: hidden;
+  border: 1px solid var(--nr-line);
+  border-radius: 6px;
+  color: var(--nr-ink-strong);
+  background: var(--nr-wash);
+}
+.reading-mode .reader-prose .md-code-bar {
+  border-bottom-color: var(--nr-line);
+  color: var(--nr-muted);
+  background: transparent;
+  font-size: 11px;
+}
+.reading-mode .reader-prose .md-code-copy {
+  border-color: var(--nr-line-strong);
+  color: var(--nr-text-2);
+  font-size: 11px;
+}
+.reading-mode .reader-prose .md-code-copy:hover { background: color-mix(in oklab, var(--nr-ink) 8%, transparent); }
+.reading-mode .reader-prose .md-code-copy:focus-visible { outline-color: var(--nr-muted); }
+.reading-mode .reader-prose .md-code-copy[data-copied] { border-color: var(--nr-ink); color: var(--nr-ink-strong); }
+.reading-mode .reader-prose .md-code pre {
+  margin: 0;
+  padding: 16px 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+/* 着色与书页墨色混合：同一条规则在白纸、夜间书页、星图深色层里都不刺眼。 */
+.reading-mode .reader-prose .md-tok-comment { color: var(--nr-muted); font-style: italic; }
+.reading-mode .reader-prose .md-tok-string { color: color-mix(in oklab, var(--green) 62%, var(--nr-ink)); }
+.reading-mode .reader-prose .md-tok-number { color: color-mix(in oklab, var(--gold) 62%, var(--nr-ink)); }
+.reading-mode .reader-prose .md-tok-keyword { color: color-mix(in oklab, var(--brand) 62%, var(--nr-ink)); }
 .reading-mode .reader-prose :is(.md-table, .prep-doc-tablewrap) {
   display: block;
   max-width: 100%;

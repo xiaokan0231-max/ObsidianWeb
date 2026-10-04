@@ -102,11 +102,30 @@
 }
 .reading-mode.scene-reader .reader-prose a:hover,
 .reading-mode.scene-reader .reader-prose button:hover { color: #edf5ee; text-decoration-color: #b0cbbb; }
+/* 断链按父级字色减淡：上面的场景链接色（0,4,0）会压过 note-reading.css 的断链规则，断链和正常链接同色。
+   这条（0,5,0）同时压过 hover，断链悬停也不变亮。 */
+.reading-mode.scene-reader .reader-prose .wiki-link.wiki-link--missing {
+  color: color-mix(in oklab, currentColor 68%, transparent);
+}
 .reading-mode.scene-reader .reader-prose rt { color: #91a899; }
 .reading-mode.scene-reader .reader-prose :is(blockquote, .md-callout, .prep-doc-note) {
   color: #b5c6bb;
   border-left-color: #567561;
   background: transparent;
+}
+/* callout 在深色阅读层里也要分得出轻重：色调取暗底上校过的亮值，底色只留一层薄雾。 */
+.reading-mode.scene-reader .reader-prose blockquote[data-callout] {
+  border-left-color: var(--scene-callout);
+  background: color-mix(in oklab, var(--scene-callout) 9%, transparent);
+}
+.reading-mode.scene-reader .reader-prose blockquote[data-callout="danger"] { --scene-callout: #d77d6b; }
+.reading-mode.scene-reader .reader-prose blockquote[data-callout="warn"] { --scene-callout: #d2ad62; }
+.reading-mode.scene-reader .reader-prose blockquote[data-callout="key"] { --scene-callout: #e0957a; }
+.reading-mode.scene-reader .reader-prose blockquote[data-callout="data"] { --scene-callout: #a99ad6; }
+.reading-mode.scene-reader .reader-prose blockquote[data-callout="info"] { --scene-callout: #82a6c2; }
+.reading-mode.scene-reader .reader-prose blockquote:is([data-callout="aim"], [data-callout="idea"]) { --scene-callout: #7dbb95; }
+.reading-mode.scene-reader .reader-prose blockquote[data-callout] > .md-callout-title {
+  color: color-mix(in oklab, var(--scene-callout) 70%, #e4ece6);
 }
 .reading-mode.scene-reader .reader-prose .md-list-item > i { color: #86a490; }
 .reading-mode.scene-reader .reader-prose pre { border-color: #304538; color: #c8dacf; background: #080e0b; }

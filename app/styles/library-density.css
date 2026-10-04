@@ -140,6 +140,210 @@
 
 .library-view .note-card-foot time { flex-shrink: 0; }
 
+/* 侧栏多了标签一组，矮屏上整列会超出视口；吸顶的同时让侧栏自己滚。 */
+.library-facets {
+  max-height: calc(100dvh - 160px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* ===== 标签 facet：多选 chip，计数随其余筛选联动 ===== */
+.library-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.library-tag-list button {
+  max-width: 100%;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.library-tag-list button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-tag-list button strong {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.library-tag-list button:hover { border-color: var(--brand-line); color: var(--ink); }
+
+.library-tag-list button[aria-pressed="true"] {
+  border-color: var(--brand);
+  background: var(--brand-wash);
+  color: var(--ink);
+}
+
+.library-tag-list button[aria-pressed="true"] strong { color: var(--interactive); }
+
+/* 和已选标签不共存的候选（加上它就是 0 篇）：留在原位免得列表跳动，但退到次要。 */
+.library-tag-list button[data-zero] { opacity: .55; }
+.library-tag-list button[data-zero]:hover { opacity: .85; }
+
+/* ===== 结果头：卡片 / 列表切换 ===== */
+.library-layout-switch {
+  height: 34px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.library-layout-switch button {
+  padding: 0 11px;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.library-layout-switch button:hover { color: var(--ink); }
+.library-layout-switch button[aria-pressed="true"] { background: var(--ink); color: var(--on-fill); }
+
+/* ===== 卡片：入场、hover、键盘焦点 =====
+   入场错峰只做装饰（减弱动效时 base.css 会把延迟归零），不依赖 animationend。 */
+.library-view .note-card {
+  animation: rise-in var(--dur-slow) var(--ease-out) backwards;
+  animation-delay: calc(var(--card-index, 0) * 18ms);
+  /* j / k 用 scrollIntoView 跟焦点：留出吸顶的顶栏与日期小标题，别让焦点卡片藏在它们下面。 */
+  scroll-margin-top: calc(var(--chrome-top, 76px) + var(--section-nav-h, 56px) + 44px);
+  scroll-margin-bottom: 16px;
+}
+
+.library-view .note-card h2 { transition: color var(--dur-fast) var(--ease-out); }
+.library-view .note-card:hover h2 { color: var(--interactive); }
+.library-view .note-card[data-semantic]::before { transition: width var(--dur-base) var(--ease-out); }
+
+.library-view .note-card[data-semantic]:is(:hover, :focus-visible)::before { width: 6px; }
+
+.library-view .note-card:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 搜索命中：标题与片段里的关键词 */
+.library-view mark.note-hit {
+  padding: 0 2px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in oklab, var(--brand) 24%, transparent);
+  color: inherit;
+}
+
+.library-view .note-card-summary.is-snippet p { -webkit-line-clamp: 3; }
+
+.library-view .note-card-hits {
+  flex-shrink: 0;
+  /* --brand 作 12px 文字在浅色卡面上只有 3:1；文字一律用按主题调过的 --interactive。 */
+  color: var(--interactive);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ===== 「最近更新」分组小标题：横跨整行并吸顶 ===== */
+.library-view .library-date-heading {
+  position: sticky;
+  /* 资料库页顶上还有一条吸顶的二级导航带，只按顶栏算会整条藏在它下面。 */
+  top: calc(var(--chrome-top, 76px) + var(--section-nav-h, 56px));
+  z-index: 3;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 0;
+  padding: 6px 2px;
+  background: color-mix(in oklab, var(--paper) 90%, transparent);
+  backdrop-filter: blur(8px);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .08em;
+}
+
+.library-view .library-date-heading:first-child { margin-top: 0; }
+
+.library-view .library-date-heading::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+/* ===== 列表模式：一行一篇（分区・标题・徽章・路径・日期） ===== */
+.library-view .note-grid--list {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.library-view .note-card.note-card--row[data-semantic] {
+  min-height: 46px;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 16px;
+}
+
+.library-view .note-card.note-card--row:hover {
+  transform: none;
+  background-color: var(--surface-raised-solid);
+}
+
+.library-view .note-card.note-card--row .note-group { flex: 0 0 92px; min-width: 0; }
+
+.library-view .note-card.note-card--row[data-semantic] h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-line-clamp: 1;
+}
+
+.library-view .note-card.note-card--row :is(.trust-badge, .note-semantic) { flex-shrink: 0; }
+
+.library-view .note-card.note-card--row[data-semantic] .note-card-source {
+  flex: 0 1 26%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.library-view .note-card.note-card--row time {
+  flex-shrink: 0;
+  min-width: 52px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+}
+
 @media (max-width: 820px) {
   .library-facets {
     position: static;

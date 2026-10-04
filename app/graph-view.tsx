@@ -312,11 +312,14 @@ function GraphView({
               </div>
             )}
           >
+            {/* 3D 锁定的节点与 2D 关系地图的中心共用 ?focus=：切换视图、刷新后停在同一个节点。 */}
             <ThreeKnowledgeGraph
               nodes={scene.nodes}
               links={scene.links}
               onOpen={openSceneNode}
               onFallback={fallBackToMap}
+              initialFocusId={focusId}
+              onFocusChange={setFocusId}
             />
           </Suspense>
         ) : (

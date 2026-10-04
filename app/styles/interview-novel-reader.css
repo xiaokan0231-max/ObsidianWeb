@@ -9,7 +9,8 @@
   --nr-ink: #252525;
   --nr-ink-strong: #1d1d1d;
   --nr-text-2: #555;
-  --nr-muted: #777;
+  /* #777 在白书页 #fdfdfb 上只有 4.4:1，页码、字号、章节眉题都是 11px 小字。 */
+  --nr-muted: #6f6f6f;
   --nr-faint: #a0a09b;
   --nr-line: #e6e6e3;
   --nr-line-strong: #c3c3be;

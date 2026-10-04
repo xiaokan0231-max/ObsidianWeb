@@ -8,7 +8,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { createStageInteraction } from "@/lib/stage-interaction.mjs";
+import { createStageInteraction, staggerLabels } from "@/lib/stage-interaction.mjs";
 import {
   createPointerMotionField,
   MOTION_IMPULSE_GAIN,
@@ -32,9 +32,12 @@ export const NODE_VERTEX_SHADER = `
   varying float vLens;
   varying float vBright;
   varying float vFog;
+  varying float vBlur;
   uniform float uTime;
   uniform float uMotion;
   uniform float uSearchActive;
+  uniform float uFocusDistance;
+  uniform float uFocusRange;
   uniform float uFogDensity;
   uniform float uFogStrength;
   uniform vec2 uPointer;
@@ -75,6 +78,11 @@ export const NODE_VERTEX_SHADER = `
     float fogDistance = length(viewPosition.xyz);
     float fogExponent = uFogDensity * fogDistance;
     vFog = mix(1.0, exp(-fogExponent * fogExponent), uFogStrength);
+    // 假景深：离对焦面越远，点越大、核心越软。不上 BokehPass——全屏多一遍采样，
+    // 加法粒子的深度也不可靠。uFocusRange 为 0（航道、未接线的材质）时整段关闭。
+    vBlur = uFocusRange > 0.0
+      ? smoothstep(0.0, uFocusRange, abs(-viewPosition.z - uFocusDistance))
+      : 0.0;
     vec2 screenPosition = gl_Position.xy / max(0.0001, gl_Position.w);
     // 宽画布上不做纵横比校正的话，影响范围会变成横向拉长的椭圆。
     vec2 aspect = vec2(max(uAspect, 0.0001), 1.0);
@@ -126,7 +134,7 @@ export const NODE_VERTEX_SHADER = `
     }
 
     float interactionScale = 1.0 + vPointer * 0.85 + vLens * 0.5 + uDragEnergy * 0.24;
-    gl_PointSize = aSize * pulse * searchScale * interactionScale
+    gl_PointSize = aSize * pulse * searchScale * interactionScale * (1.0 + vBlur * 0.75)
       * (360.0 / max(3.0, -viewPosition.z));
   }
 `;
@@ -139,6 +147,7 @@ export const NODE_FRAGMENT_SHADER = `
   varying float vLens;
   varying float vBright;
   varying float vFog;
+  varying float vBlur;
   uniform float uSearchActive;
   uniform float uDragEnergy;
   uniform vec2 uDragVector;
@@ -147,7 +156,8 @@ export const NODE_FRAGMENT_SHADER = `
     vec2 point = (gl_PointCoord - vec2(0.5)) * 2.0;
     float radius = length(point);
     if (radius > 1.0) discard;
-    float core = exp(-radius * radius * 34.0);
+    // 离焦的星没有锐利的核：核心指数从 34 降到 8，光斑摊开，星芒也随之消失。
+    float core = exp(-radius * radius * mix(34.0, 8.0, vBlur));
     float halo = exp(-radius * 5.4) * 0.58;
     float horizontal = exp(-abs(point.y) * 52.0)
       * smoothstep(1.0, 0.08, abs(point.x));
@@ -160,7 +170,7 @@ export const NODE_FRAGMENT_SHADER = `
     // 星芒只发给真正亮的那几颗。之前每个点都带十字，整片星野读起来像
     // 一格格的水晶网，而不是一张星空照片——真实镜头也只有过曝的星才起芒。
     float rays = smoothstep(0.34, 0.86, vBright);
-    float diffraction = (horizontal * 0.62 + vertical * 0.42 + diagonal) * rays;
+    float diffraction = (horizontal * 0.62 + vertical * 0.42 + diagonal) * rays * (1.0 - vBlur);
     vec2 dragDirection = normalize(uDragVector + vec2(0.0001, 0.0));
     float alongDrag = dot(point, dragDirection);
     float acrossDrag = dot(point, vec2(-dragDirection.y, dragDirection.x));
@@ -174,7 +184,8 @@ export const NODE_FRAGMENT_SHADER = `
     float alpha = min(1.0, (halo + core + diffraction + dragStreak + vPointer * 0.2) * exposure)
       * mix(0.76, 1.0, vFocus)
       * searchVisibility
-      * (1.0 + vLens * 0.55);
+      * (1.0 + vLens * 0.55)
+      * mix(1.0, 0.5, vBlur);
     vec3 color = mix(
       vColor * 1.2,
       vec3(1.0),
@@ -208,6 +219,54 @@ export const LINK_FRAGMENT_SHADER = `
     gl_FragColor = vec4(vColor + vFocus * vec3(0.2), alpha);
   }
 `;
+
+// 搜索命中很少时，用只有边缘光的薄壳标记空间位置。实体玻璃球在结果多时
+// 会叠成肥皂泡墙，因此两个视图都在命中超过 SEARCH_SHELL_LIMIT 时不画壳，
+// 只靠 aSearch 放大星点。壳只有边缘发光，不受场景灯光影响。
+export const SEARCH_SHELL_LIMIT = 10;
+
+export const SEARCH_SHELL_VERTEX_SHADER = /* glsl */ `
+  varying vec3 vColor;
+  varying vec3 vViewNormal;
+  varying vec3 vViewPosition;
+
+  void main() {
+    vec4 instancePosition = instanceMatrix * vec4(position, 1.0);
+    vec4 viewPosition = modelViewMatrix * instancePosition;
+    vColor = instanceColor;
+    vViewNormal = normalize(mat3(modelViewMatrix) * mat3(instanceMatrix) * normal);
+    vViewPosition = viewPosition.xyz;
+    gl_Position = projectionMatrix * viewPosition;
+  }
+`;
+
+export const SEARCH_SHELL_FRAGMENT_SHADER = /* glsl */ `
+  varying vec3 vColor;
+  varying vec3 vViewNormal;
+  varying vec3 vViewPosition;
+
+  void main() {
+    vec3 viewDirection = normalize(-vViewPosition);
+    float facing = abs(dot(normalize(vViewNormal), viewDirection));
+    float rim = pow(1.0 - facing, 3.8);
+    float alpha = rim * 0.24;
+    vec3 color = mix(vColor, vec3(1.0), rim * 0.42);
+    if (alpha < 0.004) discard;
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
+export function createSearchShellMaterial() {
+  return new THREE.ShaderMaterial({
+    vertexShader: SEARCH_SHELL_VERTEX_SHADER,
+    fragmentShader: SEARCH_SHELL_FRAGMENT_SHADER,
+    transparent: true,
+    side: THREE.BackSide,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+}
 
 export function seeded(value: string) {
   let hash = 2166136261;
@@ -460,6 +519,8 @@ export type StagePointerEffects = {
   readonly tiltY: number;
   readonly releaseImpulse: number;
   readonly aspect: number;
+  /** 画布矩形的缓存（只在尺寸变化、滚动时刷新）。命中测试用它，免得每次移动都同步布局。 */
+  readonly rect: DOMRect;
   readonly motion: PointerMotionField;
   tick(now: number, animate: boolean): void;
   setAccent(color: string): void;
@@ -643,6 +704,9 @@ export function createStagePointerEffects(
     },
     get aspect() {
       return aspect;
+    },
+    get rect() {
+      return rect;
     },
     resize: refreshRect,
     tick(now, animate) {
@@ -879,9 +943,13 @@ const HIGHLIGHT_KNEE_SHADER = {
 // 刻意不接 OutputPass：当前管线里自定义 ShaderMaterial 不参与 three 的色调映射
 // 和色彩空间转换，直接输出。加了 OutputPass 会把整套颜色重新编码一遍，画面会
 // 整体发白——那是另一个问题，不该混在这次改动里。
+//
+// samples：场景先画进离屏靶再走 bloom，canvas 自带的 antialias 只作用于最后那张
+// 全屏四边形，等于白开——1px 连线和圆环全是锯齿。离屏靶自己带 MSAA 才有效。
+// 代价是显存和填充率，所以由视图按节点规模决定（大图传 0）。色调不受影响。
 export function createStageBloom(
   renderer: THREE.WebGLRenderer,
-  options?: { strength?: number; radius?: number; threshold?: number },
+  options?: { strength?: number; radius?: number; threshold?: number; samples?: number },
 ): StageBloom | null {
   const size = renderer.getSize(new THREE.Vector2());
   let composer: EffectComposer;
@@ -889,7 +957,14 @@ export function createStageBloom(
   let bloomPass: UnrealBloomPass;
   let kneePass: ShaderPass;
   try {
-    composer = new EffectComposer(renderer);
+    const pixelRatio = renderer.getPixelRatio();
+    const target = new THREE.WebGLRenderTarget(
+      Math.max(1, Math.round(size.x * pixelRatio)),
+      Math.max(1, Math.round(size.y * pixelRatio)),
+      { type: THREE.HalfFloatType, samples: Math.max(0, options?.samples ?? 0) },
+    );
+    target.texture.name = "StageBloom.rt1";
+    composer = new EffectComposer(renderer, target);
     renderPass = new RenderPass(new THREE.Scene(), new THREE.PerspectiveCamera());
     bloomPass = new UnrealBloomPass(
       new THREE.Vector2(Math.max(1, size.x), Math.max(1, size.y)),
@@ -903,6 +978,10 @@ export function createStageBloom(
     composer.addPass(renderPass);
     composer.addPass(bloomPass);
     composer.addPass(kneePass);
+    // 传入自建靶时，EffectComposer 把靶的像素尺寸当成 CSS 尺寸、却仍乘渲染器的 DPR，
+    // addPass 时各 pass 拿到的是 DPR² 倍的尺寸（bloom 的 mip 链白占几倍显存），
+    // 要等第一次 ResizeObserver 回调才纠正。这里立刻按 CSS 尺寸归一一次。
+    composer.setSize(Math.max(1, size.x), Math.max(1, size.y));
   } catch {
     return null;
   }
@@ -1105,6 +1184,8 @@ export type FocusArtifact = {
   setAccent(color: string): void;
   setPosition(position: THREE.Vector3): void;
   setVisible(visible: boolean): void;
+  /** 锁定了新目标时调用：下一帧起 300ms 内从 0.6 倍弹到原尺寸，减弱动态时直接到位。 */
+  reveal(): void;
   tick(seconds: number, animate: boolean): void;
 };
 
@@ -1227,6 +1308,11 @@ export function createFocusArtifact(bloomTexture: THREE.Texture): FocusArtifact 
   group.add(bloom, lattice, shell, cage, core, light);
   group.visible = false;
   group.renderOrder = 6;
+  // 出场时钟跟着 tick 的 seconds 走，不另读 performance.now()：暂停或减弱动态时
+  // tick 传 animate=false，出场直接跳到终点，不会卡在缩小的状态。
+  let revealPending = false;
+  let revealStartedAt: number | null = null;
+  const REVEAL_SECONDS = 0.3;
 
   return {
     group,
@@ -1245,9 +1331,22 @@ export function createFocusArtifact(bloomTexture: THREE.Texture): FocusArtifact 
     setVisible(visible) {
       group.visible = visible;
     },
+    reveal() {
+      revealPending = true;
+    },
     tick(seconds, animate) {
       if (!group.visible) return;
-      group.scale.setScalar(animate ? 1 + Math.sin(seconds * 1.05) * 0.012 : 1);
+      if (revealPending) {
+        revealPending = false;
+        revealStartedAt = animate ? seconds : null;
+      }
+      let revealScale = 1;
+      if (revealStartedAt !== null) {
+        const progress = Math.min(1, Math.max(0, (seconds - revealStartedAt) / REVEAL_SECONDS));
+        revealScale = animate ? 0.6 + 0.4 * (1 - Math.pow(1 - progress, 3)) : 1;
+        if (progress >= 1 || !animate) revealStartedAt = null;
+      }
+      group.scale.setScalar((animate ? 1 + Math.sin(seconds * 1.05) * 0.012 : 1) * revealScale);
       shellMaterial.uniforms.uTime.value = animate ? seconds : 0;
       if (animate) {
         shell.rotation.y = seconds * 0.11;
@@ -1268,6 +1367,9 @@ export type StageLabelItem = {
   position: THREE.Vector3;
   element: HTMLElement;
   offsetY?: number;
+  /** 参与纵向错开的标签（星图的动态标签池）。宽度是绑定时按文字估的，不逐帧量 DOM。 */
+  stagger?: boolean;
+  width?: number;
 };
 
 export function createLabelLayer(host: HTMLElement) {
@@ -1277,6 +1379,21 @@ export function createLabelLayer(host: HTMLElement) {
   return layer;
 }
 
+// 逐帧复用的临时量：每个标签每帧 clone 一个 Vector3，几十个标签就是每秒几千个
+// 短命对象；DOM 也只在取整后的位置真的变了才写，静止画面不再逐帧改 transform。
+const labelScratch = new THREE.Vector3();
+type LabelSlot = {
+  item: StageLabelItem;
+  x: number;
+  y: number;
+  width: number;
+  visible: boolean;
+  dropped?: boolean;
+};
+const labelSlots: LabelSlot[] = [];
+const staggerSlots: LabelSlot[] = [];
+const labelTransforms = new WeakMap<HTMLElement, string>();
+
 // 把三维位置投到屏幕像素并写进 transform。文字必须留在 HTML 层——
 // WebGL 里渲染 CJK 文本既不清晰也不可选中，这是两个视图共同的铁律。
 export function projectLabelItems(
@@ -1284,21 +1401,47 @@ export function projectLabelItems(
   anchor: THREE.Object3D,
   camera: THREE.Camera,
   host: HTMLElement,
+  options?: { staggerRow?: number },
 ) {
-  items.forEach(({ position, element, offsetY = 13 }) => {
-    const projected = anchor.localToWorld(position.clone()).project(camera);
-    const onScreen =
+  const hostWidth = host.clientWidth;
+  const hostHeight = host.clientHeight;
+  while (labelSlots.length < items.length) {
+    labelSlots.push({ item: items[0], x: 0, y: 0, width: 0, visible: false });
+  }
+  staggerSlots.length = 0;
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const slot = labelSlots[index];
+    const projected = anchor.localToWorld(labelScratch.copy(item.position)).project(camera);
+    slot.item = item;
+    slot.visible =
       projected.z > -1 &&
       projected.z < 1 &&
       Math.abs(projected.x) < 1.08 &&
       Math.abs(projected.y) < 1.08;
-    element.dataset.visible = onScreen ? "true" : "false";
-    if (onScreen) {
-      const x = (projected.x * 0.5 + 0.5) * host.clientWidth;
-      const y = (-projected.y * 0.5 + 0.5) * host.clientHeight;
-      element.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, ${offsetY}px)`;
+    slot.x = (projected.x * 0.5 + 0.5) * hostWidth;
+    slot.y = (-projected.y * 0.5 + 0.5) * hostHeight + (item.offsetY ?? 13);
+    slot.width = item.width ?? 0;
+    slot.dropped = false;
+    if (slot.visible && item.stagger && options?.staggerRow) staggerSlots.push(slot);
+  }
+  if (staggerSlots.length > 1 && options?.staggerRow) {
+    // 最多下推两行：再远名字就和星脱钩了，宁可这一帧不显示。
+    staggerLabels(staggerSlots, { rowHeight: options.staggerRow, maxShift: options.staggerRow * 2 });
+  }
+  for (let index = 0; index < items.length; index += 1) {
+    const slot = labelSlots[index];
+    const element = slot.item.element;
+    const visible = slot.visible && !slot.dropped ? "true" : "false";
+    // 比对 DOM 上的真实值而不是缓存：标签池解绑时会在别处直接把它设成 false。
+    if (element.dataset.visible !== visible) element.dataset.visible = visible;
+    if (visible === "false") continue;
+    const transform = `translate3d(${Math.round(slot.x * 2) / 2}px, ${Math.round(slot.y * 2) / 2}px, 0) translate(-50%, 0)`;
+    if (labelTransforms.get(element) !== transform) {
+      labelTransforms.set(element, transform);
+      element.style.transform = transform;
     }
-  });
+  }
 }
 
 export function disposeStage(scene: THREE.Scene) {

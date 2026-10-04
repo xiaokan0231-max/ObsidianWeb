@@ -1,4 +1,5 @@
-import { stripFrontmatter } from "./notes";
+import { stripFrontmatter } from "./notes.ts";
+import { inlinePlainText } from "./markdown-inline.ts";
 
 export type ReadingHeading = { id: string; text: string; level?: number; lang?: string };
 
@@ -6,16 +7,9 @@ export function headingAnchor(lineIndex: number) {
   return `doc-h-${lineIndex}`;
 }
 
+// 与正文共用同一套行内切分：斜体、高亮、脚注号等记号不会原样漏进目录和标题。
 export function headingPlainText(text: string) {
-  return text
-    .replace(/!?\[\[([^\]]+)\]\]/g, (_, body: string) => {
-      const [target, alias] = body.split("|");
-      return alias || target.split("#").filter(Boolean).pop() || target;
-    })
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .trim();
+  return inlinePlainText(text).trim();
 }
 
 // 目录和正文使用同一份行序列；隐藏生成标记但保留换行，避免章节锚点错位。

@@ -23,7 +23,22 @@ function decisionClip(value: string, limit: number) {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
-export function noteDecisionMeta(note: Note) {
+export type NoteDecisionMeta = { semantic: DecisionSemantic; importance: string; when: string; next: string; label: string };
+
+// 资料库每次重渲染都会对可见卡片取一次；摘要里有整篇 stripMarkdown。
+// 结果依赖「今天」（逾期判定），所以缓存带上日期键，跨过零点自然重算。
+const decisionCache = new WeakMap<Note, { day: string; meta: NoteDecisionMeta }>();
+
+export function noteDecisionMeta(note: Note): NoteDecisionMeta {
+  const day = localDateKey();
+  const cached = decisionCache.get(note);
+  if (cached?.day === day) return cached.meta;
+  const meta = computeDecisionMeta(note, day);
+  decisionCache.set(note, { day, meta });
+  return meta;
+}
+
+function computeDecisionMeta(note: Note, today: string): NoteDecisionMeta {
   const type = getType(note);
   const status = getString(note.frontmatter.status);
   const nextAction =
@@ -31,7 +46,7 @@ export function noteDecisionMeta(note: Note) {
     getString(note.frontmatter.action);
   const scheduled = getString(note.frontmatter.next_event_at);
   const scheduledDate = scheduled.match(/\b20\d{2}-\d{2}-\d{2}\b/u)?.[0] ?? "";
-  const overdue = scheduledDate !== "" && scheduledDate < localDateKey() && status !== "完了";
+  const overdue = scheduledDate !== "" && scheduledDate < today && status !== "完了";
   const waiting = /(?:待ち|待機|等待|返信|回复|結果待)/u.test(`${nextAction} ${status}`);
   // 「選考が動いている」は lib/job-status.mjs の集合で判定（配色名で判定すると色表を変えた瞬間に壊れる）。
   const activeJob = getType(note) === "job-case" && IN_FLIGHT_STATUSES.includes(careerStatus(status).label);
@@ -39,7 +54,7 @@ export function noteDecisionMeta(note: Note) {
   if (overdue) semantic = "risk";
   else if (waiting) semantic = "waiting";
   else if (type === "todo" && todoAudience(note) === "user" && status !== "完了") semantic = "action";
-  else if (activeJob || (type === "interview-prep" && scheduledDate >= localDateKey())) semantic = "action";
+  else if (activeJob || (type === "interview-prep" && scheduledDate >= today)) semantic = "action";
   else if (trustLayer(note).className === "trust-analysis") semantic = "analysis";
 
   const structuredWhy = [

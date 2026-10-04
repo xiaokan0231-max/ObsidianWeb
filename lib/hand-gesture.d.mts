@@ -203,3 +203,32 @@ export function smoothHandPose(
   next: HandPose,
   alpha?: number,
 ): HandPose;
+
+export function handUiFrameKey(
+  frame: {
+    mode: string;
+    primaryHandId: string | null;
+    transform: unknown;
+    hands: Array<{
+      id: string;
+      role: string;
+      visible: boolean;
+      grabbed: boolean;
+      pinching: boolean;
+      pinchConfident: boolean;
+      gesture: string;
+      x: number;
+      y: number;
+    }>;
+    diagnostics?: {
+      pinchRatio: number;
+      closeThreshold: number;
+      pinchPose: boolean;
+      gesture: string;
+      suppressed: boolean;
+      targetKind: string;
+      lastEvent: string;
+    };
+  } | null,
+  minDualSeparation?: number,
+): string;

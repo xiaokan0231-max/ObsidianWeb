@@ -8,8 +8,10 @@
   justify-content: center;
   background: var(--paper);
   backdrop-filter: none;
+  animation: fade-in var(--dur-base) var(--ease-out);
 }
 
+/* 入场交给背景淡入 + 阅读列上移（见下方「打开动效」），面板本身不再单独淡入。 */
 .note-drawer--full {
   width: 100vw;
   max-width: 100vw;
@@ -17,7 +19,7 @@
   flex-direction: column;
   background: var(--paper);
   box-shadow: none;
-  animation: fade-in 180ms ease;
+  animation: none;
 }
 
 .note-drawer--full .drawer-header {
@@ -36,18 +38,18 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-faint);
-  font-size: 9px;
+  color: var(--text-tertiary);
+  font-size: 12px;
   white-space: nowrap;
 }
 
 .drawer-esc-hint kbd {
   padding: 2px 5px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface);
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .note-drawer--full .drawer-scroll {
@@ -92,7 +94,7 @@
 .doc-toc-label {
   display: block;
   margin-bottom: 12px;
-  color: var(--text-faint);
+  color: var(--text-tertiary);
   font-family: var(--font-geist-mono), monospace;
   font-size: 8px;
   letter-spacing: 0.22em;
@@ -128,7 +130,8 @@
 .doc-toc-item--h3 > button {
   padding-left: 24px;
   font-size: 9.5px;
-  color: var(--text-faint);
+  /* 三级目录也是要点的导航文字，faint 在浅色纸面上只有 3.2:1。 */
+  color: var(--text-tertiary);
 }
 
 .doc-toc-item.is-active > button {
@@ -137,17 +140,18 @@
   font-weight: 620;
 }
 
-/* 読書進捗。ヘッダの下端をそのままバーにする */
+/* 読書進捗。ヘッダの下端をそのままバーにする。
+   進捗は useReadingProgress が詳細パネルに --reading-progress（0–1）として書く。React の state を経由しない。 */
 .drawer-progress {
   position: absolute;
   left: 0;
   bottom: -1px;
   width: 100%;
   height: 2px;
-  transform: scaleX(0);
+  transform: scaleX(var(--reading-progress, 0));
   transform-origin: left center;
   background: linear-gradient(90deg, var(--orange), var(--gold));
-  transition: transform 90ms linear;
+  transition: transform var(--dur-fast) linear;
 }
 
 /* 全屏では読書用に一段大きく。
@@ -162,10 +166,11 @@
   letter-spacing: -0.02em;
 }
 
+/* 正文 16px（可用头部的 A−/A＋ 调，与阅读层共用同一个持久化键）。13.5px 撑满 880px 时一行约 65 字，太小也太长。 */
 .note-drawer--full .markdown-document p,
 .note-drawer--full .md-list-item {
-  font-size: 13.5px;
-  line-height: 2.05;
+  font-size: var(--drawer-font-size, 16px);
+  line-height: 1.9;
 }
 
 .note-drawer--full .markdown-document h2 {
@@ -186,22 +191,22 @@
 .note-drawer--full .drawer-meta > span {
   padding: 3px 10px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface);
-  color: var(--text-faint);
-  font-size: 8.5px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
-.note-drawer--full .markdown-document h3 { font-size: 19px; }
-.note-drawer--full .markdown-document h4 { font-size: 14.5px; }
+.note-drawer--full .markdown-document h3 { font-size: 20px; }
+.note-drawer--full .markdown-document h4 { font-size: 17px; }
 
 .note-drawer--full .markdown-document blockquote {
-  font-size: 12.5px;
-  line-height: 1.9;
+  font-size: calc(var(--drawer-font-size, 16px) - 1px);
+  line-height: 1.85;
 }
 
-.note-drawer--full .markdown-document pre { font-size: 10.5px; }
-.note-drawer--full .md-table-row span { padding: 10px; font-size: 10.5px; }
+.note-drawer--full .markdown-document pre { font-size: 13px; }
+.note-drawer--full .md-table-row span { padding: 10px; font-size: 13px; }
 
 /* frontmatter は既定で畳む（指紋や schema_version は読む妨げ） */
 .frontmatter-fold {
@@ -211,11 +216,11 @@
 }
 
 .frontmatter-fold > summary {
-  padding: 9px 14px;
+  padding: 10px 14px;
   color: var(--muted);
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
   cursor: pointer;
   list-style: none;
 }
@@ -230,6 +235,134 @@
 .frontmatter-fold[open] > summary::before { content: "▾ "; }
 .frontmatter-fold > summary:hover { color: var(--ink); }
 .frontmatter-fold .frontmatter-grid { margin: 0; border: 0; border-top: 1px solid var(--line); }
+
+/* ===== 原笔记详情页：三栏（目录 | 720px 阅读列 | 属性・反链） =====
+   读者偏好：阅读列限宽后两侧不能空着。目录放左、属性与反链放右，各自吸顶。
+   全部写在 --full 作用域里：.note-drawer 基类还被岗位抽屉共用。 */
+.note-drawer--full .drawer-reading-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 720px);
+  justify-content: center;
+  align-items: start;
+  gap: clamp(24px, 3vw, 44px);
+}
+
+.note-drawer--full .drawer-reading-shell.has-toc { grid-template-columns: 200px minmax(0, 720px); }
+.note-drawer--full .drawer-reading-shell.has-aside { grid-template-columns: minmax(0, 720px) 288px; }
+.note-drawer--full .drawer-reading-shell.has-toc.has-aside { grid-template-columns: 200px minmax(0, 720px) 288px; }
+
+.note-drawer--full .drawer-reading-shell > .drawer-reading {
+  width: auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.note-drawer--full .doc-toc { flex: none; }
+.note-drawer--full .doc-toc-label { font-size: 11px; letter-spacing: 0.16em; }
+.note-drawer--full .doc-toc-item > button { font-size: 13px; line-height: 1.5; }
+.note-drawer--full .doc-toc-item--h3 > button { font-size: 12px; }
+
+.note-drawer--full .drawer-aside {
+  position: sticky;
+  top: 0;
+  max-height: calc(100dvh - 140px);
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  overflow-y: auto;
+  padding: 4px 2px 12px 0;
+  scrollbar-width: thin;
+}
+
+.note-drawer--full .drawer-aside .frontmatter-fold {
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+}
+
+/* 侧栏只有 288px，属性改单列，长值换行而不是挤成两半。 */
+.note-drawer--full .drawer-aside .frontmatter-grid { grid-template-columns: minmax(0, 1fr); }
+
+.note-drawer--full .drawer-aside .backlinks {
+  margin: 0;
+  padding: 14px 14px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.note-drawer--full .drawer-aside .backlinks > span { margin-bottom: 6px; }
+.note-drawer--full .drawer-aside .backlinks button:first-of-type { border-top: 0; }
+
+/* 头部：字号 A−/A＋ */
+.note-drawer--full .drawer-header small { font-size: 12px; }
+.note-drawer--full .drawer-header .accent-ink { font-size: 12px; }
+/* 基类 .drawer-header span（9px 粗体）会压到提示文字上，这里按 --full 抬回来。 */
+.note-drawer--full .drawer-header .drawer-esc-hint { font-size: 12px; font-weight: 400; }
+
+.note-drawer--full .drawer-font-controls {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+
+.note-drawer--full .drawer-font-controls button {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 14px/1 var(--font-serif);
+  cursor: pointer;
+}
+
+.note-drawer--full .drawer-font-controls button:hover:not(:disabled) { background: var(--surface-sunken); color: var(--ink); }
+.note-drawer--full .drawer-font-controls button:disabled { opacity: .35; cursor: default; }
+
+.note-drawer--full .drawer-font-controls output {
+  min-width: 22px;
+  color: var(--muted);
+  font: 11px/1 var(--font-mono);
+  text-align: center;
+}
+
+/* ===== 打开动效：背景淡入 + 阅读列上移 12px，标题 / meta / 正文 30・60・90ms 装饰错峰 =====
+   错峰只是装饰：减弱动效时 base.css 会把延迟归零、时长压到近 0，不依赖 animationend。 */
+@keyframes drawer-rise {
+  from { opacity: 0; transform: translateY(12px); }
+}
+
+.note-drawer--full .drawer-reading { animation: drawer-rise var(--dur-slow) var(--ease-out) backwards; }
+
+.note-drawer--full .drawer-reading > :is(.drawer-title-row, h1) {
+  animation: rise-in var(--dur-slow) var(--ease-out) 30ms backwards;
+}
+
+.note-drawer--full .drawer-reading > .drawer-meta { animation: rise-in var(--dur-slow) var(--ease-out) 60ms backwards; }
+.note-drawer--full .drawer-reading > .markdown-document { animation: rise-in var(--dur-slow) var(--ease-out) 90ms backwards; }
+.note-drawer--full :is(.doc-toc, .drawer-aside) { animation: fade-in var(--dur-slow) var(--ease-out) 90ms backwards; }
+
+/* ?section= 与 [[笔记#章节]] 打开后约 60ms 就跳章节，那时阅读列与正文还带着合计约 14–22px 的入场位移，
+   scrollIntoView 按位移后的位置对齐，动画收尾时标题会被顶边裁掉一截。留出比位移更大的余量。 */
+.note-drawer--full .markdown-document [data-md-heading] { scroll-margin-top: 24px; }
+
+@media (max-width: 1180px) {
+  /* 这个宽度起目录隐藏（ui-language.css），把它那一栏也收掉，别留一条空白。 */
+  .note-drawer--full .drawer-reading-shell.has-toc { grid-template-columns: minmax(0, 720px); }
+  .note-drawer--full .drawer-reading-shell.has-aside,
+  .note-drawer--full .drawer-reading-shell.has-toc.has-aside { grid-template-columns: minmax(0, 1fr) 260px; }
+}
+
+@media (max-width: 900px) {
+  .note-drawer--full .drawer-reading-shell.has-aside,
+  .note-drawer--full .drawer-reading-shell.has-toc.has-aside { grid-template-columns: minmax(0, 1fr); }
+  .note-drawer--full .drawer-aside { position: static; max-height: none; }
+}
 
 .drawer-header {
   height: 67px;
@@ -254,7 +387,7 @@
 
 .drawer-header small {
   overflow: hidden;
-  color: var(--text-faint);
+  color: var(--text-tertiary);
   font-family: var(--font-geist-mono), monospace;
   font-size: 8px;
   text-overflow: ellipsis;
@@ -283,8 +416,8 @@
 }
 
 .drawer-title-row > span:last-child {
-  color: var(--text-faint);
-  font-size: 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
 }
 
 .drawer-scroll > h1 {
@@ -331,15 +464,16 @@
 }
 
 .frontmatter-grid span {
-  color: var(--text-faint);
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 7px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .frontmatter-grid strong {
   overflow-wrap: anywhere;
-  font-size: 9px;
-  font-weight: 620;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.55;
 }
 
 .markdown-document {
@@ -388,6 +522,67 @@
   border-radius: 50%;
 }
 
+/* 有序项的序号不能塞进 5px 圆点里：改成右对齐的等宽数字，步骤编号一眼能对齐。
+   前缀 .markdown-document 是为了压过周复盘里 .job-week-md .md-list-item > i 的圆点位移。 */
+.markdown-document .md-list-item[data-ordered] { align-items: baseline; }
+
+.markdown-document .md-list-item[data-ordered] > i {
+  width: auto;
+  min-width: 1.6em;
+  height: auto;
+  margin-top: 0;
+  border-radius: 0;
+  background: transparent;
+  /* 序号是要读的文字：--brand 在浅色纸面上只有 2.8:1，用专给文字调过的 --interactive。 */
+  color: var(--interactive);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* 第二层起改空心点，缩进之外再给一个层级信号。 */
+.markdown-document .md-list-item[data-depth]:not([data-ordered], [data-task]) > i {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--orange);
+}
+
+/* 任务项：只读的勾选框外观。不是 input——这里不能改 vault，做成可点的框会让人以为能勾。 */
+.markdown-document .md-list-item[data-task] > i {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin-top: 0.42em;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+}
+
+.markdown-document .md-list-item[data-task="done"] > i {
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.markdown-document .md-list-item[data-task="done"] > i::after {
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--on-fill);
+  border-width: 0 2px 2px 0;
+  content: "";
+  rotate: 45deg;
+}
+
+/* 完成项退到次要：划线 + 弱色，未完成的自然浮上来。 */
+.markdown-document .md-list-item[data-task="done"] > span {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--text-tertiary) 60%, transparent);
+}
+
 .markdown-document blockquote {
   margin: 19px 0;
   padding: 13px 16px;
@@ -432,6 +627,25 @@
   border-left-color: var(--green);
 }
 
+/* Obsidian 原生 [!note]/[!info] 等：emoji 体系里没有「中性说明」这一档，借信息色。 */
+.markdown-document blockquote[data-callout="info"] {
+  background: var(--info-wash);
+  border-left-color: var(--info);
+}
+
+/* [!type] 的标题行：比正文重一档，颜色跟左线走，不另起一个标题字号。 */
+.markdown-document .md-callout-title {
+  color: var(--ink);
+  font-weight: 640;
+}
+
+.markdown-document blockquote[data-callout="danger"] > .md-callout-title { color: var(--danger); }
+.markdown-document blockquote[data-callout="warn"] > .md-callout-title { color: var(--warning); }
+.markdown-document blockquote[data-callout="key"] > .md-callout-title { color: var(--interactive); }
+.markdown-document blockquote[data-callout="data"] > .md-callout-title { color: var(--violet); }
+.markdown-document blockquote[data-callout="info"] > .md-callout-title { color: var(--info); }
+.markdown-document blockquote:is([data-callout="aim"], [data-callout="idea"]) > .md-callout-title { color: var(--green); }
+
 /* 連続した > 行は1つの引用の中で改行して並べる */
 .markdown-document blockquote > span {
   display: block;
@@ -471,6 +685,174 @@
   color: inherit;
 }
 
+/* 代码块 = 工具条 + 代码。圆角与边框给外层 figure，pre 只管滚动，
+   这样横向滚动条贴在框内底边，不会把工具条一起滚走。 */
+.markdown-document .md-code {
+  overflow: hidden;
+  margin: 17px 0;
+  border: 1px solid var(--line-on-inverse);
+  border-radius: var(--radius-control);
+  background: var(--surface-inverse);
+  color: var(--text-on-inverse);
+}
+
+.markdown-document .md-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 8px 5px 14px;
+  border-bottom: 1px solid var(--line-on-inverse);
+  background: var(--surface-inverse-soft);
+  color: var(--text-on-inverse-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+}
+
+.markdown-document .md-code-copy {
+  min-height: 26px;
+  padding: 2px 10px;
+  border: 1px solid var(--line-on-inverse);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-on-inverse);
+  font: inherit;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.markdown-document .md-code-copy:hover {
+  background: color-mix(in oklab, var(--text-on-inverse) 10%, transparent);
+}
+
+.markdown-document .md-code-copy:focus-visible {
+  outline: 2px solid var(--brand-on-inverse);
+  outline-offset: 2px;
+}
+
+.markdown-document .md-code-copy[data-copied] {
+  border-color: color-mix(in oklab, var(--green-on-inverse) 60%, transparent);
+  color: var(--green-on-inverse);
+}
+
+/* 外层已经有底色和圆角；字号拉回 12px，旧的 9px 低于正文下限。
+   :where 让权重与基础 .markdown-document pre 持平（靠后者胜），全屏详情页的 13px 仍能覆盖。 */
+:where(.markdown-document) .md-code pre {
+  margin: 0;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--fs-support);
+  line-height: 1.7;
+}
+
+/* 四类着色只用反相面上的点缀色：同一套值在两种主题下都落在深底上。 */
+.markdown-document .md-tok-comment { color: var(--text-on-inverse-muted); font-style: italic; }
+.markdown-document .md-tok-string { color: var(--green-on-inverse); }
+.markdown-document .md-tok-number { color: var(--gold-on-inverse); }
+.markdown-document .md-tok-keyword { color: var(--brand-on-inverse); }
+
+/*
+ * 行内强调：斜体、删除线、高亮。高亮用半透明金底，不用荧光黄——暗色主题下荧光块太刺眼。
+ * 下面这几类（删除线、插图、脚注）也会出现在阅读层和星图的深色阅读层里，
+ * 那里的底色不跟主题走，所以颜色一律相对 currentColor 取，不写死某个主题色。
+ */
+.markdown-document em { font-style: italic; }
+
+.markdown-document del {
+  opacity: 0.68;
+  text-decoration-color: color-mix(in oklab, currentColor 70%, transparent);
+}
+
+.markdown-document .md-mark {
+  padding: 0 2px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in oklab, var(--gold) 26%, transparent);
+  color: inherit;
+}
+
+/* 图片：行内的限高随文字走，单独一行的当插图居中带说明。 */
+.markdown-document .md-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-control);
+  vertical-align: middle;
+}
+
+.markdown-document .md-figure {
+  margin: 20px 0;
+  text-align: center;
+}
+
+.markdown-document .md-figure .md-image {
+  max-height: 520px;
+  border: 1px solid color-mix(in oklab, currentColor 16%, transparent);
+}
+
+.markdown-document .md-figure figcaption {
+  margin-top: 8px;
+  font-size: var(--fs-support);
+  line-height: 1.6;
+  opacity: 0.75;
+}
+
+/* 脚注：上标只占一个数字宽；文末清单用小一号字，与正文之间一道细线。 */
+.markdown-document .md-footnote-ref {
+  margin-left: 1px;
+  font-size: 0.72em;
+  line-height: 0;
+  scroll-margin-block: 30vh;
+}
+
+.markdown-document .md-footnote-ref > a {
+  padding: 0 2px;
+  color: var(--interactive);
+  font-family: var(--font-mono);
+  text-decoration: none;
+}
+
+.markdown-document .md-footnote-ref > a:hover { text-decoration: underline; }
+
+.markdown-document .md-footnotes {
+  margin-top: 40px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in oklab, currentColor 18%, transparent);
+  font-size: max(var(--fs-support), 0.8em);
+  line-height: 1.8;
+}
+
+.markdown-document .md-footnotes ol {
+  margin: 0;
+  padding-left: 1.6em;
+}
+
+.markdown-document .md-footnotes li {
+  margin: 4px 0;
+  padding-left: 4px;
+  border-radius: var(--radius-xs);
+  scroll-margin-block: 30vh;
+}
+
+.markdown-document .md-footnotes li::marker {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* 跳转后焦点落在目标上（JS 给的），用淡底标出落点，焦点离开即消失。 */
+.markdown-document .md-footnotes li:focus,
+.markdown-document .md-footnote-ref:focus {
+  outline: none;
+  background: color-mix(in oklab, var(--brand) 14%, transparent);
+}
+
+.markdown-document .md-footnote-back {
+  margin-left: 6px;
+  color: var(--interactive);
+  text-decoration: none;
+}
+
 .wiki-link {
   display: inline;
   border: 0;
@@ -483,6 +865,75 @@
 
 .wiki-link:hover {
   border-color: var(--orange);
+}
+
+/* 解析不到的双链：仍可点（交给外壳去提示），但用虚线弱色告诉读者「这里可能断了」。 */
+.wiki-link.wiki-link--missing {
+  border-bottom: 1px dashed var(--text-faint);
+  color: var(--muted);
+  cursor: help;
+}
+
+.wiki-link.wiki-link--missing:hover { border-bottom-color: var(--muted); }
+
+/* 阅读层把所有双链改成文字下划线（.reading-mode .reader-prose .wiki-link，权重 0,3,0），
+   上面那条会被整体盖掉，断链和正常链接看起来一样。这里把权重抬到 0,3,1，
+   只换成虚线下划线、按父级字色减淡——不写死颜色，白纸、夜间书页、星图深色层上都成立。 */
+.markdown-document button.wiki-link.wiki-link--missing {
+  color: color-mix(in oklab, currentColor 68%, transparent);
+  text-decoration-style: dashed;
+}
+
+/* 双链预览卡：挂在 body 上 fixed 定位，所以自己带齐字号与配色，不依赖正文容器。
+   不拦指针、不可聚焦——它只是提示，焦点和点击都留给链接本身。 */
+.wiki-preview {
+  position: fixed;
+  z-index: calc(var(--z-top) + 10);
+  display: grid;
+  gap: 7px;
+  padding: 13px 15px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  pointer-events: none;
+  animation: pop-in var(--dur-fast) var(--ease-out) both;
+}
+
+.wiki-preview > strong {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lead);
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.wiki-preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+
+.wiki-preview-meta > span {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  line-height: 1.7;
+}
+
+/* 信任层那枚沿用全站 .trust-* 的底色与字色，分区这枚给中性底。 */
+.wiki-preview-meta > span:first-child { background: var(--surface-sunken); }
+
+.wiki-preview > p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-compact);
+  line-height: 1.7;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 
 /* 外部リンク。vault 内リンク（.wiki-link）と色で区別する */
@@ -506,12 +957,19 @@
 }
 
 /* 表は1つの枠にまとめる。行ごとに独立した箱だと、ヘッダと本体の区別が付かない */
+/* 列多时不能裁掉右侧：表格自身横向滚动，书页不跟着变宽。 */
 .md-table {
-  overflow: hidden;
+  overflow-x: auto;
   margin: 18px 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   background: var(--surface);
+  overscroll-behavior-x: contain;
+}
+
+.md-table:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .md-table-row {
@@ -519,7 +977,24 @@
   grid-auto-flow: column;
   grid-auto-columns: minmax(100px, 1fr);
   border-bottom: 1px solid var(--line);
-  transition: background 120ms ease;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+/*
+ * 普通模式的表格仍是「div 行 + span 格」（不改 DOM），对齐靠 subgrid：
+ * 外层按列数（--md-cols，由组件写入）开列轨，每行跨满并继承同一组列轨，
+ * 所以一格长文本会把整列撑宽，而不是只撑歪自己那行。列轨下限 100px，
+ * 列多到放不下时整张表按内容宽度横向滚动，行底线与悬停底色也跟着铺满。
+ */
+.md-table--grid {
+  display: grid;
+  grid-template-columns: repeat(var(--md-cols, 1), minmax(100px, auto));
+}
+
+.md-table--grid > .md-table-row {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  grid-auto-flow: row;
 }
 
 .md-table > .md-table-row:last-child { border-bottom: 0; }
@@ -543,8 +1018,29 @@
 
 .md-table-row span:last-child { border-right: 0; }
 
+/* 字号拉回正文下限之上，只压过基础的 9px：用 :where 把权重留在 0,1,1，
+   全屏详情页自己的 .note-drawer--full .md-table-row span（13px、10px 内边距）仍然生效。 */
+:where(.markdown-document .md-table--grid) > .md-table-row > span {
+  min-width: 0;
+  padding: 9px 12px;
+  font-size: var(--fs-support);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+/* 表头略加字距：底色之外再给一个与数据行不同的质感，两套主题下都不靠颜色单独区分。 */
+.markdown-document .md-table--grid > .md-table-head > span {
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+
 /* 1列目は行の見出しとして働くことが多いので、少し強く出す */
 .md-table > .md-table-row:not(.md-table-head) > span:first-child { color: var(--green-deep); }
+
+/* 首列只加字重不加底色：底色会盖住整行的悬停色，行就断成两截。 */
+.markdown-document .md-table--grid > .md-table-row:not(.md-table-head) > span:first-child {
+  font-weight: 560;
+}
 
 .backlinks {
   margin-top: 48px;
@@ -554,35 +1050,70 @@
 
 .backlinks > span {
   display: block;
-  margin-bottom: 12px;
-  color: var(--text-faint);
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 8px;
-  letter-spacing: 0.12em;
+  margin-bottom: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
 }
 
+/* 每条两行：标题 + 对方提到本篇的那一句（命中处高亮），看得出是在什么语境下被引用。 */
 .backlinks button {
   width: 100%;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
   border: 0;
   border-top: 1px solid var(--line);
   background: transparent;
-  padding: 12px 0;
+  padding: 11px 0;
+  color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.backlinks button strong {
-  font-family: "Songti SC", serif;
-  font-size: 13px;
+.backlinks-head {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
 }
 
+.backlinks button strong {
+  min-width: 0;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.backlinks button:hover strong { color: var(--interactive); }
+
 .backlinks button small {
-  color: var(--text-faint);
-  font-size: 8px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.backlinks-context {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.backlinks-context mark {
+  padding: 0 2px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in oklab, var(--brand) 22%, transparent);
+  color: inherit;
 }
 
 .loading-state,

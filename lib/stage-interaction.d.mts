@@ -65,3 +65,12 @@ export class StageInteraction {
 }
 
 export function createStageInteraction(options?: StageInteractionOptions): StageInteraction;
+
+export type StaggerLabelItem = { x: number; y: number; width?: number; dropped?: boolean };
+
+export function staggerLabels<T extends StaggerLabelItem>(
+  items: T[],
+  options?: { rowHeight?: number; padding?: number; maxShift?: number },
+): T[];
+
+export function estimateLabelWidth(text: string, fontSize?: number, chrome?: number): number;

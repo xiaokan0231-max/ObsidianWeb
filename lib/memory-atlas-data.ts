@@ -15,6 +15,7 @@ import {
   type Note,
 } from "./notes.ts";
 import { JOB_CASE_TYPE } from "./vault-boundary.mjs";
+import type { SnippetPart } from "./search-snippet.ts";
 import { interviewContext, interviewNoteTime, matchingInterviewPrep, matchingInterviewContext, resolveCalendarRoundBadge } from "./calendar-interview.ts";
 import { calendarRoundBadge, interviewRound } from "./interview-round.ts";
 
@@ -301,6 +302,132 @@ export function normalizeHeading(text: string) {
     .replace(/\[\[([^#|\]]+)(?:#[^|\]]+)?(?:\|([^\]]+))?\]\]/g, "$2$1")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * 按 ?section= 找章节：全等优先，其次前缀互含（链接里的章节名常被截短，或标题后来补了括注）。
+ * 抽屉与阅读层以前各写了一份，判定细节一改就两边不一致，所以只留这一份。
+ */
+export function findHeadingBySection<T extends { id: string; text: string }>(headings: readonly T[], section: string | null | undefined): T | undefined {
+  if (!section) return undefined;
+  const wanted = normalizeHeading(section);
+  if (!wanted) return undefined;
+  const normalized = headings.map((heading) => normalizeHeading(heading.text));
+  const exact = normalized.findIndex((actual) => actual === wanted);
+  if (exact >= 0) return headings[exact];
+  const loose = normalized.findIndex((actual) => actual && (actual.startsWith(wanted) || wanted.startsWith(actual)));
+  return loose >= 0 ? headings[loose] : undefined;
+}
+
+// 反链的口径与 noteLinks 一致：链接目标文字与文件名（不含 .md）全等才算。
+// 抽屉、场景阅读层、阅读层文末都要问「谁提到了这篇」，每次全库走一遍是 O(n)；
+// 一批 notes 只建一次索引，notes 数组整体替换时 WeakMap 自然失效。
+const backlinkIndexCache = new WeakMap<readonly Note[], Map<string, Note[]>>();
+
+function backlinkIndex(notes: readonly Note[]) {
+  const cached = backlinkIndexCache.get(notes);
+  if (cached) return cached;
+  const index = new Map<string, Note[]>();
+  for (const candidate of notes) {
+    for (const target of new Set(noteLinks(candidate))) {
+      const list = index.get(target);
+      if (list) list.push(candidate);
+      else index.set(target, [candidate]);
+    }
+  }
+  backlinkIndexCache.set(notes, index);
+  return index;
+}
+
+export function noteBacklinks(notes: readonly Note[], note: Note): Note[] {
+  const basename = noteBasename(note.path);
+  return (backlinkIndex(notes).get(basename) ?? []).filter((candidate) => candidate.path !== note.path);
+}
+
+const basenameIndexCache = new WeakMap<readonly Note[], Map<string, Note | null>>();
+
+/** 本文链接到的笔记。同名多篇无法判定指向哪一篇，宁可不列也不猜（与 resolveNoteLink 同一原则）。 */
+export function noteOutlinks(notes: readonly Note[], note: Note): Note[] {
+  let index = basenameIndexCache.get(notes);
+  if (!index) {
+    index = new Map();
+    for (const candidate of notes) {
+      const name = noteBasename(candidate.path);
+      index.set(name, index.has(name) ? null : candidate);
+    }
+    basenameIndexCache.set(notes, index);
+  }
+  const seen = new Set<string>();
+  const result: Note[] = [];
+  for (const target of noteLinks(note)) {
+    const linked = index.get(target);
+    if (!linked || linked.path === note.path || seen.has(linked.path)) continue;
+    seen.add(linked.path);
+    result.push(linked);
+  }
+  return result;
+}
+
+const LINE_WIKILINK = /!?\[\[([^\]|#]+)(#[^\]|]+)?(?:\\?\|([^\]]+))?\]\]/g;
+const backlinkContextCache = new WeakMap<Note, Map<string, SnippetPart[] | null>>();
+
+/**
+ * 把一行 Markdown 变成可读的一句：链接换成显示名，去掉行首记号与强调符，空白折叠成一个。
+ * 同时返回目标链接在结果里的位置——边拼边记，事后再去找会撞上同名的普通文字。
+ */
+function readableLine(line: string, basename: string) {
+  const body = line.replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)+/u, "");
+  const clean = (value: string) => value.replace(/\*\*|__|`|==|~~/g, "").replace(/\s+/g, " ");
+  let text = "";
+  let hit: [number, number] | null = null;
+  let cursor = 0;
+  for (const match of body.matchAll(LINE_WIKILINK)) {
+    const at = match.index ?? 0;
+    text += clean(body.slice(cursor, at));
+    // 表格里的别名链接写成 [[目标\|别名]]，目标末尾会带一个转义用的反斜杠。
+    const target = match[1].trim().replace(/\\$/u, "");
+    const display = clean((match[3] ?? target).trim());
+    if (!hit && target === basename) hit = [text.length, text.length + display.length];
+    text += display;
+    cursor = at + match[0].length;
+  }
+  text += clean(body.slice(cursor));
+  return { text, hit };
+}
+
+/**
+ * 反链的引用上下文：source 里提到 basename 的那一行，链接前后各约 radius 字，链接本身标为命中。
+ * 只提到在 frontmatter 里（source_note: [[…]] 这类结构化关系）时取那一行属性。找不到返回 null。
+ * 按 source 对象缓存：抽屉的反链栏每次重渲染都会问一遍。
+ */
+export function backlinkContext(source: Note, basename: string, radius = 60): SnippetPart[] | null {
+  let perNote = backlinkContextCache.get(source);
+  if (!perNote) {
+    perNote = new Map();
+    backlinkContextCache.set(source, perNote);
+  }
+  if (perNote.has(basename)) return perNote.get(basename) ?? null;
+  const frontmatter = source.content.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+  const lines = [...stripNonLinkRegions(source.content).split("\n"), ...frontmatter.split("\n")];
+  let result: SnippetPart[] | null = null;
+  for (const line of lines) {
+    if (!line.includes("[[")) continue;
+    const { text, hit } = readableLine(line, basename);
+    if (!hit) continue;
+    const [from, to] = hit;
+    const start = Math.max(0, from - radius);
+    const end = Math.min(text.length, to + radius);
+    const before = text.slice(start, from).trimStart();
+    const after = text.slice(to, end).trimEnd();
+    result = [
+      { text: `${start > 0 ? "…" : ""}${before}`, hit: false },
+      { text: text.slice(from, to), hit: true },
+      { text: `${after}${end < text.length ? "…" : ""}`, hit: false },
+    ].filter((part) => part.text);
+    break;
+  }
+  perNote.set(basename, result);
+  return result;
 }
 
 export function seeded(path: string) {

@@ -622,3 +622,70 @@ export function graphHealth(graph: KnowledgeGraph) {
     defaultIsolates: defaultNodes.filter((node) => !connected.has(node.id)).length,
   };
 }
+
+export type ConstellationLabelCandidate = {
+  id: string;
+  degree: number;
+  group: string;
+  x: number;
+  y: number;
+  z: number;
+};
+
+/**
+ * 3D 星图的动态标签该贴给谁。标签池只有十几个 DOM，要把它们花在「此刻最该有名字」的星上：
+ * - 有选中：选中星本身 + 它的邻居，按被引用数从高到低（飞近后周围的星不再是无名光点）；
+ * - 没有选中：离镜头注视点近、被引用多的星。分数 = log2(degree+2) × e^(-距离/radius)，
+ *   radius 由调用方按镜头距离给——远看时近似按 degree 选全图主角，拉近后只选眼前的。
+ *   每个分区最多 perGroupLimit 个，免得全景下名字全挤在最大的那条旋臂上。
+ * 同分时按 id 排，保证同一输入永远绑定同一批，标签不会来回换人。
+ */
+export function pickConstellationLabels(options: {
+  candidates: ConstellationLabelCandidate[];
+  focus: { x: number; y: number; z: number };
+  radius: number;
+  limit: number;
+  perGroupLimit?: number;
+  selectedId?: string | null;
+  neighborIds?: Iterable<string> | null;
+}): string[] {
+  const limit = Math.max(0, Math.floor(options.limit));
+  if (limit === 0) return [];
+  const byId = new Map(options.candidates.map((candidate) => [candidate.id, candidate]));
+  const selected = options.selectedId ? byId.get(options.selectedId) : undefined;
+  if (selected) {
+    const neighbors = [...new Set(options.neighborIds ?? [])]
+      .filter((id) => id !== selected.id)
+      .flatMap((id) => {
+        const candidate = byId.get(id);
+        return candidate ? [candidate] : [];
+      })
+      .toSorted((left, right) => right.degree - left.degree || left.id.localeCompare(right.id));
+    return [selected.id, ...neighbors.map((candidate) => candidate.id)].slice(0, limit);
+  }
+  const radius = Math.max(0.001, options.radius);
+  const perGroupLimit = Math.max(1, options.perGroupLimit ?? limit);
+  const scored = options.candidates
+    .map((candidate) => {
+      const distance = Math.hypot(
+        candidate.x - options.focus.x,
+        candidate.y - options.focus.y,
+        candidate.z - options.focus.z,
+      );
+      return {
+        candidate,
+        score: Math.log2(Math.max(0, candidate.degree) + 2) * Math.exp(-distance / radius),
+      };
+    })
+    .toSorted((left, right) => right.score - left.score || left.candidate.id.localeCompare(right.candidate.id));
+  const perGroup = new Map<string, number>();
+  const picked: string[] = [];
+  for (const { candidate } of scored) {
+    if (picked.length >= limit) break;
+    const used = perGroup.get(candidate.group) ?? 0;
+    if (used >= perGroupLimit) continue;
+    perGroup.set(candidate.group, used + 1);
+    picked.push(candidate.id);
+  }
+  return picked;
+}
