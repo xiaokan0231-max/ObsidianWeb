@@ -15,6 +15,49 @@ import { WikiPreviewLink, wikiMissingTitle } from "./wiki-preview";
 /** 見出しに付ける id。行番号ベースなので、目次側と本文側で必ず一致する。 */
 export { headingAnchor } from "@/lib/reading-document";
 
+function tableCells(line: string): string[] {
+  const source = line.trim().replace(/^\|/, "");
+  const cells: string[] = [];
+  let cell = "";
+  let wiki = false;
+  let codeFence = "";
+  let trailingSeparator = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    trailingSeparator = false;
+    // 代码里的反斜杠是原文；只移除保护表格竖线的转义，不能把代码本身压短。
+    if (char === "\\" && (source[index + 1] === "|" || (!codeFence && source[index + 1] === "\\"))) {
+      cell += source[index + 1];
+      index += 1;
+      continue;
+    }
+    if (!wiki && char === "`") {
+      const marker = source.slice(index).match(/^`+/)![0];
+      if (codeFence === marker) codeFence = "";
+      // 未闭合的反引号仍是普通文本，不能把后续列全部吞进一个单元格。
+      else if (!codeFence && [...source.slice(index + marker.length).matchAll(/`+/g)].some((match) => match[0] === marker)) codeFence = marker;
+      cell += marker;
+      index += marker.length - 1;
+      continue;
+    }
+    if (!codeFence && source.slice(index, index + 2) === "[[" && source.indexOf("]]", index + 2) >= 0) wiki = true;
+    if (!codeFence && source.slice(index, index + 2) === "]]") {
+      wiki = false;
+      cell += "]]";
+      index += 1;
+      continue;
+    }
+    if (char === "|" && !wiki && !codeFence) {
+      cells.push(cell);
+      cell = "";
+      trailingSeparator = true;
+    } else cell += char;
+  }
+  // 只去掉真正的末尾边界；空列和转义的竖线都必须保留。
+  if (!trailingSeparator) cells.push(cell);
+  return cells;
+}
+
 type InternalLinkResolver = (href: string) => { href: string; onNavigate: () => void } | null;
 type WikiResolver = (target: string, section?: string) => Note | null;
 
@@ -275,7 +318,8 @@ function MarkdownDocument({
   let quoteStart = 0;
   // 表も同じ理由でまとめる。行ごとに独立した箱だと、
   // ヘッダ行と本体行の区別も、枠線の一体感も出せない。
-  let tableLines: string[] = [];
+  let tableLines: string[][] = [];
+  let tableHasSeparator = false;
   let tableStart = 0;
   let seenTitle = false;
   const flushQuote = () => {
@@ -310,9 +354,9 @@ function MarkdownDocument({
   };
   const flushTable = () => {
     if (!tableLines.length) return;
-    const buffered = tableLines;
+    const rows = tableLines;
     tableLines = [];
-    const rows = buffered.map((row) => row.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|"));
+    tableHasSeparator = false;
     const columnCount = Math.max(...rows.map((row) => row.length));
     if (reading) {
       // 独立的行网格会被各行的长文本撑成不同宽度；原生表格让所有行共用列宽。
@@ -390,8 +434,12 @@ function MarkdownDocument({
       flushParagraph();
       flushQuote();
       if (!tableLines.length) tableStart = index;
-      // |---|---| の区切り行は表示しない
-      if (!/^\|?\s*:?-+/.test(line)) tableLines.push(line);
+      const cells = tableCells(line);
+      // 分隔行必须每列都是横线；负数或以横线开头的正文不能被当成分隔行删掉。
+      const separator = !tableHasSeparator && tableLines.length === 1 && cells.length === tableLines[0].length
+        && cells.every((cell) => /^:?-+:?$/.test(cell.trim()));
+      if (separator) tableHasSeparator = true;
+      else tableLines.push(cells);
       return;
     }
     flushQuote();
