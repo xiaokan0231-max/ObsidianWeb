@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { UI_THEME_COOKIE, UI_THEME_EVENT, type UiTheme } from "@/lib/ui-theme";
+import { DEFAULT_UI_THEME, UI_THEME_COOKIE, UI_THEME_EVENT, type UiTheme } from "@/lib/ui-theme";
 import { useUiLocale } from "./ui-locale";
 
 /*
@@ -10,7 +10,7 @@ import { useUiLocale } from "./ui-locale";
  */
 type UiThemeContextValue = { theme: UiTheme; setTheme: (theme: UiTheme) => void };
 
-const UiThemeContext = createContext<UiThemeContextValue>({ theme: "light", setTheme: () => {} });
+const UiThemeContext = createContext<UiThemeContextValue>({ theme: DEFAULT_UI_THEME, setTheme: () => {} });
 
 export function UiThemeProvider({ initialTheme, children }: { initialTheme: UiTheme; children: ReactNode }) {
   // 服务端按同一枚 cookie 渲染出 <html data-theme>，第一帧就是所选主题，不需要再加首帧脚本。

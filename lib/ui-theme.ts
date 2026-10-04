@@ -4,10 +4,10 @@ export type UiTheme = "dark" | "light";
 export const UI_THEME_COOKIE = "career-room-theme";
 
 /**
- * 没选过主题时的默认值。颜色迁移完成前保持浅色，免得半迁移的页面以暗色示人；
- * 全部样式改成语义 token 之后再改成 "dark"。
+ * 没选过主题时的默认值：墨夜作战室（暗色）。全站样式都已改成语义 token，
+ * 本人在顶栏或 ⌘K 里切回浅色后，cookie 会记住选择。
  */
-export const DEFAULT_UI_THEME: UiTheme = "light";
+export const DEFAULT_UI_THEME: UiTheme = "dark";
 
 export function resolveUiTheme(value: unknown): UiTheme {
   return value === "dark" || value === "light" ? value : DEFAULT_UI_THEME;
