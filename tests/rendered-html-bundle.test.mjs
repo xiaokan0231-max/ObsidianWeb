@@ -49,3 +49,13 @@ test("教材和情境课样式随课程模块加载，不进入全局与日历�
   assert.match(courseCss, /\.scenario-workbench\b/);
   assert.match(courseCss, /\.language-textbook\b/);
 });
+
+test("快练样式随日语训练模块加载，不进入全局与日历首屏 CSS", async () => {
+  const serverEntry = Object.keys(server).filter((key) => server[key].isEntry);
+  const initialCss = await cssFor(client, shell, clientRoot) +
+    await cssFor(server, staticClosure(server, serverEntry), serverRoot);
+  assert.match(initialCss, /\.app-shell\b/, "实际检查包含全局外壳的样式，不能因清单漏读而空通过");
+  assert.doesNotMatch(initialCss, /\.quick-card\b/);
+  const training = staticClosure(client, ["app/japanese-training.tsx"]);
+  assert.match(await cssFor(client, training, clientRoot), /\.quick-card\b/);
+});

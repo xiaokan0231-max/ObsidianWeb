@@ -16,7 +16,7 @@ test("输入场景判定：input/textarea/select 与 contentEditable 都算，�
 });
 
 test("全仓只有一份判定；全局 R 让位给 3D 舞台已处理过的按键", async () => {
-  const files = ["app/prep-search.tsx", "app/three-stage-chrome.tsx", "app/language-expression-courses.tsx", "app/jobs-view.tsx", "app/jobs-decision.tsx", "app/interview-review.tsx"];
+  const files = ["app/prep-search.tsx", "app/three-stage-chrome.tsx", "app/language-expression-courses.tsx", "app/jobs-view.tsx", "app/jobs-decision.tsx", "app/interview-review.tsx", "app/language-quick-drill.tsx"];
   for (const file of files) {
     const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
     assert.doesNotMatch(source, /instanceof HTMLInputElement|\["INPUT", "TEXTAREA", "SELECT"\]|\(INPUT\|TEXTAREA\|SELECT\)/, `${file} 不再自带一份输入场景判定`);

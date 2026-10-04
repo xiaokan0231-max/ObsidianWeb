@@ -1995,7 +1995,8 @@
   font-weight: 600;
   line-height: 1;
 }
-.focus-language-glance div:nth-child(2) dd { color: var(--orange); }
+/* 强调色作文字要用 --interactive：--orange 在浅色主题的 22px 数字上只有 2.9:1。 */
+.focus-language-glance div:nth-child(2) dd { color: var(--interactive); }
 
 /* 首屏只保留一个训练入口，同时把三阶段放在同一视线内。 */
 .focus-language-now {
@@ -2151,7 +2152,7 @@
 .focus-language-two-column { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 22px; }
 .focus-language-two-column > div { padding: 30px; background: var(--surface); border: 1px solid var(--line); }
 .focus-issue-compact { display: grid; grid-template-columns: 36px minmax(0,1fr); gap: 12px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line-soft); }
-.focus-issue-compact > b { color: var(--orange); font: 700 10px/1 monospace; }
+.focus-issue-compact > b { color: var(--interactive); font: 700 11px/1 var(--font-mono); }
 .focus-issue-compact strong, .focus-issue-compact span { display: block; }
 .focus-issue-compact strong { font-size: 13px; }
 .focus-issue-compact span { margin-top: 3px; color: var(--muted); font-size: 10px; }
