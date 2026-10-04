@@ -5,7 +5,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
 // 求职看板的决策台：不注入 window，URL 状态走 SSR 分支（默认视图＝决策台、默认只看未応募）。
-const { default: JobsView } = await loadAppModule("app/jobs-view.tsx");
+// 周复盘的 Markdown 渲染与这里断言的看板・空态无关，换成替身，免得把阅读模块链整条拉进来。
+const { default: JobsView } = await loadAppModule("app/jobs-view.tsx", {
+  stubs: { "./markdown-document": { default: () => null } },
+});
 
 const V2 = {
   rating_version: "v2", fit_score_100: 74, fit_band_final: "B", hard_gate: "hold",

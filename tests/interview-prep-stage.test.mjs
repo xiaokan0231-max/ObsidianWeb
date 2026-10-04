@@ -9,7 +9,13 @@ import { loadAppModule } from "./helpers/render-tsx.mjs";
 const text = (value) => [{ kind: "text", text: value }];
 
 test("临场卡只留台词与紧邻的小标题，没有台词的标题一起丢掉", async () => {
-  const { stageCardBlocks } = await loadAppModule("app/prep-material-reader.tsx");
+  // 只测台词筛选：阅读层与标题工具换成替身，不把整条阅读模块链（含 lib/notes）拉进来。
+  const { stageCardBlocks } = await loadAppModule("app/prep-material-reader.tsx", {
+    stubs: {
+      "@/lib/reading-document": { headingPlainText: (value) => value },
+      "./reading-mode": { default: () => null },
+    },
+  });
   const blocks = [
     { kind: "paragraph", inline: text("背景说明") },
     { kind: "heading", level: 3, depth: 3, inline: text("没有台词的小节") },

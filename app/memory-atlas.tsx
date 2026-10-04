@@ -28,7 +28,7 @@ import GraphView from "./graph-view";
 import LibraryView from "./library-view";
 import NoteDrawer from "./note-drawer";
 import SceneNoteReader from "./scene-note-reader";
-import SearchPalette from "./search-palette";
+import SearchPalette, { type PaletteAction } from "./search-palette";
 import TimelineView from "./timeline-view";
 import {
   appViewFromPathname,
@@ -79,6 +79,8 @@ import { resolveNoteLink } from "@/lib/wiki-target";
 import { tokyoParts } from "@/lib/dojo/utils";
 import { APP_BRANDING } from "@/lib/ui-locale";
 import { LanguageSwitch, useUiLocale } from "./ui-locale";
+import { ThemeSwitch, useUiTheme } from "./ui-theme";
+import { rememberRecentPath } from "@/lib/recent-notes";
 import { SHELL_MESSAGES } from "./shell-messages";
 
 
@@ -369,7 +371,8 @@ function newHistoryEntryId() {
 }
 
 function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
-  const { locale } = useUiLocale();
+  const { locale, setLocale } = useUiLocale();
+  const { theme, setTheme } = useUiTheme();
   const ui = SHELL_MESSAGES[locale];
   const branding = APP_BRANDING[locale];
   const navigation = getNavigation(locale);
@@ -848,8 +851,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        // 面板挂载后自己聚焦输入框，这里不需要再持有 ref。
-        setSearchOpen(true);
+        // 面板挂载后自己聚焦输入框，这里不需要再持有 ref。再按一次就关，和其它命令面板的习惯一致。
+        setSearchOpen((open) => !open);
       }
       // R = 重读 vault。顶栏不再有按钮，所以这条必须挡住输入场景，否则打字就会触发。
       if (
@@ -865,6 +868,11 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
         void loadVault({ fresh: true });
       }
       if (event.key === "Escape") {
+        // ⌘K 面板永远在最上层：先关它，不连带关掉它底下的抽屉或浮层。
+        if (searchOpen) {
+          setSearchOpen(false);
+          return;
+        }
         // 回答库の上に原笔记 drawer を開いている時は、一段ずつ閉じる。
         if (selectedPath) {
           if (window.history.state?.__echoNote) window.history.back();
@@ -900,6 +908,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     closeSharedAsset,
     loadVault,
     prepOverlayCard,
+    searchOpen,
     selectedPath,
     sharedAssetOverlay,
   ]);
@@ -1053,6 +1062,18 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     void loadVault({ scope: "all" });
   }, [selectedPath, selectedNote, loadVault]);
 
+  // ⌘K 搜的是「全库」：没去过资料库时只载了当前视图的 scope，打开面板时把 all 补齐，
+  // 面板在补齐前会说明「正在载入全部资料」，不把部分结果当成全库。
+  useEffect(() => {
+    if (!searchOpen || loadedScopes.current.has("all") || loadingScopes.current.has("all")) return;
+    void loadVault({ scope: "all" });
+  }, [searchOpen, loadVault]);
+
+  // 「最近打开」记在本机：不论从哪一页、哪种方式打开笔记，都在这里统一记一笔。
+  useEffect(() => {
+    if (selectedPath) rememberRecentPath(selectedPath);
+  }, [selectedPath]);
+
   const sourceLabel = error ? (locale === "ja" ? "接続中断" : "连接中断") : loading ? ui.loading : ui.connected;
   const syncedAt = fetchedAt
     ? `${new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(fetchedAt)} ${locale === "ja" ? "同期" : "同步"}`
@@ -1135,6 +1156,31 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   }, [calendarInterviewTargets, navigateToView, nextEvent]);
 
   const openAnswerLibrary = useCallback(() => navigateToView("prep"), [navigateToView]);
+
+  // 复盘页「准备稿 ↗」：按这场面试的公司・日期・轮次去本场面试页，由那边按同一套规则找到对应准备稿。
+  const openReviewSession = useCallback((target: { company: string; date: string; round: string; notePath: string }) => {
+    navigateToView("session", calendarInterviewSearch({
+      view: "session",
+      path: null,
+      company: target.company,
+      date: target.date,
+      label: target.round,
+      sourcePath: target.notePath,
+      caseId: "",
+    }));
+  }, [navigateToView]);
+
+  // ⌘K 里的动作：和页面命令同列，但单独一张表（页面命令每个视图恰好一条，由导航表派生）。
+  const paletteActions = useMemo<PaletteAction[]>(() => {
+    const ja = locale === "ja";
+    return [
+      { id: "reload", label: ja ? "資料を再読み込み" : "重读资料", description: ja ? "Obsidian から最新の状態を取り直す（R）" : "从 Obsidian 重新读取最新内容（R）", keywords: "重读 刷新 reload refresh 再読み込み 更新", run: () => void loadVault({ fresh: true }) },
+      { id: "stats", label: ja ? "統計を再計算" : "重算统计", description: ja ? "台帳と集計の generated 区画を作り直す" : "重新生成台帐与汇总的生成区块", keywords: "统计 重算 汇总 stats rebuild 統計 集計", run: () => void rebuildStats() },
+      { id: "theme", label: theme === "dark" ? (ja ? "ライトテーマに切替" : "切换到浅色主题") : (ja ? "ダークテーマに切替" : "切换到暗色主题"), description: ja ? "表示テーマを切り替える" : "切换界面主题", keywords: "主题 暗色 浅色 夜间 dark light theme テーマ ダーク ライト", run: () => setTheme(theme === "dark" ? "light" : "dark") },
+      { id: "locale", label: ja ? "中文に切替" : "切换到日本語", description: ja ? "表示言語を切り替える" : "切换界面语言", keywords: "语言 中文 日本語 日语 language 言語", run: () => setLocale(ja ? "zh-CN" : "ja") },
+      ...(nextEvent ? [{ id: "next", label: ja ? "次の予定を開く" : "打开下一场", description: `${nextEvent.date} ${nextEvent.company}`, keywords: "下一场 面试 安排 next 次 予定 面接", run: () => openNextEvent() }] : []),
+    ];
+  }, [locale, theme, setTheme, setLocale, loadVault, rebuildStats, nextEvent, openNextEvent]);
 
   const syncInterviewSelection = useCallback((company: string, prepPath: string) => {
     const params = new URLSearchParams();
@@ -1309,7 +1355,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           </div>
 
           {/* 当前面试页已经有“本场”倒计时；再放全局下一场会让两家公司同时争夺上下文。 */}
-          {nextEvent && view !== "session" && (
+          {/* 日历首页自己有下一场的大卡，顶栏不再重复一条。 */}
+          {nextEvent && view !== "session" && view !== "calendar" && (
             <button
               className="topbar-next"
               onClick={openNextEvent}
@@ -1348,6 +1395,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
             <button onClick={() => setSearchOpen(true)} aria-label={ui.searchCommands}><kbd>⌘K</kbd>{ui.search}</button>
             <span><kbd>R</kbd>{ui.reload}</span>
           </div>
+          <ThemeSwitch />
           <LanguageSwitch />
         </header>
 
@@ -1420,15 +1468,19 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   onOpenEvidence={openReviewEvidence}
                   onOpenInsights={openInterviewInsights}
                   onSelectionChange={syncReviewSelection}
+                  onOpenNote={openNote}
+                  onOpenSession={openReviewSession}
                 />
               )}
               {view === "insights" && <InterviewInsights notes={notes} onOpenEvidence={openReviewEvidence} onOpenReview={openReview}
                 onVaultChanged={loadVault} onNoteWritten={patchNote} />}
               {view === "practice" && (
                 <InterviewPractice
+                  loading={!scopeReady && !error}
                   notes={notes}
                   today={today}
                   onNoteWritten={patchNote}
+                  onOpenEvidence={openReviewEvidence}
                 />
               )}
               {view === "session" && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && (calendarInterview.path || calendarCompanyContext))) && (
@@ -1471,6 +1523,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
               )}
               {view === "jobs" && (
                 <JobsView
+                  loading={!scopeReady && !error}
                   notes={notes}
                   today={today}
                   onOpen={openNote}
@@ -1583,6 +1636,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           onQuery={runSavedQuery}
           onClose={() => setSearchOpen(false)}
           onNavigate={(target) => navigateToView(target)}
+          allReady={readyScopes.has("all")}
+          actions={paletteActions}
         />
       )}
 
