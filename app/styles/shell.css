@@ -140,6 +140,12 @@
   animation: pulse 1s infinite alternate;
 }
 
+/* 超过 10 分钟没同步：状态点转金色提醒，悬停标题里有具体时刻。 */
+.topbar-source.aged .status-dot {
+  background: var(--gold);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--gold) 14%, transparent);
+}
+
 .status-dot.error {
   background: var(--danger);
   box-shadow: 0 0 0 4px color-mix(in oklab, var(--danger) 12%, transparent);

@@ -13,6 +13,9 @@ const zh = {
   sessionBack: "返回本场面试", escapeBack: "也可返回", answerLibrary: "回答库",
   snapshot: "快照", justUpdated: "刚刚更新", cached: "已缓存", unavailable: "数据暂不可用",
   stalePrefix: "同步中断，正在显示", staleSuffix: "的可用快照。",
+  syncedJustNow: "刚刚同步", syncedMinutesAgo: "{n} 分钟前同步",
+  connectionSteps: ["确认 Obsidian 已打开这个 vault", "确认 Local REST API 插件已启用", "用 npm run dev 启动开发服务器"],
+  retryIn: "{n} 秒后自动重试",
 };
 
 const ja: typeof zh = {
@@ -28,6 +31,9 @@ const ja: typeof zh = {
   sessionBack: "今回の面接に戻る", escapeBack: "でも戻れます", answerLibrary: "回答集",
   snapshot: "スナップショット", justUpdated: "更新したばかり", cached: "キャッシュ済み", unavailable: "データを取得できません",
   stalePrefix: "同期が中断しました。", staleSuffix: "のスナップショットを表示しています。",
+  syncedJustNow: "たった今同期", syncedMinutesAgo: "{n} 分前に同期",
+  connectionSteps: ["Obsidian でこの vault を開いているか確認", "Local REST API プラグインが有効か確認", "npm run dev で開発サーバーを起動"],
+  retryIn: "{n} 秒後に自動で再試行",
 };
 
 export const SHELL_MESSAGES: Record<UiLocale, typeof zh> = { "zh-CN": zh, ja };

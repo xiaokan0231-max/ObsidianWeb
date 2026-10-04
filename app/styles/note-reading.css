@@ -641,20 +641,52 @@
 .loading-state p,
 .connection-error p {
   margin: 12px 0;
-  color: var(--text-faint);
-  font-size: 11px;
+  color: var(--text-tertiary);
+  font-size: 13px;
 }
 
+/* 首屏骨架：画出将要打开的页面的大致版式，数据到达时不至于从一个圆圈突然跳成整页。 */
+.loading-skeleton {
+  width: min(1080px, 100%);
+  margin-top: 30px;
+  display: grid;
+  gap: 10px;
+}
+.loading-skeleton[data-shape="calendar"] { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.loading-skeleton[data-shape="calendar"] > i { height: 72px; }
+.loading-skeleton[data-shape="cards"] { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.loading-skeleton[data-shape="cards"] > i { height: 120px; border-radius: var(--radius-card); }
+.loading-skeleton[data-shape="columns"] { grid-template-columns: 260px minmax(0, 1fr); grid-auto-rows: 18px; row-gap: 14px; }
+.loading-skeleton[data-shape="columns"] > i:nth-child(odd) { grid-column: 1; }
+.loading-skeleton[data-shape="columns"] > i:nth-child(even) { grid-column: 2; }
+.loading-skeleton[data-shape="columns"] > i:nth-child(4n) { width: 72%; }
+
 .connection-error {
+  --error-tone: var(--danger);
   max-width: 650px;
   margin: 0 auto;
+}
+/* 原因不同，强调色不同：凭证是配置问题（警示），连不上通常只是 Obsidian 没开（信息）。 */
+.connection-error[data-kind="credentials"] { --error-tone: var(--warning); }
+.connection-error[data-kind="unreachable"] { --error-tone: var(--info); }
+
+.connection-steps {
+  margin: 6px 0 4px;
+  padding: 14px 18px 14px 36px;
+  border-left: 3px solid var(--error-tone);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.9;
+  text-align: left;
 }
 
 .error-code {
   margin-bottom: 17px;
-  color: var(--orange);
+  color: var(--error-tone, var(--orange));
   font-family: var(--font-geist-mono), monospace;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.2em;
 }
 
@@ -671,17 +703,23 @@
   background: var(--paper-deep);
   color: var(--danger-strong);
   font-family: var(--font-geist-mono), monospace;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .connection-error button {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
   border: 0;
+  border-radius: var(--radius-control);
   background: var(--ink);
   color: var(--on-fill);
-  padding: 11px 16px;
-  font-size: 10px;
+  padding: 11px 18px;
+  font-size: 13px;
   cursor: pointer;
 }
+.connection-error button small { opacity: 0.75; font-size: 11px; }
 .exam-select { padding: 6px 9px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; font-size: 8px; }
 .exam-select.selected { color: var(--on-fill); background: var(--violet); border-color: var(--violet); }
 .exam-topbar { height: 70px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; border-bottom: 1px solid var(--line); background: color-mix(in oklab, var(--surface) 90%, transparent); backdrop-filter: blur(15px); }

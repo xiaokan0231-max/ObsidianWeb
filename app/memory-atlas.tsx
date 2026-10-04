@@ -1078,7 +1078,26 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const syncedAt = fetchedAt
     ? `${new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(fetchedAt)} ${locale === "ja" ? "同期" : "同步"}`
     : locale === "ja" ? "ローカルデータ" : "本地数据源";
-  const sourceDetail = derivedState === "rebuilding" ? ui.rebuilding : derivedState === "stale" ? (locale === "ja" ? "集計の更新待ち" : "统计待重算") : syncedAt;
+  // 相对时间只在这里算：每分钟、以及回到页面时刷新一次时钟，不常驻秒级计时器。
+  const [clock, setClock] = useState(0);
+  useEffect(() => {
+    const tick = () => setClock(Date.now());
+    const first = window.setTimeout(tick, 0);
+    const timer = window.setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [fetchedAt]);
+  const syncedMinutes = fetchedAt && clock ? Math.max(0, Math.floor((clock - fetchedAt) / 60_000)) : null;
+  // 一小时以内说「N 分钟前」更好判断新不新；再久就回到具体时刻。超过 10 分钟状态点转警示色。
+  const syncedLabel = syncedMinutes === null || syncedMinutes >= 60
+    ? syncedAt
+    : syncedMinutes < 1 ? ui.syncedJustNow : ui.syncedMinutesAgo.replace("{n}", String(syncedMinutes));
+  const syncAged = syncedMinutes !== null && syncedMinutes >= 10 && !error;
+  const sourceDetail = derivedState === "rebuilding" ? ui.rebuilding : derivedState === "stale" ? (locale === "ja" ? "集計の更新待ち" : "统计待重算") : syncedLabel;
 
   const navigateToView = useCallback((
     nextView: View,
@@ -1370,7 +1389,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           )}
 
           <button
-            className="topbar-source"
+            className={`topbar-source${syncAged ? " aged" : ""}`}
             onClick={() => void loadVault({ fresh: true })}
             disabled={loading}
             title={`${sourceLabel} · ${sourceDetail}（${ui.reloadHint}）`}
@@ -1393,7 +1412,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
 
           <div className="topbar-keys">
             <button onClick={() => setSearchOpen(true)} aria-label={ui.searchCommands}><kbd>⌘K</kbd>{ui.search}</button>
-            <span><kbd>R</kbd>{ui.reload}</span>
+            <button onClick={() => void loadVault({ fresh: true })} disabled={loading} title={ui.reloadHint}><kbd>R</kbd>{ui.reload}</button>
           </div>
           <ThemeSwitch />
           <LanguageSwitch />
@@ -1402,7 +1421,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
         {error && notes.length === 0 ? (
           <ConnectionError error={error} onRetry={() => void loadVault()} />
         ) : loading && notes.length === 0 ? (
-          <LoadingState />
+          <LoadingState view={view} />
         ) : (
           <ViewErrorBoundary key={view} label={view}>
             {error && notes.length > 0 && (
@@ -1687,29 +1706,77 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
 }
 
 
-function LoadingState() {
+/** 首屏骨架按将要打开的页面画：日历是月格，岗位・分析是卡片，其余是阅读两栏。 */
+function loadingShape(view: View) {
+  if (view === "calendar") return "calendar";
+  if (view === "jobs" || view === "analytics" || view === "library") return "cards";
+  return "columns";
+}
+
+function LoadingState({ view }: { view: View }) {
   const { locale } = useUiLocale();
   const ui = SHELL_MESSAGES[locale];
+  const shape = loadingShape(view);
+  const count = shape === "calendar" ? 35 : shape === "cards" ? 6 : 8;
   return (
     <div className="loading-state">
       <div className="loading-orbit"><i /><i /><i /><strong>職</strong></div>
       <h1>{ui.loadingTitle}</h1>
       <p>{ui.loadingDetail}</p>
+      <div className="loading-skeleton" data-shape={shape} aria-hidden="true">
+        {Array.from({ length: count }, (_, index) => <i key={index} className="skeleton" />)}
+      </div>
     </div>
   );
 }
+
+/** 连不上时按 3→6→12→24→30 秒退避自动重连；凭证错误重试也没用，只给手动按钮。 */
+const RECONNECT_DELAYS = [3, 6, 12, 24, 30];
 
 function ConnectionError({ error, onRetry }: { error: string; onRetry: () => void }) {
   const { locale } = useUiLocale();
   const ui = SHELL_MESSAGES[locale];
   const detail = describeConnectionError(error);
+  const autoRetry = detail.kind === "unreachable";
+  const [attempt, setAttempt] = useState(0);
+  const [remaining, setRemaining] = useState(RECONNECT_DELAYS[0]);
+  // 外壳每次重渲染都会传一个新的 onRetry；倒计时只认最新的那个，不因此重新开始。
+  const retryRef = useRef(onRetry);
+  useEffect(() => {
+    retryRef.current = onRetry;
+  });
+  useEffect(() => {
+    if (!autoRetry) return;
+    const delay = RECONNECT_DELAYS[Math.min(attempt, RECONNECT_DELAYS.length - 1)];
+    let left = delay;
+    const reset = window.setTimeout(() => setRemaining(delay), 0);
+    const timer = window.setInterval(() => {
+      left -= 1;
+      setRemaining(left);
+      if (left <= 0) {
+        window.clearInterval(timer);
+        setAttempt((current) => current + 1);
+        retryRef.current();
+      }
+    }, 1000);
+    return () => {
+      window.clearTimeout(reset);
+      window.clearInterval(timer);
+    };
+  }, [attempt, autoRetry]);
   return (
-    <div className="connection-error">
+    <div className="connection-error" data-kind={detail.kind}>
       <span className="error-code">LOCAL / OFFLINE</span>
       <h1>{detail.title}</h1>
       <p>{detail.hint}</p>
+      <ol className="connection-steps">
+        {ui.connectionSteps.map((step) => <li key={step}>{step}</li>)}
+      </ol>
       <code>{error}</code>
-      <button onClick={onRetry}>{ui.reconnect} <span>↻</span></button>
+      <button onClick={onRetry}>
+        {ui.reconnect} <span>↻</span>
+        {autoRetry && <small>{ui.retryIn.replace("{n}", String(Math.max(0, remaining)))}</small>}
+      </button>
     </div>
   );
 }
