@@ -435,11 +435,23 @@ function readStoredPreferences() {
       && thresholds.releaseThreshold > thresholds.closeThreshold;
     return {
       seen: parsed?.seen === true,
+      // 摄像头默认关：一进全屏就弹授权框太突兀。只有本人主动开过才在下次自动开。
+      enabled: parsed?.enabled === true,
       thresholds: usable ? thresholds as PinchThresholds : DEFAULT_THRESHOLDS,
       envelope: seed,
     };
   } catch {
-    return { seen: false, thresholds: DEFAULT_THRESHOLDS, envelope: null };
+    return { seen: false, enabled: false, thresholds: DEFAULT_THRESHOLDS, envelope: null };
+  }
+}
+
+/** 只改存档里的开关一项，阈值与包络原样保留。 */
+function writeEnabledPreference(enabled: boolean) {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY) ?? "null") ?? {};
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({ ...parsed, enabled }));
+  } catch {
+    // 隐私模式下写不进去：本次会话照常，下次回到默认关闭。
   }
 }
 
@@ -487,7 +499,7 @@ export function GraphHandControls({
   const envelopeResetRequestedRef = useRef(false);
   const onboardingRef = useRef({ visible: false, step: 0 });
   const calibrationSamplesRef = useRef({ open: [] as number[], closed: [] as number[] });
-  const [enabled, setEnabled] = useState(true);
+  const [enabled, setEnabled] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [detail, setDetail] = useState("");
   const [retry, setRetry] = useState(0);
@@ -516,6 +528,10 @@ export function GraphHandControls({
     const stored = readStoredPreferences();
     thresholdsRef.current = stored.thresholds;
     envelopeSeedRef.current = stored.envelope;
+    if (stored.enabled) {
+      const timer = window.setTimeout(() => setEnabled(true), 0);
+      return () => window.clearTimeout(timer);
+    }
     if (!stored.seen) {
       onboardingRef.current = { visible: true, step: 0 };
       const timer = window.setTimeout(() => setOnboarding({ visible: true, step: 0 }), 0);
@@ -532,6 +548,7 @@ export function GraphHandControls({
     try {
       window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
         seen: true,
+        enabled: true,
         thresholds: calibrated,
         envelope: envelopeSeedRef.current,
       }));
@@ -560,6 +577,7 @@ export function GraphHandControls({
     try {
       window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
         seen: true,
+        enabled,
         thresholds: DEFAULT_THRESHOLDS,
       }));
     } catch {
@@ -1450,9 +1468,11 @@ export function GraphHandControls({
         )}
         <div className="graph-hand-status" aria-live="polite">
           <span><i /> HAND NAVIGATION <b>{uiFrame?.hands.length === 2 ? "DUAL" : "SINGLE"}</b></span>
-          <strong>{modeTitle}</strong>
+          <strong>{enabled ? modeTitle : "手势已关闭"}</strong>
           <small>
-            {uiFrame?.mode === "dual-transform"
+            {!enabled
+              ? "启用后用摄像头识别手势；视频只在本机内存中处理，不会上传。"
+              : uiFrame?.mode === "dual-transform"
               ? "移动中点平移 · 拉开缩放 · 转动双手旋转"
               : uiFrame?.hands.length === 2
                 ? "辅助手稳定张掌可展开菜单盘；双手同时握拳或捏合可操纵空间"
@@ -1537,7 +1557,8 @@ export function GraphHandControls({
                   setActionFeedback(null);
                   setRadialMenu((current) => ({ ...current, open: false, selected: null }));
                 }
-                setEnabled((current) => !current);
+                writeEnabledPreference(!enabled);
+                setEnabled(!enabled);
               }}
             >
               {enabled ? "关闭摄像头" : "启用手势"}
@@ -1548,7 +1569,8 @@ export function GraphHandControls({
         </div>
       </aside>
 
-      {onboarding.visible && (
+      {/* 校准要人把手举到镜头前：摄像头没开时弹出来只会让人困惑。 */}
+      {enabled && onboarding.visible && (
         <section className="graph-hand-onboarding" aria-label="手势校准">
           <span>HAND CALIBRATION · {onboarding.step + 1}/{ONBOARDING_STEPS.length}</span>
           <strong>{ONBOARDING_STEPS[onboarding.step].title}</strong>

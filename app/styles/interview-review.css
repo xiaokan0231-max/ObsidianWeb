@@ -393,6 +393,23 @@
 
 .rv-message { margin: 0; padding: 12px 16px; background: #f5e8c9; border: 1px solid #e6ce95; color: #725311; font-size: 12px; }
 
+/*
+ * 写入结果的落点。按钮（句卡、展开的 details、报告面板上方）离正文流里的任何提示位
+ * 都有几百到几千 px，所以放固定层：不受滚动位置、details 开合、面板切换影响。
+ * 这条容器规则在 globals.css 拆分成 styles/*.css 时丢过一次，提示因此掉到页面最底部。
+ * z-index 取到全应用最高（抽屉 100、对比托盘 110、状态失败层与阅读模式 200）之上。
+ */
+.rv-write-alerts {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 230;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, calc(100vw - 36px));
+}
+
 .rv-write-alerts p {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -410,6 +427,10 @@
 
 .rv-write-alerts b { color: #c0392b; }
 .rv-write-alerts span { grid-column: 1; }
+
+/* 成功・找不到证据这类通知：同一位置，绿边，不用红色免得把成功读成失败。 */
+.rv-write-alerts p.info { border-color: var(--green); }
+.rv-write-alerts p.info b { color: var(--green); }
 
 .rv-write-alerts button {
   grid-row: 1;

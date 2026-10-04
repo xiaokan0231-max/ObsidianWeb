@@ -190,29 +190,26 @@ button {
   display: none;
 }
 
-.side-nav button {
+/* 导航项是 <a>（可以中键开新标签页），这里的规则以前写给 <button>，换标签后整组失效过一次。 */
+.side-nav a {
   position: relative;
-  height: 45px;
+  min-height: 45px;
   display: flex;
   align-items: center;
   gap: 14px;
-  border: 0;
-  background: transparent;
-  color: #6d746f;
   padding: 0 13px;
-  cursor: pointer;
-  text-align: left;
   border-radius: 4px;
+  color: var(--text-secondary);
   transition: background 160ms ease, color 160ms ease, transform 160ms ease;
 }
 
-.side-nav button:hover {
+.side-nav a:hover {
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.52);
+  background: rgba(255, 255, 255, 0.58);
   transform: translateX(2px);
 }
 
-.side-nav button.active {
+.side-nav a.active {
   color: #fff;
   background: var(--ink);
 }
@@ -224,10 +221,10 @@ button {
   text-align: center;
 }
 
-.side-nav button span:last-child {
+.side-nav a > span:last-child {
   font-size: 13px;
-  font-weight: 620;
-  letter-spacing: 0.05em;
+  font-weight: 650;
+  letter-spacing: 0.04em;
 }
 
 /* 当前分区的子项，只在该分区被选中时出现，所以顶层永远只有 7 个目标。 */
@@ -240,8 +237,8 @@ button {
   border-left: 1px solid var(--line);
 }
 
-.side-subnav button {
-  height: 34px;
+.side-subnav a {
+  min-height: 34px;
   gap: 9px;
   padding: 0 9px;
   color: #7c837e;
@@ -253,22 +250,25 @@ button {
   font-size: 15px;
 }
 
-.side-subnav button span:last-child {
+.side-subnav a > span:last-child {
   font-size: 12px;
   font-weight: 560;
 }
 
-/* 父项已经是整块墨底，子项再来一块就成了两个黑砖；这里只用纸色和朱记做标记。 */
-.side-subnav button.active {
+/*
+ * 父项已经是整块墨底，子项再来一块就成了两个黑砖；这里只用纸色和朱记做标记。
+ * 必须排在 .side-nav a.active 之后：两者特异性相同，靠顺序取胜。
+ */
+.side-subnav a.active {
   background: rgba(255, 255, 255, 0.66);
   color: var(--ink);
 }
 
-.side-subnav button.active span:last-child {
+.side-subnav a.active > span:last-child {
   font-weight: 680;
 }
 
-.side-subnav button.active::before {
+.side-subnav a.active::before {
   content: "";
   position: absolute;
   left: -12px;

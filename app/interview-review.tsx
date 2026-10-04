@@ -76,7 +76,10 @@ type ReviewDoc = {
  * 写入失败的一条提示。`subject` 必须自带主语（哪场面接、哪句/哪个 block），
  * 因为这条提示不出现在触发它的按钮旁边，靠位置认不出说的是谁。
  */
-type WriteAlert = { subject: string; detail: string };
+/** info 是成功・找不到证据这类通知：同一固定层显示，几秒后自己消失；error 要人手动关。 */
+type WriteAlert = { subject: string; detail: string; tone?: "error" | "info" };
+
+const NOTICE_MS = 4200;
 
 type Mode = "study" | "compare" | "novel";
 type NovelLanguage = "ja" | "zh";
@@ -293,15 +296,13 @@ function InterviewReview({
   const [deepFocusBlockId, setDeepFocusBlockId] = useState<string | null>(null);
   const [deepFocusDimension, setDeepFocusDimension] = useState<ReviewDimensionKey | null>(null);
   const [evidenceFocus, setEvidenceFocus] = useState<string | null>(initialSentenceId);
-  const [message, setMessage] = useState<string | null>(null);
   /**
-   * 🔴 写入失败**不走** `message`。`message` 只在正文流的一个位置（第二阶段面板之后）渲染，
-   * 而这四条写入路径的触发点全都看不到那个位置：句卡在它下面几千 px，
-   * 「加入重练」「同意」在展开的 `<details>` 里往下几百 px，
-   * 「重新生成」隔着整份报告面板（约 2,400px）。
-   * 按下的人看不到失败理由，就跟按了没反应的死按钮没有区别 —— 这正是这次要修的病。
+   * 🔴 写入结果**不走**正文流里的提示位。以前有一个 `message`，只渲染在「原文」面板里，
+   * 而触发它的「加入重练」「同意」在「回答质量」面板 —— 按的时候那个面板是 hidden 的，
+   * 成功提示永远看不到；找不到证据句时也只写了 message，点了等于没反应。
+   * 失败更是如此：句卡在提示位下面几千 px，「重新生成」隔着整份报告面板（约 2,400px）。
    *
-   * 所以失败一律积到 `writeAlerts`，只由固定层 `.rv-write-alerts` 一处渲染：
+   * 所以失败和通知一律积到 `writeAlerts`，只由固定层 `.rv-write-alerts` 一处渲染：
    * 不依赖任何子树保持挂载、不依赖滚动位置、不依赖当前是详情页还是一覧页。
    * 同样的理由和同样的形状见 jobs-view 的 `statusErrors`
    *（那边把提示放在控件旁边试过两次，两次都在实际使用中看不见）。
@@ -408,9 +409,27 @@ function InterviewReview({
   const noteWriteFailure = useCallback(
     (key: string, subject: string, error: unknown, fallback: string) => {
       const reason = error instanceof Error && error.message ? error.message : fallback;
-      setWriteAlerts((current) => ({ ...current, [key]: { subject, detail: reason } }));
+      setWriteAlerts((current) => ({ ...current, [key]: { subject, detail: reason, tone: "error" } }));
     },
     [],
+  );
+
+  // 通知只是确认「做到了 / 找不到」，读完就该消失；失败提示仍要人手动关，不共用这个计时。
+  const noticeTimers = useRef(new Map<string, number>());
+  useEffect(() => {
+    const timers = noticeTimers.current;
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, []);
+  const showNotice = useCallback(
+    (key: string, subject: string, detail: string) => {
+      setWriteAlerts((current) => ({ ...current, [key]: { subject, detail, tone: "info" } }));
+      window.clearTimeout(noticeTimers.current.get(key));
+      noticeTimers.current.set(key, window.setTimeout(() => {
+        noticeTimers.current.delete(key);
+        dismissWriteAlert(key);
+      }, NOTICE_MS));
+    },
+    [dismissWriteAlert],
   );
 
   const submitAnnotation = useCallback(
@@ -427,7 +446,6 @@ function InterviewReview({
       // 裁定按 target 分 key：同一句上「話者裁定」和「誤2 裁定」各自失败时要能同时看到两条。
       const alertKey = `annotate:${target.key}:${sentenceId}:${kind}:${decisionTarget ?? ""}`;
       setBusy(sentenceId);
-      setMessage(null);
       dismissWriteAlert(alertKey);
       try {
         const payload = await postReviewWrite(
@@ -463,7 +481,6 @@ function InterviewReview({
     async (target: ReviewDoc) => {
       const alertKey = `deep:${target.key}`;
       setDeepBusy(true);
-      setMessage(null);
       dismissWriteAlert(alertKey);
       try {
         await postReviewWrite("/api/review/deep", { notePath: target.note.path }, "生成失败");
@@ -487,7 +504,6 @@ function InterviewReview({
     async (target: ReviewDoc, blockId: string) => {
       const alertKey = `practice:${target.key}:${blockId}`;
       setPracticeBusy(blockId);
-      setMessage(null);
       dismissWriteAlert(alertKey);
       try {
         const payload = await postReviewWrite<WriteResponse & { deduplicated?: boolean }>(
@@ -495,9 +511,9 @@ function InterviewReview({
           { notePath: target.note.path, blockId },
           "加入失败",
         );
+        // 成功不另发通知：按钮随回写变成「已加入重练」并锁住，就在按下的位置。
         if (payload.note && onNoteWritten) onNoteWritten(payload.note);
         else await onVaultChanged();
-        setMessage(payload.deduplicated ? `${blockId} 已在重练队列中。` : `${blockId} 已加入重练队列。`);
       } catch (error) {
         noteWriteFailure(
           alertKey,
@@ -521,7 +537,6 @@ function InterviewReview({
     ) => {
       const alertKey = `feedback:${target.key}:${blockId}:${kind}`;
       setFeedbackBusy(blockId);
-      setMessage(null);
       dismissWriteAlert(alertKey);
       try {
         const payload = await postReviewWrite<WriteResponse & { deduplicated?: boolean }>(
@@ -531,7 +546,11 @@ function InterviewReview({
         );
         if (payload.note && onNoteWritten) onNoteWritten(payload.note);
         else await onVaultChanged();
-        setMessage(payload.deduplicated ? `${blockId} 已记录过相同反馈。` : `${blockId} 的人工反馈已保存。`);
+        showNotice(
+          `feedback-ok:${target.key}:${blockId}`,
+          `${target.company} · ${blockId}`,
+          payload.deduplicated ? "已记录过相同反馈。" : "人工反馈已保存。",
+        );
         return true;
       } catch (error) {
         noteWriteFailure(
@@ -545,7 +564,7 @@ function InterviewReview({
         setFeedbackBusy(null);
       }
     },
-    [dismissWriteAlert, noteWriteFailure, onNoteWritten, onVaultChanged],
+    [dismissWriteAlert, noteWriteFailure, onNoteWritten, onVaultChanged, showNotice],
   );
 
   if (!doc) {
@@ -679,7 +698,7 @@ function InterviewReview({
       item.sentences.some((sentence) => sentence.id === sentenceId),
     );
     if (!block) {
-      setMessage(`整理稿中找不到证据句 ${sentenceId}。`);
+      showNotice(`evidence-missing:${doc.key}`, "证据句定位", `整理稿中找不到证据句 ${sentenceId}。`);
       return;
     }
     setPanel("source");
@@ -952,9 +971,6 @@ function InterviewReview({
       {!doc.annotationExists && (
         <p className="rv-message">这场面试还没有批注文件（{doc.annotationPath}）。先在 vault 里建好再批注。</p>
       )}
-      {/* 写入失败不再走这里（由 .rv-write-alerts 接住），剩下的只有成功和找不到证据句的通知，
-          所以不再挂 error 样式 —— 红底配「已加入重练队列」会把成功读成失败。 */}
-      {message && <p className="rv-message">{message}</p>}
 
       <div className="rv-reading-bar">
         <p>
@@ -1126,12 +1142,13 @@ function ReviewWriteAlerts({
 }) {
   const entries = Object.entries(alerts);
   if (entries.length === 0) return null;
+  const hasError = entries.some(([, alert]) => alert.tone !== "info");
   return (
-    <div className="rv-write-alerts" role="alert">
+    <div className="rv-write-alerts" role={hasError ? "alert" : "status"}>
       {entries.map(([key, alert]) => (
-        <p key={key}>
+        <p key={key} className={alert.tone === "info" ? "info" : undefined}>
           <b>{alert.subject}</b>
-          <span>没有写入。{alert.detail}</span>
+          <span>{alert.tone === "info" ? alert.detail : `没有写入。${alert.detail}`}</span>
           <button type="button" onClick={() => onDismiss(key)} aria-label="关闭提示">×</button>
         </p>
       ))}

@@ -1,5 +1,6 @@
 "use client";
 
+import ScopeLoading from "./scope-loading";
 import { memo, useMemo, useState } from "react";
 import { postJson } from "@/lib/client-api";
 import { getString, getType, type Note } from "@/lib/notes";
@@ -35,10 +36,13 @@ const RATING_LABEL: Record<InterviewPracticeRating, string> = {
 
 function InterviewPractice({
   notes,
+  loading = false,
   today,
   onNoteWritten,
 }: {
   notes: Note[];
+  /** 面试 scope 还没到：此时队列为空不等于「今天清空了」，别先闪一句假的完成提示。 */
+  loading?: boolean;
   today: string;
   onNoteWritten: (note: Note) => void;
 }) {
@@ -115,7 +119,9 @@ function InterviewPractice({
         <button className={showCompleted ? "active" : ""} onClick={() => { setShowCompleted(true); selectItem(""); }}>{ui("已完成")} {completed.length}</button>
       </div>
 
-      {visible.length === 0 ? (
+      {visible.length === 0 && loading ? (
+        <ScopeLoading label="回答队列" />
+      ) : visible.length === 0 ? (
         <div className="practice-empty">
           <strong>{showCompleted ? "还没有已完成的回答" : "今天的回答队列已经清空"}</strong>
           <p>{showCompleted ? "完成一次重练后会保留在这里。" : "从面试复盘中选择“加入重练”，下一题会出现在这里。"}</p>

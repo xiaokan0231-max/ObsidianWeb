@@ -53,10 +53,11 @@
   background: #fdf1ec; color: #8a3c1d; font-size: 11px; line-height: 1.7;
 }
 
-/* 🔴 .topbar が sticky top:0 / z-index:25 / 高さ76px。ここを 0 にすると章ナビが
-   顶栏の裏に隠れて、スクロール後に章を切り替えられなくなる（実際に踏んだ）。 */
+/* 🔴 .topbar が sticky top:0 / z-index:25。ここを 0 にすると章ナビが
+   顶栏の裏に隠れて、スクロール後に章を切り替えられなくなる（実際に踏んだ）。
+   顶栏高度桌面 64px・窄屏 68px，统一读 --chrome-top，写死 76px 会在顶栏下漏出一条正文。 */
 .prep-doc-bar {
-  position: sticky; top: 76px; z-index: 6;
+  position: sticky; top: var(--chrome-top, 76px); z-index: 6;
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px;
   padding: 9px 0; background: var(--paper); border-bottom: 1px solid var(--line);
 }

@@ -306,6 +306,14 @@
   gap: 20px 26px;
 }
 
+/* 看板模式下状态这一组让位给这句说明：列本身就是状态。 */
+.jobs-filter-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .jobs-results {
   min-width: 0;
   padding: 16px 0 34px;

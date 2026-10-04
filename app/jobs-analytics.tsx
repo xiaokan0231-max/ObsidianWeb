@@ -873,11 +873,23 @@ function JobsAnalytics({
                     />
                   ))}
                 </div>
-                <p className="chart-note">
-                  <strong>n が小さい経路の率を単独で読まない。</strong>
-                  企業直投の {channels.find((c) => c.channel.includes("直投"))?.reached ?? 0} / {channels.find((c) => c.channel.includes("直投"))?.total ?? 0} 社は、
-                  1 社増減するだけで率が十数ポイント動く。
-                </p>
+                {/* 例に挙げる経路は固定しない：直投が台帳に無い月に「0 / 0 社」と書くと文が嘘になる。
+                    実際に n が小さい経路だけを並べ、無ければこの注意書き自体を出さない。 */}
+                {(() => {
+                  // 例は n の小さい順に 2 つまで。全部並べると注意書きが表より長くなる。
+                  const small = channels
+                    .filter((row) => row.total > 0 && row.total < SMALL_SAMPLE_THRESHOLD)
+                    .sort((left, right) => left.total - right.total)
+                    .slice(0, 2);
+                  if (small.length === 0) return null;
+                  return (
+                    <p className="chart-note">
+                      <strong>n が小さい経路の率を単独で読まない。</strong>
+                      {small.map((row) => `${row.channel}の ${row.reached} / ${row.total} 社`).join("、")}は、
+                      1 社増減するだけで率が十数ポイント動く。
+                    </p>
+                  );
+                })()}
                 <TableView
                   head={["経路", "不採用", "書類終了", "面接到達", "到達率"]}
                   rows={channels.map((row) => [

@@ -52,6 +52,10 @@ const TRAINING_MENU_COPY = {
   "更新训练画像": ["更新训练画像", "練習プロフィールを更新"],
   "保存": ["保存", "保存"],
   "退出到总览": ["退出到总览", "概要に戻る"],
+  "已保存": ["已保存", "保存済み"],
+  "{count} 项待保存": ["{count} 项待保存", "未保存 {count} 項目"],
+  "保存中": ["保存中", "保存中"],
+  "保存失败": ["保存失败", "保存に失敗"],
 } as const satisfies Record<string, readonly [string, string]>;
 
 type TrainingMenuKey = keyof typeof TRAINING_MENU_COPY;
@@ -110,6 +114,9 @@ const ISSUE_DISPLAY_LABELS: Record<string, string> = {
 };
 
 const AUTO_SAVE_ACTION_COUNT = 50;
+// 编译・压力阶段同一题的作答原地替换，待保存数最多就是题数（20/15），到不了上面的阈值；
+// 停手这么久就静默存一次，免得切到别的页面时整段作答随组件一起丢掉。
+const IDLE_SAVE_MS = 2500;
 
 type ApiError = { error?: string };
 
@@ -532,6 +539,13 @@ function LanguageBatchWorkspace({
   const activeSessionStartedAt = useRef(0);
   const [showScanOverview, setShowScanOverview] = useState(false);
   const saveInFlight = useRef<Promise<void> | null>(null);
+  // 卸载时补发要读到「最后一刻」的待保存内容；放进 effect 依赖会让每次按键都触发一次清理和补发。
+  const pendingRef = useRef<LanguageBatchAction[]>([]);
+  const cursorRef = useRef(batch.cursor);
+  useEffect(() => {
+    pendingRef.current = pending;
+    cursorRef.current = cursor;
+  }, [pending, cursor]);
 
   const allActions = useMemo(() => {
     const map = new Map(batch.actions.map((value) => [value.actionId, value]));
@@ -571,7 +585,9 @@ function LanguageBatchWorkspace({
     }
     if (!silent) setBusy(nextPhase ? "正在切换训练阶段" : "正在保存");
     setError("");
-    const sentIds = new Set(actions.map((action) => action.actionId));
+    // 同一题在请求途中又被改过时 actionId 不变、at 变了：只按 actionId 清会把新改的内容一起丢掉。
+    const sentKey = (action: LanguageBatchAction) => `${action.actionId}\u0000${action.at}`;
+    const sentKeys = new Set(actions.map(sentKey));
     const operation = (async () => {
       try {
         const result = await api<{ state: LanguageV2State }>(
@@ -582,8 +598,11 @@ function LanguageBatchWorkspace({
           },
         );
         onState(result.state);
-        setPending((current) => current.filter((action) => !sentIds.has(action.actionId)));
-        setCursor(result.state.currentBatch?.cursor ?? 0);
+        setPending((current) => current.filter((action) => !sentKeys.has(sentKey(action))));
+        pendingRef.current = pendingRef.current.filter((action) => !sentKeys.has(sentKey(action)));
+        // 只有换阶段才回到服务端给的位置（归零）。普通保存发出后人还在往前扫，
+        // 回写请求发出时的旧 cursor 会把焦点卡片拽回几项之前。
+        if (nextPhase) setCursor(result.state.currentBatch?.cursor ?? 0);
         if (!silent) await onVaultChanged();
       } catch (saveError) {
         setError(saveError instanceof Error ? saveError.message : "自动保存失败");
@@ -604,6 +623,27 @@ function LanguageBatchWorkspace({
     const timer = window.setTimeout(() => void checkpoint(pending, undefined, cursor, true), 0);
     return () => window.clearTimeout(timer);
   }, [pending, busy, checkpoint, cursor]);
+
+  useEffect(() => {
+    if (!pending.length || busy) return;
+    const timer = window.setTimeout(() => void checkpoint(pending, undefined, cursor, true), IDLE_SAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [pending, busy, checkpoint, cursor]);
+
+  // 应用内切到别的视图时组件直接卸载，beforeunload 不会触发；这里补发最后一批。
+  useEffect(() => {
+    const batchId = batch.id;
+    return () => {
+      const unsaved = pendingRef.current;
+      if (!unsaved.length) return;
+      void fetch("/api/language/v2/batch/checkpoint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchId, actions: unsaved, cursor: cursorRef.current }),
+        keepalive: true,
+      }).catch(() => undefined);
+    };
+  }, [batch.id]);
 
   useEffect(() => {
     activeSessionStartedAt.current = Date.now();
@@ -654,7 +694,8 @@ function LanguageBatchWorkspace({
     if (batch.phase !== "scan") return;
     const keydown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if ((event.target as HTMLElement)?.matches("input,textarea,select,button")) return;
+      // 按钮不算输入场景：鼠标点过判断按钮后焦点留在按钮上，1–4 和方向键照样要能用。
+      if ((event.target as HTMLElement)?.closest?.("input,textarea,select,[contenteditable]")) return;
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
         const direction = event.key === "ArrowLeft" ? -1 : 1;
@@ -691,6 +732,8 @@ function LanguageBatchWorkspace({
         "/api/language/v2/batch/complete",
         { method: "POST", body: JSON.stringify({ batchId: batch.id, actions: pending }) },
       );
+      // 结算已经带走了全部作答，卸载时不该再往已完成的批次补发。
+      pendingRef.current = [];
       onState(result.state);
       await onVaultChanged();
       onExit();
@@ -709,11 +752,18 @@ function LanguageBatchWorkspace({
   const currentScanItem = itemById.get(batch.scanItemIds[cursor]);
   const currentScanJudgment = currentScanItem ? scanJudgments.get(currentScanItem.id) : undefined;
   const scanComplete = scanJudgments.size === batch.scanItemIds.length;
+  const saveStatus = busy
+    ? t("保存中")
+    : error
+      ? t("保存失败")
+      : pending.length
+        ? t("{count} 项待保存", { count: pending.length })
+        : t("已保存");
 
   return (
     <div className="language-batch-workspace">
       <header className="language-batch-topbar">
-        <div><span>語</span><div><small>DEEP WORK · AUTO SAVED</small><strong>{batch.targetSize} 项集中训练</strong></div></div>
+        <div><span>語</span><div><small>DEEP WORK · <span aria-live="polite">{saveStatus}</span></small><strong>{batch.targetSize} 项集中训练</strong></div></div>
         <div className="language-batch-clock"><strong>{elapsed}</strong><span>分钟</span></div>
         <div>
           <button disabled={Boolean(busy)} onClick={() => void checkpoint(pending)}>{t("保存")}</button>

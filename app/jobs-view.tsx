@@ -1,5 +1,6 @@
 "use client";
 
+import ScopeLoading from "./scope-loading";
 import {
   memo,
   Fragment,
@@ -103,6 +104,7 @@ const JOB_MENU_COPY = {
   "组合筛选 · FILTERS": ["组合筛选 · FILTERS", "条件の組み合わせ · FILTERS"],
   "已启用 {count} 项": ["已启用 {count} 项", "有効な条件 {count} 件"],
   "默认只看未応募": ["默认只看未応募", "既定では未応募のみ"],
+  "看板按状态分列，不受状态筛选影响": ["看板按状态分列，不受状态筛选影响", "ボードは状態ごとに並ぶため、状態の絞り込みは使いません"],
   "当前显示全部岗位": ["当前显示全部岗位", "すべての求人を表示中"],
   "恢复默认": ["恢复默认", "既定に戻す"],
   "应募状态": ["应募状态", "応募状況"],
@@ -651,6 +653,7 @@ function FilterChips({
 
 function JobsView({
   notes,
+  loading = false,
   today,
   onOpen,
   onVaultChanged,
@@ -659,6 +662,11 @@ function JobsView({
   onFlash,
 }: {
   notes: Note[];
+  /**
+   * 岗位 scope 还没到。外壳只在「一条笔记都没有」时画全屏加载；从别的视图切过来时
+   * notes 已非空但不含 job-case，不区分的话会先闪一下「还没有可以展示的岗位机会」。
+   */
+  loading?: boolean;
   /** 「今日」は殻が持つ（零時の切替も殻が面倒を見る）。ここで new Date() すると跨日後の「今日入库」が前日のまま凍る。 */
   today: string;
   onOpen: (note: Note) => void;
@@ -815,15 +823,25 @@ function JobsView({
     [narrow, sort],
   );
 
+  /**
+   * 看板本身就按状态分列，状态筛选对它没有意义：默认筛选只看未応募，
+   * 直接用 visible 的话切到看板只有第一列有卡、其余四列永远是「—」。
+   * 所以看板的池子排除状态这一组，其余筛选（关键词・技术栈・地点…）照常生效。
+   */
+  const kanbanJobs = useMemo(
+    () => narrow("statuses").sort((left, right) => compareJobs(left, right, sort)),
+    [narrow, sort],
+  );
+
   /** 看板列：枚举顺序在前，核心五列常驻；笔记里出现的自定义状态补在末尾，避免岗位被吞掉。 */
   const kanbanColumns = useMemo(() => {
-    const custom = Array.from(new Set(visible.map((job) => job.status)))
+    const custom = Array.from(new Set(kanbanJobs.map((job) => job.status)))
       .filter((status) => !isJobStatus(status))
       .sort((left, right) => left.localeCompare(right, "ja"));
     return [...JOB_STATUSES, ...custom]
-      .map((status) => ({ status, jobs: visible.filter((job) => job.status === status) }))
+      .map((status) => ({ status, jobs: kanbanJobs.filter((job) => job.status === status) }))
       .filter((column) => column.jobs.length > 0 || KANBAN_CORE_STATUSES.includes(column.status as JobStatus));
-  }, [visible]);
+  }, [kanbanJobs]);
 
   const week = useMemo(() => weekBounds(today, weekOffset), [today, weekOffset]);
 
@@ -1076,7 +1094,8 @@ function JobsView({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (compareOpen) setCompareOpen(false);
-        else if (detailOpen) closeDetail();
+        // 决策台没有抽屉，选中项是常驻的右栏：Esc 在这里关不掉任何东西，只会把正在看的岗位重置回队首。
+        else if (detailOpen && viewMode !== "decision") closeDetail();
         return;
       }
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -1086,7 +1105,7 @@ function JobsView({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeDetail, compareOpen, detailOpen]);
+  }, [closeDetail, compareOpen, detailOpen, viewMode]);
 
   useEffect(() => {
     const pathname = window.location.pathname;
@@ -1172,6 +1191,11 @@ function JobsView({
     query.trim() === "" && JSON.stringify(filters) === JSON.stringify(jobStatTileFilters(id));
 
   const isJobList = viewMode !== "weekly";
+  // 看板不用状态筛选，计数里也不该算它，否则「已选 1 个筛选」指向一个看不见的条件。
+  const shownFilterCount = viewMode === "kanban" ? activeFilterCount - filters.statuses.length : activeFilterCount;
+  // 结果条的条数和空态都要跟画面上实际画出的那一池对齐：看板用的是不含状态筛选的池子。
+  const listedJobs = viewMode === "kanban" ? kanbanJobs : resultVisible;
+  const matchedJobs = viewMode === "kanban" ? kanbanJobs : visible;
   const decisionDetail = viewMode === "decision" ? detail ?? visible[0] ?? null : null;
 
   return (
@@ -1233,8 +1257,8 @@ function JobsView({
             <span>
               <b>{t("筛选条件")}</b>
               <small>
-                {activeFilterCount > 0
-                  ? `${t("已启用 {count} 项", { count: activeFilterCount })}${filters.statuses.length === 1 && filters.statuses[0] === "未応募" ? ` · ${t("默认只看未応募")}` : ""}`
+                {shownFilterCount > 0
+                  ? `${t("已启用 {count} 项", { count: shownFilterCount })}${viewMode !== "kanban" && filters.statuses.length === 1 && filters.statuses[0] === "未応募" ? ` · ${t("默认只看未応募")}` : ""}`
                   : t("当前显示全部岗位")}
               </small>
             </span>
@@ -1249,12 +1273,16 @@ function JobsView({
             </div>
 
             <div className="jobs-filter-groups">
-              <FilterChips
-                label={t("应募状态")}
-                options={statusOptions}
-                selected={filters.statuses}
-                onToggle={(value) => setFilters((current) => ({ ...current, statuses: toggle(current.statuses, value) }))}
-              />
+              {viewMode === "kanban" ? (
+                <p className="jobs-filter-note">{t("看板按状态分列，不受状态筛选影响")}</p>
+              ) : (
+                <FilterChips
+                  label={t("应募状态")}
+                  options={statusOptions}
+                  selected={filters.statuses}
+                  onToggle={(value) => setFilters((current) => ({ ...current, statuses: toggle(current.statuses, value) }))}
+                />
+              )}
 
               {/* 只有未応募才有动手状态；选中后应募済以降会全部落选，与顶部统计格同一口径。 */}
               <FilterChips
@@ -1460,21 +1488,23 @@ function JobsView({
           {isJobList && (
             <div className="jobs-result-bar">
               <span>
-                {highlightedNextPick ? `${t("其余")} ` : ""}<strong>{resultVisible.length}</strong> / {jobs.length} {t("条")}
+                {highlightedNextPick ? `${t("其余")} ` : ""}<strong>{listedJobs.length}</strong> / {jobs.length} {t("条")}
                 {query && <> · {t("关键词")}「{query.trim()}」</>}
               </span>
-              <span className="jobs-filter-count">{t("已选 {count} 个筛选", { count: activeFilterCount })}</span>
+              <span className="jobs-filter-count">{t("已选 {count} 个筛选", { count: shownFilterCount })}</span>
             </div>
           )}
 
-          {jobs.length === 0 && (
+          {jobs.length === 0 && loading && <ScopeLoading label={t("岗位机会")} />}
+
+          {jobs.length === 0 && !loading && (
             <div className="jobs-empty">
               <p>还没有可以展示的岗位机会。</p>
               <small>在 Vault 的 <code>20_求職/</code> 下新建 <code>type: job-case</code> 的应募案件即可显示；AI 推荐只是 <code>origin</code> 的一种。</small>
             </div>
           )}
 
-          {jobs.length > 0 && isJobList && visible.length === 0 && (
+          {jobs.length > 0 && isJobList && matchedJobs.length === 0 && (
             <div className="jobs-empty">
               <p>没有岗位同时满足这些条件。</p>
               <button type="button" className="job-detail" onClick={resetFilters}>{t("清空筛选")}</button>
@@ -1532,7 +1562,7 @@ function JobsView({
             <JobListView jobs={resultVisible} query={query} today={today} onDetail={openDetail} />
           )}
 
-          {jobs.length > 0 && viewMode === "kanban" && visible.length > 0 && (
+          {jobs.length > 0 && viewMode === "kanban" && kanbanJobs.length > 0 && (
             <JobKanbanView columns={kanbanColumns} query={query} onDetail={openDetail} />
           )}
 

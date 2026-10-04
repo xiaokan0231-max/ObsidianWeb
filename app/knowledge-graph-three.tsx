@@ -335,7 +335,11 @@ export default function ThreeKnowledgeGraph({
 
   useEffect(() => {
     const handleDossierShortcut = (event: KeyboardEvent) => {
+      // 笔记抽屉或阅读层盖在舞台上时舞台是 inert 的：此时 R/P/O 不该在背后重置镜头、
+      // 暂停或打开另一篇笔记。别的层已经处理过的按键（defaultPrevented）也让出去。
       if (
+        event.defaultPrevented ||
+        stageRef.current?.closest("[inert]") ||
         event.metaKey ||
         event.ctrlKey ||
         event.altKey ||

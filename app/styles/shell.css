@@ -53,12 +53,12 @@
   margin-top: 36px;
 }
 
-:root[data-rail="collapsed"] .side-nav button {
+:root[data-rail="collapsed"] .side-nav a {
   justify-content: center;
   padding: 0;
 }
 
-:root[data-rail="collapsed"] .side-nav button:hover {
+:root[data-rail="collapsed"] .side-nav a:hover {
   transform: none;
 }
 
@@ -69,16 +69,16 @@
   border-left: 0;
 }
 
-:root[data-rail="collapsed"] .side-subnav button {
-  height: 32px;
+:root[data-rail="collapsed"] .side-subnav a {
+  min-height: 32px;
 }
 
-:root[data-rail="collapsed"] .side-subnav button.active::before {
+:root[data-rail="collapsed"] .side-subnav a.active::before {
   display: none;
 }
 
 /* 折叠时文字只做视觉隐藏，可访问名与搜索仍然拿得到。 */
-:root[data-rail="collapsed"] .side-nav button > span:last-child {
+:root[data-rail="collapsed"] .side-nav a > span:last-child {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -88,7 +88,7 @@
 }
 
 /* 悬停 / 键盘聚焦时在右侧弹出中文标签。 */
-:root[data-rail="collapsed"] .side-nav button::after {
+:root[data-rail="collapsed"] .side-nav a::after {
   content: attr(data-label);
   position: absolute;
   left: calc(100% + 12px);
@@ -109,8 +109,8 @@
   transition: opacity 120ms ease;
 }
 
-:root[data-rail="collapsed"] .side-nav button:hover::after,
-:root[data-rail="collapsed"] .side-nav button:focus-visible::after {
+:root[data-rail="collapsed"] .side-nav a:hover::after,
+:root[data-rail="collapsed"] .side-nav a:focus-visible::after {
   opacity: 1;
 }
 
@@ -238,113 +238,6 @@
   display: flex;
   align-items: flex-end;
   gap: 6px;
-}
-
-.section-nav-tabs button {
-  position: relative;
-  bottom: -1px;
-  min-width: 0;
-  /* 和选中态同高。高度不一样时因为底对齐，未选中的文字会整体下沉几像素。 */
-  height: 58px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 17px;
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: 11px 11px 0 0;
-  background: transparent;
-  color: var(--muted);
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    color 170ms ease,
-    background-color 170ms ease,
-    border-color 170ms ease;
-}
-
-.section-nav-tabs button i {
-  flex: 0 0 auto;
-  width: 27px;
-  height: 27px;
-  display: grid;
-  place-items: center;
-  border: 1px solid currentColor;
-  border-radius: 50% 50% 50% 10%;
-  color: inherit;
-  font-family: "Songti SC", serif;
-  font-size: 14px;
-  font-style: normal;
-  line-height: 1;
-  opacity: .55;
-  transition: background-color 170ms ease, color 170ms ease, opacity 170ms ease;
-}
-
-.section-nav-tabs button span {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.section-nav-tabs button strong {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: .04em;
-  white-space: nowrap;
-}
-
-.section-nav-tabs button small {
-  color: var(--muted);
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: .14em;
-  white-space: nowrap;
-  transition: color 170ms ease;
-}
-
-.section-nav-tabs button:hover {
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.5);
-}
-
-.section-nav-tabs button:hover i {
-  opacity: .8;
-}
-
-.section-nav-tabs button.active {
-  border-color: rgba(200, 196, 184, 0.78);
-  background: var(--paper);
-  color: var(--ink);
-  box-shadow: 0 -6px 18px rgba(28, 37, 32, 0.05);
-}
-
-/* 顶边的朱线＝这一页就是当前打开的章节。 */
-.section-nav-tabs button.active::before {
-  content: "";
-  position: absolute;
-  top: -1px;
-  right: -1px;
-  left: -1px;
-  height: 3px;
-  border-radius: 11px 11px 0 0;
-  background: var(--orange);
-}
-
-.section-nav-tabs button.active strong {
-  font-weight: 700;
-}
-
-.section-nav-tabs button.active small {
-  color: var(--orange);
-}
-
-.section-nav-tabs button.active i {
-  border-color: var(--orange);
-  background: var(--orange);
-  color: #fff;
-  opacity: 1;
 }
 
 .mobile-brand {

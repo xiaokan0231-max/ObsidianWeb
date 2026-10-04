@@ -587,7 +587,8 @@
 
 .loading-state,
 .connection-error {
-  min-height: calc(100dvh - 76px);
+  /* 顶栏桌面是 64px、窄屏 68px，只认 --chrome-top；写死 76px 会多出一截滚动。 */
+  min-height: calc(100dvh - var(--chrome-top, 76px));
   display: flex;
   flex-direction: column;
   align-items: center;
