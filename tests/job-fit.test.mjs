@@ -38,8 +38,12 @@ test("並び替え fit は合計点の降順、未採点（null）は末尾", as
 });
 
 test("看板の接線：Gate/Band/到達の URL パラメータが読み書き両方にあり、未採点は共有文言で出す", async () => {
-  const { readFile } = await import("node:fs/promises");
-  const source = await readFile(new URL("../app/jobs-view.tsx", import.meta.url), "utf8");
+  const { readFile, readdir } = await import("node:fs/promises");
+  // 看板拆成了 app/jobs-*.tsx 多个模块（jobs-analytics 是分析页，不算），断言对整套源码生效。
+  const appDir = new URL("../app/", import.meta.url);
+  const files = (await readdir(appDir)).filter((name) => /^jobs-.+\.tsx?$/.test(name) && name !== "jobs-analytics.tsx").sort();
+  assert.ok(files.includes("jobs-view.tsx") && files.includes("jobs-url-state.ts"), "読み取り対象に入口と URL 状態がある");
+  const source = (await Promise.all(files.map((name) => readFile(new URL(name, appDir), "utf8")))).join("\n");
   for (const key of ["gate", "band", "access"]) {
     assert.match(source, new RegExp(`csvParam\\(params, "${key}"\\)`), `${key} を URL から読む`);
     assert.match(source, new RegExp(`params\\.set\\("${key}",`), `${key} を URL に書く`);
