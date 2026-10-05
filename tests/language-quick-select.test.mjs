@@ -1,15 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildQuickPool } from "../lib/language/quick-items.ts";
-import { createQuickIndex } from "../lib/language/quick-cards.ts";
-import { jstMidnightIso } from "../lib/language/quick-progress.ts";
+import { availableCardTypes, createQuickIndex } from "../lib/language/quick-cards.ts";
+import { quickDayStartIso } from "../lib/language/quick-progress.ts";
 import {
+  annotateQuickTopIssues,
+  mergeJudgments,
+  QUICK_KNOWN_TIER,
   QUICK_SELECT_RULES,
+  quickDailyNewLimit,
+  quickFocusOptions,
   quickHistory,
   quickNewTier,
+  quickNextSet,
   quickSourceOf,
   quickSummary,
   selectQuickSet,
+  selectTriageItems,
 } from "../lib/language/quick-select.ts";
 
 // ── 虚构 fixture：公司名、句子与词表都是测试自编的通用内容 ─────────
@@ -182,7 +189,7 @@ function dueEntry(itemId, dueDay, values = {}) {
     successCount: 1,
     successDates: ["2026-09-30"],
     attemptCount: 1,
-    nextDueAt: jstMidnightIso(dueDay),
+    nextDueAt: quickDayStartIso(dueDay),
     ...values,
   });
 }
@@ -282,20 +289,29 @@ test("新题顺序：旧批次「不会」→「犹豫」→ 其余", () => {
   for (const id of legacy.keys()) assert.ok(ids.has(id), `${id} 应进入第一组`);
 });
 
-test("同一来源内：旧批次「不会」先于「犹豫」，「犹豫」先于其余", () => {
-  const unknown = ["ip_11", "ip_12", "ip_13", "ip_14"];
-  const uncertain = ["ip_15", "ip_16", "ip_17", "ip_18"];
+// 原断言是「种子按来源配额分（10 题里面试官名额 3 → 只出 3 条种子）」；本人改为种子先取、不受来源配额限制（M1）。
+test("种子先取：「不会」先于「犹豫」，不受来源配额限制", () => {
+  const unknown = ["ip_11", "ip_12", "ip_13", "ip_14", "ip_15", "ip_16"];
+  const uncertain = ["ip_17", "ip_18", "ip_19", "ip_20", "ip_21", "ip_22"];
   const legacy = new Map([...unknown.map((id) => [id, "unknown"]), ...uncertain.map((id) => [id, "uncertain"])]);
   const phrases = (set) => set.cards.filter((card) => card.group === "interviewer_phrase").map((card) => card.itemId).sort();
-  // 10 题：面试官名额 3 → 全是「不会」。
+  // 10 题全是种子：6 条「不会」+ 4 条「犹豫」，面试官用语占满一组也不按 0.3 截。
   const ten = phrases(select({ size: 10, legacy }));
-  assert.equal(ten.length, 3);
-  assert.ok(ten.every((id) => unknown.includes(id)), ten.join());
-  // 20 题：面试官名额 6 → 4 条「不会」+ 2 条「犹豫」。
-  const twenty = phrases(select({ size: 20, legacy }));
-  assert.equal(twenty.length, 6);
-  assert.deepEqual(twenty.filter((id) => unknown.includes(id)), unknown);
-  assert.equal(twenty.filter((id) => uncertain.includes(id)).length, 2);
+  assert.equal(ten.length, 10);
+  assert.deepEqual(ten.filter((id) => unknown.includes(id)), unknown);
+  assert.equal(ten.filter((id) => uncertain.includes(id)).length, 4);
+  // 20 题：12 条种子全进，剩下 8 个名额再按来源配额分。
+  const twenty = select({ size: 20, legacy });
+  const ids = new Set(twenty.cards.map((card) => card.itemId));
+  for (const id of legacy.keys()) assert.ok(ids.has(id), id);
+  assert.ok(sourceCount(twenty.cards).patch >= 3, "其余名额仍按来源配额分给改错");
+});
+
+test("种子不受来源配额限制，但同一错误型新题上限仍在", () => {
+  const legacy = new Map(PATCHES.filter((item) => item.pattern === "型_参加").map((item) => [item.id, "unknown"]));
+  const set = select({ size: 10, legacy });
+  const picked = set.cards.filter((card) => legacy.has(card.itemId));
+  assert.equal(picked.length, QUICK_SELECT_RULES.newPatternCap);
 });
 
 test("新题来源配额：改错 0.4 / 面试官 0.3 / 単語文法帳 0.2 / 句型 0.1（最大余数法）", () => {
@@ -356,8 +372,10 @@ test("到期优先：到期日早的在前，今天答过的不再算到期", ()
   assert.equal(reason.get("ip_6"), "lapsed");
   assert.equal(set.composition.due, 2);
   assert.equal(set.composition.lapsed, 1);
-  // 新题 3 条后仍有空位：先补明天到期，再补新题。
-  assert.equal(reason.get("ip_5"), "early");
+  // 原断言是「新题 3 条后仍有空位：先补明天到期」；本人改为先补新题（仍受每日额度）再补明天到期（Q4）。
+  assert.equal(reason.get("ip_5"), undefined, "新题还有额度时不提前出明天的题");
+  assert.equal(set.composition.new, 7);
+  assert.equal(set.composition.early, 0);
   assert.equal(set.cards.length, 10);
 });
 
@@ -419,10 +437,15 @@ test("每日新题额度 2N：今天已引入的新题计入；extra 本组再�
   assert.ok(fresh.composition.new > 0);
 });
 
-test("JST 日界：UTC 前一天 15:00 之后的作答算今天", () => {
-  const events = [answer("ip_0", { at: "2026-10-03T15:30:00.000Z" })];
-  const set = select({ size: 10, events, progress: new Map([["ip_0", dueEntry("ip_0", "2026-10-07")]]) });
-  assert.equal(set.limits.newToday, 1);
+// 原用例是「UTC 前一天 15:00（JST 零点）之后算今天」；本人改为练习日从日本时间 04:00 起算（Q3）。
+test("练习日界：JST 04:00 之后的作答算今天，之前算昨天", () => {
+  const progress = new Map([["ip_0", dueEntry("ip_0", "2026-10-07")]]);
+  const after = select({ size: 10, progress, events: [answer("ip_0", { at: "2026-10-03T19:00:00.000Z" })] });
+  assert.equal(after.limits.newToday, 1);
+  const before = select({ size: 10, progress, events: [answer("ip_0", { at: "2026-10-03T18:59:00.000Z" })] });
+  assert.equal(before.limits.newToday, 0, "JST 03:59 仍属前一个练习日");
+  const midnight = select({ size: 10, progress, events: [answer("ip_0", { at: "2026-10-03T15:30:00.000Z" })] });
+  assert.equal(midnight.limits.newToday, 0, "JST 00:30 不再算今天");
 });
 
 test("打字题每组 ≤ round(N×0.2)，超出的退回点选", () => {
@@ -463,10 +486,12 @@ test("quickHistory：按组合成，首答 ≥5 的组才产出，新 → 旧", 
   const history = quickHistory(events);
   assert.deepEqual(history.map((entry) => entry.id), ["set_c", "set_a"]);
   const a = history[1];
-  assert.equal(a.date, "2026-10-04", "首事件按 JST 归日");
+  // 原断言是 10-04（JST 日历日）；首事件在 JST 10-04 00:50，按练习日（04:00 起算）归到 10-03。
+  assert.equal(a.date, "2026-10-03", "首事件按练习日归日");
   assert.equal(a.targetSize, 10);
   assert.equal(a.completedCount, 6, "重出不计");
   assert.equal(a.successCount, 3);
+  assert.equal(a.gradedCount, 6, "自动判分首答数：重出不计");
   assert.equal(a.completedAt, "2026-10-03T16:30:00.000Z");
 });
 
@@ -506,4 +531,270 @@ test("quickSummary：阶段分布只数可出题条目，到期、新题、种�
   assert.equal(summary.ready, true);
   assert.equal(summary.stale, true);
   assert.equal(summary.notebookParsed, 10);
+});
+
+// ── 判断合并、自报「会」与验证 ──────────────────────────────────
+
+test("mergeJudgments：分流覆盖旧批次判断，其余照旧", () => {
+  const legacy = new Map([["a", "known"], ["b", "reject"], ["c", "unknown"]]);
+  const triage = new Map([["a", "unknown"], ["b", "known"], ["d", "uncertain"]]);
+  const merged = mergeJudgments(legacy, triage);
+  assert.deepEqual(Object.fromEntries(merged), { a: "unknown", b: "known", c: "unknown", d: "uncertain" });
+  assert.equal(legacy.get("a"), "known", "不改入参");
+});
+
+test("自报「会」排在所有新题之后（第 7 档）", () => {
+  const byId = new Map(POOL.items.map((item) => [item.id, item]));
+  const known = new Map(PHRASES.slice(0, 15).map((item) => [item.id, "known"]));
+  assert.equal(quickNewTier(byId.get("ip_0"), known, new Set()), QUICK_KNOWN_TIER);
+  assert.equal(QUICK_KNOWN_TIER, 7);
+  assert.ok(quickNewTier(byId.get("ip_23"), known, new Set()) < QUICK_KNOWN_TIER, "送分题也排在「会」之前");
+  // 10 题里面试官名额 3：出的是没标「会」的那几条。
+  const set = select({ size: 10, legacy: known });
+  const phrases = set.cards.filter((card) => card.group === "interviewer_phrase");
+  assert.equal(phrases.length, 3);
+  for (const card of phrases) assert.ok(!known.has(card.itemId), card.itemId);
+  // 某个来源只剩「会」：来源配额不把它们提前拉出来，名额让给别的来源的普通新题。
+  const strategiesKnown = new Map(STRATEGIES.map((item) => [item.id, "known"]));
+  assert.equal(sourceCount(select({ size: 20 }).cards).pattern, 2, "对照：不标「会」时句型拿 2 个名额");
+  const twenty = select({ size: 20, legacy: strategiesKnown });
+  assert.equal(sourceCount(twenty.cards).pattern, 0);
+  assert.equal(twenty.cards.length, 20);
+});
+
+test("自报「会」的新题与「太简单」回来的条目用辨析层验证（面试官用语：识义 → 识词）", () => {
+  // 只留 ip_3、ip_4 两条可出：其余全部排除。
+  const progress = new Map(POOL.items.map((item) => [item.id, progressEntry(item.id, { rejected: true })]));
+  progress.set("ip_3", progressEntry("ip_3", { stage: "recognized" }));
+  progress.set("ip_4", dueEntry("ip_4", "2026-10-04", { stage: "recognized", lastOutcome: "easy", successDates: [] }));
+  const plain = select({ size: 10, progress });
+  assert.equal(plain.cards.find((card) => card.itemId === "ip_3").type, "meaning_choice", "没自报时从识义起步");
+  assert.equal(plain.cards.find((card) => card.itemId === "ip_4").type, "word_choice", "太简单回来：直接识词");
+  const set = select({ size: 10, progress, legacy: new Map([["ip_3", "known"]]) });
+  assert.equal(set.cards.find((card) => card.itemId === "ip_3").type, "word_choice");
+});
+
+// ── 多组：先新题、后提前出 ───────────────────────────────────────
+
+test("不满时先补新题再补明天到期；额度用完才提前出，且每组 ≤ round(N×0.3)", () => {
+  const tomorrow = PHRASES.slice(0, 8).map((item) => item.id);
+  const progress = new Map(tomorrow.map((id) => [id, dueEntry(id, "2026-10-05")]));
+  const set = select({ size: 10, progress });
+  assert.equal(set.composition.new, 10);
+  assert.equal(set.composition.early, 0);
+  // 今天已引入 20 条（10 题的额度用完）：明天到期的提前出，但最多 3 条。
+  const introduced = POOL.items.filter((item) => !tomorrow.includes(item.id)).slice(0, 20)
+    .map((item, index) => answer(item.id, { eventId: `in_${index}` }));
+  for (const event of introduced) progress.set(event.itemId, dueEntry(event.itemId, "2026-10-07"));
+  const later = select({ size: 10, progress, events: introduced });
+  assert.equal(later.composition.new, 0);
+  assert.equal(later.composition.early, Math.round(10 * QUICK_SELECT_RULES.earlyShare));
+  assert.equal(later.cards.length, 3, "组不满也不再多提前");
+  assert.equal(later.limits.newExhausted, true);
+});
+
+// ── 二选一上限 ──────────────────────────────────────────────────
+
+test("每组「哪个更自然」二选一 ≤ round(N×0.4)，超出的换别的条目补", () => {
+  const nouns = ["資料", "日報", "議事録", "仕様書", "提案書", "手順書", "報告書", "設計書", "見積書", "計画書", "企画書", "契約書"];
+  // 虚构的措辞改错（非助词）：只能出二选一。每条一个错误型，不受同型上限影响。
+  const binary = nouns.map((noun, index) => li("error_patch", `bin_${index}`, {
+    targetJa: `${noun}を見ます → ${noun}を拝見します`,
+    correctedJa: `${noun}を拝見します`,
+    originalJa: `明日${noun}を見ます。`,
+    meaningZh: "改成谦让语",
+    pattern: `型_措辞${index}`,
+  }));
+  const pool = buildQuickPool({ ...CURRICULUM, items: [...binary, ...PHRASES] }, undefined);
+  const index = createQuickIndex(pool.items);
+  for (const item of pool.items.filter((entry) => entry.group === "error_patch")) {
+    assert.deepEqual(availableCardTypes(item, index, { typing: true }), ["natural_choice"], "fixture：只有二选一");
+  }
+  const set = select({ pool, index, size: 10 });
+  const natural = set.cards.filter((card) => card.type === "natural_choice").length;
+  // 不设上限时按来源配额改错会拿 6 张（面试官 4 张）。
+  assert.equal(natural, Math.round(10 * QUICK_SELECT_RULES.naturalShare));
+  assert.equal(set.cards.length, 10, "空出来的位子由面试官用语补上");
+});
+
+// ── 针对练习 ────────────────────────────────────────────────────
+
+test("focus：只出该错误型的条目，放开同型上限与来源配额；返回的组带 focus", () => {
+  const set = select({ size: 10, focus: "型_参加" });
+  assert.equal(set.focus, "型_参加");
+  assert.equal(set.cards.length, 6, "这一型只有 6 条");
+  for (const card of set.cards) assert.equal(INDEX.byId.get(card.itemId).pattern, "型_参加");
+  assert.equal(set.composition.new, 6, "同型新题上限 2 不适用");
+  assert.equal(select({ size: 10 }).focus, undefined);
+});
+
+test("focus：到期先出，再今日答错，再新题；新题计入每日额度", () => {
+  const ids = PATCHES.filter((item) => item.pattern === "型_慣れ").map((item) => item.id);
+  const progress = new Map([
+    [ids[0], dueEntry(ids[0], "2026-10-02")],
+    [ids[1], dueEntry(ids[1], "2026-10-07")],
+  ]);
+  const events = [answer(ids[1], { passed: false, type: "cloze_choice" })];
+  const set = select({ size: 10, focus: "型_慣れ", progress, events });
+  const reason = new Map(set.cards.map((card) => [card.itemId, card.reason]));
+  assert.equal(reason.get(ids[0]), "due");
+  assert.equal(reason.get(ids[1]), "lapsed");
+  assert.equal(set.composition.new, 4);
+  // 今天已引入 39 条（20 题额度 40）：针对练习也只能再出 1 条新题。
+  const introduced = POOL.items.filter((item) => item.pattern !== "型_慣れ").slice(0, 39)
+    .map((item, index) => answer(item.id, { eventId: `fx_${index}` }));
+  const capped = select({ size: 20, focus: "型_慣れ", events: introduced });
+  assert.equal(capped.composition.new, 1);
+  assert.equal(capped.limits.newExhausted, true);
+});
+
+test("quickFocusOptions 与 annotateQuickTopIssues：每个改错型可出题条数，只给有条目的问题填 focus", () => {
+  const progress = new Map([["ep_0_0", progressEntry("ep_0_0", { rejected: true })]]);
+  const options = quickFocusOptions(POOL, INDEX, progress, true);
+  assert.equal(options.get("型_参加"), 5, "排除的不算");
+  assert.equal(options.get("型_慣れ"), 6);
+  assert.equal(options.size, 5);
+  const issues = annotateQuickTopIssues([
+    { key: "型_参加", label: "参加", interviewCount: 3, occurrenceCount: 9 },
+    { key: "structure", label: "型_慣れ", interviewCount: 2, occurrenceCount: 4, kind: "language" },
+    { key: "conclusion_first", label: "结论先行", interviewCount: 4, occurrenceCount: 6, kind: "strategy" },
+  ], options);
+  assert.deepEqual(issues.map((issue) => [issue.focus, issue.itemCount, issue.kind]), [
+    ["型_参加", 5, "language"],
+    ["型_慣れ", 6, "language"],
+    [undefined, undefined, "strategy"],
+  ]);
+});
+
+// ── 分流列表 ────────────────────────────────────────────────────
+
+test("selectTriageItems：只取没作答、没判断、未排除、可出题的条目，按新题队列顺序", () => {
+  const legacy = new Map([["ip_0", "known"], ["ip_1", "unknown"], ["as_0", "reject"]]);
+  const progress = new Map([
+    ["ip_2", dueEntry("ip_2", "2026-10-07")],
+    ["ip_3", progressEntry("ip_3", { rejected: true })],
+  ]);
+  const input = { pool: POOL, index: INDEX, progress, legacy, typing: true };
+  const all = selectTriageItems({ ...input, size: 1000 });
+  const ids = all.map((brief) => brief.itemId);
+  for (const id of ["ip_0", "ip_1", "as_0", "ip_2", "ip_3"]) assert.ok(!ids.includes(id), id);
+  assert.equal(all.length, POOL.items.length - 5);
+  const head = selectTriageItems({ ...input, size: 7 });
+  assert.deepEqual(head, all.slice(0, 7), "前 size 条");
+  const tiers = all.map((brief) => quickNewTier(INDEX.byId.get(brief.itemId), legacy, new Set()));
+  assert.deepEqual(tiers, [...tiers].sort((a, b) => a - b), "档位不降");
+  const patch = all.find((brief) => brief.group === "error_patch");
+  assert.ok(patch.wrong && patch.ja && patch.wrong !== patch.ja, "改错条目带错形");
+  const phrase = all.find((brief) => brief.itemId === "ip_5");
+  assert.deepEqual(phrase, { itemId: "ip_5", group: "interviewer_phrase", ja: "落とし込む", reading: "おとしこむ", meaning: "落实到具体" });
+});
+
+// ── 今天：「太简单」与练习日 ─────────────────────────────────────
+
+test("今天按了「太简单」的条目：不再出、占新题额度、不算今天答错", () => {
+  const events = [
+    answer("ip_7", { passed: false, at: "2026-10-04T01:00:00.000Z" }),
+    answer("ip_7", { action: "easy", passed: undefined, first: false, at: "2026-10-04T01:00:05.000Z" }),
+    answer("ip_8", { action: "easy", passed: undefined, first: false, at: "2026-10-04T01:01:00.000Z" }),
+    answer("ip_9", { action: "triage", judgment: "unknown", passed: undefined, first: false }),
+  ];
+  const set = select({ size: 30, events });
+  const ids = new Set(set.cards.map((card) => card.itemId));
+  assert.ok(!ids.has("ip_7") && !ids.has("ip_8"));
+  assert.equal(set.limits.newToday, 2, "分流不占新题额度");
+  const summary = quickSummary({ pool: POOL, index: INDEX, progress: NONE, events, legacy: NONE, day: DAY });
+  assert.equal(summary.lapsedToday, 0);
+  assert.equal(summary.answeredToday, 2);
+});
+
+// ── 汇总的新字段 ────────────────────────────────────────────────
+
+function summarize(overrides = {}) {
+  return quickSummary({ pool: POOL, index: INDEX, progress: NONE, events: [], legacy: NONE, day: DAY, size: 10, ...overrides });
+}
+
+test("nextSet 与实际 GET set 的构成一致（冷启动、有到期、有今日答错、额度用完、追赶模式）", () => {
+  const dueMany = new Map(POOL.items.slice(0, 45).map((item) => [item.id, dueEntry(item.id, "2026-10-03")]));
+  const introduced = POOL.items.slice(0, 20).map((item, index) => answer(item.id, { eventId: `nx_${index}` }));
+  const scenarios = [
+    {},
+    { progress: new Map([["ip_3", dueEntry("ip_3", "2026-10-01")], ["ip_5", dueEntry("ip_5", "2026-10-05")]]) },
+    { events: [answer("ip_6", { passed: false })], progress: new Map([["ip_6", dueEntry("ip_6", "2026-10-05")]]) },
+    { events: introduced, progress: new Map(introduced.map((event) => [event.itemId, dueEntry(event.itemId, "2026-10-05")])) },
+    { progress: dueMany },
+    { legacy: new Map([["ip_11", "unknown"], ["ip_12", "known"]]) },
+  ];
+  for (const [index, scenario] of scenarios.entries()) {
+    for (const size of [10, 20]) {
+      const set = select({ size, ...scenario });
+      const expected = {
+        total: set.cards.length,
+        due: set.composition.due,
+        lapsed: set.composition.lapsed,
+        fresh: set.composition.new,
+        early: set.composition.early,
+      };
+      assert.deepEqual(summarize({ size, ...scenario }).nextSet, expected, `场景 ${index} size ${size}`);
+      assert.deepEqual(quickNextSet({ pool: POOL, index: INDEX, progress: NONE, events: [], legacy: NONE, day: DAY, size, typing: true, ...scenario }), expected);
+    }
+  }
+});
+
+test("dueSoon：7 天，[0] 含逾期、不含今天已答；[1] 等于 dueTomorrow", () => {
+  const progress = new Map([
+    ["ip_3", dueEntry("ip_3", "2026-09-28")],
+    ["ip_4", dueEntry("ip_4", "2026-10-04")],
+    ["ip_5", dueEntry("ip_5", "2026-10-05")],
+    ["ip_6", dueEntry("ip_6", "2026-10-05")],
+    ["ip_7", dueEntry("ip_7", "2026-10-10")],
+    ["ip_8", dueEntry("ip_8", "2026-10-11")],
+    ["ip_9", dueEntry("ip_9", "2026-10-02")],
+  ]);
+  const events = [answer("ip_9", { passed: true })];
+  const summary = summarize({ progress, events });
+  assert.deepEqual(summary.dueSoon, [2, 2, 0, 0, 0, 0, 1]);
+  assert.equal(summary.due, summary.dueSoon[0]);
+  assert.equal(summary.dueTomorrow, summary.dueSoon[1]);
+});
+
+test("suspended：排除清单（新 → 旧，最多 50 条）与总数；撤销后回到题库", () => {
+  const progress = new Map([
+    ["ip_3", progressEntry("ip_3", { rejected: true, lastSeenAt: "2026-10-04T01:00:00.000Z" })],
+    ["ep_0_0", progressEntry("ep_0_0", { rejected: true, lastSeenAt: "2026-10-04T02:00:00.000Z" })],
+    // 旧批次标过 reject、之后在快练里撤销：有回放进度时以进度为准。
+    ["as_0", progressEntry("as_0", { rejected: false })],
+  ]);
+  const legacy = new Map([["as_0", "reject"], ["as_1", "reject"]]);
+  const summary = summarize({ progress, legacy });
+  assert.equal(summary.suspendedCount, 3);
+  assert.deepEqual(summary.suspended.map((brief) => brief.itemId), ["ep_0_0", "ip_3", "as_1"]);
+  assert.ok(summary.suspended[0].wrong, "改错条目带错形，方便判断要不要恢复");
+  const set = select({ size: 30, progress, legacy });
+  const ids = new Set(set.cards.map((card) => card.itemId));
+  assert.ok(!ids.has("as_1") && !ids.has("ip_3"));
+
+  const many = new Map(POOL.items.slice(0, 60).map((item) => [item.id, progressEntry(item.id, { rejected: true })]));
+  const big = summarize({ progress: many });
+  assert.equal(big.suspended.length, 50);
+  assert.equal(big.suspendedCount, 60);
+});
+
+test("triageRemaining、orphanEvents、glossed、dailyNewLimit 口径", () => {
+  const legacy = new Map([["ip_0", "known"]]);
+  const progress = new Map([["ip_1", dueEntry("ip_1", "2026-10-07")]]);
+  const events = [answer("ip_1", { at: "2026-10-01T01:00:00.000Z" }), answer("li2_gone"), answer("nb_gone", { action: "triage", judgment: "known" })];
+  const summary = summarize({ progress, legacy, events, size: 20 });
+  assert.equal(summary.triageRemaining, POOL.items.length - 2);
+  assert.equal(summary.orphanEvents, 2);
+  assert.equal(summary.glossed, 0);
+  assert.equal(summarize({ pool: { ...POOL, glossed: 12 } }).glossed, 12);
+  assert.equal(summary.dailyNewLimit, quickDailyNewLimit(20));
+  assert.equal(summary.dailyNewLimit, select({ size: 20 }).limits.dailyNewLimit, "与 GET set 同一口径");
+  assert.equal(quickDailyNewLimit(10, true), 30);
+});
+
+test("topIssues 在 summary 里带上 focus 与 itemCount", () => {
+  const summary = summarize({ topIssues: [{ key: "型_対応", label: "对应", interviewCount: 3, occurrenceCount: 5 }] });
+  assert.equal(summary.topIssues[0].focus, "型_対応");
+  assert.equal(summary.topIssues[0].itemCount, 6);
 });

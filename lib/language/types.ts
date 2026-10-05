@@ -336,7 +336,7 @@ export type LanguageItemProgress = {
   selfStreak?: number;
   /** 最近一次自动判分首答的 JST 日。 */
   lastGradedDay?: string;
-  lastOutcome?: "pass" | "fail" | "self";
+  lastOutcome?: "pass" | "fail" | "self" | "easy";
 };
 
 export type LanguageBatchPhase = "scan" | "compile" | "stress" | "completed";
@@ -380,6 +380,8 @@ export type LanguageBatchHistory = {
   completedCount: number;
   successCount: number;
   completedAt?: string;
+  /** 快练：这一组里自动判分的首答数（翻卡自评不算）。「答对 7 / 9」的分母，和小结屏一致。 */
+  gradedCount?: number;
 };
 
 export type LanguageV2State = {

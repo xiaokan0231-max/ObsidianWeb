@@ -7,6 +7,7 @@ import type {
   QuickSelfRating,
   QuickSet,
 } from "./quick-types.ts";
+import { QUICK_DAY_START_HOUR } from "./quick-types.ts";
 import { gradeQuickCard } from "./quick-cards.ts";
 import { seededShuffle } from "./quick-text.ts";
 
@@ -17,6 +18,9 @@ import { seededShuffle } from "./quick-text.ts";
  * - 答错（含「不知道」、翻卡模糊/忘了）的卡隔至少 3 题再出一次：紧接着重出只是在看刚才的答案，
  *   隔几题才是一次真正的回想。剩余不足 3 题时排在末尾。重出不计成败、选项重排，重出再错不再追加。
  * - 「这题有问题」（suspend）随时可按：干扰项没有人工校验，必须有出口；它的重出也一并撤掉。
+ *   按错了可以撤销（undoSuspend → restore 事件）：题面阶段按的那张卡回到当前位置重新作答。
+ * - 「太简单」（easy）在题面与反馈阶段都能按：记一条 easy 事件、撤掉它的重出、直接下一题；不计正确率。
+ * - 回看（back / forward）：只读地看已经答过的卡；回看期间一切作答类动作都不生效，不产生任何事件。
  *
  * eventId 默认按「setId.序号」生成：同一组里唯一，且重发时不变，服务端据此去重。
  */
@@ -39,7 +43,8 @@ export type QuickSessionRecord = {
   type: QuickCardType;
   grading: QuickCard["grading"];
   round: 0 | 1;
-  action: "answer" | "suspend";
+  /** restore 只来自 undoSuspend；easy 不进正确率。 */
+  action: "answer" | "suspend" | "restore" | "easy";
   response: string;
   rating?: QuickSelfRating;
   gaveUp?: boolean;
@@ -66,6 +71,11 @@ export type QuickSessionState = {
   suspended: string[];
   /** 已分配的 eventId 序号。 */
   seq: number;
+  /**
+   * 回看位置：正在看 queue[peek] 那张已答的卡；null＝看当前题。只读——cursor、phase 都不动，
+   * 回到当前题时一切照旧（反馈阶段回看完仍停在反馈）。
+   */
+  peek: number | null;
 };
 
 export type QuickSessionAction =
@@ -73,6 +83,11 @@ export type QuickSessionAction =
   | { type: "answer"; response?: string; rating?: QuickSelfRating; elapsedMs?: number; eventId?: string }
   | { type: "gaveUp"; elapsedMs?: number; eventId?: string }
   | { type: "suspend"; elapsedMs?: number; eventId?: string }
+  /** 撤销「不再出」。itemId 缺省＝本组最近一条还没撤销的。 */
+  | { type: "undoSuspend"; itemId?: string; eventId?: string }
+  | { type: "easy"; elapsedMs?: number; eventId?: string }
+  | { type: "back" }
+  | { type: "forward" }
   | { type: "next" }
   | { type: "end" };
 
@@ -89,11 +104,69 @@ export function createQuickSession(set: Pick<QuickSet, "setId" | "day" | "size" 
     retried: [],
     suspended: [],
     seq: 0,
+    peek: null,
   };
 }
 
 export function currentQuickEntry(state: QuickSessionState): QuickSessionEntry | undefined {
   return state.phase === "ended" ? undefined : state.queue[state.cursor];
+}
+
+/** 某张卡（按 key）在本组的作答记录：答题与「太简单」优先，其次「不再出」；没有则 undefined。 */
+function recordFor(state: QuickSessionState, key: string): QuickSessionRecord | undefined {
+  let fallback: QuickSessionRecord | undefined;
+  for (let index = state.records.length - 1; index >= 0; index -= 1) {
+    const record = state.records[index];
+    if (record.key !== key) continue;
+    if (record.action === "answer" || record.action === "easy") return record;
+    if (!fallback && record.action === "suspend") fallback = record;
+  }
+  return fallback;
+}
+
+/** 当前题之前、本组里答过（或标过）的卡的位置，从旧到新。 */
+function peekTargets(state: QuickSessionState) {
+  const targets: number[] = [];
+  for (let index = 0; index < Math.min(state.cursor, state.queue.length); index += 1) {
+    if (recordFor(state, state.queue[index].key)) targets.push(index);
+  }
+  return targets;
+}
+
+export function canPeekBack(state: QuickSessionState) {
+  if (state.phase === "ended") return false;
+  const targets = peekTargets(state);
+  return state.peek === null ? targets.length > 0 : targets.some((index) => index < state.peek!);
+}
+
+export type QuickDisplayed = {
+  entry: QuickSessionEntry;
+  /** 这张卡在本组的作答记录（当前题还没答时为 undefined）。 */
+  record?: QuickSessionRecord;
+  /** 正在回看：界面只读显示，不收作答。 */
+  peeking: boolean;
+};
+
+/** 界面此刻该显示的卡：回看时是那张已答的卡，否则是当前题。组结束后为 undefined。 */
+export function displayedQuickEntry(state: QuickSessionState): QuickDisplayed | undefined {
+  if (state.phase === "ended") return undefined;
+  if (state.peek !== null) {
+    const entry = state.queue[state.peek];
+    if (entry) return { entry, record: recordFor(state, entry.key), peeking: true };
+  }
+  const entry = currentQuickEntry(state);
+  if (!entry) return undefined;
+  const record = state.phase === "feedback" ? recordFor(state, entry.key) : undefined;
+  return { entry, ...(record ? { record } : {}), peeking: false };
+}
+
+/**
+ * 反馈阶段该不该停下等本人看解释（界面「答对自动下一题」据此决定是否起计时器）。
+ * 只有自动判分、真答对的题可以自动前进；答错、不知道、翻卡自评、太简单与「不再出」都停下。
+ */
+export function shouldPauseAfter(record: QuickSessionRecord | undefined): boolean {
+  if (!record) return true;
+  return !(record.action === "answer" && record.grading === "auto" && record.passed === true && !record.gaveUp);
 }
 
 /** 全部要提交的作答（按作答顺序）。客户端按 eventId 记已发送，失败重发同一条即可。 */
@@ -126,14 +199,20 @@ function reshuffle(card: QuickCard): QuickCard {
 
 function advance(state: QuickSessionState): QuickSessionState {
   const cursor = state.cursor + 1;
-  return { ...state, cursor, phase: cursor >= state.queue.length ? "ended" : "question", revealed: false };
+  return { ...state, cursor, phase: cursor >= state.queue.length ? "ended" : "question", revealed: false, peek: null };
+}
+
+/** 撤掉某条目在当前位置之后还没出的卡（重出）：已经说了「不再出」或「太简单」。 */
+function dropPending(state: QuickSessionState, itemId: string): QuickSessionState {
+  const queue = state.queue.filter((candidate, index) => index <= state.cursor || candidate.card.itemId !== itemId);
+  return queue.length === state.queue.length ? state : { ...state, queue };
 }
 
 function record(
   state: QuickSessionState,
   entry: QuickSessionEntry,
   values: {
-    action: "answer" | "suspend";
+    action: QuickSessionRecord["action"];
     response: string;
     rating?: QuickSelfRating;
     gaveUp?: boolean;
@@ -151,7 +230,9 @@ function record(
     ...(values.response ? { response: values.response } : {}),
     ...(values.rating ? { rating: values.rating } : {}),
     ...(values.gaveUp ? { gaveUp: true } : {}),
+    // suspend 沿用旧布尔（服务端两种都认）；新动作用 action。
     ...(values.action === "suspend" ? { suspend: true } : {}),
+    ...(values.action === "restore" || values.action === "easy" ? { action: values.action } : {}),
     ...(values.elapsedMs !== undefined ? { elapsedMs: values.elapsedMs } : {}),
   };
   const next: QuickSessionRecord = {
@@ -187,8 +268,51 @@ function scheduleRetry(state: QuickSessionState, entry: QuickSessionEntry): Quic
   return { ...state, queue, retried: [...state.retried, itemId] };
 }
 
+/** 撤销「不再出」：记一条 restore；题面阶段按的（那张卡还没答）放回当前位置重新作答。 */
+function undoSuspend(state: QuickSessionState, action: { itemId?: string; eventId?: string }): QuickSessionState {
+  const itemId = action.itemId ?? state.suspended.at(-1);
+  if (!itemId || !state.suspended.includes(itemId)) return state;
+  const suspendRecord = [...state.records].reverse().find((entry) => entry.itemId === itemId && entry.action === "suspend");
+  const at = suspendRecord ? state.queue.findIndex((entry) => entry.key === suspendRecord.key) : -1;
+  if (at < 0) return state;
+  const entry = state.queue[at];
+  const restored = record(state, entry, { action: "restore", response: "", eventId: action.eventId });
+  const next = { ...restored, suspended: restored.suspended.filter((value) => value !== itemId) };
+  const unanswered = !state.records.some((value) => value.key === entry.key && (value.action === "answer" || value.action === "easy"));
+  if (!unanswered || next.phase === "ended" || at >= next.cursor) return next;
+  // 把那张卡从历史里挪到当前题之前：题面阶段直接成为当前题；当前题已答（反馈阶段）就排在下一题。
+  const queue = next.queue.filter((_, index) => index !== at);
+  const cursor = next.cursor - 1;
+  if (next.phase === "question") {
+    queue.splice(cursor, 0, entry);
+    return { ...next, queue, cursor, revealed: false, peek: null };
+  }
+  queue.splice(cursor + 1, 0, entry);
+  return { ...next, queue, cursor, peek: null };
+}
+
+function peekBack(state: QuickSessionState): QuickSessionState {
+  if (state.phase === "ended") return state;
+  const targets = peekTargets(state).filter((index) => state.peek === null || index < state.peek);
+  const target = targets.at(-1);
+  return target === undefined ? state : { ...state, peek: target };
+}
+
+function peekForward(state: QuickSessionState): QuickSessionState {
+  if (state.peek === null) return state;
+  const target = peekTargets(state).find((index) => index > state.peek!);
+  return { ...state, peek: target ?? null };
+}
+
 export function quickSessionReducer(state: QuickSessionState, action: QuickSessionAction): QuickSessionState {
-  if (action.type === "end") return state.phase === "ended" ? state : { ...state, phase: "ended" };
+  if (action.type === "end") return state.phase === "ended" ? state : { ...state, phase: "ended", peek: null };
+  if (action.type === "back") return peekBack(state);
+  if (action.type === "forward") return peekForward(state);
+  if (state.peek !== null) {
+    // 回看是只读的：Enter（next）只是回到当前题，其余作答类动作一律不生效。
+    return action.type === "next" ? { ...state, peek: null } : state;
+  }
+  if (action.type === "undoSuspend") return undoSuspend(state, action);
   const entry = currentQuickEntry(state);
   if (!entry) return state;
   const { card } = entry;
@@ -239,8 +363,17 @@ export function quickSessionReducer(state: QuickSessionState, action: QuickSessi
         action: "suspend", response: "", elapsedMs: action.elapsedMs, eventId: action.eventId,
       });
       // 撤掉这条后面还没出的重出：已经说了「不再出」。
-      const queue = next.queue.filter((candidate, index) => index <= next.cursor || candidate.card.itemId !== itemId);
-      return advance({ ...next, queue, suspended: [...next.suspended, itemId] });
+      return advance({ ...dropPending(next, itemId), suspended: [...next.suspended, itemId] });
+    }
+
+    case "easy": {
+      // 同一张卡按过一次就够了（反馈阶段连按）；easy 之后直接前进，所以只可能在当前卡上重复。
+      if (state.records.some((value) => value.key === entry.key && value.action === "easy")) return state;
+      const next = record(state, entry, {
+        action: "easy", response: "", elapsedMs: action.elapsedMs, eventId: action.eventId,
+      });
+      // 已经安排的重出也撤掉：太简单的卡本组不再出。
+      return advance(dropPending(next, card.itemId));
     }
 
     case "next":
@@ -260,7 +393,17 @@ const STAGE_ORDER: readonly LanguageTrainingStage[] = [
 ];
 const rank = (stage: LanguageTrainingStage) => STAGE_ORDER.indexOf(stage);
 
-export type QuickStageChange = { itemId: string; before: LanguageTrainingStage; after: LanguageTrainingStage };
+export type QuickStageChange = {
+  itemId: string;
+  before: LanguageTrainingStage;
+  after: LanguageTrainingStage;
+  /** 本组里这条的题面与答案（小结展开「升阶 N 项是哪几项」用）。 */
+  stem?: string;
+  answer?: string;
+};
+
+/** 本组被「不再出」排除、且没有撤销的条目。 */
+export type QuickSuspendedItem = { itemId: string; cardId: string; stem: string; answer: string };
 
 export type QuickMistake = {
   itemId: string;
@@ -289,6 +432,10 @@ export type QuickSetSummaryData = {
   gaveUp: number;
   retries: { total: number; fixed: number; stillWrong: number };
   suspended: number;
+  /** 被排除的条目明细（撤销过的不在内），供小结屏逐条恢复。 */
+  suspendedItems: QuickSuspendedItem[];
+  /** 「太简单」的条目数：不计入正确率，单列。 */
+  easy: number;
   /** 各题 elapsedMs 之和；一条都没有时为 null。 */
   elapsedMs: number | null;
   /**
@@ -316,6 +463,13 @@ export function summarizeQuickSet(
   const selfRated = firstRound.filter((entry) => entry.grading === "self");
   const retryOutcome = new Map(retries.map((entry) => [entry.itemId, !missed(entry.passed, entry.rating)]));
   const cards = new Map(state.queue.map((entry) => [entry.key, entry.card]));
+  // 每个条目本组第一次出现的卡：升降与排除明细都用它的题面。
+  const firstCard = new Map<string, QuickCard>();
+  for (const entry of state.queue) if (!firstCard.has(entry.card.itemId)) firstCard.set(entry.card.itemId, entry.card);
+  const detail = (itemId: string) => {
+    const card = firstCard.get(itemId);
+    return card ? { stem: card.stem, answer: card.answer } : {};
+  };
 
   const results = new Map((serverResults ?? []).map((result) => [result.eventId, result]));
   // 升降按条目算：首答与重出常在同一次提交里，两条应答的 before/after 相同，逐条计会把一项算成两项。
@@ -332,6 +486,7 @@ export function summarizeQuickSet(
       itemId: result.itemId,
       before: known?.before ?? result.stageBefore,
       after: result.stageAfter,
+      ...detail(result.itemId),
     });
   }
   const promoted = [...changes.values()].filter((change) => rank(change.after) > rank(change.before));
@@ -361,6 +516,11 @@ export function summarizeQuickSet(
       stillWrong: retries.filter((entry) => missed(entry.passed, entry.rating)).length,
     },
     suspended: state.suspended.length,
+    suspendedItems: state.suspended.flatMap((itemId) => {
+      const card = firstCard.get(itemId);
+      return card ? [{ itemId, cardId: card.cardId, stem: card.stem, answer: card.answer }] : [];
+    }),
+    easy: new Set(state.records.filter((entry) => entry.action === "easy").map((entry) => entry.itemId)).size,
     elapsedMs: elapsed.length ? elapsed.reduce((sum, value) => sum + value, 0) : null,
     stages: { known: serverResults !== undefined && pending === 0, confirmed, pending, promoted, demoted },
     mistakes: firstRound
@@ -380,4 +540,41 @@ export function summarizeQuickSet(
         };
       }),
   };
+}
+
+// ── 下次复习 ────────────────────────────────────────────────────
+
+const DAY_MS = 86_400_000;
+const JST_OFFSET_HOURS = 9;
+
+export type QuickDueGroup = { days: number; count: number };
+
+/**
+ * 本组的题什么时候回来：按服务端应答里的 nextDueAt 分组成「1 天后 3 题 · 3 天后 7 题」。
+ * day 是本组的练习日（YYYY-MM-DD），练习日从日本时间 dayStartHour 点起算（默认 QUICK_DAY_START_HOUR）。
+ * 同一条目取最后一条应答（首答与重出常在同一次提交里）；stale 的、没有 nextDueAt 的、exclude 里的（本组排除的）不算。
+ * 天数四舍五入到整天：服务端把到期写成某个练习日的起点，按零点还是按 04:00 写都落在同一天。
+ */
+export function nextDueGroups(
+  results: readonly QuickAnswerResult[],
+  day: string,
+  { dayStartHour = QUICK_DAY_START_HOUR, exclude = [] }: { dayStartHour?: number; exclude?: Iterable<string> } = {},
+): QuickDueGroup[] {
+  const start = Date.parse(`${day}T00:00:00.000Z`) + (dayStartHour - JST_OFFSET_HOURS) * 3_600_000;
+  if (!Number.isFinite(start)) return [];
+  const skip = new Set(exclude);
+  const latest = new Map<string, string>();
+  for (const result of results) {
+    if (result.status === "stale" || skip.has(result.itemId)) continue;
+    if (result.nextDueAt) latest.set(result.itemId, result.nextDueAt);
+    else latest.delete(result.itemId);
+  }
+  const counts = new Map<number, number>();
+  for (const due of latest.values()) {
+    const time = Date.parse(due);
+    if (!Number.isFinite(time)) continue;
+    const days = Math.max(0, Math.round((time - start) / DAY_MS));
+    counts.set(days, (counts.get(days) ?? 0) + 1);
+  }
+  return [...counts].sort((left, right) => left[0] - right[0]).map(([days, count]) => ({ days, count }));
 }

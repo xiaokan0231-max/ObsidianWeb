@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { stableId } from "../lib/dojo/utils.ts";
 import { normalizeQuickAnswer } from "../lib/language/quick-text.ts";
-import { buildQuickPool, parseVocabNotebook } from "../lib/language/quick-items.ts";
+import { buildQuickPool, completeMisreading, parseVocabNotebook } from "../lib/language/quick-items.ts";
 
 // 全部虚构内容：表格结构仿单語文法帳，词条与备注是测试自编的。
 const PATH = "20_求職/_素材/単語文法帳.md";
@@ -59,11 +59,14 @@ type: material
 |---|---|---|
 | 担う | になう | 承担 ★ |
 
-## G. 数字（読まない）
+## G. 数字の読み方
 
 | 数字 | 読み | ★ |
 |---|---|---|
 | 99件 | きゅうじゅうきゅうけん | ★★ |
+| 約9冊 | やくきゅうさつ | ★（「きゅうさつ」。きゅさつ✗） |
+| 7キロ | ななきろ | ★（[[架空ノート]]参照・**例** 2026-01-01 確認） |
+| 謎の数 | ー | ★ |
 
 ## H. 構文の型
 
@@ -77,15 +80,17 @@ type: material
 | 謎語 | なぞご | 谜语 |
 `;
 
-test("七张表都解析，E、G 与未知小节不产出任何条目", () => {
+// 本人 2026-10-05 拍板 G 表（实绩数字读法）进快练、只考读音（A6-14）：原用例断言 G 表不产出条目、跳过 3 个小节，
+// 规则变了，改成「八张表都解析，只有 E 与未知小节不读」。
+test("八张表都解析，E 与未知小节不产出任何条目", () => {
   const { items, skipped } = parseVocabNotebook(NOTEBOOK, PATH);
   const tables = new Set(items.map((item) => item.pattern));
-  assert.deepEqual([...tables].sort(), ["A", "B-1", "B-2", "C", "D", "F", "H"]);
+  assert.deepEqual([...tables].sort(), ["A", "B-1", "B-2", "C", "D", "F", "G", "H"]);
   const surfaces = items.map((item) => item.ja);
-  for (const forbidden of ["架空資格", "99件", "謎語"]) {
+  for (const forbidden of ["架空資格", "謎語"]) {
     assert.ok(!surfaces.includes(forbidden), `${forbidden} 不应出现`);
   }
-  assert.equal(skipped.notebook_section, 3, "E、G、Z 三个小节被跳过");
+  assert.equal(skipped.notebook_section, 2, "E、Z 两个小节被跳过");
   assert.equal(items.every((item) => item.source === "notebook"), true);
 });
 
@@ -105,7 +110,7 @@ test("かな「ー」＝无读音；C 表無読音的行跳过；表記多段时
   assert.equal(agent.reading, "");
   assert.deepEqual(agent.jaAlts, ["エージェント／リクルーター", "エージェント", "リクルーター"]);
   assert.ok(!items.some((value) => value.ja === "パイプライン"));
-  assert.equal(skipped.notebook_no_reading, 1);
+  assert.equal(skipped.notebook_no_reading, 2, "C 表与 G 表各一行没有读音");
   const rounds = items.find((value) => value.ja === "一次面接／最終面接");
   assert.equal(rounds.reading, "");
   assert.match(rounds.note, /よみ：いちじ／さいしゅうめんせつ/u);
@@ -166,4 +171,36 @@ test("buildQuickPool：没有课程也能只用単語文法帳组题库，并报
   assert.ok(pool.items.length >= 10);
   assert.equal(pool.excludedJaMeaning, 0);
   assert.equal(pool.items[0].evidence[0].label.startsWith("単語文法帳 · "), true);
+});
+
+test("G 表：表記列叫「数字」，只有读音没有中文；★ 注进 note（链接与加粗只留文字），✗ 误读补成完整读音", () => {
+  const { items } = parseVocabNotebook(NOTEBOOK, PATH);
+  const numbers = items.filter((item) => item.pattern === "G");
+  assert.deepEqual(numbers.map((item) => item.ja), ["99件", "約9冊", "7キロ"]);
+  assert.ok(numbers.every((item) => item.group === "nb_number" && item.meaning === ""));
+  const nine = numbers.find((item) => item.ja === "約9冊");
+  assert.equal(nine.reading, "やくきゅうさつ");
+  assert.equal(nine.note, "「きゅうさつ」。きゅさつ✗");
+  assert.deepEqual(nine.misreadings, ["やくきゅさつ"], "片段「きゅさつ」替换掉正解里最像的「きゅうさつ」");
+  assert.equal(numbers.find((item) => item.ja === "7キロ").note, "架空ノート参照・例 2026-01-01 確認");
+  assert.equal(numbers.find((item) => item.ja === "99件").stars, 2);
+  const kanji = items.find((item) => item.ja === "冪等");
+  assert.deepEqual(kanji.misreadings, ["べきどう"], "C 表的 ✗ 同样当误读");
+  assert.equal(items.find((item) => item.ja === "求人票").misreadings, undefined);
+});
+
+test("completeMisreading：只写出错那一段时在正解里找最像的一段替换；差太远或与正解相同不补", () => {
+  assert.equal(completeMisreading("やくななねん", "さんぜん"), null, "差太远（超过片段长度三分之一）不补");
+  assert.equal(completeMisreading("ろっぴゃくえん", "ろくぴゃく"), "ろくぴゃくえん");
+  assert.equal(completeMisreading("やくよんほん", "よほん"), "やくよほん", "首尾对得上的「よんほん」优先于「んほん」，也不换成「よん」");
+  assert.equal(completeMisreading("ごかげつ", "ごげつ"), "ごげつ");
+  assert.equal(completeMisreading("ティーエス", "ティエス"), "ティエス");
+  assert.equal(completeMisreading("やくななねん", "やくななねん"), null);
+  assert.equal(completeMisreading("", "よん"), null);
+});
+
+test("buildQuickPool：notebookParsed 含 G 表条数", () => {
+  const pool = buildQuickPool(undefined, { path: PATH, content: NOTEBOOK });
+  assert.equal(pool.items.filter((item) => item.group === "nb_number").length, 3);
+  assert.equal(pool.notebookParsed, pool.items.length);
 });

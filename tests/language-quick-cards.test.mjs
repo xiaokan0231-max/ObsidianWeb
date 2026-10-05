@@ -16,7 +16,9 @@ import {
 } from "../lib/language/quick-text.ts";
 import {
   buildQuickPool,
+  isCognateItem,
   parsePatch,
+  parsePhraseGlossTable,
   quickItemsFromCurriculum,
   reliableReading,
 } from "../lib/language/quick-items.ts";
@@ -33,6 +35,8 @@ import {
   layerOf,
   mutateReading,
   particleOptions,
+  patternHint,
+  rankedDistractorCandidates,
 } from "../lib/language/quick-cards.ts";
 
 // ── 虚构 fixture：句子、公司名与词条全部是测试自编的 ─────────────
@@ -376,7 +380,8 @@ test("哪个更自然：只显示差异核 ± 最多 4 字，并给出高亮区�
   assert.deepEqual(verb.optionMarks[1 - wrongAt], [2, 2], "删除型为空区间");
   assert.equal(verb.answer, "感じます");
   assert.equal(verb.reveal.wrong, "感じします");
-  assert.match(verb.reveal.explain, /一段動詞/u, "没有 noteJa 时用型说明兜底");
+  // 型说明改成中文为主（本人 2026-10-05 拍板 UI-04）：原断言匹配日语「一段動詞」。
+  assert.match(verb.reveal.explain, /一段动词/u, "没有 noteJa 时用型说明兜底");
 });
 
 test("干扰项排除：释义同段或互相包含、日语互相包含的不同时出现", () => {
@@ -615,4 +620,224 @@ test("出处：没有假名的摘录（回答复盘里的中文点评）不显�
   assert.ok(item);
   assert.equal(item.evidence[0].excerpt, "");
   assert.ok(item.evidence[0].label.length > 0);
+});
+
+// ── 第六轮：同形送分题、题面泄露、释义表、数字读法、阶梯修正、答后解释（fixture 仍全部自编） ──
+
+test("isCognateItem：纯汉字过半同形、或汉字过半原样（含简繁对照）出现在释义里；只判面试官用语", () => {
+  const item = (ja, meaning, group = "interviewer_phrase") => ({ ja, meaning, group, jaAlts: [ja] });
+  assert.equal(isCognateItem(item("工数", "工时")), true, "纯汉字，一半同形");
+  assert.equal(isCognateItem(item("交通費", "交通费")), true, "費→费");
+  assert.equal(isCognateItem(item("確認する", "进行确认")), true, "確→确、認→认，两字都在");
+  assert.equal(isCognateItem(item("前倒し", "提前进行")), false, "一半不算过半");
+  assert.equal(isCognateItem(item("伺う", "请教/拜访")), false);
+  assert.equal(isCognateItem(item("段取り", "安排、步骤")), false);
+  assert.equal(isCognateItem(item("推薦", "推荐", "nb_term")), false, "単語文法帳不判");
+  assert.equal(isCognateItem(item("承知しました", "")), false, "没有释义");
+});
+
+test("同形面试官用语跳过识义层：R 层直接出识词", () => {
+  const local = buildQuickPool({ ...CURRICULUM, items: [
+    ...CURRICULUM.items,
+    phrase("ip_cog", "日程調整する", "调整日程"),
+  ] }, NOTEBOOK);
+  const localIndex = createQuickIndex(local.items);
+  const cog = local.items.find((item) => item.id === "ip_cog");
+  assert.equal(isCognateItem(cog), true);
+  assert.ok(!availableCardTypes(cog, localIndex, { typing: false }).includes("meaning_choice"));
+  assert.equal(chooseCardType(cog, "unseen", { index: localIndex, typing: false, day: DAYS[0], typedLeft: 0 }), "word_choice");
+});
+
+test("题面泄露：比较去掉假名、换成简体后的汉字串，被助词绕过的也挡住；单个汉字不算", () => {
+  const base = {
+    cardId: "x", itemId: "x", group: "interviewer_phrase", grading: "auto", reason: "new", stage: "unseen", layer: "R",
+    stemLang: "ja", reveal: { ja: "", reading: "", meaning: "", wrong: "", explain: "", evidence: [] },
+  };
+  const item = { id: "x", group: "interviewer_phrase", ja: "", jaAlts: [], meaning: "" };
+  const meaning = { ...base, type: "meaning_choice", prompt: "meaning", stem: "一律に", options: ["一律（统一）", "甲", "乙", "丙"], answer: "一律（统一）", accepted: ["一律（统一）"] };
+  assert.ok(checkQuickCard(meaning, item).includes("stem_leak"), "「一律に」→「一律（统一）」");
+  const word = { ...base, type: "word_choice", prompt: "word", stemLang: "zh", stem: "交通费", options: ["交通費", "甲乙", "丙丁", "戊己"], answer: "交通費", accepted: ["交通費"] };
+  assert.ok(checkQuickCard(word, item).includes("stem_leak"), "简体题面与日本字形答案");
+  const single = { ...word, stem: "看见", options: ["見る", "甲乙", "丙丁", "戊己"], answer: "見る", accepted: ["見る"] };
+  assert.ok(!checkQuickCard(single, item).includes("stem_leak"), "只有一个汉字对上不算");
+  const typed = { ...word, type: "short_input", prompt: "input_word", options: [] };
+  assert.ok(!checkQuickCard(typed, item).includes("stem_leak"), "打字题要打出读音，汉字对上不算泄露");
+  // 真实出卡：汉字串原样出现在释义里的条目不出这两种点选，退回翻卡。
+  const local = buildQuickPool({ ...CURRICULUM, items: [...CURRICULUM.items, phrase("ip_leak2", "概算で", "概算（粗略估计）")] }, NOTEBOOK);
+  const leak = local.items.find((entry) => entry.id === "ip_leak2");
+  const types = availableCardTypes(leak, createQuickIndex(local.items), { typing: false });
+  assert.ok(!types.includes("meaning_choice") && !types.includes("word_choice"), types.join());
+});
+
+test("释义表：按表頭找「表現」「中文」两列，跳过分隔行与空中文，\\| 还原成竖线，键按 normalizeQuickAnswer", () => {
+  const table = parsePhraseGlossTable(`---
+type: material
+material_kind: interviewer-phrase-gloss
+---
+# 表
+
+| 表現 | 中文 | 備考 |
+|---|---|---|
+| なるほど | 原来如此 | |
+| 〜ってことですね | 也就是说……对吧 | |
+| ざっくり言うと | 粗略地说 \\| 大致来讲 | |
+| まだ空欄 |  | |
+
+段落
+
+| 中文 | 表現 |
+|:--|--:|
+| 稍等一下 | 少々お待ちください |
+`);
+  assert.equal(table.get("なるほど"), "原来如此");
+  assert.equal(table.get(normalizeQuickAnswer("〜ってことですね")), "也就是说……对吧");
+  assert.equal(table.get(normalizeQuickAnswer("ざっくり言うと")), "粗略地说 | 大致来讲");
+  assert.equal(table.has(normalizeQuickAnswer("まだ空欄")), false);
+  assert.equal(table.get(normalizeQuickAnswer("少々お待ちください")), "稍等一下", "列序调换也认");
+  assert.equal(table.has(normalizeQuickAnswer("表現")), false, "表头不当数据");
+  assert.equal(parsePhraseGlossTable("没有表格").size, 0);
+});
+
+test("释义表叠加：日文释义的面试官用语有中文就出题（原日文说明进 note、计入 glossed）；没有的仍计 excludedJaMeaning", () => {
+  const items = [
+    ...CURRICULUM.items,
+    phrase("ip_ja2", "おっしゃる通り", "相手の発言を全面的に肯定する"),
+    phrase("ip_ja3", "ちなみに", "話題を少し横にそらす前置き"),
+  ];
+  const without = buildQuickPool({ ...CURRICULUM, items }, NOTEBOOK);
+  assert.equal(without.excludedJaMeaning, 3);
+  assert.equal(without.glossed, 0);
+  const glosses = parsePhraseGlossTable("| 表現 | 中文 |\n|---|---|\n| なるほど | 原来如此 |\n| おっしゃる通り | 您说得对 |\n| ちなみに | 日本語の説明しかない |\n");
+  const glossed = buildQuickPool({ ...CURRICULUM, items }, NOTEBOOK, glosses);
+  assert.equal(glossed.glossed, 2);
+  assert.equal(glossed.excludedJaMeaning, 1, "表里写的仍是日文：等于没有中文");
+  const hmm = glossed.items.find((item) => item.id === "ip_ja");
+  assert.equal(hmm.meaning, "原来如此");
+  assert.match(hmm.note, /^相手の話を受け止める相槌/u, "原日文说明是答后解释的第一段");
+  const index2 = createQuickIndex(glossed.items);
+  const value = buildQuickCard(hmm, "meaning_choice", { index: index2, day: DAYS[0], reason: "new", stage: "unseen" });
+  assert.ok(value, "能出看日语选中文");
+  assert.match(value.reveal.explain, /相手の話/u);
+  assert.equal(glossed.items.length, without.items.length + 2);
+});
+
+test("阶梯修正：只有短输入（和兜底翻卡）的条目，打字开着且有额度时直接出短输入，不必等到 P 层", () => {
+  const local = buildQuickPool({ ...CURRICULUM, items: [
+    patchItem("ep_tense_kana", "いきます", "いきました", "先週、大阪にいきます。", "時制"),
+  ] }, undefined);
+  const localIndex = createQuickIndex(local.items);
+  const item = local.items[0];
+  assert.deepEqual(availableCardTypes(item, localIndex, { typing: true }), ["short_input", "flip"]);
+  const choose = (extra) => chooseCardType(item, "recognized", { index: localIndex, typing: true, day: DAYS[0], typedLeft: 2, ...extra });
+  assert.equal(choose({}), "short_input", "翻卡最高只到 recognized，等 P 层永远等不到");
+  assert.equal(choose({ typedLeft: 0 }), "flip", "本组打字额度用完退回翻卡");
+  assert.equal(choose({ typing: false }), "flip");
+});
+
+test("chooseCardType 的 verify：自报会的条目回来验证时跳过 R 层、直接出 D 层题型；D 层没有就退回原逻辑", () => {
+  const choose = (item, stage, extra = {}) =>
+    chooseCardType(item, stage, { index, typing: true, day: DAYS[0], typedLeft: 2, verify: true, ...extra });
+  assert.equal(choose(byId.get("ip_plan"), "recognized"), "word_choice", "不再出识义");
+  assert.equal(choose(nb("担う"), "unseen"), "word_choice", "不再出读音");
+  assert.equal(choose(nb("Kafka"), "recognized"), "reading_choice", "C 表 D 层本来就是读音");
+  assert.equal(choose(byId.get("ep_long"), "recognized"), "flip", "只有翻卡的照旧翻卡");
+  assert.equal(choose(nb("担う"), "retrievable"), "word_choice", "verify 不出打字题");
+  assert.equal(
+    chooseCardType(byId.get("ip_plan"), "recognized", { index, typing: true, day: DAYS[0], typedLeft: 2 }),
+    "meaning_choice",
+    "不传 verify 时与原来一致",
+  );
+});
+
+test("释义干扰项：带「」引文或「……的说法」的正解优先配同类，动作收尾的优先配动作收尾", () => {
+  const fillers = [
+    "大致的方向", "下周的日程", "预算的上限", "项目的背景", "团队的规模", "客户的反馈", "当前的进度",
+    "技术的选型", "系统的瓶颈", "成本的估算", "合同的条款", "需求的优先级", "上线的时间", "故障的原因",
+  ];
+  const metas = ["「来」的尊敬说法", "对「去」的委婉表达", "「知道」的郑重讲法", "表示「辛苦」的口吻"];
+  const local = buildQuickPool({ ...CURRICULUM, items: [
+    phrase("m_target", "差し上げる", "「给」的谦让说法"),
+    ...fillers.map((meaning, at) => phrase(`m_fill${at}`, `ダミー${"アイウエオカキクケコサシスセ"[at]}語`, meaning)),
+    ...metas.map((meaning, at) => phrase(`m_meta${at}`, `ニセ${"タチツテ"[at]}語`, meaning)),
+  ] }, undefined);
+  const localIndex = createQuickIndex(local.items);
+  const target = local.items.find((item) => item.id === "m_target");
+  const ranked = rankedDistractorCandidates(target, "meaning", localIndex);
+  assert.deepEqual(ranked.slice(0, 4).map((item) => item.id).sort(), metas.map((_, at) => `m_meta${at}`));
+  assert.deepEqual(rankedDistractorCandidates(target, "meaning", localIndex), ranked, "确定性");
+
+  const verbs = buildQuickPool({ ...CURRICULUM, items: [
+    phrase("v_target", "持ち帰る", "带回去再考虑"),
+    ...fillers.map((meaning, at) => phrase(`v_fill${at}`, `ダミー${"アイウエオカキクケコサシスセ"[at]}語`, meaning)),
+    phrase("v_verb1", "ニセタ語", "推迟到下周处理"),
+    phrase("v_verb2", "ニセチ語", "先跟上司确认"),
+  ] }, undefined);
+  const verbIndex = createQuickIndex(verbs.items);
+  const top = rankedDistractorCandidates(verbs.items.find((item) => item.id === "v_target"), "meaning", verbIndex).slice(0, 2);
+  assert.deepEqual(top.map((item) => item.id).sort(), ["v_verb1", "v_verb2"]);
+});
+
+test("数字读法（G 表）：只出读音题，题面是数字、答案是读音；本人记下的误读优先当干扰项；≤6 假名才出打字", () => {
+  const local = buildQuickPool(undefined, { path: "x.md", content: `## G. 数字
+
+| 数字 | 読み | ★ |
+|---|---|---|
+| 約9冊 | やくきゅうさつ | ★（「きゅうさつ」。きゅさつ✗・架空の説明 2026-01-01） |
+| 3〜5冊 | さんさつからごさつ | ★ |
+| 8個 | はっこ | ★ |
+| 6枚 | ろくまい | |
+| 三千万円 | さんぜんまんえん | ★★（さんせんまん✗） |
+` });
+  const localIndex = createQuickIndex(local.items);
+  const get = (ja) => local.items.find((item) => item.ja === ja);
+  for (const item of local.items) {
+    const types = availableCardTypes(item, localIndex, { typing: true });
+    assert.ok(types.includes("reading_choice"), `${item.ja}：${types.join()}`);
+    assert.ok(!types.includes("meaning_choice") && !types.includes("word_choice"));
+  }
+  assert.ok(availableCardTypes(get("3〜5冊"), localIndex, { typing: true }).includes("reading_choice"), "数字范围的〜不是句型空位");
+  assert.ok(availableCardTypes(get("8個"), localIndex, { typing: true }).includes("short_input"), "はっこ ≤6 假名");
+  assert.ok(!availableCardTypes(get("約9冊"), localIndex, { typing: true }).includes("short_input"), "やくきゅうさつ 超过 6 假名");
+  assert.ok(!availableCardTypes(get("三千万円"), localIndex, { typing: true }).includes("short_input"), "长串不出打字");
+  for (const day of DAYS) {
+    const value = buildQuickCard(get("約9冊"), "reading_choice", { index: localIndex, day, reason: "new", stage: "unseen" });
+    assert.equal(value.stem, "約9冊");
+    assert.equal(value.answer, "やくきゅうさつ");
+    assert.ok(value.options.includes("やくきゅさつ"), "误读补全后进选项");
+    assert.ok(!value.stem.includes("架空"), "括注不进题面");
+    assert.match(value.reveal.explain, /架空の説明/u, "括注进答后解释");
+    const big = buildQuickCard(get("三千万円"), "reading_choice", { index: localIndex, day, reason: "new", stage: "unseen" });
+    assert.ok(big.options.includes("さんせんまんえん"));
+  }
+  const choose = (item, stage) => chooseCardType(item, stage, { index: localIndex, typing: true, day: DAYS[0], typedLeft: 2 });
+  assert.equal(choose(get("8個"), "unseen"), "reading_choice");
+  assert.equal(choose(get("8個"), "correctable"), "reading_choice");
+  assert.equal(choose(get("8個"), "retrievable"), "short_input");
+});
+
+test("答后解释：括注里「よみ：」拆到读音栏；解释按「本条括注 → 错误型中文说明」拼接；复合与别名错误型也查得到说明", () => {
+  const partial = card(byId.get("ip_partial"), "word_choice");
+  // 「よみ」只注了「展開」两字：挪到读音栏时标「（部分）」，不冒充整句读音（原断言是不带标记的「てんかい」）。
+  assert.equal(partial.reveal.reading, "てんかい（部分）");
+  assert.ok(!partial.reveal.explain.includes("よみ："));
+  // 表記里没有汉字的「よみ」是展开形，不进读音栏，留在解释里。
+  const kanaOnly = { ...byId.get("ip_partial"), id: "ip_kana_yomi", ja: "マーケ", jaAlts: ["マーケ"], note: "よみ：マーケティング" };
+  const kanaCard = buildQuickCard(kanaOnly, "word_choice", { index: createQuickIndex([...byId.values(), kanaOnly]), day: DAYS[0], reason: "new", stage: "unseen" });
+  assert.ok(kanaCard, "kana-only 条目能出识词题");
+  assert.equal(kanaCard.reveal.reading, "");
+  assert.match(kanaCard.reveal.explain, /よみ：マーケティング/u);
+  const local = buildQuickPool({ ...CURRICULUM, items: [
+    { ...patchItem("ep_noted", "感じします", "感じます", "そこに意義を感じします。", "感じします"), noteJa: "一段活用の誤り" },
+  ] }, undefined);
+  const noted = buildQuickCard(local.items[0], "natural_choice", { index: createQuickIndex(local.items), day: DAYS[0], reason: "new", stage: "unseen" });
+  assert.ok(noted.reveal.explain.startsWith("一段活用の誤り；"), noted.reveal.explain);
+  assert.match(noted.reveal.explain, /一段动词/u);
+  assert.equal(patternHint("テンス"), patternHint("時制"));
+  assert.equal(patternHint("語彙・時制"), patternHint("語彙"));
+  assert.match(patternHint("何が何か"), /何か/u);
+  for (const key of ["語法", "構文", "接続", "何が何か", "敬体接続", "名詞化", "語順", "中文直訳"]) {
+    assert.ok(patternHint(key), `${key} 有说明`);
+    assert.match(patternHint(key), /[的是用]/u, `${key} 以中文为主`);
+  }
+  assert.equal(patternHint("未知の型"), "");
 });

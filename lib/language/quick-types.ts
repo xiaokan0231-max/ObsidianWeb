@@ -32,7 +32,8 @@ export type QuickGroup =
   | "nb_katakana" // C：片假名与读音
   | "nb_keigo"    // D：商务敬语定型
   | "nb_verb"     // F：训读动词
-  | "nb_pattern"; // H：句型
+  | "nb_pattern" // H：句型
+  | "nb_number";  // G：实绩数字的读法。只考读音；数字本身是本人事实，只在本人页面显示，不进任何 fixture
 
 export type QuickCardType =
   | "meaning_choice" // 看日语选中文意思（四选一）
@@ -104,6 +105,11 @@ export type QuickItem = {
   stars: 0 | 1 | 2;
   listeningMark?: "×" | "△";
   evidence: QuickEvidence[];
+  /**
+   * 単語文法帳 ★ 括注里本人记下的误读（「…✗」），已补成完整读音。读音题优先拿它们当干扰项：
+   * 本人真实读错过的形比按规则变异出来的更值得辨。
+   */
+  misreadings?: string[];
 };
 
 export type QuickPool = {
@@ -114,6 +120,8 @@ export type QuickPool = {
   excludedJaMeaning: number;
   /** 単語文法帳解析出的条目数（用于发现表格改版导致的静默缺失）。 */
   notebookParsed: number;
+  /** 靠中文释义表（material_kind: interviewer-phrase-gloss）补上中文意思才出得了题的面试官用语条数。 */
+  glossed?: number;
 };
 
 export type QuickPromptKey =
@@ -169,6 +177,8 @@ export type QuickSet = {
   cards: QuickCard[];
   composition: Record<QuickCardReason, number>;
   limits: { newToday: number; dailyNewLimit: number; newExhausted: boolean };
+  /** 针对练习时的错误型（GET set?focus=）。 */
+  focus?: string;
 };
 
 /** 客户端提交的一题。passed 由服务端算，客户端不传。 */
@@ -180,12 +190,27 @@ export type QuickAnswerInput = {
   response?: string;
   rating?: QuickSelfRating;
   gaveUp?: boolean;
-  /** 「这题有问题，不再出」。 */
+  /** 「这题有问题，不再出」。旧客户端只发这个布尔；新客户端发 action。 */
   suspend?: boolean;
+  /** 缺省＝answer（suspend 为真时＝suspend）。 */
+  action?: QuickAction;
+  /** action=triage 时必填。 */
+  judgment?: QuickTriageJudgment;
   elapsedMs?: number;
 };
 
-export type QuickAction = "answer" | "suspend";
+/**
+ * - answer  正常作答（含「不知道」与翻卡自评）
+ * - suspend 这题有问题，不再出（rejected=true）
+ * - restore 撤销 suspend（rejected=false）；不计成败、不算作答
+ * - easy    太简单：阶段至少 recognized，排到 30 天后验证一次；不产生成功日，算一次作答（不再是新题）。
+ *           到期回来时第一张卡用 D 层题型验证，答对才开始记成功日——自报永远不直接进 stable
+ * - triage  「一屏过一遍」的分流判断：只影响新题的出题先后（会→最后、不确定→靠前、不会→最前），
+ *           不改阶段、不算作答；同一条目以最后一次判断为准，并覆盖旧批次的 scan 判断
+ */
+export type QuickAction = "answer" | "suspend" | "restore" | "easy" | "triage";
+
+export type QuickTriageJudgment = "known" | "uncertain" | "unknown";
 
 /** 日志里的一条事件：不可变。passed、first、at 只由服务端写。 */
 export type QuickEvent = {
@@ -198,8 +223,10 @@ export type QuickEvent = {
   response: string;
   rating?: QuickSelfRating;
   gaveUp?: boolean;
+  /** 仅 action=triage。 */
+  judgment?: QuickTriageJudgment;
   passed?: boolean;
-  /** 当日（JST）该条目的首次作答，且同一组里没有更早的作答。只有首答影响成败。 */
+  /** 当日（练习日，日本时间 04:00 起算）该条目的首次作答，且同一组里没有更早的作答或「太简单」。只有首答影响成败。 */
   first: boolean;
   at: string;
   elapsedMs?: number;
@@ -218,14 +245,39 @@ export type QuickAnswerResult = {
   nextDueAt?: string;
 };
 
-export type QuickTopIssue = { key: string; label: string; interviewCount: number; occurrenceCount: number };
+export type QuickTopIssue = {
+  key: string;
+  label: string;
+  interviewCount: number;
+  occurrenceCount: number;
+  /** language＝语言错误型（可以针对练习）；strategy＝回答策略问题（快练里只有模板翻卡）。 */
+  kind?: "language" | "strategy";
+  /** 可传给 GET set?focus= 的错误型；没有可出题条目时不给。 */
+  focus?: string;
+  /** 该问题下可出题的条目数。 */
+  itemCount?: number;
+};
+
+/** 列表里用的条目简表：分流屏、已排除清单。 */
+export type QuickItemBrief = {
+  itemId: string;
+  group: QuickGroup;
+  ja: string;
+  reading: string;
+  meaning: string;
+  /** 改错条目：本人当时的错形 → 修正。 */
+  wrong?: string;
+};
+
+/** 下一组的预计构成（与 GET set 同一套选题逻辑算出，无副作用）。 */
+export type QuickNextSet = { total: number; due: number; lapsed: number; fresh: number; early: number };
 
 export type QuickSummary = {
   ready: boolean;
   stale: boolean;
   day: string;
   due: number;
-  /** 明天（JST）到期的条目数：今天答错的、以及排期正好落在明天的。练完马上能看到「明天会回来几题」。 */
+  /** 明天（练习日）到期的条目数：今天答错的、以及排期正好落在明天的。练完马上能看到「明天会回来几题」。 */
   dueTomorrow?: number;
   lapsedToday: number;
   newAvailable: number;
@@ -243,9 +295,31 @@ export type QuickSummary = {
   history: LanguageBatchHistory[];
   topIssues: QuickTopIssue[];
   curriculum?: { generatedAt: string; itemCount: number; sourceCount: number };
+  /** 按当前设置再开一组会出什么。入口卡据此写「本组 N 题＝复习 a＋新题 b」，不再把每日额度当成本组新题数。 */
+  nextSet?: QuickNextSet;
+  /** 未来 7 天每天到期的条目数，[0]＝今天（含已逾期）。 */
+  dueSoon?: number[];
+  /** 被「不再出」排除的条目（最多 50 条，供恢复）；总数见 suspendedCount。 */
+  suspended?: QuickItemBrief[];
+  suspendedCount?: number;
+  /** 还没练过、也没有任何分流判断的条目数（「一屏过一遍」还剩多少）。 */
+  triageRemaining?: number;
+  /** 日志里指向已不存在条目的事件数（课程重建或単語文法帳改表記后进度对不上的可见提示）。 */
+  orphanEvents?: number;
+  /** 用了本人维护的中文释义表才出得了题的面试官用语条数。 */
+  glossed?: number;
 };
 
-export type QuickSettings = { size: QuickSetSize; typing: boolean };
+/** autoAdvance：答对后约 1 秒自动进下一题；答错、翻卡、不知道仍停下等本人看解释。 */
+export type QuickSettings = { size: QuickSetSize; typing: boolean; autoAdvance: boolean };
+
+export const QUICK_TRIAGE_SIZE = 50;
+
+/**
+ * 「一天」的起点是日本时间 04:00，不是零点：深夜练习时 23:50 答错、0:05 再答对不该算两天。
+ * 快练里所有按日的判断（首答、成功日、到期、每日新题额度、今天已练）都用这个「练习日」。
+ */
+export const QUICK_DAY_START_HOUR = 4;
 
 /** 选题时需要的旧批次 scan 判断（只读，批次文件与签名不动）。 */
 export type QuickLegacyJudgments = ReadonlyMap<string, LanguageScanJudgment>;

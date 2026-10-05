@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  canPeekBack,
   createQuickSession,
   currentQuickEntry,
+  displayedQuickEntry,
+  nextDueGroups,
   QUICK_RETRY_GAP,
   quickSessionAnswers,
   quickSessionReducer,
+  shouldPauseAfter,
   summarizeQuickSet,
 } from "../lib/language/quick-session.ts";
 
@@ -261,4 +265,168 @@ test("小结：回落与 stale 应答", () => {
   // a 首答错 + 重出两条应答，按条目只算一次回落（逐条计会让「回落 2 项」多报）。
   assert.deepEqual(summary.stages.demoted.map((change) => change.itemId), ["a"]);
   assert.deepEqual(summary.stages.promoted, []);
+});
+
+// ── 第六轮：回看、太简单、撤销不再出、下次复习分组、自动下一题的停顿判断 ──
+
+test("回看：← 看上一张已答的卡（只读），→ 一步步回到当前题；回看时作答类动作一律不生效", () => {
+  let state = session(["a", "b", "c", "d"].map((id) => choice(id)));
+  assert.equal(canPeekBack(state), false, "第一题之前没有可回看的");
+  assert.equal(quickSessionReducer(state, { type: "back" }), state);
+  state = run(state, right(state), next, wrong, next);
+  assert.equal(currentQuickEntry(state).card.itemId, "c");
+  assert.equal(canPeekBack(state), true);
+
+  state = run(state, { type: "back" });
+  let shown = displayedQuickEntry(state);
+  assert.equal(shown.peeking, true);
+  assert.equal(shown.entry.card.itemId, "b");
+  assert.equal(shown.record.response, "干扰一", "带着当时的作答");
+  assert.equal(state.cursor, 2, "cursor 不动");
+
+  const frozen = state;
+  for (const action of [right(frozen), { type: "gaveUp" }, { type: "suspend" }, { type: "easy" }, { type: "reveal" }, { type: "undoSuspend" }]) {
+    assert.equal(quickSessionReducer(frozen, action), frozen, `${action.type} 在回看时不生效`);
+  }
+
+  state = run(state, { type: "back" });
+  assert.equal(displayedQuickEntry(state).entry.card.itemId, "a");
+  assert.equal(canPeekBack(state), false);
+  assert.equal(quickSessionReducer(state, { type: "back" }), state, "最早一张再往前不动");
+  state = run(state, { type: "forward" });
+  assert.equal(displayedQuickEntry(state).entry.card.itemId, "b");
+  state = run(state, { type: "forward" });
+  shown = displayedQuickEntry(state);
+  assert.equal(shown.peeking, false);
+  assert.equal(shown.entry.card.itemId, "c");
+  assert.equal(shown.record, undefined, "当前题还没答");
+  assert.equal(quickSessionReducer(state, { type: "forward" }), state, "不在回看时 → 不动");
+
+  // 反馈阶段回看：Enter 只是回到当前题，仍停在反馈，不前进。
+  state = run(state, right(state), { type: "back" });
+  assert.equal(displayedQuickEntry(state).entry.card.itemId, "b");
+  state = run(state, next);
+  assert.equal(state.peek, null);
+  assert.equal(state.phase, "feedback");
+  assert.equal(displayedQuickEntry(state).record.passed, true);
+  state = run(state, next);
+  assert.equal(currentQuickEntry(state).card.itemId, "d");
+  assert.equal(state.records.length, 3, "回看没有产生任何作答");
+});
+
+test("太简单：题面与反馈阶段都能按，记 action=easy、撤掉重出、直接下一题；不计正确率，小结单列", () => {
+  let state = session(["a", "b", "c", "d", "e"].map((id) => choice(id)));
+  state = run(state, { type: "easy", elapsedMs: 800 });
+  assert.equal(currentQuickEntry(state).card.itemId, "b");
+  assert.deepEqual(state.records[0].input, { eventId: "set_demo.1", itemId: "a", type: "meaning_choice", action: "easy", elapsedMs: 800 });
+  assert.equal(state.records[0].action, "easy");
+
+  // 答错后在反馈阶段按太简单：答错照常提交，重出被撤掉。
+  state = run(state, wrong);
+  assert.ok(state.queue.some((entry) => entry.round === 1 && entry.card.itemId === "b"));
+  state = run(state, { type: "easy" });
+  assert.ok(!state.queue.some((entry) => entry.round === 1 && entry.card.itemId === "b"), "重出撤掉");
+  assert.equal(currentQuickEntry(state).card.itemId, "c");
+
+  state = playAll(state, (entry) => ({ type: "answer", response: entry.card.answer }));
+  const summary = summarizeQuickSet(state);
+  assert.equal(summary.easy, 2);
+  assert.deepEqual(summary.graded, { total: 4, correct: 3, accuracy: 3 / 4 }, "a 的太简单不进分母；b 的答错仍算");
+  assert.equal(summary.answered, 4);
+  assert.equal(shouldPauseAfter(state.records[0]), true, "太简单不是自动判分的答对");
+});
+
+test("撤销不再出：记 action=restore；题面阶段按的卡回到当前位置重新作答，反馈阶段按的只记事件", () => {
+  let state = session(["a", "b", "c", "d"].map((id) => choice(id)));
+  state = run(state, { type: "suspend" });
+  assert.equal(currentQuickEntry(state).card.itemId, "b");
+  state = run(state, { type: "undoSuspend", eventId: "custom.9" });
+  assert.deepEqual(state.records.at(-1).input, { eventId: "custom.9", itemId: "a", type: "meaning_choice", action: "restore" });
+  assert.deepEqual(state.suspended, []);
+  assert.equal(currentQuickEntry(state).card.itemId, "a", "回到 a 重新作答");
+  assert.equal(state.phase, "question");
+  assert.equal(state.queue.length, 4, "只挪位置，不多出一张");
+  state = run(state, right(state), next);
+  assert.equal(currentQuickEntry(state).card.itemId, "b");
+
+  // 答完再标不再出（反馈阶段），撤销只记事件，不重出。
+  state = run(state, right(state), { type: "suspend" });
+  assert.equal(currentQuickEntry(state).card.itemId, "c");
+  const before = state.queue.map((entry) => entry.key);
+  state = run(state, { type: "undoSuspend" });
+  assert.equal(state.records.at(-1).action, "restore");
+  assert.deepEqual(state.queue.map((entry) => entry.key), before);
+  assert.equal(currentQuickEntry(state).card.itemId, "c");
+
+  // 当前题已答（反馈阶段）时撤销题面阶段标的卡：排到下一题。
+  state = run(state, { type: "suspend" });
+  assert.equal(currentQuickEntry(state).card.itemId, "d");
+  state = run(state, right(state), { type: "undoSuspend" });
+  assert.equal(state.phase, "feedback");
+  assert.equal(currentQuickEntry(state).card.itemId, "d");
+  state = run(state, next);
+  assert.equal(currentQuickEntry(state).card.itemId, "c");
+
+  assert.equal(quickSessionReducer(state, { type: "undoSuspend" }), state, "没有可撤销的");
+  assert.equal(quickSessionReducer(state, { type: "undoSuspend", itemId: "zzz" }), state);
+});
+
+test("小结：被排除条目明细（撤销过的不在内）；升阶回落带题面与前后阶段", () => {
+  let state = session(["a", "b", "c"].map((id) => choice(id)));
+  state = run(state, { type: "suspend" }, { type: "suspend" }, { type: "undoSuspend", itemId: "a" });
+  state = playAll(state, (entry) => ({ type: "answer", response: entry.card.answer }));
+  const summary = summarizeQuickSet(state);
+  assert.equal(summary.suspended, 1);
+  assert.deepEqual(summary.suspendedItems, [{ itemId: "b", cardId: "b:meaning_choice:2026-10-04", stem: "題面b", answer: "正解" }]);
+
+  const results = state.records.filter((record) => record.action === "answer").map((record) => ({
+    eventId: record.input.eventId, itemId: record.itemId, status: "recorded", first: true,
+    stageBefore: record.itemId === "a" ? "unseen" : "stable",
+    stageAfter: record.itemId === "a" ? "correctable" : "retrievable",
+  }));
+  const done = summarizeQuickSet(state, results);
+  assert.deepEqual(done.stages.promoted, [{ itemId: "a", before: "unseen", after: "correctable", stem: "題面a", answer: "正解" }]);
+  assert.deepEqual(done.stages.demoted.map((change) => [change.itemId, change.stem, change.before, change.after]), [["c", "題面c", "stable", "retrievable"]]);
+});
+
+test("nextDueGroups：按 nextDueAt 离本练习日的天数分组；同条目取最后一条，stale、无到期、被排除的不算", () => {
+  // 练习日从日本时间 04:00 起：2026-10-05 的起点是 2026-10-04T19:00Z。
+  const at = (day) => `${day}T19:00:00.000Z`;
+  const result = (itemId, nextDueAt, extra = {}) => ({
+    eventId: `${itemId}.${nextDueAt}`, itemId, status: "recorded", first: true, stageBefore: "unseen", stageAfter: "recognized",
+    ...(nextDueAt ? { nextDueAt } : {}), ...extra,
+  });
+  const results = [
+    result("a", at("2026-10-05")), // 首答错 → 明天
+    result("a", at("2026-10-07")), // 同条目后一条为准 → 3 天后
+    result("b", at("2026-10-07")),
+    result("c", at("2026-10-05")),
+    result("d", at("2026-11-03")),
+    result("e", at("2026-10-05"), { status: "stale" }),
+    result("f", undefined),
+    result("g", at("2026-10-05")),
+  ];
+  assert.deepEqual(nextDueGroups(results, "2026-10-05", { exclude: ["g"] }), [
+    { days: 1, count: 1 },
+    { days: 3, count: 2 },
+    { days: 30, count: 1 },
+  ]);
+  // 服务端若按零点写到期（JST 00:00＝前一天 15:00Z），四舍五入后仍落在同一天。
+  assert.deepEqual(nextDueGroups([result("x", "2026-10-07T15:00:00.000Z")], "2026-10-05"), [{ days: 3, count: 1 }]);
+  assert.deepEqual(nextDueGroups([result("x", at("2026-10-03"))], "2026-10-05"), [{ days: 0, count: 1 }], "已逾期算今天");
+  assert.deepEqual(nextDueGroups(results, "坏日期"), []);
+});
+
+test("shouldPauseAfter：只有自动判分的真答对可以自动前进", () => {
+  let state = session([choice("a"), choice("b"), flip("f"), choice("c"), choice("d")]);
+  state = run(state, right(state));
+  assert.equal(shouldPauseAfter(state.records.at(-1)), false, "答对");
+  state = run(state, next, wrong);
+  assert.equal(shouldPauseAfter(state.records.at(-1)), true, "答错");
+  state = run(state, next, { type: "reveal" }, { type: "answer", rating: "remembered" });
+  assert.equal(shouldPauseAfter(state.records.at(-1)), true, "翻卡自评");
+  state = run(state, next, { type: "gaveUp" });
+  assert.equal(shouldPauseAfter(state.records.at(-1)), true, "不知道");
+  assert.equal(shouldPauseAfter(undefined), true);
+  assert.equal(shouldPauseAfter({ ...state.records[0], action: "suspend" }), true);
 });

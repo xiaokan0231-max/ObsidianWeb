@@ -1,7 +1,11 @@
-import type { QuickAction, QuickCardType, QuickEvent, QuickSelfRating } from "./quick-types.ts";
+import type { QuickAction, QuickCardType, QuickEvent, QuickSelfRating, QuickTriageJudgment } from "./quick-types.ts";
+import { quickDay } from "./quick-progress.ts";
+
+// 练习日的换算放在 quick-progress.ts（到期日也要用同一个起点）；这里转出口，旧的 import 路径不用改。
+export { quickDay };
 
 /*
- * 快练事件日志：一题一条不可变事件，按 JST 月追加到一份笔记里。
+ * 快练事件日志：一题一条不可变事件，按练习日所在的月追加到一份笔记里。
  *
  * 为什么按月而不是按日：数据字典的 type 统计按文件数算，按日建文件会让统计每天漂移、
  * Stop hook 天天拦；按月只在每月第一次作答时多一份。
@@ -22,21 +26,17 @@ const QUICK_CARD_TYPES: readonly QuickCardType[] = [
   "short_input",
   "flip",
 ];
-const QUICK_ACTIONS: readonly QuickAction[] = ["answer", "suspend"];
+const QUICK_ACTIONS: readonly QuickAction[] = ["answer", "suspend", "restore", "easy", "triage"];
 const QUICK_RATINGS: readonly QuickSelfRating[] = ["remembered", "fuzzy", "forgot"];
+const QUICK_JUDGMENTS: readonly QuickTriageJudgment[] = ["known", "uncertain", "unknown"];
 
-const JST_OFFSET_MS = 9 * 3_600_000;
-
-/** ISO 时刻 → JST 日（YYYY-MM-DD）。只做算术、不读当前时间；解析失败返回 ""。 */
-export function quickDay(at: string) {
-  const time = Date.parse(at);
-  return Number.isFinite(time) ? new Date(time + JST_OFFSET_MS).toISOString().slice(0, 10) : "";
-}
-
-/** JST 日 → 当月日志路径。传入的必须已是 JST 日：UTC 日期在月末最后 9 小时会落到上个月的文件。 */
+/**
+ * 练习日 → 当月日志路径。传入的必须已是练习日（quickDay 的输出）：直接用 UTC 日期会在月末错位。
+ * 月初 0:00–4:00 的作答属于上个月最后一个练习日，因此写进上个月的文件——回放按 at 排序，与文件归属无关。
+ */
 export function quickLogPath(day: string) {
   const month = /^(\d{4}-\d{2})/u.exec(day)?.[1];
-  if (!month) throw new Error(`快练日志需要 YYYY-MM-DD 形式的 JST 日：${day}`);
+  if (!month) throw new Error(`快练日志需要 YYYY-MM-DD 形式的练习日：${day}`);
   return `${QUICK_LOG_DIR}/${month}_快練ログ.md`;
 }
 
@@ -94,6 +94,9 @@ function normalizeEvent(raw: unknown): QuickEvent | null {
   if (typeof value.at !== "string" || !quickDay(value.at)) return null;
   if (value.response !== undefined && typeof value.response !== "string") return null;
   if (value.rating !== undefined && !QUICK_RATINGS.includes(value.rating as QuickSelfRating)) return null;
+  // 分流判断必须带合法的 judgment；别的动作即使带了也丢掉，不让它流进选题。
+  const triage = value.action === "triage";
+  if (triage && !QUICK_JUDGMENTS.includes(value.judgment as QuickTriageJudgment)) return null;
   if (!optionalBoolean(value.passed) || !optionalBoolean(value.gaveUp)) return null;
   if (value.elapsedMs !== undefined && (typeof value.elapsedMs !== "number" || !Number.isFinite(value.elapsedMs))) return null;
   // 只留契约里的键：日志被手改塞进别的字段时，不让它流进回放和接口应答。
@@ -107,6 +110,7 @@ function normalizeEvent(raw: unknown): QuickEvent | null {
     response: (value.response as string | undefined) ?? "",
     ...(value.rating !== undefined ? { rating: value.rating as QuickSelfRating } : {}),
     ...(value.gaveUp !== undefined ? { gaveUp: value.gaveUp as boolean } : {}),
+    ...(triage ? { judgment: value.judgment as QuickTriageJudgment } : {}),
     ...(value.passed !== undefined ? { passed: value.passed as boolean } : {}),
     first: value.first,
     at: value.at,
@@ -169,10 +173,19 @@ export function collectQuickEvents(notes: readonly QuickLogNote[]): QuickEvent[]
 }
 
 /**
+ * 只有作答与「太简单」算「这题已经答过」。分流、撤销排除不是作答；「不再出」也不是：
+ * 题面阶段按了 X 再撤销，那张卡会回到当前位置重新作答，那才是本人第一次回答它。
+ * 若把同组的 suspend 也算进去，撤销后的作答永远判不成首答，条目一直停在新题。
+ */
+function answeredBefore(event: QuickEvent) {
+  return event.action === "answer" || event.action === "easy";
+}
+
+/**
  * 这一题算不算首答（只有首答影响成败）。events 是此前已落盘的事件。
  * 两个条件缺一不可：
- * - 当日（JST）该条目没有更早的作答：答错后同一天再答对拿不到成功日；
- * - 同一组里该条目没有更早的事件：一组跨零点时，组内重出不能因为换了日期就变成新一天的首答。
+ * - 当日（练习日）该条目没有更早的作答或「太简单」：答错后同一天再答对拿不到成功日；
+ * - 同一组里该条目没有更早的作答或「太简单」：一组跨过练习日起点时，组内重出不能因为换了日期就变成新一天的首答。
  */
 export function isFirstAnswer(
   events: readonly QuickEvent[],
@@ -180,6 +193,19 @@ export function isFirstAnswer(
 ) {
   return !events.some((event) =>
     event.itemId === itemId
-    && (event.setId === setId || (event.action === "answer" && quickDay(event.at) === day))
+    && answeredBefore(event)
+    && (event.setId === setId || quickDay(event.at) === day)
   );
+}
+
+/**
+ * 「一屏过一遍」的分流判断：条目 → 最后一次判断。events 须按时间排序（collectQuickEvents 的输出），
+ * 改主意时以最后一次为准。
+ */
+export function collectTriageJudgments(events: readonly QuickEvent[]): Map<string, QuickTriageJudgment> {
+  const judgments = new Map<string, QuickTriageJudgment>();
+  for (const event of events) {
+    if (event.action === "triage" && event.judgment) judgments.set(event.itemId, event.judgment);
+  }
+  return judgments;
 }

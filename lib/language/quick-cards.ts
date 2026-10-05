@@ -10,13 +10,14 @@ import type {
   QuickSelfRating,
 } from "./quick-types.ts";
 import { QUICK_EMPTY } from "./quick-types.ts";
-import { alignReading } from "./quick-items.ts";
+import { alignReading, isCognateItem } from "./quick-items.ts";
 import { stableHash } from "../dojo/utils.ts";
 import {
   clipContextRange,
-  dice,
+  hasKanji,
   isKanaOnly,
   isKanjiOnly,
+  kanjiKey,
   normalizeQuickAnswer,
   seededShuffle,
   stableSeed,
@@ -29,7 +30,8 @@ import {
  * - R 识别（unseen / recognized）：点选。
  * - D 辨析（correctable）：更难的点选。
  * - P 提取（retrievable 及以上，即 ≥2 个成功日）：才允许短输入，且受每组打字题上限约束。
- * 某层没有可用题型时先往下一层找，再往上；短输入只在条目本身处于 P 层时出。
+ * 某层没有可用题型时先往下一层找，再往上；短输入只在条目本身处于 P 层时出
+ * （例外：没有任何点选、只有短输入的条目，见 chooseCardType）。
  *
  * 干扰项全部确定性生成（种子 itemId|type|day），没有人工或 AI 校验，所以排除规则宁严勿松：
  * 凑不够就不出这个题型，不放宽到别的组。
@@ -46,6 +48,9 @@ const NATURAL_CONTEXT = 4;
 const INPUT_MAX = 6;
 const READING_INPUT_MAX = 8;
 const READING_MAX = 12;
+/** 数字读法常是一整串（「约……年」「每秒……件」），放宽到选项上限之内；仍超过的退回翻卡。 */
+const NUMBER_READING_MAX = 24;
+const READING_GROUPS = new Set<QuickGroup>(["nb_term", "nb_keigo", "nb_verb", "nb_katakana", "nb_number"]);
 const CHOICE_TYPES = new Set<QuickCardType>([
   "meaning_choice",
   "reading_choice",
@@ -59,27 +64,76 @@ const HIRAGANA = /^[ぁ-ゖ]$/u;
 const SLOT_MARK = /…|〜/u;
 
 /**
- * 型说明兜底：只在条目自己没有解释（整理稿 型:: 括注、単語文法帳备注）时显示。
- * 只写语法规则，不举整理稿里的真实句子。
+ * 型说明：中文为主，必要的日语术语放括号里——本人是中文母语者，答错时最想知道的是「规则是什么」，
+ * 一句日语语法套话读完还得再翻译一遍。只写规则，不举整理稿里的真实句子。
+ * 显示在条目自己的括注之后（见 explainOf）。
  */
 export const PATTERN_HINT: Record<string, string> = {
-  助詞: "動詞・形容詞ごとに取る助詞が決まっている。動作の対象・相手・場所で助詞を選ぶ。",
-  い形だと: "動詞・い形容詞の普通形は「だ」を挟まずに「と思う／と考える」へつなぐ。",
-  感じします: "「感じる」は一段動詞。「感じします」「感じした」とは言わない。",
-  時制: "名詞を修飾する動詞は、述べる時点に合わせて辞書形とた形を選ぶ。",
-  文体: "面接では普通体や「〜けど」で終えず、です・ます体で言い切る。",
-  敬語: "相手側の行為は尊敬語、自分側の行為は謙譲語。自分の行為に尊敬語を使わない。",
-  冗長敬語: "敬語を重ねすぎない。謙譲語と尊敬語を一つの動作に重ねない。",
-  の過剰: "動詞・形容詞が名詞を直接修飾するとき、間に「の」は入れない。",
-  な形: "な形容詞が名詞を修飾するときは「な」を入れる。",
-  語彙: "中国語の語感に引かれず、日本語で定着している語を選ぶ。",
-  語彙選択: "意味が近い語のうち、場面と結びつきが自然な語を選ぶ。",
-  中文直訳: "中国語の言い回しを直訳せず、日本語の定型表現に置き換える。",
-  語形: "活用形（て形・ない形・可能形・受身形など）を正しく作る。",
-  搭配: "語と語の決まった組み合わせ（コロケーション）を使う。",
-  語順: "修飾語は修飾される語の直前に置き、述語は文末に置く。",
-  名詞化: "動詞を名詞として使うときは「こと」「の」で名詞化する。",
+  助詞: "助词由动词、形容词的搭配决定：先看动作的对象、对方、场所分别要哪个助词，再看前后的固定搭配。",
+  語法: "语法：这里的句型或接续用错了，按「词性 + 接续形」把整段重组，而不是只换一个词。",
+  語形: "词形变化（活用）：て形、ない形、可能形、被动形等要先变对再接后面的成分。",
+  語彙: "用词：别被中文的字面意思带偏，选日语里固定使用的词。",
+  語彙選択: "近义词选择：意思相近的几个词里，选和这个场景搭配最自然的那个。",
+  い形だと: "动词、い形容词的简体形直接接「と思う／と考える」，中间不加「だ」；只有名词、な形容词才加「だ」。",
+  動詞だと: "动词的简体形直接接「と思う」，中间不加「だ」。",
+  時制: "时态：修饰名词的动词按「说的是哪个时间点的事」选辞书形或た形。",
+  文体: "文体：面试里用です・ます体把话说完，不用简体或「〜けど」收尾。",
+  敬語: "敬语：对方的动作用尊敬语，自己的动作用谦让语；自己的动作不用尊敬语。",
+  冗長敬語: "敬语别叠加：同一个动作不要同时用谦让语和尊敬语，也不要重复「ます」「です」。",
+  搭配: "固定搭配（コロケーション）：这个名词和动词在日语里有固定的组合。",
+  何が何か: "「何が」是疑问（问到底是什么），「何か」是不定（某个东西）。句中不是在提问时用「何か」。",
+  の過剰: "动词、形容词直接修饰名词，中间不加「の」（中文的「的」不要直译成「の」）。",
+  感じします: "「感じる」是一段动词，说「感じます／感じました」，没有「感じします」。",
+  構文: "句子结构：主语和谓语要对应（「〜は…ことです」），整句的骨架要先搭对。",
+  接続: "接续：前一个成分要变成后一个成分要求的形（名词 + な／の、动词简体 + の 等）。",
+  敬体接続: "です・ます形不能直接接「と思う」「けど」等：前面先用简体，礼貌只放在句末。",
+  中文直訳: "中文直译：中文的说法直接搬过来日语不通，换成日语的固定说法。",
+  名詞化: "名词化：动词要当名词用时加「こと」或「の」。",
+  な形: "な形容词修饰名词时要加「な」。",
+  語順: "语序：修饰语放在被修饰的词前面，谓语放在句末。",
+  語尾: "句尾：面试里句尾用「です・ます」说完整，不用「の」「ね」这类口语收尾。",
+  連体詞: "连体词（この・その・同じ 等）直接接名词，中间不加「の」。",
+  可能形: "可能形：一段动词变「〜られる」，五段动词变「〜える」段；别把两种混用。",
+  自他動詞: "自动词和他动词：有宾语「を」时用他动词，描述事物自己变化时用自动词。",
+  引用形: "引用：「〜と言う／と思う」前面用简体，引用的内容不带です・ます。",
+  条件形: "条件形：「〜たら」「〜ば」「〜と」各有用法，已经发生的事的感想不用「〜たら」。",
+  使役: "使役：让别人做用「〜させる」，自己做的事不用使役。",
+  助数詞: "量词（助数詞）：数字后面的量词按事物类别选，并注意读音变化。",
+  副詞: "副词：程度、频率副词的意思和位置要和后面的谓语对应。",
 };
+
+/** 整理稿里同一类错误的写法不统一（「テンス」「時点表現」「助詞・時制」），先归到上表的键再查。 */
+const PATTERN_ALIAS: Record<string, string> = {
+  テンス: "時制",
+  時点表現: "時制",
+  い形容詞なので: "い形だと",
+  な形容詞: "な形",
+  余分なの: "の過剰",
+  他動詞: "自他動詞",
+  普通形接続: "接続",
+  ない接続: "接続",
+  接続詞: "接続",
+  丁寧形の重複: "冗長敬語",
+  主述ねじれ: "構文",
+  主語述語: "構文",
+  主題構文: "構文",
+  修飾関係: "構文",
+  動詞活用: "語形",
+  た形: "語形",
+  場面語彙: "語彙選択",
+  助詞脱落: "助詞",
+  引用助詞: "助詞",
+  格関係: "助詞",
+};
+
+/** 某个错误型的中文说明；复合写法（「語彙・時制」）取第一个查得到的部分。 */
+export function patternHint(pattern: string): string {
+  for (const part of [pattern, ...pattern.split(/[・／/]/u)]) {
+    const key = PATTERN_ALIAS[part.trim()] ?? part.trim();
+    if (PATTERN_HINT[key]) return PATTERN_HINT[key];
+  }
+  return "";
+}
 
 export function layerOf(stage: LanguageTrainingStage): QuickLayer {
   if (stage === "unseen" || stage === "recognized") return "R";
@@ -89,6 +143,13 @@ export function layerOf(stage: LanguageTrainingStage): QuickLayer {
 
 // ── 索引与缓存 ──────────────────────────────────────────────────
 
+/** 条目归一化后的比较字段：干扰项排序要两两比较全组条目，每次现算归一化是冷启动的主要耗时。 */
+type ItemNorms = {
+  ja: string[];
+  meaning: string;
+  segments: ReadonlySet<string>;
+};
+
 export type QuickIndex = {
   items: readonly QuickItem[];
   byId: ReadonlyMap<string, QuickItem>;
@@ -96,6 +157,11 @@ export type QuickIndex = {
   pools: ReadonlyMap<string, readonly QuickItem[]>;
   /** 纯缓存（排好序的干扰项候选、可用题型）。内容只由 items 决定，不随日期变。 */
   cache: Map<string, unknown>;
+  /** 每个条目预先算好的归一化字段。 */
+  norms: ReadonlyMap<string, ItemNorms>;
+  /** 任意文本 → 归一化结果、字符二元组（选项文本反复出现，只算一次）。 */
+  text: Map<string, string>;
+  grams: Map<string, ReadonlyMap<string, number>>;
 };
 
 function poolKey(item: QuickItem) {
@@ -110,11 +176,73 @@ export function createQuickIndex(items: readonly QuickItem[]): QuickIndex {
     list.push(item);
     pools.set(key, list);
   }
+  const text = new Map<string, string>();
+  const normalize = (value: string) => {
+    let known = text.get(value);
+    if (known === undefined) {
+      known = normalizeQuickAnswer(value);
+      text.set(value, known);
+    }
+    return known;
+  };
+  const norms = new Map<string, ItemNorms>();
+  for (const item of items) {
+    norms.set(item.id, {
+      ja: [...new Set([item.ja, ...item.jaAlts])].map(normalize).filter(Boolean),
+      meaning: item.meaning ? normalize(item.meaning) : "",
+      segments: new Set(item.meaning ? meaningSegments(item.meaning) : []),
+    });
+  }
   return {
     items,
     byId: new Map(items.map((item) => [item.id, item])),
     pools,
     cache: new Map(),
+    norms,
+    text,
+    grams: new Map(),
+  };
+}
+
+function normIn(index: QuickIndex, value: string) {
+  let known = index.text.get(value);
+  if (known === undefined) {
+    known = normalizeQuickAnswer(value);
+    index.text.set(value, known);
+  }
+  return known;
+}
+
+function bigramsIn(index: QuickIndex, value: string) {
+  let known = index.grams.get(value);
+  if (!known) {
+    const grams = new Map<string, number>();
+    for (let at = 0; at < value.length - 1; at += 1) {
+      const gram = value.slice(at, at + 2);
+      grams.set(gram, (grams.get(gram) ?? 0) + 1);
+    }
+    known = grams;
+    index.grams.set(value, known);
+  }
+  return known;
+}
+
+/** 与 quick-text.ts 的 dice 同一公式，二元组从缓存取（两个参数都已归一化且 ≥2 字）。 */
+function diceIn(index: QuickIndex, a: string, b: string) {
+  if (a === b) return 1;
+  const left = bigramsIn(index, a);
+  const right = bigramsIn(index, b);
+  let overlap = 0;
+  for (const [gram, count] of left) overlap += Math.min(count, right.get(gram) ?? 0);
+  return (2 * overlap) / (a.length - 1 + b.length - 1);
+}
+
+function normsOf(index: QuickIndex, item: QuickItem): ItemNorms {
+  // 不在索引里的条目（测试里临时构造的）现算一份，不进缓存。
+  return index.norms.get(item.id) ?? {
+    ja: [...new Set([item.ja, ...item.jaAlts])].map((value) => normIn(index, value)).filter(Boolean),
+    meaning: item.meaning ? normIn(index, item.meaning) : "",
+    segments: new Set(item.meaning ? meaningSegments(item.meaning) : []),
   };
 }
 
@@ -141,24 +269,26 @@ function overlaps(left: string, right: string) {
   return left === right || left.includes(right) || right.includes(left);
 }
 
-/** 两段文本是否「可能都对」：归一化相同、互相包含、或（≥4 字时）字形过近。 */
-function textClash(left: string, right: string) {
-  const a = norm(left);
-  const b = norm(right);
+/** 两段已归一化的文本是否「可能都对」：相同、互相包含、或（≥4 字时）字形过近。 */
+function normClash(index: QuickIndex, a: string, b: string) {
   if (!a || !b) return false;
   if (overlaps(a, b)) return true;
-  return a.length >= 4 && b.length >= 4 && dice(a, b) >= 0.5;
+  return a.length >= 4 && b.length >= 4 && diceIn(index, a, b) >= 0.5;
+}
+
+/** 两段文本是否「可能都对」：归一化相同、互相包含、或（≥4 字时）字形过近。 */
+function textClash(index: QuickIndex, left: string, right: string) {
+  return normClash(index, normIn(index, left), normIn(index, right));
 }
 
 /** 两个条目同时出现在一题里会不会两个选项都说得通。 */
-function itemsClash(a: QuickItem, b: QuickItem) {
-  const aJa = [...new Set([a.ja, ...a.jaAlts])].map(norm).filter(Boolean);
-  const bJa = [...new Set([b.ja, ...b.jaAlts])].map(norm).filter(Boolean);
-  if (aJa.some((left) => bJa.some((right) => overlaps(left, right)))) return true;
-  if (a.meaning && b.meaning) {
-    if (textClash(a.meaning, b.meaning)) return true;
-    const segments = new Set(meaningSegments(a.meaning));
-    if (meaningSegments(b.meaning).some((segment) => segments.has(segment))) return true;
+function itemsClash(index: QuickIndex, a: QuickItem, b: QuickItem) {
+  const left = normsOf(index, a);
+  const right = normsOf(index, b);
+  if (left.ja.some((x) => right.ja.some((y) => overlaps(x, y)))) return true;
+  if (left.meaning && right.meaning) {
+    if (normClash(index, left.meaning, right.meaning)) return true;
+    for (const segment of right.segments) if (left.segments.has(segment)) return true;
   }
   return false;
 }
@@ -186,13 +316,45 @@ function lastChar(value: string) {
   return value.replace(/[。、]$/u, "").slice(-1);
 }
 
-/** 同组候选按「易混」排序：同词尾优先、长度相近优先；平分时按稳定哈希，结果只由条目决定。 */
+/**
+ * 释义带元说明：引了日文（「「〜しかいません」的郑重说法」）或写的是「……的表达／说法」。
+ * 这类释义和普通释义混在一起，只有正解长这样（或只有它不长这样）时一眼就能认出。
+ */
+function metaMeaning(value: string) {
+  return /[「」『』]/u.test(value) || /的[^，。；、]{0,8}(?:表达|说法|讲法|用法|表现|口吻|语气)$/u.test(value) || /此处指/u.test(value);
+}
+
+/** 释义开头的语境括注（「（谦让）」「（婉转）」）：都带或都不带才不显眼。 */
+function taggedMeaning(value: string) {
+  return /^[（(]/u.test(value);
+}
+
+// 中文释义以动作收尾的常见字。只用来给干扰项排序（同类优先），判错了也只是顺序变一下。
+const VERBAL_END = /(?:[做作说讲看想问给拿去来到出起开关改调换整办求请教访谢辞拒示担负参与判培展推迟延排执施联系通商协备查学习帮试搞弄聊谈答应听读写记忘放留离走跑等找选定认确交提报发收送接取用说]|进行|处理|确认|完成|开始|结束|决定|安排|核对|继续|负责|参与|从事|判断|培养|推进|表示|理解|考虑|准备|调整|拜访|请教|告诉|了解|说明|解释|联系|沟通|讨论|商量|研究)$/u;
+
+function verbalMeaning(value: string) {
+  return VERBAL_END.test(value.replace(/[（(][^）)]*[）)]$/u, "").replace(/[。．…]+$/u, ""));
+}
+
+/** 日语一侧的外形：全片假名词混进汉字词（或反过来）一眼就能排除。 */
+function jaShape(value: string) {
+  return /^[ァ-ヺー・]+$/u.test(value) ? "katakana" : "other";
+}
+
+/**
+ * 同组候选按「易混」排序：长度相近优先；日语侧同词尾、同外形优先；释义侧同为句型（带省略号）、
+ * 同为元说明、同带语境括注、同为动作收尾的优先——干扰项和正解长得像同一类东西，才逼得人去想意思。
+ * 平分时按稳定哈希，结果只由条目决定。
+ */
 function rankedCandidates(item: QuickItem, field: Field, index: QuickIndex) {
   return cached(index, `rank|${item.id}|${field}`, () => {
     const target = fieldOf(item, field);
     const pool = index.pools.get(poolKey(item)) ?? [];
     const limit = field === "ja" ? JA_OPTION_MAX : OPTION_MAX;
-    const accepted = acceptedAnswers(item, field === "ja" ? "word_choice" : "meaning_choice");
+    const accepted = acceptedAnswers(item, field === "ja" ? "word_choice" : "meaning_choice").map((answer) => normIn(index, answer));
+    const targetMeta = metaMeaning(target);
+    const targetTagged = taggedMeaning(target);
+    const targetVerbal = verbalMeaning(target);
     return pool
       .filter((candidate) => {
         if (candidate.id === item.id) return false;
@@ -200,17 +362,26 @@ function rankedCandidates(item: QuickItem, field: Field, index: QuickIndex) {
         if (!value || value.length > limit) return false;
         // 「〜」句型混进普通词，一眼就能排除；反之亦然。
         if (field === "ja" && candidate.hasSlot !== item.hasSlot) return false;
-        if (itemsClash(item, candidate)) return false;
-        return !accepted.some((answer) => textClash(answer, value));
+        if (itemsClash(index, item, candidate)) return false;
+        const key = normIn(index, value);
+        return !accepted.some((answer) => normClash(index, answer, key));
       })
       .map((candidate) => {
         const value = fieldOf(candidate, field);
-        const sameEnding = field === "ja" && lastChar(value) === lastChar(target);
-        // 句型的释义带「……」（「关于……」），只有正解带省略号时一眼就能认出；释义侧优先取同样带省略号的。
-        const sameSlot = field === "meaning" && SLOT_MARK.test(value) === SLOT_MARK.test(target);
+        let bonus = 0;
+        if (field === "ja") {
+          if (lastChar(value) === lastChar(target)) bonus += 2;
+          if (jaShape(value) === jaShape(target)) bonus += 2;
+        } else {
+          // 句型的释义带「……」（「关于……」），只有正解带省略号时一眼就能认出；释义侧优先取同样带省略号的。
+          if (SLOT_MARK.test(value) === SLOT_MARK.test(target)) bonus += 3;
+          if (metaMeaning(value) === targetMeta) bonus += 3;
+          if (taggedMeaning(value) === targetTagged) bonus += 2;
+          if (verbalMeaning(value) === targetVerbal) bonus += 2;
+        }
         return {
           candidate,
-          score: Math.abs(value.length - target.length) - (sameEnding ? 2 : 0) - (sameSlot ? 3 : 0),
+          score: Math.abs(value.length - target.length) - bonus,
           tie: stableHash(`${item.id}|${candidate.id}`),
         };
       })
@@ -219,7 +390,13 @@ function rankedCandidates(item: QuickItem, field: Field, index: QuickIndex) {
   });
 }
 
+/** 排好序的干扰项候选（测试与真实数据抽查用；出卡走 pickDistractors）。 */
+export function rankedDistractorCandidates(item: QuickItem, field: Field, index: QuickIndex): readonly QuickItem[] {
+  return rankedCandidates(item, field, index);
+}
+
 function greedyPick(
+  index: QuickIndex,
   order: readonly QuickItem[],
   field: Field,
   count: number,
@@ -229,8 +406,8 @@ function greedyPick(
   for (const candidate of order) {
     if (picked.length >= count) break;
     const value = fieldOf(candidate, field);
-    if (picked.some((other) => itemsClash(other, candidate))) continue;
-    if (fixed.some((other) => textClash(other, value))) continue;
+    if (picked.some((other) => itemsClash(index, other, candidate))) continue;
+    if (fixed.some((other) => textClash(index, other, value))) continue;
     picked.push(candidate);
   }
   return picked.length >= count ? picked.map((candidate) => fieldOf(candidate, field)) : null;
@@ -250,7 +427,7 @@ export function pickDistractors(
 ) {
   const ranked = rankedCandidates(item, field, index);
   const shuffled = [...seededShuffle(ranked.slice(0, 12), seed), ...ranked.slice(12)];
-  return greedyPick(shuffled, field, count, fixed) ?? greedyPick(ranked, field, count, fixed);
+  return greedyPick(index, shuffled, field, count, fixed) ?? greedyPick(index, ranked, field, count, fixed);
 }
 
 // ── 助词选项 ────────────────────────────────────────────────────
@@ -371,7 +548,8 @@ export function mutateReading(reading: string, ja: string) {
       variants["long+"].push(`${reading.slice(0, index + 1)}ー${reading.slice(index + 1)}`);
     }
     if (char === "っ" || char === "ッ") variants["sokuon-"].push(cut);
-    if ((char === "ん" || char === "ン") && reading.length > 2) variants["n-"].push(cut);
+    // 词尾的「ん」掉了（「…まんえ」）不是会真读错的形，一眼可排除；只删词中的拨音。
+    if ((char === "ん" || char === "ン") && reading.length > 2 && index < reading.length - 1) variants["n-"].push(cut);
     if (VOICE[char]) variants.voice.push(reading.slice(0, index) + VOICE[char] + reading.slice(index + 1));
     if (index > 0 && SOKUON_BEFORE.includes(char) && !NO_SOKUON_AFTER.includes(prev)) {
       const mark = KATAKANA.test(char) ? "ッ" : "っ";
@@ -395,6 +573,8 @@ function readingDistractors(item: QuickItem, index: QuickIndex, seed: string | n
     seen.add(key);
     picked.push(value);
   };
+  // 本人记下的误读排最前：那正是他真会说错的形。
+  for (const value of item.misreadings ?? []) take(value);
   const longest = Math.max(...READING_OPS.map((op) => variants[op].length));
   // 六种变异轮流各取一个；种子只决定每种里取哪一个，候选集合不随日期变，可用性因此与日期无关。
   for (let round = 0; round < longest && picked.length < 3; round += 1) {
@@ -629,6 +809,10 @@ function inputKind(item: QuickItem): InputKind | null {
   if (item.group === "nb_katakana") {
     return item.reading && norm(item.reading).length <= READING_INPUT_MAX ? "reading" : null;
   }
+  // 数字只考读音：短到能一口气打完的（≤6 假名）才出打字题，长串打字只是在考输入法。
+  if (item.group === "nb_number") {
+    return item.reading && norm(item.reading).length <= INPUT_MAX ? "reading" : null;
+  }
   if (item.group === "nb_calque") {
     return patch?.fixes.some((fix) => isKanaOnly(fix) && fix.length <= INPUT_MAX) ? "word" : null;
   }
@@ -748,8 +932,8 @@ function choiceBody(item: QuickItem, type: QuickCardType, index: QuickIndex, see
   const patch = item.patch;
   switch (type) {
     case "meaning_choice": {
-      // 只给中文释义的面试官表达；纯汉字短语与中文释义同形，看日语选中文是送分题，改出识词。
-      if (item.group !== "interviewer_phrase" || isKanjiOnly(item.ja)) return null;
+      // 只给中文释义的面试官表达；纯汉字或汉字过半与中文释义同形的（isCognateItem），看日语选中文是送分题，改出识词。
+      if (item.group !== "interviewer_phrase" || isKanjiOnly(item.ja) || isCognateItem(item)) return null;
       if (item.meaning.length < 2 || item.meaning.length > OPTION_MAX || item.ja.length > JA_OPTION_MAX) return null;
       if (norm(item.meaning).includes(norm(item.ja)) || sharesKana(item.meaning, item.ja)) return null;
       const distractors = pickDistractors(item, "meaning", 3, seed, index);
@@ -775,8 +959,9 @@ function choiceBody(item: QuickItem, type: QuickCardType, index: QuickIndex, see
     case "reading_choice": {
       // 只对単語文法帳完整的かな列开放：整理稿的读音常只注了一部分，拿来当正解会出错题。
       if (item.source !== "notebook" || !item.reading || item.hasSlot) return null;
-      if (!["nb_term", "nb_keigo", "nb_verb", "nb_katakana"].includes(item.group)) return null;
-      if (item.reading.length > READING_MAX || isKanaOnly(item.ja)) return null;
+      if (!READING_GROUPS.has(item.group)) return null;
+      const max = item.group === "nb_number" ? NUMBER_READING_MAX : READING_MAX;
+      if (item.reading.length > max || isKanaOnly(item.ja)) return null;
       const distractors = readingDistractors(item, index, seed);
       if (!distractors) return null;
       return { prompt: "reading", stem: item.ja, stemLang: "ja", options: [item.reading, ...distractors], answer: item.reading };
@@ -862,6 +1047,12 @@ export function checkQuickCard(card: QuickCard, item: QuickItem): string[] {
   return problems;
 }
 
+/**
+ * 题面与答案分属中日两种语言的点选题：汉字可能跨语言直接对上。
+ * 打字题不算：要打出来就得知道读音（假名即可），汉字对上了也替不了这一步。
+ */
+const CROSS_LANGUAGE = new Set(["meaning", "word"]);
+
 function stemLeaks(card: QuickCard, item: QuickItem) {
   if (card.type === "flip") return false;
   const patch = item.patch;
@@ -873,10 +1064,41 @@ function stemLeaks(card: QuickCard, item: QuickItem) {
       .some((probe) => card.stem.includes(probe));
   }
   const stem = norm(card.stem);
-  return card.accepted.some((answer) => {
+  if (card.accepted.some((answer) => {
     const key = norm(answer);
     return key.length > 0 && stem.includes(key);
+  })) return true;
+  if (!CROSS_LANGUAGE.has(card.prompt)) return false;
+  // 只比整串会被助词绕过：「一律に」对「一律（统一）」整串不互含，汉字串「一律」却原样在释义里。
+  // 所以再比一次「去掉假名、换成简体后的汉字串」，任一方被另一方包含就算泄露（单个汉字不算，太容易碰巧）。
+  const stemKanji = kanjiKey(card.stem);
+  return card.accepted.some((answer) => {
+    const answerKanji = kanjiKey(answer);
+    return (answerKanji.length >= 2 && stemKanji.includes(answerKanji))
+      || (stemKanji.length >= 2 && answerKanji.includes(stemKanji));
   });
+}
+
+/** 挪到读音栏的「よみ：」后面加的标记：它只注了一部分汉字，不是整句读音。 */
+export const QUICK_PARTIAL_READING_MARK = "（部分）";
+
+/**
+ * 答后的读音与解释。条目没有可靠读音时，括注里「よみ：…」那段挪到读音栏（半截读音也有用，但它不是解释）。
+ * 这些「よみ」几乎都只注了其中一段汉字（「お互い」只注「たが」），原样放在「读音」下会被当成整句读音，
+ * 所以带上「（部分）」。表記里没有汉字的（「よみ」其实是展开形或另一种说法）留在解释里，不冒充读音。
+ * 解释按「本条括注 → 错误型的中文说明」拼接：括注说的是这一句，型说明补上通用规则。
+ */
+function revealText(item: QuickItem) {
+  const parts = item.note.split("；").map((part) => part.trim()).filter(Boolean);
+  const movable = !item.reading && hasKanji(item.ja);
+  const isYomi = (part: string) => movable && part.startsWith("よみ：");
+  const yomi = parts.filter(isYomi).map((part) => part.slice(3).trim()).filter(Boolean);
+  const rest = parts.filter((part) => !isYomi(part));
+  const hint = item.group === "error_patch" ? patternHint(item.pattern) : "";
+  return {
+    reading: item.reading || (yomi.length ? `${yomi.join("／")}${QUICK_PARTIAL_READING_MARK}` : ""),
+    explain: [...rest, hint].filter(Boolean).join("；"),
+  };
 }
 
 function composeCard(item: QuickItem, type: QuickCardType, index: QuickIndex, day: string) {
@@ -887,6 +1109,7 @@ function composeCard(item: QuickItem, type: QuickCardType, index: QuickIndex, da
       ? inputBody(item)
       : choiceBody(item, type, index, seed);
   if (!body) return null;
+  const revealed = revealText(item);
   // 选项位置也由种子决定；高亮区间跟着选项一起换位。
   const order = seededShuffle(body.options.map((_, position) => position), `${seed}|order`);
   const card: QuickCard = {
@@ -908,10 +1131,10 @@ function composeCard(item: QuickItem, type: QuickCardType, index: QuickIndex, da
     accepted: acceptedAnswers(item, type),
     reveal: {
       ja: item.group === "error_patch" && item.patch ? item.patch.fixes.join("／") : item.ja,
-      reading: item.reading,
+      reading: revealed.reading,
       meaning: item.meaning,
       wrong: item.patch?.wrong ?? "",
-      explain: item.note || (item.group === "error_patch" ? PATTERN_HINT[item.pattern] ?? "" : ""),
+      explain: revealed.explain,
       evidence: item.evidence.slice(0, 2),
     },
   };
@@ -959,6 +1182,7 @@ const LADDER: Record<QuickGroup, Record<QuickLayer, QuickCardType[]>> = {
   nb_verb: { R: ["reading_choice"], D: ["word_choice"], P: ["short_input"] },
   nb_katakana: { R: ["reading_choice"], D: ["reading_choice"], P: ["short_input"] },
   nb_calque: { R: ["word_choice"], D: ["word_choice"], P: ["short_input"] },
+  nb_number: { R: ["reading_choice"], D: ["reading_choice"], P: ["short_input"] },
   answer_strategy: { R: ["flip"], D: ["flip"], P: ["flip"] },
   active_chunk: { R: ["flip"], D: ["flip"], P: ["flip"] },
   nb_pattern: { R: ["flip"], D: ["flip"], P: ["flip"] },
@@ -969,13 +1193,30 @@ const SEARCH: Record<QuickLayer, QuickLayer[]> = { R: ["R", "D", "P"], D: ["D", 
 /**
  * 按阶段选题型。P 层的短输入还要 typing 打开且本组打字额度 typedLeft > 0，否则退回同层以下的点选。
  * 同一层有多个可用题型时按 itemId|day 轮换，同一天同一条目选法固定。
+ *
+ * verify：「太简单」或分流判「会」的条目回来验证时不出 R 层的送分题，直接出 D 层题型；
+ * D 层没有可用题型时退回原逻辑。自报永远要过一道真题才算数。
+ *
+ * 没有任何点选、只有短输入（和兜底翻卡）的条目：短输入不要求先到 P 层——翻卡自评最高只到 recognized，
+ * 按阶段等永远等不到 P 层，可判分的打字题就永远出不来。
  */
 export function chooseCardType(
   item: QuickItem,
   stage: LanguageTrainingStage,
-  { index, typing, day, typedLeft }: { index: QuickIndex; typing: boolean; day: string; typedLeft: number },
+  { index, typing, day, typedLeft, verify = false }: {
+    index: QuickIndex;
+    typing: boolean;
+    day: string;
+    typedLeft: number;
+    verify?: boolean;
+  },
 ): QuickCardType | null {
   const available = new Set(availableCardTypes(item, index, { typing }));
+  const pick = (candidates: QuickCardType[]) => candidates[stableSeed(`${item.id}|${day}`) % candidates.length];
+  if (verify) {
+    const candidates = LADDER[item.group].D.filter((type) => type !== "short_input" && available.has(type));
+    if (candidates.length) return pick(candidates);
+  }
   const own = layerOf(stage);
   for (const layer of SEARCH[own]) {
     const candidates = LADDER[item.group][layer].filter((type) => {
@@ -983,8 +1224,10 @@ export function chooseCardType(
       if (type === "short_input") return own === "P" && layer === "P" && typing && typedLeft > 0;
       return true;
     });
-    if (candidates.length) return candidates[stableSeed(`${item.id}|${day}`) % candidates.length];
+    if (candidates.length) return pick(candidates);
   }
+  const choiceless = ![...available].some((type) => CHOICE_TYPES.has(type));
+  if (choiceless && available.has("short_input") && typing && typedLeft > 0) return "short_input";
   return available.has("flip") ? "flip" : null;
 }
 
