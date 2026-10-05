@@ -310,8 +310,15 @@ export type QuickSummary = {
   glossed?: number;
 };
 
-/** autoAdvance：答对后约 1 秒自动进下一题；答错、翻卡、不知道仍停下等本人看解释。 */
-export type QuickSettings = { size: QuickSetSize; typing: boolean; autoAdvance: boolean };
+/** 答对后自动进下一题的等待秒数（本人 2026-10-05 要求可选 1 / 3 / 5 秒三档）。 */
+export type QuickAutoAdvanceSeconds = 1 | 3 | 5;
+export const QUICK_AUTO_ADVANCE_SECONDS: readonly QuickAutoAdvanceSeconds[] = [1, 3, 5];
+
+/**
+ * autoAdvance：答对后按 autoAdvanceSeconds 自动进下一题；答错、翻卡、不知道仍停下等本人看解释。
+ * 秒数与开关分开存：关掉再打开时回到上次选的档位。
+ */
+export type QuickSettings = { size: QuickSetSize; typing: boolean; autoAdvance: boolean; autoAdvanceSeconds: QuickAutoAdvanceSeconds };
 
 export const QUICK_TRIAGE_SIZE = 50;
 

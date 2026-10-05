@@ -156,7 +156,11 @@
 /* 每日额度退成小字：主句写这一组，额度与「为什么不满」放在下面一行。 */
 .quick-start-quota { margin: 4px 0 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
 .quick-start-quota span { color: var(--text-secondary); }
-.quick-start-facts dd .quick-switch + small { margin-bottom: 6px; }
+.quick-start-facts dd .quick-switch + small,
+.quick-start-facts dd .quick-auto-setting + small { margin-bottom: 6px; }
+/* 自动下一题：标签与「关 / 1 秒 / 3 秒 / 5 秒」同一行，按钮比组大小的那组矮一号，设置区不被撑高。 */
+.quick-auto-setting { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 6px 0 2px; color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.quick-auto-choice button { min-width: 44px; min-height: 28px; padding: 2px 10px; font-size: 12px; }
 .quick-start-facts dd small.quick-warn { color: var(--warning); }
 
 /* 已排除清单：默认折起，整行横跨入口卡；每条一行，恢复按钮靠右。 */
@@ -585,8 +589,10 @@
   .quick-feedback.is-shown > * { animation: quick-feedback-in var(--dur-base) var(--ease-out) both; }
   .quick-flip-back { animation: quick-feedback-in var(--dur-base) var(--ease-out) both; }
   .quick-dots li { transition: background-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
-  /* 倒计时线与 QUICK_AUTO_ADVANCE_MS（1 秒）同长：线走完正好进下一题。 */
+  /* 倒计时线与设置的秒数同长（quickAutoAdvanceMs）：线走完正好进下一题。 */
   .quick-auto-track i { animation: quick-auto-drain 1s linear both; }
+  .quick-auto[data-seconds="3"] .quick-auto-track i { animation-duration: 3s; }
+  .quick-auto[data-seconds="5"] .quick-auto-track i { animation-duration: 5s; }
 }
 
 @keyframes quick-auto-drain {

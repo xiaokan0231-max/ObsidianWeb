@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type RefObject } from "react";
-import type { QuickAnswerResult, QuickCard, QuickSelfRating } from "@/lib/language/quick-types";
+import type { QuickAnswerResult, QuickAutoAdvanceSeconds, QuickCard, QuickSelfRating } from "@/lib/language/quick-types";
 import { QUICK_EMPTY } from "@/lib/language/quick-types";
 import { gradeQuickCard } from "@/lib/language/quick-cards";
 import {
@@ -18,7 +18,6 @@ import {
 import { isTypingTarget } from "@/lib/keyboard";
 import { formatClock } from "@/lib/training-rhythm";
 import {
-  QUICK_AUTO_ADVANCE_MS,
   QUICK_ELAPSED_CAP_MS,
   QUICK_END_CONFIRM_MS,
   QUICK_GROUP_COPY,
@@ -26,6 +25,7 @@ import {
   QUICK_RATING_COPY,
   QUICK_REASON_COPY,
   QUICK_TYPE_COPY,
+  quickAutoAdvanceMs,
   useQuickCopy,
   type QuickSaveStatus,
 } from "./language-quick-sync";
@@ -168,6 +168,8 @@ export type QuickCardViewProps = {
   undoable?: boolean;
   /** 答对自动下一题的倒计时正在走。 */
   autoAdvancing?: boolean;
+  /** 倒计时的秒数（提示文字与倒计时线的长度）。 */
+  autoAdvanceSeconds?: QuickAutoAdvanceSeconds;
   cardRef?: RefObject<HTMLElement | null>;
   inputRef?: RefObject<HTMLInputElement | null>;
   nextRef?: RefObject<HTMLButtonElement | null>;
@@ -197,6 +199,7 @@ export function QuickCardView({
   canBack = false,
   undoable = false,
   autoAdvancing = false,
+  autoAdvanceSeconds = 1,
   cardRef,
   inputRef,
   nextRef,
@@ -355,9 +358,9 @@ export function QuickCardView({
           <>
             <QuickFeedback card={card} record={record} passed={passed} serverPassed={serverPassed} />
             {autoAdvancing && (
-              <p className="quick-auto">
+              <p className="quick-auto" data-seconds={autoAdvanceSeconds}>
                 <span className="quick-auto-track" aria-hidden="true"><i /></span>
-                <span>{t("自动下一题提示")}</span>
+                <span>{t("自动下一题提示", { count: autoAdvanceSeconds })}</span>
               </p>
             )}
           </>
@@ -589,6 +592,7 @@ export function QuickDrill({
   onAction,
   clock = NO_CLOCK,
   autoAdvance = false,
+  autoAdvanceSeconds = 1,
   focusLabel = "",
 }: {
   session: QuickSessionState;
@@ -597,8 +601,9 @@ export function QuickDrill({
   onAction: (action: QuickSessionAction) => void;
   /** 外壳的专注计时（页面隐藏时暂停）；顶栏与每题用时都读它。 */
   clock?: QuickClockSource;
-  /** 设置「答对自动下一题」。 */
+  /** 设置「答对自动下一题」与等待秒数。 */
   autoAdvance?: boolean;
+  autoAdvanceSeconds?: QuickAutoAdvanceSeconds;
   /** 针对练习时的错误型名称（顶栏显示）。 */
   focusLabel?: string;
 }) {
@@ -655,12 +660,13 @@ export function QuickDrill({
     else cardRef.current?.focus({ preventScroll: true });
   }, [peeking, session.phase, entryType]);
 
-  // 答对自动下一题：约 1 秒后走；计时器随题目（事件 id）换掉，停留或换题时撤掉。
+  // 答对自动下一题：按设置的秒数走；计时器随题目（事件 id）换掉，停留或换题时撤掉。
+  const autoMs = quickAutoAdvanceMs(autoAdvanceSeconds);
   useEffect(() => {
     if (!autoKey) return;
-    const timer = window.setTimeout(() => onAction({ type: "next" }), QUICK_AUTO_ADVANCE_MS);
+    const timer = window.setTimeout(() => onAction({ type: "next" }), autoMs);
     return () => window.clearTimeout(timer);
-  }, [autoKey, onAction]);
+  }, [autoKey, autoMs, onAction]);
 
   useEffect(() => {
     if (!endArmed) return;
@@ -843,6 +849,7 @@ export function QuickDrill({
             canBack={backable}
             undoable={Boolean(undoTarget) && session.phase === "question"}
             autoAdvancing={Boolean(autoKey)}
+            autoAdvanceSeconds={autoAdvanceSeconds}
             cardRef={cardRef}
             inputRef={inputRef}
             nextRef={nextRef}

@@ -7,13 +7,14 @@ import type {
   QuickCardReason,
   QuickCardType,
   QuickGroup,
+  QuickAutoAdvanceSeconds,
   QuickPromptKey,
   QuickSelfRating,
   QuickSetSize,
   QuickSettings,
   QuickSummary,
 } from "@/lib/language/quick-types";
-import { QUICK_SET_SIZES } from "@/lib/language/quick-types";
+import { QUICK_AUTO_ADVANCE_SECONDS, QUICK_SET_SIZES } from "@/lib/language/quick-types";
 import { useUiLocale } from "./ui-locale";
 
 /*
@@ -32,8 +33,10 @@ export const QUICK_ENDPOINTS = {
 
 // ── 节奏常量 ─────────────────────────────────────────────────────
 
-/** 答对后自动进下一题的等待：够看一眼对勾和读音，又不至于让答对的题也要按一次 Enter。 */
-export const QUICK_AUTO_ADVANCE_MS = 1_000;
+/** 答对后自动进下一题的等待：设置里选 1 / 3 / 5 秒；想多看一眼读音和出处的人选长一档。 */
+export function quickAutoAdvanceMs(seconds: QuickAutoAdvanceSeconds) {
+  return seconds * 1_000;
+}
 /** 单题用时前端封顶：中途离开座位，这一题不该被记成几分钟，污染日后按用时的分析。 */
 export const QUICK_ELAPSED_CAP_MS = 120_000;
 /** 小结挂载后这段时间内「再来一组」不响应：最后一题习惯性多按的 Enter 不能把小结直接跳过去。 */
@@ -361,9 +364,9 @@ export function createQuickAnswerQueue(options: QuickAnswerQueueOptions = {}): Q
 // ── 设置 ────────────────────────────────────────────────────────
 
 export const QUICK_SETTINGS_KEY = "echo:language-quick-settings:v1";
-// autoAdvance 默认开（本人 2026-10-05 拍板）：一组里大半是答对的题，每题多按一次 Enter 没有学习价值。
-// 旧版本存下的设置没有这个键，按默认值补上，不当成坏数据。
-export const DEFAULT_QUICK_SETTINGS: QuickSettings = Object.freeze({ size: 20, typing: true, autoAdvance: true });
+// autoAdvance 默认开、1 秒（本人 2026-10-05 拍板）：一组里大半是答对的题，每题多按一次 Enter 没有学习价值。
+// 旧版本存下的设置没有这些键，按默认值补上，不当成坏数据。
+export const DEFAULT_QUICK_SETTINGS: QuickSettings = Object.freeze({ size: 20, typing: true, autoAdvance: true, autoAdvanceSeconds: 1 });
 
 export function parseQuickSettings(raw: string | null | undefined): QuickSettings {
   if (!raw) return DEFAULT_QUICK_SETTINGS;
@@ -372,9 +375,12 @@ export function parseQuickSettings(raw: string | null | undefined): QuickSetting
     const size = QUICK_SET_SIZES.includes(parsed.size as QuickSetSize) ? parsed.size as QuickSetSize : DEFAULT_QUICK_SETTINGS.size;
     const typing = typeof parsed.typing === "boolean" ? parsed.typing : DEFAULT_QUICK_SETTINGS.typing;
     const autoAdvance = typeof parsed.autoAdvance === "boolean" ? parsed.autoAdvance : DEFAULT_QUICK_SETTINGS.autoAdvance;
+    const autoAdvanceSeconds = QUICK_AUTO_ADVANCE_SECONDS.includes(parsed.autoAdvanceSeconds as QuickAutoAdvanceSeconds)
+      ? parsed.autoAdvanceSeconds as QuickAutoAdvanceSeconds
+      : DEFAULT_QUICK_SETTINGS.autoAdvanceSeconds;
     const same = size === DEFAULT_QUICK_SETTINGS.size && typing === DEFAULT_QUICK_SETTINGS.typing
-      && autoAdvance === DEFAULT_QUICK_SETTINGS.autoAdvance;
-    return same ? DEFAULT_QUICK_SETTINGS : { size, typing, autoAdvance };
+      && autoAdvance === DEFAULT_QUICK_SETTINGS.autoAdvance && autoAdvanceSeconds === DEFAULT_QUICK_SETTINGS.autoAdvanceSeconds;
+    return same ? DEFAULT_QUICK_SETTINGS : { size, typing, autoAdvance, autoAdvanceSeconds };
   } catch {
     return DEFAULT_QUICK_SETTINGS;
   }
@@ -506,7 +512,9 @@ export const QUICK_COPY = {
   "快速过一遍（还剩 {count} 条）": ["快速过一遍（还剩 {count} 条）", "ざっと仕分け（残り {count} 件）"],
   "快速过一遍说明": ["一屏一条，只决定新题先后，不算成绩", "1画面1件。新規の出題順だけを決め、成績には入りません"],
   "答对自动下一题": ["答对自动下一题", "正解なら自動で次へ"],
-  "答对自动下一题说明": ["答对约 1 秒后进下一题；答错、不知道、翻卡仍停下", "正解なら約1秒で次へ。不正解・分からない・フリップでは止まります"],
+  "答对自动下一题说明": ["答对后按选的秒数进下一题；答错、不知道、翻卡仍停下", "正解なら選んだ秒数で次へ。不正解・分からない・フリップでは止まります"],
+  "关": ["关", "オフ"],
+  "{count} 秒": ["{count} 秒", "{count} 秒"],
   "已排除 {count} 条": ["已排除 {count} 条", "除外済み {count} 件"],
   "已排除说明": ["按 X「不再出」排除的条目；恢复后照常出题。", "X（今後出さない）で除外した項目。戻すと通常どおり出題されます。"],
   "只列最近 {count} 条": ["只列最近 {count} 条", "最新 {count} 件のみ表示"],
@@ -587,7 +595,7 @@ export const QUICK_COPY = {
   "回看中": ["回看中 · 只读，不能改答案", "振り返り中・読み取り専用（回答は変えられません）"],
   "往后看": ["往后看", "次を見る"],
   "回到当前题": ["回到当前题", "現在の問題へ"],
-  "自动下一题提示": ["答对了 · 约 1 秒后下一题，按任意键或点击停留", "正解・約1秒で次へ（キーかクリックで止まります）"],
+  "自动下一题提示": ["答对了 · {count} 秒后下一题，按任意键或点击停留", "正解・{count}秒で次へ（キーかクリックで止まります）"],
   "再按一次结束": ["再按一次结束", "もう一度押して終了"],
   "再按一次 Esc 结束": ["才答了 {done} / {total} 题，2 秒内再按一次 Esc 结束", "{done} / {total} 問しか答えていません。2秒以内にもう一度 Esc で終了"],
   // 小结

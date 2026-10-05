@@ -94,7 +94,7 @@ const SUMMARY = {
 };
 
 const overviewProps = (values = {}) => ({
-  summary: SUMMARY, loading: false, error: "", notice: "", busy: "", settings: { size: 20, typing: true, autoAdvance: true }, exhausted: false,
+  summary: SUMMARY, loading: false, error: "", notice: "", busy: "", settings: { size: 20, typing: true, autoAdvance: true, autoAdvanceSeconds: 1 }, exhausted: false,
   tab: "today", fullState: null, stateLoading: false, stateError: "", today: DAY,
   onSettings: noop, onStart: noop, onRebuild: noop, onRetry: noop, onTab: noop, ...values,
 });
@@ -353,12 +353,18 @@ test("样式契约：无十六进制色、文字色不用 --brand/--orange、px 
 
 test("设置：localStorage 内容坏了或越界时回到默认 {20, 打字开}", () => {
   // 改写理由：本人 2026-10-05 加了「答对自动下一题」设置（默认开），设置对象多一个 autoAdvance 键；旧存档没有这个键时按默认补上。
-  assert.deepEqual(sync.parseQuickSettings(null), { size: 20, typing: true, autoAdvance: true });
-  assert.deepEqual(sync.parseQuickSettings("{oops"), { size: 20, typing: true, autoAdvance: true });
-  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ size: 15, typing: "yes" })), { size: 20, typing: true, autoAdvance: true });
-  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ size: 30, typing: false })), { size: 30, typing: false, autoAdvance: true });
-  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ size: 10, typing: true, autoAdvance: false })), { size: 10, typing: true, autoAdvance: false });
-  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ autoAdvance: "no" })), { size: 20, typing: true, autoAdvance: true });
+  // 再改写理由：本人 2026-10-05 要求等待秒数可选 1 / 3 / 5 秒，设置对象多一个 autoAdvanceSeconds（缺省 1 秒）。
+  const D = { size: 20, typing: true, autoAdvance: true, autoAdvanceSeconds: 1 };
+  assert.deepEqual(sync.parseQuickSettings(null), D);
+  assert.deepEqual(sync.parseQuickSettings("{oops"), D);
+  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ size: 15, typing: "yes" })), D);
+  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ size: 30, typing: false })), { ...D, size: 30, typing: false });
+  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ size: 10, typing: true, autoAdvance: false })), { ...D, size: 10, autoAdvance: false });
+  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ autoAdvance: "no" })), D);
+  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ autoAdvanceSeconds: 5 })), { ...D, autoAdvanceSeconds: 5 });
+  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ autoAdvance: false, autoAdvanceSeconds: 3 })), { ...D, autoAdvance: false, autoAdvanceSeconds: 3 }, "关掉时记住上次的档位");
+  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ autoAdvanceSeconds: 10 })), D, "不在三档里的秒数回到默认");
+  assert.equal(sync.parseQuickSettings(JSON.stringify(D)), sync.DEFAULT_QUICK_SETTINGS, "与默认相同时复用同一个对象");
   assert.equal(sync.QUICK_SETTINGS_KEY, "echo:language-quick-settings:v1");
   assert.equal(sync.quickMinutes(20), 5);
   assert.equal(sync.quickMinutes(10), 3);
@@ -667,30 +673,39 @@ test("回看 ←：只读显示当时的作答，标「回看中」，数字键�
   assert.doesNotMatch(peekBlock, /actions\.(choose|rate|suspend|easy|giveUp)/, "回看分支里没有任何作答动作");
 });
 
-test("答对自动下一题：设置开关默认开；答对才显示倒计时提示，答错、关掉设置都不显示；减弱动效下线不动", async () => {
+test("答对自动下一题：关 / 1 / 3 / 5 秒同一组、默认 1 秒；答对才显示倒计时，答错、关掉都不显示；线长随秒数，减弱动效下不动", async () => {
+  // 改写理由：本人 2026-10-05 要求等待可选 1 / 3 / 5 秒，开关与秒数合成一组按钮。
   const on = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps()));
-  assert.match(on, /role="switch" class="quick-switch" aria-checked="true"><i aria-hidden="true"><\/i><span>答对自动下一题<\/span>/);
-  const off = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ settings: { size: 20, typing: true, autoAdvance: false } })));
-  assert.match(off, /aria-checked="false"><i aria-hidden="true"><\/i><span>答对自动下一题<\/span>/);
+  assert.match(on, /<div class="quick-auto-setting" role="group" aria-label="答对自动下一题">/);
+  assert.match(on, /<button type="button" aria-pressed="false">关<\/button><button type="button" aria-pressed="true">1 秒<\/button><button type="button" aria-pressed="false">3 秒<\/button><button type="button" aria-pressed="false">5 秒<\/button>/);
+  const off = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ settings: { size: 20, typing: true, autoAdvance: false, autoAdvanceSeconds: 3 } })));
+  assert.match(off, /<button type="button" aria-pressed="true">关<\/button><button type="button" aria-pressed="false">1 秒<\/button><button type="button" aria-pressed="false">3 秒<\/button>/, "关掉时三档都不亮");
+  const five = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ settings: { size: 20, typing: true, autoAdvance: true, autoAdvanceSeconds: 5 } })));
+  assert.match(five, /aria-pressed="true">5 秒<\/button>/);
   assert.equal(sync.DEFAULT_QUICK_SETTINGS.autoAdvance, true);
+  assert.equal(sync.DEFAULT_QUICK_SETTINGS.autoAdvanceSeconds, 1);
 
   const base = createQuickSession({ setId: "s", day: DAY, size: 10, cards: [CARDS.meaning, CARDS.reading] });
   const right = quickSessionReducer(base, { type: "answer", response: "开会商量" });
   const wrong = quickSessionReducer(base, { type: "answer", response: "出差" });
-  const render = (session, autoAdvance) => renderToStaticMarkup(createElement(drill.QuickDrill, drillProps(session, { autoAdvance })));
-  assert.match(render(right, true), /<p class="quick-auto"><span class="quick-auto-track" aria-hidden="true"><i><\/i><\/span><span>答对了 · 约 1 秒后下一题，按任意键或点击停留<\/span><\/p>/);
+  const render = (session, autoAdvance, autoAdvanceSeconds) => renderToStaticMarkup(createElement(drill.QuickDrill, drillProps(session, { autoAdvance, autoAdvanceSeconds })));
+  assert.match(render(right, true), /<p class="quick-auto" data-seconds="1"><span class="quick-auto-track" aria-hidden="true"><i><\/i><\/span><span>答对了 · 1 秒后下一题，按任意键或点击停留<\/span><\/p>/);
+  assert.match(render(right, true, 3), /data-seconds="3"[\s\S]*答对了 · 3 秒后下一题/);
   assert.doesNotMatch(render(right, false), /quick-auto"/);
   assert.doesNotMatch(render(wrong, true), /quick-auto"/, "答错停下来看解释");
   const gaveUp = quickSessionReducer(base, { type: "gaveUp" });
   assert.doesNotMatch(render(gaveUp, true), /quick-auto"/, "不知道也停下");
 
   const [source, css] = await Promise.all([readFile("app/language-quick-drill.tsx", "utf8"), readFile("app/styles/language-quick.css", "utf8")]);
-  assert.equal(sync.QUICK_AUTO_ADVANCE_MS, 1000);
-  assert.match(source, /window\.setTimeout\(\(\) => onAction\(\{ type: "next" \}\), QUICK_AUTO_ADVANCE_MS\)/);
+  assert.deepEqual([1, 3, 5].map(sync.quickAutoAdvanceMs), [1000, 3000, 5000]);
+  assert.match(source, /const autoMs = quickAutoAdvanceMs\(autoAdvanceSeconds\);/);
+  assert.match(source, /window\.setTimeout\(\(\) => onAction\(\{ type: "next" \}\), autoMs\)/);
   assert.match(source, /!shouldPauseAfter\(record\) && serverPassed !== false/);
   assert.match(source, /onPointerDown=\{hold\}/, "点击打断并停留");
   const motion = css.slice(css.indexOf("@media (prefers-reduced-motion: no-preference)"));
-  assert.match(motion, /\.quick-auto-track i \{ animation: quick-auto-drain/, "倒计时动画只在允许动效时播放");
+  assert.match(motion, /\.quick-auto-track i \{ animation: quick-auto-drain 1s/, "倒计时动画只在允许动效时播放");
+  assert.match(motion, /\.quick-auto\[data-seconds="3"\] \.quick-auto-track i \{ animation-duration: 3s; \}/);
+  assert.match(motion, /\.quick-auto\[data-seconds="5"\] \.quick-auto-track i \{ animation-duration: 5s; \}/);
 });
 
 test("计时与结束：每题用时封顶 120 秒、读同一只表；Esc 少于一半时要 2 秒内再按一次", async () => {

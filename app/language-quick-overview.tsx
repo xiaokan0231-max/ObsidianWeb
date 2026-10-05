@@ -9,7 +9,7 @@ import type {
   LanguageV2State,
 } from "@/lib/language/types";
 import type { QuickItemBrief, QuickSettings, QuickSummary, QuickTopIssue } from "@/lib/language/quick-types";
-import { QUICK_SET_SIZES } from "@/lib/language/quick-types";
+import { QUICK_AUTO_ADVANCE_SECONDS, QUICK_SET_SIZES } from "@/lib/language/quick-types";
 import { quickDay } from "@/lib/language/quick-progress";
 import { tokyoParts } from "@/lib/dojo/utils";
 import { STRATEGY_TREND_META } from "@/lib/interview-trends.mjs";
@@ -323,15 +323,23 @@ export function QuickStartCard({
               <i aria-hidden="true" /><span>{t("打字题")}</span>
             </button>
             <small>{t("打字题说明")}</small>
-            <button
-              type="button"
-              role="switch"
-              className="quick-switch"
-              aria-checked={settings.autoAdvance}
-              onClick={() => onSettings({ autoAdvance: !settings.autoAdvance })}
-            >
-              <i aria-hidden="true" /><span>{t("答对自动下一题")}</span>
-            </button>
+            {/* 关与三档秒数放在同一组里：一眼看出现在是哪一档，不用先开开关再找秒数。 */}
+            <div className="quick-auto-setting" role="group" aria-label={t("答对自动下一题")}>
+              <span aria-hidden="true">{t("答对自动下一题")}</span>
+              <div className="quick-size quick-auto-choice">
+                <button type="button" aria-pressed={!settings.autoAdvance} onClick={() => onSettings({ autoAdvance: false })}>{t("关")}</button>
+                {QUICK_AUTO_ADVANCE_SECONDS.map((seconds) => (
+                  <button
+                    key={seconds}
+                    type="button"
+                    aria-pressed={settings.autoAdvance && settings.autoAdvanceSeconds === seconds}
+                    onClick={() => onSettings({ autoAdvance: true, autoAdvanceSeconds: seconds })}
+                  >
+                    {t("{count} 秒", { count: seconds })}
+                  </button>
+                ))}
+              </div>
+            </div>
             <small>{t("答对自动下一题说明")}</small>
           </dd>
         </div>

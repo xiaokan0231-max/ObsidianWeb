@@ -498,6 +498,7 @@ function JapaneseTraining({
         onAction={onAction}
         clock={clock}
         autoAdvance={settings.autoAdvance}
+        autoAdvanceSeconds={settings.autoAdvanceSeconds}
         focusLabel={focusLabel}
       />
     );
