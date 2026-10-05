@@ -439,7 +439,7 @@ test("第四参为空时与三参回放结果相同；extraItemIds 也建初始�
   assert.deepEqual(withExtra.map((state) => [state.itemId, state.stage]), [["p1", "unseen"], ["nb_x", "unseen"]]);
 });
 
-test("快练与批次动作的成功日都按 JST 归日", () => {
+test("快练按练习日（JST 04:00 起算）归日，批次动作仍按 JST 日", () => {
   const items = [patchItem("p1", "助詞", []), patchItem("p2", "助詞", [])];
   const progress = deriveLanguageProgress(
     curriculumOf(items),
@@ -448,8 +448,9 @@ test("快练与批次动作的成功日都按 JST 归日", () => {
     { events: [quickEvent("p1", "2026-07-01T16:00:00.000Z", true)] },
   );
   const byId = new Map(progress.map((state) => [state.itemId, state]));
-  assert.deepEqual(byId.get("p1").successDates, ["2026-07-02"]);
-  assert.equal(byId.get("p1").nextDueAt, "2026-07-04T15:00:00.000Z");
+  // 本人定的日界：JST 07-02 01:00 的快练属于练习日 07-01，到期写成 3 天后那个练习日的起点（JST 04:00）。
+  assert.deepEqual(byId.get("p1").successDates, ["2026-07-01"]);
+  assert.equal(byId.get("p1").nextDueAt, "2026-07-03T19:00:00.000Z");
   assert.deepEqual(byId.get("p2").successDates, ["2026-07-02"]);
 });
 
@@ -489,7 +490,7 @@ test("同型别的条目在之后的面试再出现，不会让已稳定的条�
   assert.deepEqual(again, first, "推导与当前时间无关");
   const p1 = first.find((state) => state.itemId === "p1");
   assert.equal(p1.stage, "stable");
-  assert.equal(p1.nextDueAt, "2026-08-08T15:00:00.000Z");
+  assert.equal(p1.nextDueAt, "2026-08-08T19:00:00.000Z");
   // 画像用的次数仍按型统计。
   assert.equal(p1.postTrainingOccurrences, 1);
 });
@@ -499,12 +500,12 @@ test("条目自己在最后成功日之后的面试里再出现才降级，到�
   const events = ["2026-07-02", "2026-07-05", "2026-07-10"].map((day) => quickEvent("p1", `${day}T01:00:00.000Z`, true));
   const demoted = deriveLanguageProgress(curriculumOf(items), [], new Set(), { events })[0];
   assert.equal(demoted.stage, "retrievable");
-  assert.equal(demoted.nextDueAt, "2026-07-20T15:00:00.000Z");
+  assert.equal(demoted.nextDueAt, "2026-07-20T19:00:00.000Z");
   const recovered = deriveLanguageProgress(curriculumOf(items), [], new Set(), {
     events: [...events, quickEvent("p1", "2026-07-22T01:00:00.000Z", true)],
   })[0];
   assert.equal(recovered.stage, "stable");
-  assert.equal(recovered.nextDueAt, "2026-08-20T15:00:00.000Z");
+  assert.equal(recovered.nextDueAt, "2026-08-20T19:00:00.000Z");
 });
 
 test("legacyScanJudgments 取每题最后一次 scan 判断，忽略非 scan 动作", () => {
@@ -519,4 +520,138 @@ test("legacyScanJudgments 取每题最后一次 scan 判断，忽略非 scan 动
     ], "2026-07-02"),
   ]);
   assert.deepEqual([...judgments.entries()], [["a", "known"], ["b", "uncertain"]]);
+});
+
+// ── 第六轮：问题次数、漏答推断、stale 口径、释义表接线 ───────────────────────
+// 全部是虚构内容；公司名一律「株式会社テスト」。
+
+const {
+  LANGUAGE_CURRICULUM_BUILDER,
+  findPhraseGlossNote,
+  languageCurriculumStale,
+  languageQuickInputs,
+} = await import("../lib/server/language-v2.ts");
+
+const R6_IDENTITY = { company: "株式会社テスト", date: "2026-09-01", round: "二次面接" };
+
+function r6Study(extraSentence = "", mtime = 40) {
+  const blocks = Array.from({ length: 14 }, (_, index) => {
+    const id = `q${String(index + 1).padStart(2, "0")}`;
+    return `## ${id} 質問${index + 1}\n- **s${index}a｜面**\n    - 正:: 質問${index + 1}をお願いします。\n- **s${index}b｜私**\n    - 正:: 回答${index + 1}です。\n`;
+  }).join("");
+  return note(
+    "20_求職/株式会社テスト/2026-09-01_二次面接_整理稿.md",
+    "transcript-study",
+    `---\ntype: transcript-study\ncompany: 株式会社テスト\ndate: 2026-09-01\nround: 二次面接\n---\n${blocks}${extraSentence}`,
+    mtime,
+    R6_IDENTITY,
+  );
+}
+
+function r6Block(blockId, overrides = {}) {
+  return {
+    blockId, questionTitle: `質問 ${blockId}`, interviewerIntentZh: "确认", askedPoints: ["一点"], answeredPoints: [],
+    missedPoints: [], comprehension: "full", relevance: "full", quality: "mixed", strategyTags: [],
+    evidenceSentenceIds: [], evaluationZh: `虚构评价 ${blockId}`, improvementZh: "", improvedAnswerJa: "", ...overrides,
+  };
+}
+
+function r6Review(blocks, priorityBlockIds = [], mtime = 41) {
+  return note(
+    "20_求職/株式会社テスト/2026-09-01_二次面接_回答品質復盤.md",
+    "interview-answer-review",
+    `---\ntype: interview-answer-review\ncompany: 株式会社テスト\ndate: 2026-09-01\nround: 二次面接\n---\n<!-- interview-answer-review-data -->\n\`\`\`json\n${JSON.stringify({
+      generatedAt: "2026-09-02T00:00:00.000Z", model: "test", overallScore: 70, summaryZh: "虚构", strengths: [], weaknesses: [],
+      priorityBlockIds, blocks,
+    })}\n\`\`\`\n`,
+    mtime,
+    R6_IDENTITY,
+  );
+}
+
+test("问题次数按截断前的真实出现次数：14 个块都不先说结论，次数是 14 而不是 evidence 截断后的 12", () => {
+  const blocks = Array.from({ length: 14 }, (_, index) =>
+    r6Block(`q${String(index + 1).padStart(2, "0")}`, { strategyTags: ["no-conclusion-first"] }));
+  const curriculum = buildLanguageCurriculum([r6Study(), r6Review(blocks)]);
+  const strategy = curriculum.items.filter((item) => item.kind === "answer_strategy");
+  assert.equal(strategy.length, 1, "同一标签的模板卡合并成一条");
+  assert.equal(strategy[0].evidence.length, 12, "生成物里的证据仍截到 12 条");
+  const issue = curriculum.profile.topIssues.find((value) => value.key === "no-conclusion-first");
+  assert.equal(issue.occurrenceCount, 14);
+  assert.equal(issue.interviewCount, 1);
+  assert.equal(LANGUAGE_CURRICULUM_BUILDER, "builder:3", "改了构建规则要把版本号加一，现行课程才会被判为过期");
+});
+
+test("没有策略标签的块：只有列出了漏答点才推断为复合问题漏答，问了两点但都答到的不算", () => {
+  const blocks = [
+    r6Block("q01", { askedPoints: ["甲", "乙"], answeredPoints: ["甲", "乙"] }),
+    r6Block("q02", { askedPoints: ["甲", "乙"], missedPoints: ["乙"] }),
+    r6Block("q03", { askedPoints: ["甲", "乙", "丙"], answeredPoints: ["甲"], improvedAnswerJa: "結論から申し上げます。" }),
+  ];
+  const curriculum = buildLanguageCurriculum([r6Study(), r6Review(blocks, ["q01"])]);
+  const compound = curriculum.items.filter((item) => item.pattern === "compound-question-miss");
+  assert.equal(compound.length, 1);
+  assert.deepEqual(compound[0].evidence.map((entry) => entry.blockId), ["q02"]);
+  assert.equal(curriculum.profile.topIssues.find((value) => value.key === "compound-question-miss").occurrenceCount, 1);
+});
+
+test("stale＝按当前笔记重建的内容指纹与现行课程不同：只碰了文件不算过期，内容真变了才算", () => {
+  const blocks = [r6Block("q01", { strategyTags: ["weak-evidence"] })];
+  const notes = [r6Study(), r6Review(blocks)];
+  const current = buildLanguageCurriculum(notes);
+  assert.equal(languageCurriculumStale(notes, current), false);
+  // 同样的内容、不同的 mtime：来源指纹变了，旧口径会一直报过期且点更新也消不掉。
+  const touched = [r6Study("", 90), r6Review(blocks, [], 91)];
+  assert.equal(languageCurriculumStale(touched, current), false);
+  // 整理稿里多了一处本人错误：重建结果不同，横幅该出现。
+  const extra = "## q99 追加\n- **s99｜私**\n    - 正:: 御社«を»志望しました。\n    - 誤1:: «を» → に ｜学習者｜型:: 助詞\n";
+  assert.equal(languageCurriculumStale([r6Study(extra, 92), r6Review(blocks, [], 91)], current), true);
+  // 构建器版本或规则变了（这里用旧指纹模拟）：内容相同的笔记也要提示重建一次。
+  assert.equal(languageCurriculumStale(notes, { ...current, contentFingerprint: "lcv2content_old" }), true);
+  // 重建不出课程（没有整理稿）时不报过期：横幅给的动作做不成。
+  assert.equal(languageCurriculumStale([], { ...current, contentFingerprint: "lcv2content_old" }), false);
+  assert.equal(languageCurriculumStale(notes, undefined), false);
+});
+
+function r6PhraseCurriculum() {
+  const phrase = (id, targetJa, meaningZh) => ({
+    ...fakeItem("interviewer_phrase", 0), id, canonicalKey: id, targetJa, correctedJa: targetJa, meaningZh, pattern: "",
+  });
+  return {
+    ...bigCurriculum,
+    contentFingerprint: "r6-phrases",
+    items: [
+      phrase("ph-ja", "お手すき", "時間がある状態のこと"),
+      phrase("ph-1", "なるほど", "原来如此"),
+      phrase("ph-2", "かしこまりました", "明白了"),
+      phrase("ph-3", "念のため", "以防万一"),
+      phrase("ph-4", "恐れ入りますが", "不好意思"),
+    ],
+  };
+}
+
+function r6GlossNote(rows, path = "20_求職/_素材/面接官用語_中文釈義.md") {
+  return note(path, "material", `---\ntype: material\nmaterial_kind: interviewer-phrase-gloss\n---\n| 表現 | 中文 |\n|---|---|\n${rows}\n`, 50,
+    { material_kind: "interviewer-phrase-gloss" });
+}
+
+test("面试官用语中文释义表：有表时日文释义的条目用中文出题，没表或表里没有这条时与原来一样", () => {
+  const curriculum = r6PhraseCurriculum();
+  const without = languageQuickInputs([], curriculum);
+  assert.equal(without.pool.excludedJaMeaning, 1);
+  assert.equal(without.pool.glossed, 0);
+  assert.equal(without.glossNote, undefined);
+  const gloss = r6GlossNote("| お手すき | 有空 |");
+  const withTable = languageQuickInputs([gloss], curriculum);
+  assert.equal(withTable.glossNote.path, gloss.path);
+  assert.equal(withTable.pool.excludedJaMeaning, 0);
+  assert.equal(withTable.pool.glossed, 1);
+  assert.equal(withTable.pool.items.find((item) => item.id === "ph-ja").meaning, "有空");
+  // 表里只有别的词：这一条仍不出题，计数照旧。
+  const other = languageQuickInputs([r6GlossNote("| 差し支えない | 不妨 |")], curriculum);
+  assert.equal(other.pool.excludedJaMeaning, 1);
+  assert.equal(other.pool.glossed, 0);
+  // frontmatter 不对的同名笔记不认。
+  const wrongKind = { ...gloss, frontmatter: { type: "material", material_kind: "other" } };
+  assert.equal(findPhraseGlossNote([wrongKind]), undefined);
 });

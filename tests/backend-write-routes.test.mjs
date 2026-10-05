@@ -640,3 +640,270 @@ test("快练：取题无副作用，同一份数据两次取到同一组；非�
   assert.equal((await summary(getRequest("/api/language/v2/quick/summary?size=15"))).status, 400);
   assert.equal(vault.writes.length, before);
 });
+
+// ── 第六轮：太简单 / 撤销排除 / 分流、针对练习、分流取题、释义表、练习日 04:00 ────────────
+// 全部是虚构内容：通用寒暄短语、自编的助词改错句；公司名一律「株式会社テスト」。
+
+const { quickDayStartIso } = await import("../lib/language/quick-progress.ts");
+
+const R6_PATCH_GROUPS = [
+  { verb: "参加する", pattern: "助詞", nouns: ["説明会", "勉強会", "研修", "交流会"] },
+  { verb: "慣れる", pattern: "語法", nouns: ["環境", "業務", "職場", "手順"] },
+];
+
+function r6QuickCurriculum() {
+  const base = quickCurriculum("r6-course");
+  const patches = R6_PATCH_GROUPS.flatMap(({ verb, pattern, nouns }, group) => nouns.map((noun, index) => ({
+    id: `patch-${group}-${index}`, kind: "error_patch", targetJa: `${noun}を${verb} → ${noun}に${verb}`,
+    correctedJa: `${noun}に${verb}`, originalJa: `来月から${noun}を${verb}予定です。`, reading: "",
+    meaningZh: `把「${noun}を」改为「${noun}に」`, promptZh: "", basePriority: 60, evidence: [], pattern,
+    sourceInterviewKeys: [], strategyTags: [],
+  })));
+  // 释义是日文的面试官用语：没有中文释义表时不出题。
+  const jaPhrase = { id: "phrase-ja", kind: "interviewer_phrase", targetJa: "お手すき", correctedJa: "", originalJa: "", reading: "",
+    meaningZh: "時間がある状態のこと", promptZh: "", basePriority: 50, evidence: [], pattern: "" };
+  const strategy = { id: "strategy-0", kind: "answer_strategy", targetJa: "結論から申し上げます。", correctedJa: "結論から申し上げます。",
+    originalJa: "", reading: "", meaningZh: "先说结论", promptZh: "", basePriority: 50, evidence: [], pattern: "no-conclusion-first",
+    strategyTags: ["no-conclusion-first"] };
+  return {
+    ...base,
+    generatedAt: "2026-01-03T00:00:00Z",
+    items: [...base.items, ...patches, jaPhrase, strategy],
+    profile: { ...base.profile, topIssues: [
+      { key: "no-conclusion-first", label: "no-conclusion-first", kind: "answer_strategy", interviewCount: 3, occurrenceCount: 7,
+        itemIds: ["strategy-0"], evidence: [] },
+      { key: "助詞", label: "助詞", kind: "error_patch", interviewCount: 2, occurrenceCount: 4,
+        itemIds: patches.filter((item) => item.pattern === "助詞").map((item) => item.id), evidence: [] },
+      { key: "不存在的型", label: "不存在的型", kind: "error_patch", interviewCount: 1, occurrenceCount: 1, itemIds: [], evidence: [] },
+    ] },
+  };
+}
+
+function r6GlossNote(rows = "| お手すき | 有空 |") {
+  return note("20_求職/_素材/面接官用語_中文釈義.md",
+    `---\ntype: material\nmaterial_kind: interviewer-phrase-gloss\n---\n# 面接官用語 中文釈義\n\n| 表現 | 中文 |\n|---|---|\n${rows}\n`);
+}
+
+/** 路由读 new Date() 定作答时刻；只给路由模块换掉 Date，测试才能把时间放在 04:00 两侧。 */
+function fixedClock(iso) {
+  const clock = { now: iso };
+  class FixedDate extends Date {
+    constructor(...args) {
+      if (args.length) super(...args);
+      else super(Date.parse(clock.now));
+    }
+    static now() { return Date.parse(clock.now); }
+  }
+  return { clock, FixedDate };
+}
+
+async function quickRoutesR6({ now = "2026-10-05T03:00:00.000Z", notes = [], curriculum = r6QuickCurriculum() } = {}) {
+  const vault = memoryVault(notes);
+  const engine = await loadAppModule("lib/server/language-v2.ts", {
+    stubs: { "./obsidian": vault.io, "./language-store": { loadLanguageState: async () => ({ units: [] }) } },
+  });
+  await vault.io.writeNote("80_AI分析/日本語訓練/quick-course.md", engine.renderLanguageCurriculum(curriculum));
+  const quick = await loadAppModule("lib/server/language-quick.ts", { stubs: { "./language-v2.ts": engine } });
+  const append = await loadAppModule("lib/server/note-append.ts", { stubs: { "./obsidian.ts": vault.io } });
+  const { clock, FixedDate } = fixedClock(now);
+  const options = {
+    stubs: {
+      "@/lib/server/obsidian": vault.io,
+      "@/lib/server/language-v2": engine,
+      "@/lib/server/language-quick": quick,
+      "@/lib/server/note-append": append,
+    },
+    globals: { Date: FixedDate },
+  };
+  const json = async (response) => {
+    assert.equal(response.status, 200, await response.clone().text());
+    return response.json();
+  };
+  const routes = {
+    answer: (await loadAppModule("app/api/language/v2/quick/answer/route.ts", options)).POST,
+    set: (await loadAppModule("app/api/language/v2/quick/set/route.ts", options)).GET,
+    summary: (await loadAppModule("app/api/language/v2/quick/summary/route.ts", options)).GET,
+    triage: (await loadAppModule("app/api/language/v2/quick/triage/route.ts", options)).GET,
+  };
+  return {
+    vault, engine, clock, ...routes,
+    post: async (answers, setId = "q20261005-20-r6") => json(await routes.answer(request(quickBody(answers, setId)))),
+    get: async (route, path) => json(await routes[route](getRequest(path))),
+  };
+}
+
+test("快练：太简单 / 不再出 / 分流按 action 落盘；分流只存判断、不判分不占首答；撤销排除后条目重新可出", { timeout: 5000 }, async () => {
+  const { post, get, vault } = await quickRoutesR6();
+  const before = await get("summary", "/api/language/v2/quick/summary?size=30");
+  const body = await post([
+    { eventId: "r6-easy", itemId: "phrase-1", type: "meaning_choice", action: "easy" },
+    { eventId: "r6-suspend", itemId: "phrase-2", type: "meaning_choice", action: "suspend" },
+    // 分流与卡无关：客户端带一个占位题型（这里故意给条目出不了的短输入），服务端照存。
+    { eventId: "r6-triage", itemId: "phrase-3", type: "short_input", action: "triage", judgment: "unknown", response: "不该落盘" },
+  ]);
+  assert.deepEqual(body.results.map((result) => [result.status, result.first, result.passed]),
+    [["recorded", false, undefined], ["recorded", false, undefined], ["recorded", false, undefined]]);
+  const [easy, , triaged] = body.results;
+  assert.equal(easy.stageAfter, "recognized", "太简单至少到 recognized");
+  assert.equal(easy.nextDueAt, quickDayStartIso("2026-10-05", 30), "30 天后的练习日起点回来验证");
+  assert.equal(triaged.stageAfter, "unseen", "分流不改阶段");
+  const events = new Map(quickLogEvents(vault).map((event) => [event.eventId, event]));
+  assert.equal(events.get("r6-easy").action, "easy");
+  assert.equal(events.get("r6-suspend").action, "suspend");
+  assert.deepEqual([events.get("r6-triage").action, events.get("r6-triage").judgment, events.get("r6-triage").type, events.get("r6-triage").response],
+    ["triage", "unknown", "short_input", ""]);
+  assert.equal(body.summary.suspendedCount, 1);
+  assert.deepEqual(body.summary.suspended.map((item) => item.itemId), ["phrase-2"]);
+  assert.equal(body.summary.triageRemaining, before.triageRemaining - 3, "答过、排除、分流过的都不再算待分流");
+  const hidden = await get("set", "/api/language/v2/quick/set?size=30");
+  assert.ok(!hidden.set.cards.some((card) => card.itemId === "phrase-2"), "排除的条目不出");
+  const restored = await post([{ eventId: "r6-restore", itemId: "phrase-2", type: "meaning_choice", action: "restore" }]);
+  assert.equal(restored.results[0].status, "recorded");
+  assert.equal(restored.summary.suspendedCount, 0);
+  const back = await get("set", "/api/language/v2/quick/set?size=30");
+  assert.ok(back.set.cards.some((card) => card.itemId === "phrase-2"), "撤销排除后重新可出");
+});
+
+test("快练：分流判断不挡首答；同一组里先分流再作答仍是首答并判分", { timeout: 5000 }, async () => {
+  const { post } = await quickRoutesR6();
+  await post([{ eventId: "r6-t1", itemId: "phrase-1", type: "meaning_choice", action: "triage", judgment: "uncertain" }], "q20261005-20-same");
+  const body = await post([{ eventId: "r6-a1", itemId: "phrase-1", type: "meaning_choice", response: "明白了" }], "q20261005-20-same");
+  assert.deepEqual([body.results[0].first, body.results[0].passed, body.results[0].stageAfter], [true, true, "correctable"]);
+});
+
+test("快练：题面阶段按 X 再撤销，同一组里接着作答仍是首答并判分（会话把那张卡放回当前位置）", { timeout: 5000 }, async () => {
+  const { post } = await quickRoutesR6();
+  // 会话一次提交三条：suspend → restore → answer。同组的 suspend 若也挡首答，撤销后的作答永远判不成首答。
+  const body = await post([
+    { eventId: "r6-x1", itemId: "phrase-1", type: "meaning_choice", action: "suspend" },
+    { eventId: "r6-x2", itemId: "phrase-1", type: "meaning_choice", action: "restore" },
+    { eventId: "r6-x3", itemId: "phrase-1", type: "meaning_choice", response: "明白了" },
+  ], "q20261005-20-undo");
+  const answered = body.results[2];
+  assert.deepEqual([answered.status, answered.first, answered.passed, answered.stageAfter], ["recorded", true, true, "correctable"]);
+  assert.equal(body.summary.suspendedCount, 0);
+});
+
+test("快练：动作参数校验——未知 action、分流缺 judgment、suspend 与 action 矛盾都 400；作答仍要求题型对得上", { timeout: 5000 }, async () => {
+  const { answer, vault } = await quickRoutesR6();
+  for (const answers of [
+    [quickAnswer({ action: "bogus" })],
+    [quickAnswer({ action: "triage" })],
+    [quickAnswer({ action: "triage", judgment: "reject" })],
+    [quickAnswer({ action: "easy", suspend: true })],
+    [quickAnswer({ action: "answer", itemId: "strategy-0", type: "meaning_choice" })],
+  ]) {
+    assert.equal((await answer(request(quickBody(answers)))).status, 400, JSON.stringify(answers));
+  }
+  assert.equal(quickLogWrites(vault), 0);
+});
+
+test("快练：focus 取组只含该错误型；未知的型 200 且说明原因；setId 与普通组不同", { timeout: 5000 }, async () => {
+  const { get, vault } = await quickRoutesR6();
+  const writes = vault.writes.length;
+  const patternOf = new Map(r6QuickCurriculum().items.map((item) => [item.id, item.pattern]));
+  const focused = await get("set", `/api/language/v2/quick/set?size=10&focus=${encodeURIComponent("助詞")}`);
+  assert.equal(focused.set.focus, "助詞");
+  assert.ok(focused.set.cards.length > 0);
+  assert.ok(focused.set.cards.every((card) => card.group === "error_patch" && patternOf.get(card.itemId) === "助詞"));
+  assert.equal(focused.emptyReason, undefined);
+  const plain = await get("set", "/api/language/v2/quick/set?size=10");
+  assert.notEqual(focused.set.setId, plain.set.setId);
+  const unknown = await get("set", `/api/language/v2/quick/set?size=10&focus=${encodeURIComponent("没有这个型")}`);
+  assert.deepEqual([unknown.set.cards.length, unknown.emptyReason], [0, "unknown_focus"]);
+  assert.equal(typeof unknown.emptyMessage, "string");
+  const { set } = await quickRoutesR6();
+  assert.equal((await set(getRequest(`/api/language/v2/quick/set?focus=${encodeURIComponent("あ".repeat(65))}`))).status, 400);
+  assert.equal((await set(getRequest("/api/language/v2/quick/set?focus=%01"))).status, 400);
+  assert.equal(vault.writes.length, writes, "取题无副作用");
+});
+
+test("快练：summary 的问题带 kind、中文标签、focus 与条目数；新字段齐全", { timeout: 5000 }, async () => {
+  const { get } = await quickRoutesR6();
+  const summary = await get("summary", "/api/language/v2/quick/summary?size=10");
+  const byKey = new Map(summary.topIssues.map((issue) => [issue.key, issue]));
+  const strategy = byKey.get("no-conclusion-first");
+  assert.deepEqual([strategy.kind, strategy.label, strategy.focus, strategy.itemCount, strategy.occurrenceCount],
+    ["strategy", "不先说结论", undefined, 1, 7]);
+  const particle = byKey.get("助詞");
+  assert.deepEqual([particle.kind, particle.label, particle.focus, particle.itemCount], ["language", "助詞", "助詞", 4]);
+  const missing = byKey.get("不存在的型");
+  assert.deepEqual([missing.kind, missing.focus, missing.itemCount], ["language", undefined, 0]);
+  for (const key of ["nextSet", "dueSoon", "suspended", "suspendedCount", "triageRemaining", "orphanEvents", "glossed"]) {
+    assert.ok(key in summary, key);
+  }
+  assert.equal(summary.dueSoon.length, 7);
+  assert.equal(summary.nextSet.total, summary.nextSet.due + summary.nextSet.lapsed + summary.nextSet.fresh + summary.nextSet.early);
+});
+
+test("快练：GET triage 无副作用，排除已作答与已分流的条目；size 只收 10–50", { timeout: 5000 }, async () => {
+  const { get, post, triage, vault } = await quickRoutesR6();
+  const writes = vault.writes.length;
+  const first = await get("triage", "/api/language/v2/quick/triage?size=10");
+  const again = await get("triage", "/api/language/v2/quick/triage?size=10");
+  assert.deepEqual(first, again);
+  assert.equal(first.ready, true);
+  assert.ok(first.items.length > 0 && first.items.length <= 10);
+  assert.ok(first.items.every((item) => typeof item.itemId === "string" && typeof item.ja === "string"));
+  assert.equal(vault.writes.length, writes);
+  const [answered, triaged] = first.items;
+  await post([
+    { eventId: "r6-x1", itemId: answered.itemId, type: "flip", action: "triage", judgment: "known" },
+  ]);
+  const summary = await get("summary", "/api/language/v2/quick/summary");
+  const set = await get("set", "/api/language/v2/quick/set?size=30");
+  const card = set.set.cards.find((entry) => entry.itemId === triaged.itemId);
+  assert.ok(card, "下一批的第二条在 size=30 的组里");
+  await post([{ eventId: "r6-x2", itemId: card.itemId, type: card.type, response: card.answer, ...(card.type === "flip" ? { rating: "remembered" } : {}) }]);
+  const after = await get("triage", "/api/language/v2/quick/triage?size=50");
+  assert.ok(!after.items.some((item) => item.itemId === answered.itemId || item.itemId === triaged.itemId));
+  assert.equal(after.remaining, first.remaining - 2);
+  assert.equal(summary.triageRemaining, first.remaining - 1, "summary 与 GET triage 同一口径");
+  for (const size of ["9", "51", "abc", "10.5"]) {
+    assert.equal((await triage(getRequest(`/api/language/v2/quick/triage?size=${size}`))).status, 400, size);
+  }
+});
+
+test("快练：中文释义表——有表时日文释义的条目出题并计入 glossed，没有表时计入 excludedJaMeaning", { timeout: 5000 }, async () => {
+  const without = await quickRoutesR6();
+  const plain = await without.get("summary", "/api/language/v2/quick/summary");
+  assert.deepEqual([plain.excludedJaMeaning, plain.glossed], [1, 0]);
+  const withTable = await quickRoutesR6({ notes: [r6GlossNote()] });
+  const glossed = await withTable.get("summary", "/api/language/v2/quick/summary");
+  assert.deepEqual([glossed.excludedJaMeaning, glossed.glossed], [0, 1]);
+  assert.equal(glossed.drillable, plain.drillable + 1);
+  // 用中文释义出的题能作答，/state 的课程条目进度与应答给出同一阶段。
+  const body = await withTable.post([{ eventId: "r6-g1", itemId: "phrase-ja", type: "meaning_choice", response: "有空" }]);
+  assert.deepEqual([body.results[0].passed, body.results[0].stageAfter], [true, "correctable"]);
+  const notes = await withTable.vault.io.readAllNotes();
+  const state = await withTable.engine.loadLanguageV2State(notes);
+  assert.equal(state.progress.find((entry) => entry.itemId === "phrase-ja").stage, "correctable");
+  assert.equal(state.stale, body.summary.stale, "/state 与快练的过期口径一致");
+});
+
+test("快练：练习日从日本时间 04:00 起算——03:30 的作答算前一天，04:30 起是新的一天", { timeout: 5000 }, async () => {
+  // JST 10-06 03:30 = 练习日 10-05。
+  const { post, get, clock, vault, engine } = await quickRoutesR6({ now: "2026-10-05T18:30:00.000Z" });
+  const wrong = await post([{ eventId: "r6-d1", itemId: "phrase-1", type: "meaning_choice", response: "以防万一" }]);
+  assert.deepEqual([wrong.results[0].first, wrong.results[0].passed, wrong.summary.day], [true, false, "2026-10-05"]);
+  assert.equal(wrong.results[0].nextDueAt, quickDayStartIso("2026-10-05", 1), "答错明天（10-06 04:00）再来");
+  // 03:50 再答对：还是同一个练习日，不是首答，拿不到成功日（旧的零点日界会让它变成新一天的首答）。
+  clock.now = "2026-10-05T18:50:00.000Z";
+  const retry = await post([{ eventId: "r6-d2", itemId: "phrase-1", type: "meaning_choice", response: "明白了" }]);
+  assert.deepEqual([retry.results[0].first, retry.results[0].stageAfter], [false, "unseen"]);
+  // 04:30 起是练习日 10-06：今天已练归零，首答答对拿到成功日。
+  clock.now = "2026-10-05T19:30:00.000Z";
+  const summary = await get("summary", "/api/language/v2/quick/summary");
+  assert.deepEqual([summary.day, summary.answeredToday], ["2026-10-06", 0]);
+  const next = await post([{ eventId: "r6-d3", itemId: "phrase-1", type: "meaning_choice", response: "明白了" }], "q20261006-20-r6");
+  assert.deepEqual([next.results[0].first, next.results[0].stageAfter], [true, "correctable"]);
+  assert.equal(next.results[0].nextDueAt, quickDayStartIso("2026-10-06", 3));
+  // /state 的阶段与应答一致。
+  const state = await engine.loadLanguageV2State(await vault.io.readAllNotes());
+  assert.equal(state.progress.find((entry) => entry.itemId === "phrase-1").stage, "correctable");
+  // 月末 0:00–4:00 的作答写进上个月的日志。
+  clock.now = "2026-10-31T18:00:00.000Z";
+  await post([{ eventId: "r6-d4", itemId: "phrase-4", type: "meaning_choice", response: "不好意思" }], "q20261031-20-r6");
+  const paths = [...vault.notes.keys()].filter((path) => path.startsWith(QUICK_LOG_PREFIX));
+  assert.deepEqual(paths, [`${QUICK_LOG_PREFIX}2026-10_快練ログ.md`]);
+});

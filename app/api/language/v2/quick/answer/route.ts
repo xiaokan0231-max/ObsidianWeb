@@ -25,7 +25,8 @@ export async function POST(request: Request) {
       const notes = await readAllNotes();
       const context = await buildQuickContext(notes);
       if (!context.curriculum) throw conflict("还没有训练课程，请先在训练页更新训练画像。");
-      // 作答时刻只认服务端：日界（JST）、首答与间隔都从它算，客户端时钟偏了也不影响。
+      // 作答时刻只认服务端：练习日（日本时间 04:00 起算）、首答与间隔都从它算，客户端时钟偏了也不影响。
+      // 作答之外的动作（不再出 / 撤销排除 / 太简单 / 分流）同走这一条：同一套去重、同一条写入车道。
       const at = new Date().toISOString();
       const plan = planQuickAnswers(context, body, at);
       let written: QuickEvent[] = [];

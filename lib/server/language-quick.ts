@@ -5,10 +5,12 @@ import type {
   LanguageTrainingStage,
 } from "../language/types";
 import type {
+  QuickAction,
   QuickAnswerInput,
   QuickAnswerResult,
   QuickCardType,
   QuickEvent,
+  QuickItemBrief,
   QuickLegacyJudgments,
   QuickPool,
   QuickSelfRating,
@@ -16,21 +18,29 @@ import type {
   QuickSetSize,
   QuickSummary,
   QuickTopIssue,
+  QuickTriageJudgment,
 } from "../language/quick-types";
-import { QUICK_SET_SIZES } from "../language/quick-types.ts";
+import { QUICK_SET_SIZES, QUICK_TRIAGE_SIZE } from "../language/quick-types.ts";
 import type { QuickIndex } from "../language/quick-cards.ts";
 import { availableCardTypes, gradeQuickAnswer } from "../language/quick-cards.ts";
-import { isFirstAnswer, quickDay } from "../language/quick-log.ts";
-import { quickSummary, selectQuickSet } from "../language/quick-select.ts";
+import { collectTriageJudgments, isFirstAnswer, quickDay } from "../language/quick-log.ts";
+import {
+  mergeJudgments,
+  quickFocusOptions,
+  quickSummary,
+  selectQuickSet,
+  selectTriageItems,
+} from "../language/quick-select.ts";
 import { stableHash } from "../dojo/utils.ts";
+import { STRATEGY_TREND_META } from "../interview-trends.mjs";
 import { vaultSnapshotFingerprint } from "../vault-merge.ts";
 import { badRequestError } from "./api.ts";
 import {
   allBatches,
   deriveLanguageProgress,
+  languageCurriculumStale,
   languageLegacyTargets,
   languageQuickInputs,
-  languageV2SourceFingerprint,
   latestLanguageCurriculumEntry,
   legacyScanJudgments,
 } from "./language-v2.ts";
@@ -57,6 +67,12 @@ const QUICK_CARD_TYPES: readonly QuickCardType[] = [
   "flip",
 ];
 const QUICK_RATINGS: readonly QuickSelfRating[] = ["remembered", "fuzzy", "forgot"];
+const QUICK_ACTIONS: readonly QuickAction[] = ["answer", "suspend", "restore", "easy", "triage"];
+const QUICK_JUDGMENTS: readonly QuickTriageJudgment[] = ["known", "uncertain", "unknown"];
+/** 分流一屏的条数范围：少于 10 条不值得开一屏，多于 50 条一屏扫不完。 */
+export const QUICK_TRIAGE_MIN = 10;
+/** 错误型名的长度上限：整理稿里的 型:: 都是几个字，64 足够又挡住乱传。 */
+export const QUICK_FOCUS_MAX = 64;
 
 export type QuickContext = {
   /** 最新课程；没有时快练不开放（接口返回 ready:false / 409）。 */
@@ -66,9 +82,15 @@ export type QuickContext = {
   pool: QuickPool;
   index: QuickIndex;
   events: readonly QuickEvent[];
+  /** 旧批次的 scan 判断（不含分流）。写入分流后要和新事件重新合并，所以单独留着。 */
+  scanJudgments: QuickLegacyJudgments;
+  /** 选题与汇总用的判断：旧批次 scan 判断被分流判断覆盖后的结果（mergeJudgments）。 */
   legacy: QuickLegacyJudgments;
   binaryOnly: ReadonlySet<string>;
+  /** 课程 profile 的问题，已补 kind 与中文标签（策略类）。 */
   topIssues: QuickTopIssue[];
+  /** 问题 key → 课程里属于它的条目 id：给策略类问题数「可出题的条目」用。 */
+  issueItemIds: ReadonlyMap<string, readonly string[]>;
   /** 课程条目 ∪ 単語文法帳条目的进度（回放旧批次动作 + 全部快练事件）。 */
   progress: ReadonlyMap<string, LanguageItemProgress>;
   /** 重放用的不变输入：作答后用「已有事件 + 新事件」再回放一次，得到写入后的阶段。 */
@@ -124,20 +146,49 @@ async function computeQuickContext(notes: ObsidianNote[]): Promise<QuickContext>
     extraItemIds: inputs.extraItemIds,
   };
   const progress = replayQuickProgress({ replay, binaryOnly: inputs.binaryOnly }, inputs.events);
+  const scanJudgments = legacyScanJudgments(batches);
+  const issues = curriculum?.profile.topIssues ?? [];
   return {
     curriculum,
-    stale: curriculum ? curriculum.sourceFingerprint !== languageV2SourceFingerprint(notes) : false,
+    // 与 /state 同一个判断：按当前笔记重建的内容指纹是否与现行课程不同。
+    stale: languageCurriculumStale(notes, curriculum),
     pool: inputs.pool,
     index: inputs.index,
     events: inputs.events,
-    legacy: legacyScanJudgments(batches),
+    scanJudgments,
+    legacy: mergeJudgments(scanJudgments, collectTriageJudgments(inputs.events)),
     binaryOnly: inputs.binaryOnly,
-    topIssues: (curriculum?.profile.topIssues ?? []).map(({ key, label, interviewCount, occurrenceCount }) => ({
-      key, label, interviewCount, occurrenceCount,
-    })),
+    topIssues: issues.map(({ key, label, kind, interviewCount, occurrenceCount }) => {
+      // 语言类保持型名（型名本身就是日语术语，翻成中文反而对不上整理稿）；策略类用复盘横断页的中文标签。
+      const strategy = kind !== "error_patch";
+      return {
+        key,
+        label: strategy ? STRATEGY_TREND_META[key]?.label ?? label : label,
+        interviewCount,
+        occurrenceCount,
+        kind: strategy ? "strategy" as const : "language" as const,
+      };
+    }),
+    issueItemIds: new Map(issues.map((issue) => [issue.key, issue.itemIds])),
     progress,
     replay,
   };
+}
+
+/** 写入分流事件之后，判断要按新的事件列表重新合并，否则应答里的「还剩多少没分流」不会变。 */
+function judgmentsOf(context: QuickContext, events: readonly QuickEvent[]): QuickLegacyJudgments {
+  return events === context.events ? context.legacy : mergeJudgments(context.scanJudgments, collectTriageJudgments(events));
+}
+
+/** 当前设置下能出题、没被排除的条目（与汇总里的「可练」同一口径）。 */
+function drillable(
+  context: Pick<QuickContext, "index">,
+  progress: ReadonlyMap<string, LanguageItemProgress>,
+  itemId: string,
+  typing: boolean,
+) {
+  const item = context.index.byId.get(itemId);
+  return Boolean(item && progress.get(itemId)?.rejected !== true && availableCardTypes(item, context.index, { typing }).length);
 }
 
 // 同 stateMemo：逐路径比较版本，单篇笔记更新也能识别；写入后快照变了自然重算（题库索引另有缓存）。
@@ -172,20 +223,33 @@ export function quickContextSummary(
     events?: readonly QuickEvent[];
   },
 ): QuickSummary {
-  return quickSummary({
+  const progress = options.progress ?? context.progress;
+  const events = options.events ?? context.events;
+  const typing = options.typing ?? true;
+  const summary = quickSummary({
     pool: context.pool,
     index: context.index,
-    progress: options.progress ?? context.progress,
-    events: options.events ?? context.events,
-    legacy: context.legacy,
+    progress,
+    events,
+    legacy: judgmentsOf(context, events),
     day: options.day,
     size: options.size,
-    typing: options.typing,
+    typing,
     topIssues: context.topIssues,
     ready: Boolean(context.curriculum),
     stale: context.stale,
     curriculum: curriculumMeta(context),
   });
+  // 能针对练习的语言类问题已由 quickSummary 按错误型数好；其余（策略类、没有可出题条目的型）按课程里归属它的条目数，
+  // 界面才能如实写「这个问题快练里只有 1 张卡」，而不是空着。
+  return {
+    ...summary,
+    topIssues: summary.topIssues.map((issue) => issue.itemCount !== undefined ? issue : {
+      ...issue,
+      itemCount: (context.issueItemIds.get(issue.key) ?? [])
+        .filter((itemId) => drillable(context, progress, itemId, typing)).length,
+    }),
+  };
 }
 
 /**
@@ -193,11 +257,11 @@ export function quickContextSummary(
  * 只要落盘了任何一条快练事件，事件数与最后一条 eventId 就变了，下一组自然换 setId；
  * 会话默认的 eventId 是「setId.序号」，setId 重复就会撞号被当成重复丢掉。
  * 客户端在上一组答案还没提交完时就取下一组，要传 nonce 让 setId 不同。
- * 形如 q20261004-20-xxxx：带上 JST 日与组大小，日志里的事件不靠别的字段也能看出属于哪天、多大的一组。
+ * 形如 q20261004-20-xxxx：带上练习日（日本时间 04:00 起算）与组大小，日志里的事件不靠别的字段也能看出属于哪天、多大的一组。
  */
 export function quickSetId(
   context: Pick<QuickContext, "events" | "curriculum" | "pool">,
-  options: { day: string; size: QuickSetSize; typing: boolean; extra: boolean; nonce?: string },
+  options: { day: string; size: QuickSetSize; typing: boolean; extra: boolean; nonce?: string; focus?: string },
 ) {
   const last = context.events.at(-1)?.eventId ?? "";
   const digest = stableHash([
@@ -210,13 +274,15 @@ export function quickSetId(
     context.events.length,
     last,
     options.nonce ?? "",
+    // 针对练习与普通组的卡不同，setId 也要不同：会话默认 eventId 是「setId.序号」，同号会被当成重复丢掉。
+    ...(options.focus ? [`focus:${options.focus}`] : []),
   ].join("|"));
   return `q${options.day.replace(/-/gu, "")}-${options.size}-${digest}`;
 }
 
 export function quickContextSet(
   context: QuickContext,
-  options: { day: string; size: QuickSetSize; typing: boolean; extra: boolean; nonce?: string },
+  options: { day: string; size: QuickSetSize; typing: boolean; extra: boolean; nonce?: string; focus?: string },
 ): QuickSet {
   return selectQuickSet({
     pool: context.pool,
@@ -230,7 +296,53 @@ export function quickContextSet(
     extra: options.extra,
     setId: quickSetId(context, options),
     topIssues: context.topIssues,
+    ...(options.focus ? { focus: options.focus } : {}),
   });
+}
+
+/**
+ * 针对练习取不到卡时的原因（GET set?focus= 仍返回 200，界面按原因写提示）：
+ * - unknown_focus：题库里没有这个错误型
+ * - no_items：有这个型，但当前设置下没有能出题的条目（都被排除，或只剩短输入而打字关着）
+ * - nothing_now：有可出题条目，但现在没有到期的、今天的新题额度也用完了
+ */
+export type QuickFocusEmptyReason = "unknown_focus" | "no_items" | "nothing_now";
+
+const FOCUS_EMPTY_MESSAGES: Record<QuickFocusEmptyReason, string> = {
+  unknown_focus: "题库里没有这个错误型。",
+  no_items: "这个错误型现在没有能出题的条目。",
+  nothing_now: "这个错误型现在没有到期的题，今天的新题额度也已用完。",
+};
+
+export function quickFocusEmpty(
+  context: QuickContext,
+  focus: string,
+  typing: boolean,
+): { emptyReason: QuickFocusEmptyReason; emptyMessage: string } {
+  const known = context.pool.items.some((item) => item.group === "error_patch" && item.pattern === focus);
+  const count = quickFocusOptions(context.pool, context.index, context.progress, typing, context.legacy).get(focus) ?? 0;
+  const emptyReason: QuickFocusEmptyReason = !known ? "unknown_focus" : count ? "nothing_now" : "no_items";
+  return { emptyReason, emptyMessage: FOCUS_EMPTY_MESSAGES[emptyReason] };
+}
+
+/** 「一屏过一遍」的下一批与剩余数。只读：分流判断由 POST answer 以 action=triage 落盘。 */
+export function quickContextTriage(
+  context: QuickContext,
+  options: { size: number; typing: boolean },
+): { ready: boolean; items: QuickItemBrief[]; remaining: number } {
+  // 没有课程时 POST answer 回 409，判断存不下来，给了条目也只能白分。
+  if (!context.curriculum) return { ready: false, items: [], remaining: 0 };
+  const input = {
+    pool: context.pool,
+    index: context.index,
+    progress: context.progress,
+    legacy: context.legacy,
+    typing: options.typing,
+    topIssues: context.topIssues,
+  };
+  // remaining 与 summary.triageRemaining 同一口径：取全部候选再数，题库不过一千来条，不必另写一套计数。
+  const all = selectTriageItems({ ...input, size: Number.MAX_SAFE_INTEGER });
+  return { ready: Boolean(context.curriculum), items: all.slice(0, options.size), remaining: all.length };
 }
 
 // ── 查询参数 ────────────────────────────────────────────────────
@@ -248,12 +360,26 @@ export function parseQuickSetQuery(params: URLSearchParams) {
   if (!QUICK_SET_SIZES.includes(size as QuickSetSize)) throw badRequestError("size 只能是 10、20 或 30。");
   const nonce = params.get("nonce") ?? "";
   if (nonce && !/^[A-Za-z0-9]{1,32}$/u.test(nonce)) throw badRequestError("nonce 格式不正确。");
+  const focus = (params.get("focus") ?? "").trim();
+  // 型名来自整理稿（日语、中文都有），不限字符集；只挡控制字符与过长的值。
+  if (focus.length > QUICK_FOCUS_MAX || /[\u0000-\u001f\u007f]/u.test(focus)) throw badRequestError("focus 格式不正确。");
   return {
     size: size as QuickSetSize,
     typing: flag(params.get("typing"), "typing", true),
     extra: flag(params.get("extra"), "extra", false),
     ...(nonce ? { nonce } : {}),
+    ...(focus ? { focus } : {}),
   };
+}
+
+/** GET triage：size 10–50，缺省 50（QUICK_TRIAGE_SIZE）；typing 与取题同义（打字关着时只靠短输入的条目不进分流）。 */
+export function parseQuickTriageQuery(params: URLSearchParams) {
+  const rawSize = params.get("size");
+  const size = rawSize === null || rawSize === "" ? QUICK_TRIAGE_SIZE : Number(rawSize);
+  if (!Number.isInteger(size) || size < QUICK_TRIAGE_MIN || size > QUICK_TRIAGE_SIZE) {
+    throw badRequestError(`size 只能是 ${QUICK_TRIAGE_MIN}–${QUICK_TRIAGE_SIZE} 的整数。`);
+  }
+  return { size, typing: flag(params.get("typing"), "typing", true) };
 }
 
 // ── 作答 ────────────────────────────────────────────────────────
@@ -297,27 +423,45 @@ function parseAnswer(raw: unknown, index: number): QuickAnswerInput {
   if (value.elapsedMs !== undefined && (typeof value.elapsedMs !== "number" || !Number.isFinite(value.elapsedMs))) {
     throw badRequestError(`${where}.elapsedMs 必须是数字。`);
   }
+  if (value.action !== undefined && !QUICK_ACTIONS.includes(value.action as QuickAction)) {
+    throw badRequestError(`${where}.action 不受支持。`);
+  }
+  // 旧客户端只发 suspend 布尔；新客户端发 action。两者矛盾（suspend 为真却说是别的动作）时拒收，免得记错。
+  if (value.suspend === true && value.action !== undefined && value.action !== "suspend") {
+    throw badRequestError(`${where}.suspend 与 action 矛盾。`);
+  }
+  const action: QuickAction = (value.action as QuickAction | undefined) ?? (value.suspend === true ? "suspend" : "answer");
+  if (action === "triage" && !QUICK_JUDGMENTS.includes(value.judgment as QuickTriageJudgment)) {
+    throw badRequestError(`${where} 是分流判断，judgment 只能是 known、uncertain 或 unknown。`);
+  }
   const type = value.type as QuickCardType;
-  const suspend = value.suspend === true;
+  const answer = action === "answer";
   const gaveUp = value.gaveUp === true;
   // 「不知道」的翻卡按「忘了」记：无评分的翻卡在回放里按模糊处理，不算失败（会话 reducer 也是这么发的）。
-  const rating = type === "flip" && !suspend
+  const rating = type === "flip" && answer
     ? (value.rating as QuickSelfRating | undefined) ?? (gaveUp ? "forgot" : undefined)
     : undefined;
-  if (type === "flip" && !suspend && !rating) throw badRequestError(`${where} 是翻卡作答，需要 rating。`);
+  if (type === "flip" && answer && !rating) throw badRequestError(`${where} 是翻卡作答，需要 rating。`);
   // 客户端的 passed 一概不读：只取契约里的键，判分由服务端按题库重算。
+  // 只有作答带 response / rating / gaveUp；别的动作即使带了也丢掉，不让它们流进日志被当成作答。
   return {
     eventId: value.eventId,
     itemId: value.itemId,
     type,
-    ...(response && !suspend ? { response } : {}),
+    ...(response && answer ? { response } : {}),
     ...(rating ? { rating } : {}),
-    ...(gaveUp && !suspend ? { gaveUp: true } : {}),
-    ...(suspend ? { suspend: true } : {}),
+    ...(gaveUp && answer ? { gaveUp: true } : {}),
+    ...(action === "suspend" ? { suspend: true } : {}),
+    ...(action !== "answer" ? { action } : {}),
+    ...(action === "triage" ? { judgment: value.judgment as QuickTriageJudgment } : {}),
     ...(value.elapsedMs !== undefined
       ? { elapsedMs: Math.min(86_400_000, Math.max(0, Math.round(value.elapsedMs as number))) }
       : {}),
   };
+}
+
+function actionOf(input: QuickAnswerInput): QuickAction {
+  return input.action ?? (input.suspend ? "suspend" : "answer");
 }
 
 /** 校验请求体（在进写入队列之前，不合法的请求不读 vault）。 */
@@ -350,9 +494,11 @@ export type QuickAnswerPlan = {
 
 /**
  * 把一次提交转成要写的事件。按数组顺序逐条：
- * 全库已有同 eventId → duplicate；条目不在题库或已出不了任何题型 → stale（不写）；
- * 题型不在该条目的可用题型里 → 整个请求 400（客户端拿到的卡和题库对不上，写进去会污染回放）；
- * 判分只用题库重算；first 把同一请求里前面刚算好的事件也算进去，组内重出才不会被当成首答。
+ * 全库已有同 eventId → duplicate；条目不在题库 → stale（不写）；
+ * 作答、「不再出」、「太简单」、分流时条目已出不了任何题型 → stale（撤销排除不要求：被排除的条目也要能放回来）；
+ * 作答与「不再出」的题型不在该条目的可用题型里 → 整个请求 400（客户端拿到的卡和题库对不上，写进去会污染回放）。
+ * 撤销排除、「太简单」、分流不针对某张卡，type 只是客户端带的占位值，照存不校验。
+ * 判分只用题库重算、只给作答；first 也只给作答，并把同一请求里前面刚算好的事件也算进去，组内重出才不会被当成首答。
  * 被「不再出」排除的条目照常记录：同一张卡先作答再按 X 时两条要一起落盘。
  */
 export function planQuickAnswers(context: QuickContext, body: QuickAnswerBody, at: string): QuickAnswerPlan {
@@ -368,32 +514,35 @@ export function planQuickAnswers(context: QuickContext, body: QuickAnswerBody, a
       entries.push({ status: "duplicate", input, event: existing });
       continue;
     }
+    const action = actionOf(input);
     const item = context.index.byId.get(input.itemId);
     const available = item ? availableCardTypes(item, context.index, { typing: true }) : [];
-    if (!item || !available.length) {
+    if (!item || (action !== "restore" && !available.length)) {
       entries.push({ status: "stale", input });
       continue;
     }
-    if (!available.includes(input.type)) {
+    if ((action === "answer" || action === "suspend") && !available.includes(input.type)) {
       throw badRequestError(`条目 ${input.itemId} 不能出「${input.type}」题型。`);
     }
-    const suspend = input.suspend === true;
-    const { passed } = suspend
-      ? { passed: undefined }
-      : gradeQuickAnswer(item, input.type, { response: input.response, rating: input.rating, gaveUp: input.gaveUp });
+    const answer = action === "answer";
+    const { passed } = answer
+      ? gradeQuickAnswer(item, input.type, { response: input.response, rating: input.rating, gaveUp: input.gaveUp })
+      : { passed: undefined };
     const event: QuickEvent = {
       eventId: input.eventId,
       setId: body.setId,
       setSize: body.setSize,
       itemId: input.itemId,
       type: input.type,
-      action: suspend ? "suspend" : "answer",
-      response: suspend ? "" : input.response ?? "",
-      ...(input.rating ? { rating: input.rating } : {}),
-      ...(input.gaveUp ? { gaveUp: true } : {}),
+      action,
+      response: answer ? input.response ?? "" : "",
+      ...(answer && input.rating ? { rating: input.rating } : {}),
+      ...(answer && input.gaveUp ? { gaveUp: true } : {}),
+      ...(action === "triage" && input.judgment ? { judgment: input.judgment } : {}),
       ...(passed !== undefined ? { passed } : {}),
-      // 「不再出」不是作答，不占首答：它只把条目标成 rejected。
-      first: suspend ? false : isFirstAnswer(history, { itemId: input.itemId, day, setId: body.setId }),
+      // 只有作答占首答：「不再出」「撤销排除」「分流」都不是作答；「太简单」虽算一次见过，
+      // 但它不判分，首答与否由回放与 isFirstAnswer 另行处理（当天按过「太简单」的条目再作答不算首答）。
+      first: answer ? isFirstAnswer(history, { itemId: input.itemId, day, setId: body.setId }) : false,
       at,
       ...(input.elapsedMs !== undefined ? { elapsedMs: input.elapsedMs } : {}),
     };

@@ -4,6 +4,7 @@ import { buildQuickContext, parseQuickSetQuery, quickContextSummary } from "@/li
 import { readAllNotes } from "@/lib/server/obsidian";
 
 // 总览数字。没有课程时也返回（ready:false），単語文法帳的解析条数仍有参考价值。
+// 下一组构成、7 天到期、已排除清单、分流剩余、问题的 kind / focus / 条目数都由同一份上下文算出，与 GET set 口径一致。
 export async function GET(request: Request) {
   try {
     const { size, typing } = parseQuickSetQuery(new URL(request.url).searchParams);
