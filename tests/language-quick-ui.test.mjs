@@ -4,7 +4,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
-import { createQuickSession, quickSessionReducer } from "../lib/language/quick-session.ts";
+import { createQuickSession, quickSessionReducer, summarizeQuickSet } from "../lib/language/quick-session.ts";
 
 /*
  * 快练界面：总览、七种卡片、反馈区、按键与样式契约。卡片与汇总全部是虚构内容。
@@ -20,6 +20,10 @@ const drillJa = await loadAppModule("app/language-quick-drill.tsx", { stubs: jaS
 const overview = await loadAppModule("app/language-quick-overview.tsx");
 const overviewJa = await loadAppModule("app/language-quick-overview.tsx", { stubs: jaStub });
 const sync = await loadAppModule("app/language-quick-sync.ts");
+const summaryView = await loadAppModule("app/language-quick-summary.tsx");
+const summaryViewJa = await loadAppModule("app/language-quick-summary.tsx", { stubs: jaStub });
+const triageView = await loadAppModule("app/language-quick-triage.tsx");
+const triageViewJa = await loadAppModule("app/language-quick-triage.tsx", { stubs: jaStub });
 
 const DAY = "2026-10-04";
 const reveal = (values = {}) => ({ ja: "", reading: "", meaning: "", wrong: "", explain: "", evidence: [], ...values });
@@ -90,7 +94,7 @@ const SUMMARY = {
 };
 
 const overviewProps = (values = {}) => ({
-  summary: SUMMARY, loading: false, error: "", notice: "", busy: "", settings: { size: 20, typing: true }, exhausted: false,
+  summary: SUMMARY, loading: false, error: "", notice: "", busy: "", settings: { size: 20, typing: true, autoAdvance: true }, exhausted: false,
   tab: "today", fullState: null, stateLoading: false, stateError: "", today: DAY,
   onSettings: noop, onStart: noop, onRebuild: noop, onRetry: noop, onTab: noop, ...values,
 });
@@ -120,7 +124,8 @@ test("总览：入口卡给出到期、新题、预计用时，组大小用 aria
   assert.match(html, /待补中文释义 511 条/);
   assert.match(html, /単語文法帳已解析 89 条/);
   assert.match(html, /助詞[\s\S]*4 场 · 21 次证据/);
-  assert.match(html, /<time>2026-10-03<\/time><strong>20 \/ 20<\/strong><em>命中 16<\/em>/);
+  // 改写理由：措辞随快练更名（批／命中 → 组／答对），并带上完成时刻的 JST 时分；没有 gradedCount 的旧历史只写答对数。
+  assert.match(html, /<span>10-03 12:00 · 20 题 · 答对 16<\/span>/);
   // 顶部四格要练完一组就会动：今天已练（含答对数）、已学会（能修正及以上）、待复习（含明天）、未练新题。
   assert.match(html, /<dt>今天已练<\/dt><dd>12<small>答对 9<\/small><\/dd>/);
   assert.match(html, /<dt>已学会<\/dt><dd>36<\/dd>/, "20 能修正 + 11 能主动提取 + 0 + 5 稳定");
@@ -305,7 +310,11 @@ test("键盘契约（源码）：1–4、Space 揭晓、1/2/3 自评、Enter/Spa
   assert.match(source, /event\.nativeEvent\.isComposing \|\| event\.keyCode === 229/);
   assert.match(source, /document\.querySelector\('\[aria-modal="true"\]'\)/);
   assert.match(source, /from "@\/lib\/keyboard"/);
-  assert.doesNotMatch(source, /=== "r"|=== "R"/, "R 留给外壳的全库重读");
+  // 改写理由：本人 2026-10-05 定了「练习中吞掉 R」（UI-14）。不再是「不绑定 R」，而是只在捕获阶段 preventDefault、
+  // 不处理也不阻止传播：外壳的全库重读看到 defaultPrevented 就跳过（见 keyboard.test 对外壳的断言）。
+  assert.match(source, /export function isShellReloadKey/);
+  assert.match(source, /window\.addEventListener\("keydown", capture, true\)/);
+  assert.doesNotMatch(source.replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, ""), /stopPropagation|stopImmediatePropagation/);
   assert.match(overviewSource, /event\.key !== "Enter"[\s\S]{0,120}yieldsToNative\(event\)/);
   assert.match(summarySource, /event\.key === "Escape"[\s\S]*onLeave\(\)/);
   assert.match(summarySource, /againRef\.current\?\.focus/);
@@ -343,10 +352,13 @@ test("样式契约：无十六进制色、文字色不用 --brand/--orange、px 
 });
 
 test("设置：localStorage 内容坏了或越界时回到默认 {20, 打字开}", () => {
-  assert.deepEqual(sync.parseQuickSettings(null), { size: 20, typing: true });
-  assert.deepEqual(sync.parseQuickSettings("{oops"), { size: 20, typing: true });
-  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ size: 15, typing: "yes" })), { size: 20, typing: true });
-  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ size: 30, typing: false })), { size: 30, typing: false });
+  // 改写理由：本人 2026-10-05 加了「答对自动下一题」设置（默认开），设置对象多一个 autoAdvance 键；旧存档没有这个键时按默认补上。
+  assert.deepEqual(sync.parseQuickSettings(null), { size: 20, typing: true, autoAdvance: true });
+  assert.deepEqual(sync.parseQuickSettings("{oops"), { size: 20, typing: true, autoAdvance: true });
+  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ size: 15, typing: "yes" })), { size: 20, typing: true, autoAdvance: true });
+  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ size: 30, typing: false })), { size: 30, typing: false, autoAdvance: true });
+  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ size: 10, typing: true, autoAdvance: false })), { size: 10, typing: true, autoAdvance: false });
+  assert.deepEqual(sync.parseQuickSettings(JSON.stringify({ autoAdvance: "no" })), { size: 20, typing: true, autoAdvance: true });
   assert.equal(sync.QUICK_SETTINGS_KEY, "echo:language-quick-settings:v1");
   assert.equal(sync.quickMinutes(20), 5);
   assert.equal(sync.quickMinutes(10), 3);
@@ -510,4 +522,311 @@ test("答案队列：drained 等到落盘或退避才返回，超时也返回，
   await flush();
   assert.equal(settled, 3, "退避中调用直接返回");
   queue.dispose();
+});
+
+// ── 2026-10-05 第六轮：本人拍板的界面项（数字讲清楚、太简单、撤销、回看、自动下一题、分流、练这个、小结、角标） ──
+
+const IDLE = { pending: 0, saving: false, failed: false, rejected: 0, error: "" };
+const drillProps = (session, values = {}) => ({ session, saveStatus: IDLE, results: new Map(), onAction: noop, ...values });
+
+test("入口卡：有 nextSet 时写「本组 N 题＝复习 a＋新题 b」，额度退成小字，不满时说原因；待复习副数字写 7 天内", () => {
+  const next = { ...SUMMARY, nextSet: { total: 20, due: 2, lapsed: 1, fresh: 17, early: 0 }, dueSoon: [7, 0, 4, 0, 2, 0, 0] };
+  const html = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ summary: next })));
+  assert.match(html, /本组 20 题＝复习 3＋新题 17 · 约 5 分钟/);
+  assert.match(html, /class="quick-start-quota">今天还可学新题 36/);
+  assert.doesNotMatch(html, /今天到期 7 · 新题 36/, "有 nextSet 时不再把每日额度当成本组新题数");
+  assert.doesNotMatch(html, /本组只有/, "本组满额时不写原因");
+  // [0] 是今天，主数字已经算过；副数字只加之后 6 天。
+  assert.match(html, /<dt>待复习<\/dt><dd>7<small>7 天内 6<\/small><\/dd>/);
+
+  // 额度卡住：题库还有新题，今天只剩 2 条额度，本组 5 题。
+  const quota = { ...SUMMARY, newToday: 38, nextSet: { total: 5, due: 3, lapsed: 0, fresh: 2, early: 0 } };
+  assert.match(renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ summary: quota }))), /今天剩下的新题额度不够，本组只有 5 题/);
+  // 题源卡住：能出的新题只剩 2 条。
+  const dry = { ...SUMMARY, newAvailable: 2, nextSet: { total: 5, due: 3, lapsed: 0, fresh: 2, early: 0 } };
+  assert.match(renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ summary: dry }))), /没有更多到期题，能出的新题也只剩这些，本组只有 5 题/);
+
+  const ja = renderToStaticMarkup(createElement(overviewJa.QuickOverview, overviewProps({ summary: next })));
+  assert.match(ja, /このセット 20 問＝復習 3＋新規 17・約 5 分/);
+  assert.match(ja, /今日あと新規 36 問まで/);
+  assert.match(ja, /7日以内 6/);
+});
+
+test("最近练习写「时间 · N 题 · 答对 x / y」；能力画像用 summary.stageCounts 并写范围说明", () => {
+  const graded = { ...SUMMARY, history: [{ ...SUMMARY.history[0], completedCount: 10, successCount: 7, gradedCount: 9, completedAt: "2026-10-04T14:53:00Z" }] };
+  const html = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ summary: graded })));
+  assert.match(html, /<span>10-04 23:53 · 10 题 · 答对 7 \/ 9<\/span>/);
+
+  const state = {
+    history: [], progress: [{ itemId: "x", stage: "recognized" }],
+    curriculum: {
+      items: [],
+      profile: { interviewCount: 3, learnerErrorCount: 9, reviewedBlockCount: 12, listeningGapCount: 0, staleReviewPaths: [], topIssues: [] },
+    },
+  };
+  const profile = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ tab: "profile", fullState: state })));
+  assert.match(profile, /统计范围：快练可出题的 376 条（含単語文法帳 89 条），与今日训练同一口径/);
+  assert.match(profile, /<strong>40<\/strong><span>能识别<\/span><small>翻卡自评、「太简单」与旧扫描自报最多到这里<\/small>/);
+  assert.match(profile, /<strong>300<\/strong><span>未见过<\/span>/, "阶段格读 summary，不数完整状态的逐条进度");
+  const profileJa = renderToStaticMarkup(createElement(overviewJa.QuickOverview, overviewProps({ tab: "profile", fullState: state })));
+  assert.match(profileJa, /集計範囲：クイック練習で出題できる 376 件/);
+  assert.match(profileJa, /構造化した面接/);
+  assert.doesNotMatch(profileJa, /结构化面试|已确认本人错误|能力画像/, "日文界面下洞察标签不留中文");
+});
+
+test("「现在最值得修」：标签用服务端中文，语言类有 focus 才给「练这个」，策略类只写场数并说明去哪练", () => {
+  const issues = [
+    { key: "particle", label: "助詞", kind: "language", focus: "助詞", itemCount: 12, interviewCount: 4, occurrenceCount: 21 },
+    { key: "no-conclusion-first", label: "结论没有先说", kind: "strategy", interviewCount: 6, occurrenceCount: 12, itemCount: 1 },
+    { key: "tense", label: "時制", kind: "language", interviewCount: 2, occurrenceCount: 3 },
+    // 旧服务端：不给 kind、label 还是英文 slug——按正本表翻译，也按策略类处理。
+    { key: "role-mismatch", label: "role-mismatch", interviewCount: 5, occurrenceCount: 12 },
+  ];
+  const html = renderToStaticMarkup(createElement(overview.QuickTodayColumns, { summary: { ...SUMMARY, topIssues: issues }, onFocus: noop }));
+  assert.equal((html.match(/>练这个</g) ?? []).length, 1, "只有带 focus 的语言类行有按钮");
+  assert.match(html, /aria-label="针对「助詞」练一组"/);
+  assert.match(html, /4 场 · 21 次证据 · 可练 12 条/);
+  assert.match(html, /<strong title="结论没有先说">结论没有先说<\/strong><span>6 场<\/span>/, "策略类不写被截断的证据次数");
+  assert.doesNotMatch(html, /role-mismatch</, "英文 slug 不原样显示");
+  assert.match(html, /回答结构类问题在快练里只有模板卡；整段回答去「回答重练」练。/);
+  const ja = renderToStaticMarkup(createElement(overviewJa.QuickTodayColumns, { summary: { ...SUMMARY, topIssues: issues }, onFocus: noop }));
+  assert.match(ja, />これを練習</);
+  assert.match(ja, /職種への期待とずれる/);
+});
+
+test("练这个与针对练习（源码）：以 focus 取一组、组大小用当前设置；取不到卡时按 emptyReason 写中日两份", async () => {
+  const shellSource = await readFile("app/japanese-training.tsx", "utf8");
+  assert.match(shellSource, /if \(focus\) params\.set\("focus", focus\.focus\)/);
+  assert.match(shellSource, /size: String\(settings\.size\)/);
+  assert.match(shellSource, /onFocus=\{\(focus, label\) => void startSet\(false, \{ focus, label \}\)\}/);
+  for (const reason of ["unknown_focus", "no_items", "nothing_now"]) assert.match(shellSource, new RegExp(`${reason}: "针对练习：`));
+  assert.doesNotMatch(shellSource, /response\.emptyMessage/, "不直接显示服务端的中文 emptyMessage");
+  for (const key of ["针对练习：没有这一类", "针对练习：没有可出题", "针对练习：现在没题"]) {
+    const [zh, ja] = sync.QUICK_COPY[key];
+    assert.ok(zh && ja && zh !== ja, key);
+  }
+  const session = createQuickSession({ setId: "s", day: DAY, size: 10, cards: [CARDS.meaning] });
+  const html = renderToStaticMarkup(createElement(drill.QuickDrill, drillProps(session, { focusLabel: "助詞" })));
+  assert.match(html, /class="quick-focus-chip">针对练习 · 助詞</);
+});
+
+test("太简单 E：题目与反馈阶段都有按钮与键位；X 之后出现「已不再出这题 · 撤销 Z」", async () => {
+  const question = renderCard(drill, CARDS.meaning, { onEasy: noop });
+  assert.match(question, /aria-keyshortcuts="E" title="太简单：30 天后用辨析题验证一次，不算答对"><kbd aria-hidden="true">E<\/kbd>太简单<\/button>/);
+  const answered = quickSessionReducer(createQuickSession({ setId: "s", day: DAY, size: 10, cards: [CARDS.meaning] }), { type: "answer", response: "出差" });
+  const feedback = renderCard(drill, CARDS.meaning, { phase: "feedback", revealed: true, record: answered.records[0], onEasy: noop });
+  assert.match(feedback, /aria-keyshortcuts="E"/, "反馈阶段也能按太简单");
+
+  const suspended = quickSessionReducer(createQuickSession({ setId: "s", day: DAY, size: 10, cards: [CARDS.meaning, CARDS.reading] }), { type: "suspend" });
+  const html = renderToStaticMarkup(createElement(drill.QuickDrill, drillProps(suspended)));
+  assert.match(html, /<p class="quick-undo"><span>已不再出这题<\/span><button type="button" class="quick-inline-action" aria-keyshortcuts="Z">撤销<kbd aria-hidden="true">Z<\/kbd><\/button><\/p>/);
+  assert.match(html, /<kbd>E<\/kbd><\/dt><dd>太简单/, "右栏键位提示");
+  assert.match(html, /<kbd>Z<\/kbd><\/dt><dd>撤销/);
+  // 下一题作答之后撤销入口消失：之后的恢复交给小结与总览的已排除清单。
+  const moved = quickSessionReducer(suspended, { type: "answer", response: "かいぎしつ" });
+  assert.doesNotMatch(renderToStaticMarkup(createElement(drill.QuickDrill, drillProps(moved))), /已不再出这题/);
+  // 题面阶段撤销：那张卡重新成为当前题，右栏圆点不能还是「跳过」色。
+  const undone = quickSessionReducer(suspended, { type: "undoSuspend" });
+  const undoneHtml = renderToStaticMarkup(createElement(drill.QuickDrill, drillProps(undone)));
+  assert.doesNotMatch(undoneHtml, /class="is-skip/);
+  assert.match(undoneHtml, /<li class="is-current" title="第 1 题"><\/li>/);
+  const ja = renderToStaticMarkup(createElement(drillJa.QuickDrill, drillProps(suspended)));
+  assert.match(ja, /この問題は今後出しません/);
+  assert.match(ja, /簡単すぎ/);
+
+  const [source, shellSource] = await Promise.all([readFile("app/language-quick-drill.tsx", "utf8"), readFile("app/japanese-training.tsx", "utf8")]);
+  assert.match(source, /letter === "e" && !event\.shiftKey/);
+  assert.match(source, /letter === "z" && !event\.shiftKey/);
+  // easy 与撤销也要像作答一样拿到带随机串的 eventId，否则会退回「setId.序号」与上一组撞号被当成重复丢掉。
+  assert.match(shellSource, /RECORDING_ACTIONS = new Set<QuickSessionAction\["type"\]>\(\["answer", "gaveUp", "suspend", "easy", "undoSuspend"\]\)/);
+});
+
+test("回看 ←：只读显示当时的作答，标「回看中」，数字键无效；→ 或 Enter 回到当前题", async () => {
+  let session = createQuickSession({ setId: "s", day: DAY, size: 10, cards: [CARDS.meaning, CARDS.reading] });
+  session = quickSessionReducer(session, { type: "answer", response: "出差" });
+  session = quickSessionReducer(session, { type: "next" });
+  const peeked = quickSessionReducer(session, { type: "back" });
+  assert.equal(peeked.peek, 0);
+  assert.equal(quickSessionReducer(peeked, { type: "answer", response: "かいぎしつ" }), peeked, "回看时作答不生效");
+  const html = renderToStaticMarkup(createElement(drill.QuickDrill, drillProps(peeked)));
+  assert.match(html, /class="quick-card type-meaning_choice is-answered is-peeking"/);
+  assert.match(html, /<p class="quick-peek-banner" role="status">回看中 · 只读，不能改答案<\/p>/);
+  assert.match(html, /打ち合わせ/, "显示的是上一题");
+  assert.match(html, /class="quick-option is-wrong"[\s\S]*?出差/, "当时选的错项照样着色");
+  assert.doesNotMatch(html, /aria-keyshortcuts="[1-4]"/, "回看时选项不收数字键");
+  assert.match(html, /往后看<kbd aria-hidden="true">→<\/kbd>/);
+  assert.match(html, /回到当前题<kbd aria-hidden="true">Enter<\/kbd>/);
+  assert.match(html, /<li class="is-fail is-peek" title="第 1 题">/, "右栏圆点标出正在看的那题");
+  const current = renderToStaticMarkup(createElement(drill.QuickDrill, drillProps(session)));
+  assert.match(current, /aria-keyshortcuts="ArrowLeft"><kbd aria-hidden="true">←<\/kbd>回看上一题/);
+  assert.match(renderToStaticMarkup(createElement(drillJa.QuickDrill, drillProps(peeked))), /振り返り中/);
+
+  const source = await readFile("app/language-quick-drill.tsx", "utf8");
+  const peekBlock = source.slice(source.indexOf("if (peeking) {"), source.indexOf("if (key === \"ArrowLeft\") {\n        if (backable)"));
+  assert.match(peekBlock, /actions\.back\(\)[\s\S]*actions\.forward\(\)[\s\S]*actions\.toCurrent\(\)/);
+  assert.doesNotMatch(peekBlock, /actions\.(choose|rate|suspend|easy|giveUp)/, "回看分支里没有任何作答动作");
+});
+
+test("答对自动下一题：设置开关默认开；答对才显示倒计时提示，答错、关掉设置都不显示；减弱动效下线不动", async () => {
+  const on = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps()));
+  assert.match(on, /role="switch" class="quick-switch" aria-checked="true"><i aria-hidden="true"><\/i><span>答对自动下一题<\/span>/);
+  const off = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ settings: { size: 20, typing: true, autoAdvance: false } })));
+  assert.match(off, /aria-checked="false"><i aria-hidden="true"><\/i><span>答对自动下一题<\/span>/);
+  assert.equal(sync.DEFAULT_QUICK_SETTINGS.autoAdvance, true);
+
+  const base = createQuickSession({ setId: "s", day: DAY, size: 10, cards: [CARDS.meaning, CARDS.reading] });
+  const right = quickSessionReducer(base, { type: "answer", response: "开会商量" });
+  const wrong = quickSessionReducer(base, { type: "answer", response: "出差" });
+  const render = (session, autoAdvance) => renderToStaticMarkup(createElement(drill.QuickDrill, drillProps(session, { autoAdvance })));
+  assert.match(render(right, true), /<p class="quick-auto"><span class="quick-auto-track" aria-hidden="true"><i><\/i><\/span><span>答对了 · 约 1 秒后下一题，按任意键或点击停留<\/span><\/p>/);
+  assert.doesNotMatch(render(right, false), /quick-auto"/);
+  assert.doesNotMatch(render(wrong, true), /quick-auto"/, "答错停下来看解释");
+  const gaveUp = quickSessionReducer(base, { type: "gaveUp" });
+  assert.doesNotMatch(render(gaveUp, true), /quick-auto"/, "不知道也停下");
+
+  const [source, css] = await Promise.all([readFile("app/language-quick-drill.tsx", "utf8"), readFile("app/styles/language-quick.css", "utf8")]);
+  assert.equal(sync.QUICK_AUTO_ADVANCE_MS, 1000);
+  assert.match(source, /window\.setTimeout\(\(\) => onAction\(\{ type: "next" \}\), QUICK_AUTO_ADVANCE_MS\)/);
+  assert.match(source, /!shouldPauseAfter\(record\) && serverPassed !== false/);
+  assert.match(source, /onPointerDown=\{hold\}/, "点击打断并停留");
+  const motion = css.slice(css.indexOf("@media (prefers-reduced-motion: no-preference)"));
+  assert.match(motion, /\.quick-auto-track i \{ animation: quick-auto-drain/, "倒计时动画只在允许动效时播放");
+});
+
+test("计时与结束：每题用时封顶 120 秒、读同一只表；Esc 少于一半时要 2 秒内再按一次", async () => {
+  const clock = sync.createQuickFocusClock();
+  clock.start(1_000);
+  clock.pause(4_000);
+  assert.equal(clock.read(60_000), 3_000, "页面隐藏时不走");
+  clock.resume(70_000);
+  assert.equal(clock.stop(72_000), 5_000);
+  assert.equal(clock.read(99_000), 5_000, "停表后读数不变");
+  assert.equal(sync.QUICK_ELAPSED_CAP_MS, 120_000);
+  assert.equal(sync.QUICK_END_CONFIRM_MS, 2_000);
+  const source = await readFile("app/language-quick-drill.tsx", "utf8");
+  assert.match(source, /Math\.min\(QUICK_ELAPSED_CAP_MS, /);
+  assert.match(source, /handled \* 2 < firstTotal && now - endArmedAt\.current > QUICK_END_CONFIRM_MS/);
+  assert.equal(sync.quickDueSoonTotal({ dueSoon: [5, 1, 2] }), 3);
+  assert.equal(sync.quickDueSoonTotal({}), 0);
+});
+
+/** 一组：答对 1 题（升到能修正）、太简单 1 题、排除 1 题；服务端应答全部到齐。 */
+function finishedSet() {
+  let session = createQuickSession({ setId: "s", day: DAY, size: 10, cards: [CARDS.meaning, CARDS.reading, CARDS.word] });
+  session = quickSessionReducer(session, { type: "answer", response: "开会商量" });
+  session = quickSessionReducer(session, { type: "next" });
+  session = quickSessionReducer(session, { type: "easy" });
+  session = quickSessionReducer(session, { type: "suspend" });
+  const results = session.records.map((record) => ({
+    eventId: record.input.eventId, itemId: record.itemId, status: "recorded", first: true,
+    stageBefore: "unseen",
+    stageAfter: record.action === "answer" ? "correctable" : record.action === "easy" ? "recognized" : "unseen",
+    ...(record.action === "answer" ? { passed: true, nextDueAt: "2026-10-07T19:00:00.000Z" } : {}),
+  }));
+  return { session, data: summarizeQuickSet(session, results) };
+}
+
+test("小结：下次复习、太简单单列、本组排除可恢复、升阶可展开；「再来一组」挂载后 600ms 内不响应", async () => {
+  const { session, data } = finishedSet();
+  assert.equal(session.phase, "ended");
+  const props = {
+    summary: data, remaining: { due: 2, fresh: 10 }, focusMs: 65_000,
+    nextDue: [{ days: 1, count: 3 }, { days: 3, count: 7 }], onAgain: noop, onLeave: noop, onRestore: noop,
+  };
+  const html = renderToStaticMarkup(createElement(summaryView.QuickSetSummary, props));
+  assert.match(html, /<span>下次复习<\/span>明天 3 题 · 3 天后 7 题/);
+  assert.match(html, /class="is-easy">太简单 1 题（30 天后验证，不计正确率）/);
+  assert.match(html, /本组排除的条目 <span>1<\/span>[\s\S]*日程调整[\s\S]*>恢复<\/button>/);
+  assert.match(html, /<summary>展开升阶条目<\/summary>[\s\S]*打ち合わせ[\s\S]*未见过 → 能修正/);
+  assert.match(html, /本次专注 01:05/, "与练习屏顶栏同一只表");
+  assert.match(html, /答对 1 \/ 判分 1/, "太简单与排除不进正确率");
+  const pending = renderToStaticMarkup(createElement(summaryView.QuickSetSummary, { ...props, nextDue: null, summary: { ...data, stages: { ...data.stages, known: false, pending: 2 } } }));
+  assert.match(pending, /<span>下次复习<\/span>保存完后显示/);
+  const ja = renderToStaticMarkup(createElement(summaryViewJa.QuickSetSummary, props));
+  assert.match(ja, /明日 3 問・3 日後 7 問/);
+  assert.match(ja, /このセットで除外した項目/);
+  assert.match(ja, /上がった項目を表示/);
+
+  const [source, shellSource] = await Promise.all([readFile("app/language-quick-summary.tsx", "utf8"), readFile("app/japanese-training.tsx", "utf8")]);
+  assert.equal(sync.QUICK_AGAIN_LOCK_MS, 600);
+  // 按钮 onClick 与全局 Enter 共用同一个判断：最后一题多按的 Enter 跳不过小结。
+  assert.match(source, /!mountedAt\.current \|\| Date\.now\(\) - mountedAt\.current < QUICK_AGAIN_LOCK_MS/);
+  assert.match(source, /onClick=\{again\}/);
+  assert.match(source, /latestAgain\.current\(\)/);
+  assert.match(shellSource, /nextDueGroups\(\[\.\.\.results\.values\(\)\], answerDay, \{ exclude: session\.suspended \}\)/);
+  assert.match(shellSource, /onRestore=\{\(itemId\) => onAction\(\{ type: "undoSuspend", itemId \}\)\}/);
+});
+
+const BRIEFS = [
+  { itemId: "fx-a", group: "nb_term", ja: "打ち合わせ", reading: "うちあわせ", meaning: "开会商量" },
+  { itemId: "fx-b", group: "error_patch", ja: "株式会社テストに入社しました", reading: "", meaning: "", wrong: "株式会社テストを入社しました" },
+];
+
+test("分流屏：一屏一条、1 会 / 2 不确定 / 3 不会、← 改判、Esc 结束；改错条目显示「✗ → ✓」；说明讲清不算成绩", async () => {
+  const html = renderToStaticMarkup(createElement(triageView.QuickTriage, { items: BRIEFS, saveStatus: IDLE, onJudge: noop, onEnd: noop }));
+  assert.match(html, /<p id="quick-triage-fx-a" class="quick-triage-ja" lang="ja">打ち合わせ<\/p>/);
+  assert.match(html, /<dt>读音<\/dt><dd lang="ja">うちあわせ<\/dd>/);
+  assert.match(html, /<dt>意思<\/dt><dd lang="zh-CN">开会商量<\/dd>/);
+  assert.match(html, /aria-keyshortcuts="1"[^>]*><kbd aria-hidden="true">1<\/kbd>会<\/button>[\s\S]*aria-keyshortcuts="2"[^>]*><kbd aria-hidden="true">2<\/kbd>不确定<\/button>[\s\S]*aria-keyshortcuts="3"[^>]*><kbd aria-hidden="true">3<\/kbd>不会<\/button>/);
+  assert.match(html, /不算成绩，只决定新题的出题先后；标「会」的以后会抽查验证/);
+  assert.match(html, /<b>1<\/b> \/ 2/, "顶部进度");
+  assert.match(html, /role="progressbar" aria-valuemin="0" aria-valuemax="2" aria-valuenow="0"/);
+  assert.match(html, /结束<kbd aria-hidden="true">Esc<\/kbd>/);
+  assert.match(html, /<kbd aria-hidden="true">←<\/kbd>上一条（改判）/);
+  assert.doesNotMatch(html, /fx-b|入社しました/, "一屏只显示一条");
+  assert.match(renderToStaticMarkup(createElement(triageView.QuickTriage, { items: [BRIEFS[1]], saveStatus: IDLE, onJudge: noop, onEnd: noop })),
+    /<s>株式会社テストを入社しました<\/s><span aria-hidden="true"> → <\/span>株式会社テストに入社しました/);
+  assert.match(renderToStaticMarkup(createElement(triageView.QuickTriage, { items: [], loading: true, saveStatus: IDLE, onJudge: noop, onEnd: noop })), /正在取条目/);
+  assert.match(renderToStaticMarkup(createElement(triageView.QuickTriage, { items: [], saveStatus: IDLE, onJudge: noop, onEnd: noop })), /没有还没过的新条目了/);
+  const ja = renderToStaticMarkup(createElement(triageViewJa.QuickTriage, { items: BRIEFS, saveStatus: IDLE, onJudge: noop, onEnd: noop }));
+  assert.match(ja, /ざっと仕分け/);
+  assert.match(ja, />分かる<\/button>[\s\S]*>あいまい<\/button>[\s\S]*>分からない<\/button>/);
+  assert.match(ja, /成績には入らず/);
+
+  const [source, shellSource] = await Promise.all([readFile("app/language-quick-triage.tsx", "utf8"), readFile("app/japanese-training.tsx", "utf8")]);
+  assert.match(source, /JUDGMENT_KEYS: Record<string, QuickTriageJudgment> = \{ "1": "known", "2": "uncertain", "3": "unknown" \}/);
+  assert.match(source, /quickShortcutBlocked\(event\)/, "与练习屏同一套键盘守卫（输入场景、浮层都让出）");
+  assert.match(source, /useSwallowShellReload\(\)/);
+  assert.match(source, /key === "Escape"[\s\S]{0,80}onEnd\(\)/);
+  // 判断进同一个答案队列：action triage、合法的占位题型、一次最多 QUICK_TRIAGE_SIZE 条。
+  assert.match(shellSource, /action: "triage", judgment/);
+  assert.match(shellSource, /size: String\(QUICK_TRIAGE_SIZE\)/);
+  assert.match(shellSource, /\.slice\(0, QUICK_TRIAGE_SIZE\)/);
+  assert.equal(sync.QUICK_META_TYPE, "flip");
+  assert.equal(sync.QUICK_ANSWER_BATCH, 30);
+  assert.match(sync.quickLooseSetId("triage", "ab-c_d!"), /^triage\.abcd$/);
+  assert.match(sync.quickLooseSetId("restore", "x".repeat(40)), /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
+});
+
+test("总览：「快速过一遍」入口、已排除清单逐条恢复、Enter 只在今日训练标签下开始", async () => {
+  const summary = {
+    ...SUMMARY, triageRemaining: 120, suspendedCount: 3,
+    suspended: [BRIEFS[0], BRIEFS[1]],
+  };
+  const html = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ summary, onTriage: noop, onRestore: noop })));
+  assert.match(html, /quick-triage-entry"[^>]*>快速过一遍（还剩 120 条）<\/button>/);
+  assert.match(html, /<details class="quick-excluded"><summary>已排除 3 条<\/summary>/);
+  assert.match(html, /只列最近 2 条/);
+  assert.equal((html.match(/>恢复<\/button>/g) ?? []).length, 2);
+  // 已点过恢复的条目在汇总重取前先从清单里拿掉。
+  const restored = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ summary, onRestore: noop, restored: new Set(["fx-a"]) })));
+  assert.match(restored, /已排除 2 条/);
+  assert.equal((restored.match(/>恢复<\/button>/g) ?? []).length, 1);
+  // 保存应答带回的汇总已不含刚恢复的条目：本地 restored 还没清，也不能再扣一次。
+  const settled = { ...summary, suspendedCount: 2, suspended: [BRIEFS[1]] };
+  const afterSave = renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ summary: settled, onRestore: noop, restored: new Set(["fx-a"]) })));
+  assert.match(afterSave, /已排除 2 条/);
+  assert.doesNotMatch(renderToStaticMarkup(createElement(overview.QuickOverview, overviewProps({ onTriage: noop }))), /快速过一遍/, "没有剩余时不出入口");
+
+  const [source, shellSource] = await Promise.all([readFile("app/language-quick-overview.tsx", "utf8"), readFile("app/japanese-training.tsx", "utf8")]);
+  assert.match(source, /if \(!canStart \|\| tab !== "today"\) return;/);
+  assert.match(shellSource, /type: QUICK_META_TYPE, action: "restore"/);
+  // 节奏带的「今天」是练习日（04:00 起算），与历史的归日同一口径，不用日历日。
+  assert.match(source, /const jstTodaySnapshot = \(\) => quickDay\(new Date\(\)\.toISOString\(\)\)/);
+});
+
+test("外壳：练完一组作废洞察标签的完整状态；把最新汇总交给侧栏角标", async () => {
+  const shellSource = await readFile("app/japanese-training.tsx", "utf8");
+  assert.match(shellSource, /before\.phase !== "ended" && next\.phase === "ended"[\s\S]{0,200}setFullState\(null\)/);
+  assert.match(shellSource, /if \(summary\?\.ready\) onQuickSummary\?\.\(summary\)/);
 });

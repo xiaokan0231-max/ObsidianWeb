@@ -72,7 +72,8 @@ import { LanguageSwitch, useUiLocale } from "./ui-locale";
 import { ThemeSwitch, useUiTheme } from "./ui-theme";
 import { rememberRecentPath } from "@/lib/recent-notes";
 import { SHELL_MESSAGES } from "./shell-messages";
-import { buildNavBadges, type NavBadge, type NavBadges } from "@/lib/nav-badges";
+import { buildNavBadges, quickDueBadgeCount, type NavBadge, type NavBadges } from "@/lib/nav-badges";
+import type { QuickSummary } from "@/lib/language/quick-types";
 import { useExitTransition } from "./use-exit-transition";
 import {
   canStartViewTransition,
@@ -408,6 +409,32 @@ let historyEntrySequence = 0;
 function newHistoryEntryId() {
   historyEntrySequence += 1;
   return `${Date.now().toString(36)}-${historyEntrySequence}`;
+}
+
+/**
+ * 训练中心角标「待复习 n」：首次载入完成后取一次快练汇总（失败静默）；在训练页时由训练页交来最新汇总，不重复请求。
+ * 单独成 hook：写在外壳组件体里会让 React Compiler 放弃整个外壳的记忆化。
+ */
+function useQuickDueBadge(loaded: boolean, viewRef: { readonly current: string }) {
+  const [quickDue, setQuickDue] = useState<number | null>(null);
+  const requested = useRef(false);
+  const onQuickSummary = useCallback((summary: QuickSummary) => setQuickDue(quickDueBadgeCount(summary)), []);
+  useEffect(() => {
+    if (!loaded || requested.current || viewRef.current === "language") return;
+    // 标记放进计时器里：开发模式下 effect 会先清理再重跑，先标记会让这一次请求永远发不出去。
+    const timer = window.setTimeout(() => {
+      requested.current = true;
+      fetch("/api/language/v2/quick/summary", { cache: "no-store", signal: AbortSignal.timeout(20_000) })
+        .then((response) => response.ok ? response.json() as Promise<QuickSummary | { summary?: QuickSummary }> : null)
+        .then((body) => {
+          const summary = body && "summary" in body && body.summary ? body.summary : body as QuickSummary | null;
+          setQuickDue((current) => current ?? quickDueBadgeCount(summary));
+        })
+        .catch(() => undefined);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loaded, viewRef]);
+  return { quickDue, onQuickSummary };
 }
 
 function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
@@ -875,6 +902,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     return () => window.clearTimeout(timer);
   }, [initialView, loadVault]);
 
+  const { quickDue, onQuickSummary } = useQuickDueBadge(Boolean(fetchedAt), currentView);
+
   useEffect(() => {
     const scope = vaultScopeForView(view);
     if (vaultReader.getState().readyScopes.has("all") || vaultReader.getState().readyScopes.has(scope)) return;
@@ -1046,8 +1075,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   // 侧栏角标与日历同一份场次表、同一个 JST「今天」；scope 未到手时不出数（lib/nav-badges.ts）。
   const navBadges: NavBadges = useMemo(() => buildNavBadges({
     events: calendarEvents, notes, today: calendarToday, readyScopes,
-    interviewTargets: calendarInterviewTargets, locale,
-  }), [calendarEvents, notes, calendarToday, readyScopes, calendarInterviewTargets, locale]);
+    interviewTargets: calendarInterviewTargets, locale, quickDue,
+  }), [calendarEvents, notes, calendarToday, readyScopes, calendarInterviewTargets, locale, quickDue]);
 
   const calendarInterview = useMemo(() => {
     const requested = calendarInterviewFromSearch(view, interviewRouteSearch);
@@ -1604,7 +1633,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                 />
               )}
               {view === "language" && (
-                <JapaneseTraining onVaultChanged={loadVault} />
+                <JapaneseTraining onVaultChanged={loadVault} onQuickSummary={onQuickSummary} />
               )}
               {view === "topics" && (
                 <LanguageExpressionCourses

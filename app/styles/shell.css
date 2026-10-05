@@ -150,6 +150,13 @@
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
+/* 训练中心＝快练待复习数：是「该回来练了」的提示，不是待处理的事，用成功色的浅底，不和日历的实心徽章抢。 */
+.side-nav a > .nav-badge[data-kind="due"] {
+  color: var(--success);
+  background: var(--success-wash);
+  box-shadow: inset 0 0 0 1px var(--success-line);
+}
+
 /* 暗色的当前分区本身就是 --surface-raised-solid 凸起面，同色徽章只剩一圈细线；改用凹面压一档。 */
 :root:not([data-theme="light"]):not([data-rail="collapsed"]) .side-nav > a.active > .nav-badge[data-kind="selection"] {
   background: var(--surface-sunken);
@@ -172,6 +179,11 @@
 /* 8px 的近白凸起面在浅色侧栏上几乎看不见；圆点不承载数字，改用中性的三级文字色实心点。 */
 :root[data-rail="collapsed"] .side-nav a > .nav-badge[data-kind="selection"] {
   background: var(--text-tertiary);
+  box-shadow: none;
+}
+
+:root[data-rail="collapsed"] .side-nav a > .nav-badge[data-kind="due"] {
+  background: var(--success);
   box-shadow: none;
 }
 

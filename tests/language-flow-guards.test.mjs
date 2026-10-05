@@ -34,15 +34,16 @@ test("language categories can expand through a fixed allowlisted task", async ()
 test("language v2 quick drill is keyboard-first, saves every answer and has no composition box", async () => {
   // 旧三阶段（扫描 1–4 判断 → 集中编译 → 压力测试的 2–3 句作文）已从界面移除，等价约束换成快练：
   // 键盘优先（一题一屏、数字键作答）、逐题保存（不攒到一批末尾）、全程没有作文输入框。
-  const [shell, drill, overview, summary, sync, css] = await Promise.all([
+  const [shell, drill, overview, summary, sync, triage, css] = await Promise.all([
     readFile("app/japanese-training.tsx", "utf8"),
     readFile("app/language-quick-drill.tsx", "utf8"),
     readFile("app/language-quick-overview.tsx", "utf8"),
     readFile("app/language-quick-summary.tsx", "utf8"),
     readFile("app/language-quick-sync.ts", "utf8"),
+    readFile("app/language-quick-triage.tsx", "utf8"),
     readAppCss(),
   ]);
-  const ui = [shell, drill, overview, summary, sync].join("\n");
+  const ui = [shell, drill, overview, summary, sync, triage].join("\n");
   // 键盘优先
   assert.ok(drill.includes('const CHOICE_KEYS = ["1", "2", "3", "4"] as const;'));
   assert.ok(drill.includes('{ "1": "remembered", "2": "fuzzy", "3": "forgot" }'));
@@ -54,6 +55,11 @@ test("language v2 quick drill is keyboard-first, saves every answer and has no c
   // 逐题保存：每条作答一产生就进队列，串行 POST 到快练接口，卸载与离开页面时 keepalive 补发
   assert.ok(sync.includes('answer: "/api/language/v2/quick/answer"'));
   assert.ok(shell.includes("queueRef.current?.enqueue(next.setId, fresh.map((record) => record.input), next.size)"));
+  // 「快速过一遍」只读地取条目，判断与总览里的「恢复」进同一个答案队列，不另开写入口。
+  assert.ok(sync.includes('triage: "/api/language/v2/quick/triage"'));
+  // 带上组大小：保存应答里的汇总按 setSize 算每日额度与 nextSet，不带时服务端按 20 算。
+  assert.ok(shell.includes("queueRef.current?.enqueue(setId, [{ ...input, eventId: `${setId}.${looseSeq.current}` }], settings.size)"));
+  assert.ok(triage.includes('{ "1": "known", "2": "uncertain", "3": "unknown" }'));
   assert.ok(shell.includes("queue.flushKeepalive()"));
   assert.ok(sync.includes("keepalive: true"));
   // 原断言「静默保存不刷新外壳」的等价：逐题保存与组间都不调 onVaultChanged，只有真正重建了课程才调。

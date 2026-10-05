@@ -22,6 +22,12 @@ test("全仓只有一份判定；全局 R 让位给 3D 舞台已处理过的按�
     assert.doesNotMatch(source, /instanceof HTMLInputElement|\["INPUT", "TEXTAREA", "SELECT"\]|\(INPUT\|TEXTAREA\|SELECT\)/, `${file} 不再自带一份输入场景判定`);
     assert.match(source, /@\/lib\/keyboard/, `${file} 改用 lib/keyboard`);
   }
+  // 快练的总览、小结、分流屏不直接 import lib/keyboard，而是复用练习屏导出的同一个守卫（它内部走 isTypingTarget）。
+  for (const file of ["app/language-quick-overview.tsx", "app/language-quick-summary.tsx", "app/language-quick-triage.tsx"]) {
+    const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /instanceof HTMLInputElement|\["INPUT", "TEXTAREA", "SELECT"\]|\(INPUT\|TEXTAREA\|SELECT\)/, `${file} 不自带输入场景判定`);
+    assert.match(source, /quickShortcutBlocked\(event\)/, `${file} 复用快练键盘守卫`);
+  }
   const atlas = await readFile(new URL("../app/memory-atlas.tsx", import.meta.url), "utf8");
   assert.match(atlas, /event\.key\.toLowerCase\(\) === "r" &&[\s\S]{0,200}!event\.defaultPrevented &&/, "全局 R 检查 defaultPrevented");
   assert.doesNotMatch(atlas, /"calendar" : "calendar"/, "顶栏的死三元已删");

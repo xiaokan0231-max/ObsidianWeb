@@ -2176,7 +2176,7 @@
 .focus-issue-map { display: grid; gap: 9px; }
 .focus-issue-map details { background: var(--surface); border: 1px solid var(--line); }
 .focus-issue-map summary { display: grid; grid-template-columns: 130px minmax(0,1fr) auto; gap: 18px; align-items: center; padding: 16px 20px; cursor: pointer; }
-.focus-issue-map summary span { color: var(--orange); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.focus-issue-map summary span { color: var(--interactive); font-size: 10px; font-weight: 800; text-transform: uppercase; }
 .focus-issue-map summary strong { font-size: 14px; }
 .focus-issue-map summary b { color: var(--muted); font-size: 11px; }
 .focus-issue-map details > div { padding: 0 20px 16px; }
@@ -2191,7 +2191,7 @@
 .focus-language-table .head, .focus-language-table article { display: grid; grid-template-columns: 130px minmax(180px,.8fr) minmax(260px,1.2fr) 110px; gap: 18px; align-items: center; }
 .focus-language-table .head { padding: 9px 18px; background: var(--paper-deep); color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; }
 .focus-language-table article { padding: 13px 18px; border-top: 1px solid var(--line-soft); }
-.focus-language-table article > small { color: var(--orange); font-size: 9px; font-weight: 800; }
+.focus-language-table article > small { color: var(--interactive); font-size: 9px; font-weight: 800; }
 .focus-language-table article strong, .focus-language-table article span { display: block; }
 .focus-language-table article strong { font-size: 15px; }
 .focus-language-table article span { margin-top: 3px; color: var(--muted); font-size: 10px; }
@@ -2325,7 +2325,7 @@
 .focus-pulse-streak p span { color: var(--text-secondary); font-size: 14px; }
 .focus-pulse-streak em { display: inline-block; padding: 3px 8px; border-radius: var(--radius-pill); background: var(--surface-sunken); color: var(--text-secondary); font-size: 12px; font-style: normal; font-weight: 650; }
 .focus-pulse-streak.done em { background: var(--success-wash); color: var(--success); }
-.focus-pulse-streak.holding em { background: var(--warning-wash); color: var(--gold-text); }
+.focus-pulse-streak.holding em { background: var(--warning-wash); color: var(--warning); }
 .focus-pulse-streak.done strong { color: var(--green); }
 .focus-pulse-heat ol { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 5px; margin: 12px 0 0; padding: 0; list-style: none; }
 .focus-pulse-heat li { display: grid; grid-template-rows: 46px auto; gap: 5px; text-align: center; }

@@ -128,6 +128,10 @@ test("节奏带：今天没练但昨天练过显示保持中；热度 14 格；�
   assert.match(html, /class="level-0 today"/);
   assert.match(html, /近 7 天 2 天 · 近 14 天 2 天/);
   assert.equal((html.match(/<li><i style="background:/g) ?? []).length, 6);
+  // 措辞随快练更名：热度格的提示写「组 · 题 · 答对」，空状态写清 ≥5 题的组才计数。
+  assert.match(html, new RegExp(`title="${shiftDay(today, -1)} · 1 组 · 100 题 · 答对 9"`));
+  const fresh = renderToStaticMarkup(createElement(zh.TrainingPulse, { state: { ...state, history: [] }, today }));
+  assert.match(fresh, /完成一组（≥5 题）后开始计数/);
 
   // 不传 today 时走订阅：服务端快照为空，SSR 不读时钟、不铺热度格，水合前后一致。
   const ssr = renderToStaticMarkup(createElement(zh.TrainingPulse, { state }));
@@ -135,19 +139,25 @@ test("节奏带：今天没练但昨天练过显示保持中；热度 14 格；�
   assert.match(ssr, /focus-pulse-streak none/);
 });
 
-test("最近练习行带上本组命中数；逐题保存走答案队列；计时在独立组件里", async () => {
+test("最近练习行带上本组答对数；逐题保存走答案队列；计时在独立组件里", async () => {
   const [overview, drill, sync, shell] = await Promise.all([
     readFile("app/language-quick-overview.tsx", "utf8"),
     readFile("app/language-quick-drill.tsx", "utf8"),
     readFile("app/language-quick-sync.ts", "utf8"),
     readFile("app/japanese-training.tsx", "utf8"),
   ]);
-  assert.match(overview, /t\("命中 \{count\}", \{ count: entry\.successCount \}\)/);
+  // 改写理由：措辞随快练更名（命中 → 答对），分母用 gradedCount，与小结的「答对 7 / 判分 9」同一口径。
+  assert.match(overview, /correct: entry\.successCount, graded: entry\.gradedCount/);
+  const code = (overview + sync).replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "");
+  assert.doesNotMatch(code, /命中|\{batches\} 批|完成一批/, "界面上不再出现旧集中训练的「批／命中」");
   assert.match(sync, /quickApi<QuickAnswerResponse>\(QUICK_ENDPOINTS\.answer, \{ method: "POST", body: JSON\.stringify\(body\) \}\)/);
   assert.match(sync, /headers: \{ "Content-Type": "application\/json" \},\s*body: JSON\.stringify\(body\),\s*keepalive: true/);
   assert.match(shell, /queueRef\.current\?\.enqueue\(next\.setId, fresh\.map\(\(record\) => record\.input\), next\.size\)/);
   // 每秒刷新的计时放在独立组件里，练习屏本身不持有每秒变化的状态。
   assert.doesNotMatch(drill.slice(drill.indexOf("export function QuickDrill")), /setElapsedMs/);
-  assert.match(drill, /<QuickClock startedAt=\{startedAt\} \/>/);
+  // 改写理由：UI-08 要求练习屏与小结用同一个数、页面隐藏时暂停，表移到外壳（createQuickFocusClock），练习屏只读它。
+  assert.match(drill, /<QuickClock clock=\{clock\} \/>/);
+  assert.match(shell, /clock\.pause\(Date\.now\(\)\)/);
+  assert.match(shell, /setFocusMs\(clock\.stop\(Date\.now\(\)\)\)/);
   assert.doesNotMatch(sync + shell, /save[A-Za-z]*Percent/, "保存状态不画百分比");
 });

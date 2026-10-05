@@ -25,9 +25,86 @@ export const QUICK_ENDPOINTS = {
   set: "/api/language/v2/quick/set",
   answer: "/api/language/v2/quick/answer",
   summary: "/api/language/v2/quick/summary",
+  triage: "/api/language/v2/quick/triage",
   state: "/api/language/v2/state",
   rebuild: "/api/language/v2/rebuild",
 } as const;
+
+// ── 节奏常量 ─────────────────────────────────────────────────────
+
+/** 答对后自动进下一题的等待：够看一眼对勾和读音，又不至于让答对的题也要按一次 Enter。 */
+export const QUICK_AUTO_ADVANCE_MS = 1_000;
+/** 单题用时前端封顶：中途离开座位，这一题不该被记成几分钟，污染日后按用时的分析。 */
+export const QUICK_ELAPSED_CAP_MS = 120_000;
+/** 小结挂载后这段时间内「再来一组」不响应：最后一题习惯性多按的 Enter 不能把小结直接跳过去。 */
+export const QUICK_AGAIN_LOCK_MS = 600;
+/** 只答了不到一半就按 Esc：要在这段时间内再按一次才结束，手滑关掉一组的代价太大。 */
+export const QUICK_END_CONFIRM_MS = 2_000;
+
+/**
+ * 分流（triage）与总览里的「恢复」不在任何一组里：服务端契约仍要一个合法题型字段，
+ * 这两种动作不判分、不看题型，按契约固定填 flip（服务端只对 action=answer 的翻卡要求自评）。
+ */
+export const QUICK_META_TYPE: QuickCardType = "flip";
+
+/** 不属于任何一组的动作（分流、总览恢复）的 setId：字符集与服务端校验一致，带随机串避免撞号。 */
+export function quickLooseSetId(kind: "triage" | "restore", nonce: string) {
+  const safe = nonce.replace(/[^A-Za-z0-9]/gu, "").slice(0, 24) || "x";
+  return `${kind}.${safe}`;
+}
+
+// ── 专注计时 ─────────────────────────────────────────────────────
+
+/**
+ * 练习屏顶栏与小结「本次专注」共用的一只表：页面隐藏时暂停。
+ * 两处各算各的（墙钟 vs 各题用时之和）会差出一分钟，本人会以为计时坏了。
+ * 时间从参数传入，测试不必读时钟。
+ */
+export type QuickFocusClock = {
+  start: (now: number) => void;
+  pause: (now: number) => void;
+  resume: (now: number) => void;
+  /** 停表并返回累计毫秒；之后 read 一直返回这个数。 */
+  stop: (now: number) => number;
+  read: (now: number) => number;
+};
+
+export function createQuickFocusClock(): QuickFocusClock {
+  let total = 0;
+  let since: number | null = null;
+  let state: "idle" | "running" | "paused" | "stopped" = "idle";
+  const read = (now: number) => total + (since === null ? 0 : Math.max(0, now - since));
+  return {
+    start(now) {
+      total = 0;
+      since = now;
+      state = "running";
+    },
+    pause(now) {
+      if (state !== "running") return;
+      total = read(now);
+      since = null;
+      state = "paused";
+    },
+    resume(now) {
+      if (state !== "paused") return;
+      since = now;
+      state = "running";
+    },
+    stop(now) {
+      if (state === "running") total = read(now);
+      since = null;
+      if (state !== "idle") state = "stopped";
+      return total;
+    },
+    read,
+  };
+}
+
+/** 未来 7 天内（不含今天）到期的条目数：[0] 是今天，顶部「待复习」的主数字已经算过。 */
+export function quickDueSoonTotal(summary: Pick<QuickSummary, "dueSoon">) {
+  return (summary.dueSoon ?? []).slice(1).reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
+}
 
 type ApiError = { error?: string };
 
@@ -284,7 +361,9 @@ export function createQuickAnswerQueue(options: QuickAnswerQueueOptions = {}): Q
 // ── 设置 ────────────────────────────────────────────────────────
 
 export const QUICK_SETTINGS_KEY = "echo:language-quick-settings:v1";
-export const DEFAULT_QUICK_SETTINGS: QuickSettings = Object.freeze({ size: 20, typing: true });
+// autoAdvance 默认开（本人 2026-10-05 拍板）：一组里大半是答对的题，每题多按一次 Enter 没有学习价值。
+// 旧版本存下的设置没有这个键，按默认值补上，不当成坏数据。
+export const DEFAULT_QUICK_SETTINGS: QuickSettings = Object.freeze({ size: 20, typing: true, autoAdvance: true });
 
 export function parseQuickSettings(raw: string | null | undefined): QuickSettings {
   if (!raw) return DEFAULT_QUICK_SETTINGS;
@@ -292,7 +371,10 @@ export function parseQuickSettings(raw: string | null | undefined): QuickSetting
     const parsed = JSON.parse(raw) as Partial<QuickSettings>;
     const size = QUICK_SET_SIZES.includes(parsed.size as QuickSetSize) ? parsed.size as QuickSetSize : DEFAULT_QUICK_SETTINGS.size;
     const typing = typeof parsed.typing === "boolean" ? parsed.typing : DEFAULT_QUICK_SETTINGS.typing;
-    return size === DEFAULT_QUICK_SETTINGS.size && typing === DEFAULT_QUICK_SETTINGS.typing ? DEFAULT_QUICK_SETTINGS : { size, typing };
+    const autoAdvance = typeof parsed.autoAdvance === "boolean" ? parsed.autoAdvance : DEFAULT_QUICK_SETTINGS.autoAdvance;
+    const same = size === DEFAULT_QUICK_SETTINGS.size && typing === DEFAULT_QUICK_SETTINGS.typing
+      && autoAdvance === DEFAULT_QUICK_SETTINGS.autoAdvance;
+    return same ? DEFAULT_QUICK_SETTINGS : { size, typing, autoAdvance };
   } catch {
     return DEFAULT_QUICK_SETTINGS;
   }
@@ -371,6 +453,8 @@ export const QUICK_COPY = {
   "至少有一天首答答对的条目": ["至少有一天首答答对的条目", "少なくとも1日、初回で正解した項目"],
   "待复习": ["待复习", "復習待ち"],
   "明天 {count}": ["明天 {count}", "明日 {count}"],
+  "7 天内 {count}": ["7 天内 {count}", "7日以内 {count}"],
+  "未来 7 天到期": ["今天之后 7 天内会到期的条目", "今日以降7日以内に復習期限が来る項目"],
   "阶段条件说明": [
     "能修正＝有 1 天首答答对 · 能主动提取＝不同 2 天答对 · 训练稳定＝3 天答对且跨 7 天以上（只有二选一的题要 4 天且跨 14 天）",
     "修正できる＝1日初回正解・自分で言える＝別の2日に正解・定着＝3日正解かつ7日以上の間隔（二択のみの項目は4日・14日以上）",
@@ -411,15 +495,49 @@ export const QUICK_COPY = {
   "首批优先": ["首批优先", "優先して出題"],
   "首批优先剩余": ["旧批次标「不会 / 犹豫」的还剩 {total} 条（不会 {unknown} · 犹豫 {uncertain}）", "以前「分からない／あいまい」とした項目が残り {total} 件（分からない {unknown}・あいまい {uncertain}）"],
   "首批优先已做完": ["旧批次标「不会 / 犹豫」的条目都已进入快练", "以前「分からない／あいまい」とした項目はすべて出題済み"],
+  // 入口卡写「这一组」会出什么；每日额度退成小字。原来把额度当成本组新题数，点开却只来两道新题。
+  "本组 {total} 题＝复习 {review}＋新题 {fresh} · 约 {minutes} 分钟": [
+    "本组 {total} 题＝复习 {review}＋新题 {fresh} · 约 {minutes} 分钟",
+    "このセット {total} 問＝復習 {review}＋新規 {fresh}・約 {minutes} 分",
+  ],
+  "今天还可学新题 {count}": ["今天还可学新题 {count}", "今日あと新規 {count} 問まで"],
+  "本组不满：额度": ["今天剩下的新题额度不够，本组只有 {count} 题。", "今日の新規枠が足りないため、このセットは {count} 問だけです。"],
+  "本组不满：没有更多": ["没有更多到期题，能出的新题也只剩这些，本组只有 {count} 题。", "復習も出題できる新規もこれ以上ないため、このセットは {count} 問だけです。"],
+  "快速过一遍（还剩 {count} 条）": ["快速过一遍（还剩 {count} 条）", "ざっと仕分け（残り {count} 件）"],
+  "快速过一遍说明": ["一屏一条，只决定新题先后，不算成绩", "1画面1件。新規の出題順だけを決め、成績には入りません"],
+  "答对自动下一题": ["答对自动下一题", "正解なら自動で次へ"],
+  "答对自动下一题说明": ["答对约 1 秒后进下一题；答错、不知道、翻卡仍停下", "正解なら約1秒で次へ。不正解・分からない・フリップでは止まります"],
+  "已排除 {count} 条": ["已排除 {count} 条", "除外済み {count} 件"],
+  "已排除说明": ["按 X「不再出」排除的条目；恢复后照常出题。", "X（今後出さない）で除外した項目。戻すと通常どおり出題されます。"],
+  "只列最近 {count} 条": ["只列最近 {count} 条", "最新 {count} 件のみ表示"],
+  "恢复": ["恢复", "戻す"],
+  "已恢复": ["已恢复", "戻しました"],
   "暂不出题": ["暂不出题", "未出題"],
-  "待补中文释义 {count} 条": ["待补中文释义 {count} 条（释义是日语的面试官用语，第一版不出题）", "中国語訳の未整備 {count} 件（訳が日本語の面接官表現は初版では出題しません）"],
+  "待补中文释义 {count} 条": ["待补中文释义 {count} 条（释义是日语的面试官用语，中文释义表里没有的暂不出题）", "中国語訳の未整備 {count} 件（訳が日本語の面接官表現のうち、中国語訳の表にないものは出題しません）"],
+  "中文释义表补上 {count} 条": ["中文释义表补上了 {count} 条面试官用语", "中国語訳の表で面接官表現 {count} 件を補いました"],
   "単語文法帳 {count} 条": ["単語文法帳已解析 {count} 条", "単語文法帳から {count} 件を読み込み"],
+  "{count} 条练习记录对不上": ["有 {count} 条练习记录找不到对应条目（课程重建或改了表記之后）", "練習記録 {count} 件に対応する項目が見つかりません（コース再作成や表記の変更後）"],
   "今天没有可出的题": ["现在没有到期题，题库里也没有新题了。", "いまは復習も新規もありません。"],
   "今天新题额度已用完，可再加": ["今天的新题额度已用完；想多练可以再加一组新题。", "今日の新規枠を使い切りました。続けるなら新規をもう1セット追加できます。"],
+  "这一类现在没有可出的题": ["这一类现在没有可出的题。", "この課題はいま出題できる問題がありません。"],
+  // 针对练习取不到卡的三种原因（服务端 emptyReason）；服务端的 emptyMessage 只有中文，界面自己写两份。
+  "针对练习：没有这一类": ["这一类问题已不在当前课程里（课程可能刚重建），请回到总览重新选。", "この課題は現在のコースにありません（コースが再作成された可能性があります）。概要から選び直してください。"],
+  "针对练习：没有可出题": ["这一类目前没有能出题的条目（可能都已排除或只有模板）。", "この課題にはいま出題できる項目がありません（すべて除外済みか、型カードのみです）。"],
+  "针对练习：现在没题": ["这一类今天能出的题都练过了：没有到期题，今天的新题额度也已用完。", "この課題で今日出せる問題は終わりました（復習期限のものがなく、今日の新規枠も使い切りました）。"],
   "现在最值得修": ["现在最值得修", "いま直したい課題"],
   "{interviews} 场 · {count} 次证据": ["{interviews} 场 · {count} 次证据", "{interviews} 回・根拠 {count} 件"],
+  // 回答结构类的证据次数在课程里被截在 12 条，写出来反而误导；只写场数。
+  "{interviews} 场": ["{interviews} 场", "{interviews} 回"],
+  "可练 {count} 条": ["可练 {count} 条", "練習できる {count} 件"],
+  "练这个": ["练这个", "これを練習"],
+  "练这个：{label}": ["针对「{label}」练一组", "「{label}」を集中して1セット"],
+  "策略类说明": ["回答结构类问题在快练里只有模板卡；整段回答去「回答重练」练。", "回答の構成に関する課題はクイック練習では型カードだけです。回答全体は「回答の練り直し」で練習してください。"],
+  "针对练习 · {focus}": ["针对练习 · {focus}", "集中練習・{focus}"],
   "最近练习": ["最近练习", "最近の練習"],
   "完成第一组后": ["完成第一组（≥5 题）后，这里会显示每组的答对数。", "最初のセット（5 問以上）を終えると、ここにセットごとの正答数が出ます。"],
+  // 分母是自动判分的首答数（翻卡自评不算），与小结的「答对 7 / 判分 9」同一口径。
+  "{time} · {count} 题 · 答对 {correct} / {graded}": ["{time} · {count} 题 · 答对 {correct} / {graded}", "{time}・{count} 問・正解 {correct} / {graded}"],
+  "{time} · {count} 题 · 答对 {correct}": ["{time} · {count} 题 · 答对 {correct}", "{time}・{count} 問・正解 {correct}"],
   "到期 {due} · 新题 {fresh}": ["到期 {due} · 新题 {fresh}", "復習 {due}・新規 {fresh}"],
   // 练习屏
   "已保存": ["已保存", "保存済み"],
@@ -459,6 +577,19 @@ export const QUICK_COPY = {
   "选择": ["选择", "選ぶ"],
   "答对 {pass} · 答错 {fail}": ["答对 {pass} · 答错 {fail}", "正解 {pass}・不正解 {fail}"],
   "第 {index} 题": ["第 {index} 题", "{index} 問目"],
+  "太简单": ["太简单", "簡単すぎ"],
+  "太简单说明": ["太简单：30 天后用辨析题验证一次，不算答对", "簡単すぎ：30日後に識別問題で一度確認（正解には数えません）"],
+  "标了太简单": ["标了太简单：30 天后用辨析题验证一次", "簡単すぎ：30日後に識別問題で一度確認します"],
+  "已标记不再出": ["已标记不再出", "今後出さないに設定"],
+  "已不再出这题": ["已不再出这题", "この問題は今後出しません"],
+  "撤销": ["撤销", "取り消す"],
+  "回看": ["回看上一题", "前の問題を見る"],
+  "回看中": ["回看中 · 只读，不能改答案", "振り返り中・読み取り専用（回答は変えられません）"],
+  "往后看": ["往后看", "次を見る"],
+  "回到当前题": ["回到当前题", "現在の問題へ"],
+  "自动下一题提示": ["答对了 · 约 1 秒后下一题，按任意键或点击停留", "正解・約1秒で次へ（キーかクリックで止まります）"],
+  "再按一次结束": ["再按一次结束", "もう一度押して終了"],
+  "再按一次 Esc 结束": ["才答了 {done} / {total} 题，2 秒内再按一次 Esc 结束", "{done} / {total} 問しか答えていません。2秒以内にもう一度 Esc で終了"],
   // 小结
   "本组小结": ["本组小结", "セットの結果"],
   "{count} 题快练": ["{count} 题快练", "{count} 問のクイック練習"],
@@ -471,6 +602,14 @@ export const QUICK_COPY = {
   "重出 {count} 题：改对 {fixed}": ["重出 {count} 题：改对 {fixed}", "再出題 {count} 問：正解に {fixed}"],
   "不知道 {count} 题": ["不知道 {count} 题", "分からない {count} 問"],
   "不再出 {count} 题": ["标记不再出 {count} 题", "今後出さない {count} 問"],
+  "太简单 {count} 题": ["太简单 {count} 题（30 天后验证，不计正确率）", "簡単すぎ {count} 問（30日後に確認・正答率には含めない）"],
+  "下次复习": ["下次复习", "次の復習"],
+  "今天 {count} 题": ["今天 {count} 题", "今日 {count} 問"],
+  "明天 {count} 题": ["明天 {count} 题", "明日 {count} 問"],
+  "{days} 天后 {count} 题": ["{days} 天后 {count} 题", "{days} 日後 {count} 問"],
+  "保存完后显示": ["保存完后显示", "保存後に表示"],
+  "本组排除的条目": ["本组排除的条目", "このセットで除外した項目"],
+  "展开升阶条目": ["展开升阶条目", "上がった項目を表示"],
   "本组升阶": ["本组升阶", "ステージが上がった項目"],
   "项": ["项", "項目"],
   "回落 {count} 项": ["回落 {count} 项", "{count} 項目が後退"],
@@ -486,13 +625,14 @@ export const QUICK_COPY = {
   "今天还剩": ["今天还剩", "今日の残り"],
   "再来一组": ["再来一组", "もう1セット"],
   "回到总览": ["回到总览", "概要に戻る"],
-  // 节奏带（键名与旧集中训练一致，测试锁定了这些字符串）
+  // 节奏带：快练叫「组／题／答对」，旧集中训练的「批／项／命中」已不在界面上出现。
   "连续训练": ["连续训练", "連続練習"],
   "天": ["天", "日"],
-  "{day} · {batches} 批 · {items} 项": ["{day} · {batches} 批 · {items} 项", "{day}・{batches} バッチ・{items} 項目"],
+  "{day} · {sets} 组 · {items} 题": ["{day} · {sets} 组 · {items} 题", "{day}・{sets} セット・{items} 問"],
   "今天已完成": ["今天已完成", "今日は完了"],
   "保持中 · 今天还没练": ["保持中 · 今天还没练", "継続中 · 今日はまだ"],
-  "完成一批后开始计数": ["完成一批后开始计数", "1バッチ完了で開始"],
+  // 少于 5 题的组不进历史（QUICK_HISTORY_MIN_FIRST）：写进提示，免得做了 4 题就退出的人奇怪为什么没计数。
+  "完成一组后开始计数": ["完成一组（≥5 题）后开始计数", "1セット（5問以上）で開始"],
   "近 14 天": ["近 14 天", "直近 14 日"],
   "近 7 天 {week} 天 · 近 14 天 {fortnight} 天": ["近 7 天 {week} 天 · 近 14 天 {fortnight} 天", "直近7日 {week} 日・14日 {fortnight} 日"],
   "掌握阶段分布": ["掌握阶段分布", "習得ステージの分布"],
@@ -500,7 +640,52 @@ export const QUICK_COPY = {
   "能识别": ["能识别", "認識できる"],
   "能修正": ["能修正", "修正できる"],
   "能迁移使用": ["能迁移使用", "応用できる"],
-  "命中 {count}": ["命中 {count}", "正答 {count}"],
+  // 能力画像：阶段格与今日训练同一来源（summary.stageCounts），说明按快练的规则写。
+  "能力画像范围": [
+    "统计范围：快练可出题的 {drillable} 条（含単語文法帳 {notebook} 条），与今日训练同一口径",
+    "集計範囲：クイック練習で出題できる {drillable} 件（単語文法帳 {notebook} 件を含む）。今日の練習と同じ基準",
+  ],
+  "未见过说明": ["还没在快练里作答过", "クイック練習でまだ回答していない"],
+  "能识别说明": ["翻卡自评、「太简单」与旧扫描自报最多到这里", "フリップの自己評価・「簡単すぎ」・旧スキャンの自己申告はここまで"],
+  "能修正说明": ["有 1 天首答答对", "1日、初回で正解"],
+  "能主动提取说明": ["不同 2 天首答答对", "別の2日に初回で正解"],
+  "能迁移使用说明": ["快练暂不判定这一级", "クイック練習ではこの段階を判定しません"],
+  "训练稳定说明": ["3 天答对且跨 7 天以上", "3日正解かつ7日以上の間隔"],
+  "结构化面试": ["结构化面试", "構造化した面接"],
+  "已确认本人错误": ["已确认本人错误", "確認済みの本人の誤り"],
+  "回答复盘块": ["回答复盘块", "回答の振り返りブロック"],
+  "本人标记听解缺口": ["本人标记听解缺口", "本人が付けた聞き取りの穴"],
+  "听解说明": [
+    "当前没有本人标记的“△推测／×没听懂”，因此系统只训练面试官表达识别，不把它描述成听力缺陷。",
+    "本人による「△推測／×聞き取れず」の印がまだないため、面接官表現の認識だけを練習し、聞き取りの弱点とは扱いません。",
+  ],
+  "深度复盘晚于本人反馈": ["以下深度复盘晚于本人反馈，需要先重建：", "以下の詳細な振り返りは本人のフィードバックより新しいため、先に再作成が必要です："],
+  "跨面试复发模式": ["跨面试复发模式", "面接をまたいで繰り返す課題"],
+  "{interviews} 场 / {count} 次": ["{interviews} 场 / {count} 次", "{interviews} 回 / {count} 件"],
+  "来源": ["来源", "出典"],
+  "个人词汇、语法和面试表达": ["个人词汇、语法和面试表达", "個人の語彙・文法・面接表現"],
+  "类型": ["类型", "種類"],
+  "中文功能": ["中文功能", "中国語での機能"],
+  "状态": ["状态", "状態"],
+  // 分流屏（一屏过一遍）
+  "快速过一遍": ["快速过一遍", "ざっと仕分け"],
+  "分流说明": [
+    "一屏一条：会按 1、不确定按 2、不会按 3。不算成绩，只决定新题的出题先后；标「会」的以后会抽查验证。",
+    "1画面に1件：分かる 1・あいまい 2・分からない 3。成績には入らず、新規の出題順だけが変わります。「分かる」とした項目も後で確認の出題があります。",
+  ],
+  "会": ["会", "分かる"],
+  "不确定": ["不确定", "あいまい"],
+  "不会": ["不会", "分からない"],
+  "上一条": ["上一条（改判）", "前の項目（判定し直す）"],
+  "下一条": ["下一条", "次の項目"],
+  "结束": ["结束", "終える"],
+  "分流进度": ["分流进度", "仕分けの進み具合"],
+  "正在取条目": ["正在取条目…", "項目を準備中…"],
+  "没有要过的条目": ["没有还没过的新条目了。", "仕分けが必要な新しい項目はありません。"],
+  "这一轮过完了": ["这一轮过完了", "この回の仕分けが終わりました"],
+  "会 {known} · 不确定 {uncertain} · 不会 {unknown}": ["会 {known} · 不确定 {uncertain} · 不会 {unknown}", "分かる {known}・あいまい {uncertain}・分からない {unknown}"],
+  "已判：{judgment}": ["已判：{judgment}", "判定：{judgment}"],
+  "意思": ["意思", "意味"],
   // 洞察标签与训练语料
   "主动词块": ["主动词块", "表現の想起"],
   "错误修正": ["错误修正", "誤りの修正"],
@@ -551,6 +736,7 @@ export const QUICK_GROUP_COPY: Record<QuickGroup, readonly [string, string]> = {
   nb_keigo: ["単語文法帳 · 敬语", "単語文法帳・敬語"],
   nb_verb: ["単語文法帳 · 动词", "単語文法帳・動詞"],
   nb_pattern: ["単語文法帳 · 句型", "単語文法帳・文型"],
+  nb_number: ["単語文法帳 · 数字读法", "単語文法帳・数字の読み"],
 };
 
 export const QUICK_REASON_COPY: Record<QuickCardReason, readonly [string, string]> = {
