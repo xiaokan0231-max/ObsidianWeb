@@ -1456,6 +1456,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
               </Fragment>
             );
           })}
+          {/* 面谈页有独立的隐私投影与阅读外壳，整页进入以卸载个人看板数据。 */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 独立面谈入口需要完整导航清除看板状态 */}
+          <a href="/consultation" data-label={locale === "ja" ? "キャリア相談" : "面谈咨询"}>
+            <span className="nav-glyph" aria-hidden="true">談</span>
+            <span>{locale === "ja" ? "キャリア相談" : "面谈咨询"}</span>
+          </a>
         </nav>
 
         <SidebarFooter
