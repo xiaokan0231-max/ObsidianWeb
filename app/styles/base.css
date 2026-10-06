@@ -91,8 +91,8 @@
   --violet-deep: #574b85;
   --violet-wash: #ece7f5;
   --gold: #b5842f;
-  /* --gold 作文字只有 2.9:1；金色文字走这个。 */
-  --gold-text: #8a6320;
+  /* --gold 作文字只有 2.9:1；金色文字走这个。原值 #8a6320 对凹陷面只有 4.46:1，压暗一点到 4.61。 */
+  --gold-text: #87611d;
   /* 面谈（非选考）的青绿：公司卷宗与本场面试 v2 的强调色。 */
   --teal: #12646a;
 
@@ -119,6 +119,18 @@
   --chart-step-3: #a64a29;
   --chart-step-4: #88371c;
   --chart-step-5: #622813;
+
+  /*
+   * 分区色（关于我・求职・日语学习・AI 分析・系统）。lib/memory-atlas-data.ts 的 GROUPS 写死了 hex，
+   * 3D 舞台继续用那份；主题化页面改传这里的 token，换皮肤时分区标签才会跟着变。
+   * 默认皮肤下必须与 GROUPS 现值逐位一致：study / system 若写 var(--violet) / var(--muted)
+   * 会差 ΔE 0.034 / 0.054，所以直接写现值；皮肤里再改成跟随皮肤的写法（skins.css 公共派生）。
+   */
+  --group-self: var(--brand);
+  --group-career: var(--green);
+  --group-study: #7466a9;
+  --group-analysis: var(--gold);
+  --group-system: #66706c;
 
   /* ===== 与主题无关的 token ===== */
   --radius-xs: 4px;
@@ -159,6 +171,14 @@
   --z-toast: 80;
   --z-overlay: 90;
   --z-top: 200;
+
+  /*
+   * 3D 舞台的底色。舞台永远是深色，与明暗无关，所以暗色块不覆盖它；皮肤只给它带一点色相（skins.css）。
+   * --stage-void：最深的虚空，舞台 CSS 底色、three.js 的 clearColor 与雾都取它；--stage-bg：全屏与 ::backdrop 的底，比虚空亮一级。
+   * three.js 读不了 CSS 变量：场景初始化时用 getComputedStyle 读一次，切皮肤后要随 echo:themechange 重读。
+   */
+  --stage-void: #030807;
+  --stage-bg: #07110d;
 }
 
 /*
@@ -241,6 +261,10 @@
   --gold: #d9ac52;
   --gold-text: #e0b96a;
   --teal: #5fb7bd;
+  /* 分区色在默认暗色下也保持 GROUPS 现值（原来就是同一组 hex，再由 .accent-ink 往正文色提亮）；
+     不钉住的话 var(--green) / var(--gold) 会取到上面暗色的值，标签颜色整体变浅。 */
+  --group-career: #2f6b59;
+  --group-analysis: #b5842f;
 
   --shadow-color: #000000;
   --shadow: 0 18px 55px color-mix(in oklab, var(--shadow-color) 55%, transparent);

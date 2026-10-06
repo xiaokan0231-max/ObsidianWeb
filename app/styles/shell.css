@@ -977,9 +977,16 @@
   display: grid;
   grid-template-columns: 0.8fr 1.2fr;
   min-height: 390px;
-  background: #1a2821;
-  border-color: #1a2821;
+  background: var(--surface-inverse);
+  border-color: var(--surface-inverse);
   color: var(--text-on-inverse);
+}
+
+/* 暗色的反相面比浮层还亮一级，当这块大面板的底太跳；暗色改用凸起面（默认皮肤下正是原来的 #1a2821）。
+   各皮肤两档都是深色，上面的反相文字照常可读。 */
+:root:not([data-theme="light"]) .panel.graph-preview-panel {
+  background: var(--surface-raised-solid);
+  border-color: var(--surface-raised-solid);
 }
 
 .graph-preview-copy {

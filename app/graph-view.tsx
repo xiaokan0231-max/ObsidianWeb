@@ -32,6 +32,7 @@ import {
 } from "@/lib/memory-atlas-data";
 import { enumCodec, useUrlState, type UrlStateCodec } from "./use-url-state";
 import { type UiLocale } from "@/lib/ui-locale";
+import { UI_THEME_EVENT } from "@/lib/ui-theme";
 import { useUiLocale } from "./ui-locale";
 
 const graphZh = {
@@ -326,6 +327,8 @@ function GraphView({
           <CanvasKnowledgeGraph nodes={scene.nodes} links={scene.links} onOpen={openSceneNode} />
         )}
         <aside className="graph-legend">
+          {/* 图例、分区筛选点和悬停提示是节点颜色的钥匙：2D/3D 节点不随皮肤换色，这里也用固定的 color，
+              换成 cssVar 会让图例和节点对不上。 */}
           <span>{renderer === "space" ? copy.spaceLegend : copy.legend}</span>
           {(Object.keys(GROUPS) as GroupKey[]).map((group) => (
             <button key={group} onClick={() => onFilter(group)}>
@@ -373,6 +376,20 @@ function GroupFilters({ value, onChange, counts }: {
   );
 }
 
+/*
+ * 2D 关系图的底色跟皮肤走：浅色取反相面、暗色取凸起面，与总览的关系图预览面板同一套映射。
+ * 暗色不用反相面：它比浮层还亮一级（默认皮肤下 #26392f），会把原来的深底整块提亮。
+ * 各皮肤这两档都是深色，白色半透明的连线、节点描边和标签照旧可读，所以它们不跟着换。
+ * 节点填色仍是 GROUPS 的固定 hex，和 3D 星图、图例保持同色。
+ */
+const CANVAS_BACKDROP_FALLBACK = "#18231e";
+
+function canvasBackdrop(canvas: HTMLCanvasElement) {
+  const token = document.documentElement.dataset.theme === "light" ? "--surface-inverse" : "--surface-raised-solid";
+  // 自定义属性的计算值已替换掉 var()，canvas 能直接解析；取不到就回落原色。
+  return getComputedStyle(canvas).getPropertyValue(token).trim() || CANVAS_BACKDROP_FALLBACK;
+}
+
 type GraphPoint = {
   node: KnowledgeGraphSceneNode;
   x: number;
@@ -395,6 +412,8 @@ function CanvasKnowledgeGraph({
   const pointsRef = useRef<GraphPoint[]>([]);
   const [hovered, setHovered] = useState<GraphPoint | null>(null);
   const [size, setSize] = useState({ width: 900, height: 620 });
+  // 切明暗或皮肤不会让这棵树重渲染，canvas 自己取的底色要靠这个计数触发重画。
+  const [themeVersion, setThemeVersion] = useState(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -404,6 +423,12 @@ function CanvasKnowledgeGraph({
     });
     observer.observe(canvas);
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const repaint = () => setThemeVersion((version) => version + 1);
+    window.addEventListener(UI_THEME_EVENT, repaint);
+    return () => window.removeEventListener(UI_THEME_EVENT, repaint);
   }, []);
 
   useEffect(() => {
@@ -448,7 +473,9 @@ function CanvasKnowledgeGraph({
     );
 
     context.clearRect(0, 0, size.width, size.height);
-    context.fillStyle = "#18231e";
+    // 先铺回落色：token 的值 canvas 解析不了时，赋值会被忽略，画面停在原来的底色上。
+    context.fillStyle = CANVAS_BACKDROP_FALLBACK;
+    context.fillStyle = canvasBackdrop(canvas);
     context.fillRect(0, 0, size.width, size.height);
     context.fillStyle = "rgba(255,255,255,.055)";
     for (let x = 18; x < size.width; x += 24) {
@@ -488,7 +515,7 @@ function CanvasKnowledgeGraph({
         context.fillText(point.node.title.slice(0, 18), point.x, point.y + point.radius + 17);
       }
     });
-  }, [hovered, links, nodes, size]);
+  }, [hovered, links, nodes, size, themeVersion]);
 
   const findPoint = (event: {
     currentTarget: HTMLCanvasElement;

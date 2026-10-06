@@ -4,6 +4,10 @@
    与时之航道（时间线）。改动任何一条规则前，两个视图都要过一遍。
    字号基线：HUD 最小 11px、正文 13px 起。之前星图停在 6–9px、只有航道用
    [data-view="corridor"] 放大过，桌面上星图的字基本读不了；现在两边共用一套。 */
+/* 皮肤只给舞台的「虚空」带一点色相：底色读 --stage-void（与 three-stage.ts 的 clearColor、雾色同源，
+   载入层和画布之间不会闪出另一种黑），全屏与 ::backdrop 读亮一级的 --stage-bg。
+   星点、节点、光效、速览卡仍是写死的舞台色，不读页面主题。
+   回落值保留原色，token 缺席时画面不变；::backdrop 在旧浏览器里不继承自定义属性，也靠它兜底。 */
 .space-graph-stage,
 .space-graph-loading-shell,
 .space-graph-empty {
@@ -15,18 +19,18 @@
     radial-gradient(ellipse at 50% 48%, rgba(107, 139, 126, .12), transparent 34%),
     radial-gradient(circle at 73% 28%, rgba(133, 158, 194, .065), transparent 24%),
     radial-gradient(circle at 31% 70%, rgba(198, 129, 92, .05), transparent 22%),
-    #030807;
+    var(--stage-void, #030807);
 }
 
 .space-graph-stage:fullscreen {
   width: 100vw;
   height: 100vh;
   min-height: 100vh;
-  background: #07110d;
+  background: var(--stage-bg, #07110d);
 }
 
 .space-graph-stage::backdrop {
-  background: #07110d;
+  background: var(--stage-bg, #07110d);
 }
 
 .space-graph-stage::after {
@@ -462,7 +466,8 @@
   position: absolute;
   inset: 0;
   z-index: 8;
-  background: #030807;
+  /* 盖在画布上淡出，必须和 clearColor 同色，否则淡出时露出一层色差。 */
+  background: var(--stage-void, #030807);
   transition: opacity 260ms ease;
 }
 

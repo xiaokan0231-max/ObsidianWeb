@@ -20,6 +20,7 @@ import {
   MOTION_STROKE_LIMIT,
   type PointerMotionField,
 } from "@/lib/stage-motion.mjs";
+import { UI_THEME_EVENT } from "@/lib/ui-theme";
 
 export const NODE_VERTEX_SHADER = `
   attribute float aSize;
@@ -284,6 +285,49 @@ export function easeInOutCubic(value: number) {
     : 1 - Math.pow(-2 * value + 2, 3) / 2;
 }
 
+// 皮肤只给舞台的「虚空」带一点色相：clearColor 与雾色读 --stage-void（和 stage-3d.css 的舞台底同源）。
+// 星点、节点、光效的颜色是各视图里的常量，刻意不读主题——那是本人定的范围。
+// 回落值就是原来写死的舞台底色，token 缺席时画面逐位不变。
+export const STAGE_VOID_FALLBACK = 0x030807;
+
+let stageColorProbe: CanvasRenderingContext2D | null | undefined;
+
+// 自定义属性的计算值已替换掉 var()，但皮肤里仍可能写成 color-mix()/oklch()，THREE.Color 只认
+// hex/rgb/hsl。非 6 位 hex 时交给 1×1 canvas 让浏览器自己解析，再读回 sRGB 字节；半透明或解析失败一律回落。
+export function readStageVoid(): number {
+  if (typeof document === "undefined") return STAGE_VOID_FALLBACK;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--stage-void").trim();
+  if (!raw) return STAGE_VOID_FALLBACK;
+  const hex = /^#([0-9a-f]{6})$/i.exec(raw);
+  if (hex) return Number.parseInt(hex[1], 16);
+  stageColorProbe ??= document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  if (!stageColorProbe) return STAGE_VOID_FALLBACK;
+  stageColorProbe.clearRect(0, 0, 1, 1);
+  stageColorProbe.fillStyle = "transparent";
+  stageColorProbe.fillStyle = raw;
+  stageColorProbe.fillRect(0, 0, 1, 1);
+  const [red, green, blue, alpha] = stageColorProbe.getImageData(0, 0, 1, 1).data;
+  return alpha === 255 ? (red << 16) | (green << 8) | blue : STAGE_VOID_FALLBACK;
+}
+
+// 切明暗或皮肤时就地改 clearColor 与雾色，不重建场景——重建会丢掉机位、飞行和选中态。
+// 雾色是逐帧刷新的 uniform，改 fog.color 不用重编材质。onChange 用来叫醒按需渲染的闸门，
+// 否则暂停中的舞台要等下一次交互才换底色。返回解绑函数，视图卸载时调用。
+export function syncStageVoid(
+  renderer: THREE.WebGLRenderer,
+  fog: THREE.FogExp2 | null,
+  onChange: () => void,
+): () => void {
+  const apply = () => {
+    const voidColor = readStageVoid();
+    renderer.setClearColor(voidColor, 1);
+    fog?.color.setHex(voidColor);
+    onChange();
+  };
+  window.addEventListener(UI_THEME_EVENT, apply);
+  return () => window.removeEventListener(UI_THEME_EVENT, apply);
+}
+
 // WebGL 初始化失败（旧显卡、无头环境）返回 null，由调用方降级到 2D 视图，
 // 而不是在这里抛错——两个视图的降级出口必须长得一样。
 export function createStageRenderer(options: {
@@ -308,7 +352,7 @@ export function createStageRenderer(options: {
   canvas.setAttribute("aria-label", options.ariaLabel);
   canvas.tabIndex = 0;
   options.host.appendChild(canvas);
-  renderer.setClearColor(options.clearColor ?? 0x030807, 1);
+  renderer.setClearColor(options.clearColor ?? readStageVoid(), 1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   // Astra 风格的星光依赖高亮端仍然有颜色层次；ACES 能让暖白恒星保持温度，
   // 又不会把大量叠加粒子直接烧成一整块纯白。

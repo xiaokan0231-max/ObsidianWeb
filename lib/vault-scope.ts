@@ -62,6 +62,8 @@ export function scopesToReloadAfterStats(loaded: Iterable<VaultScope>): VaultSco
 }
 
 export function vaultScopeForView(view: string): VaultScope {
+  // 设置页不读笔记：借外壳常驻的 actions scope，别落到最后的 all（整库读取）。
+  if (view === "settings") return "actions";
   if (view === "calendar") return "actions";
   if (view === "jobs" || view === "analytics") return "jobs";
   if (view === "session" || view === "prep" || view === "review" || view === "practice" || view === "insights") return "interview";

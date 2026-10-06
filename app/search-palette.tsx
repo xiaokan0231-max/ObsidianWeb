@@ -319,7 +319,7 @@ export default function SearchPalette({
           >
             <span
               className="result-group accent-chip"
-              style={{ "--accent": GROUPS[getGroup(note.path)].color } as CSSProperties}
+              style={{ "--accent": GROUPS[getGroup(note.path)].cssVar } as CSSProperties}
             >
               {text.groups[getGroup(note.path)]}
             </span>

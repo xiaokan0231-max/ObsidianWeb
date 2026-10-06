@@ -184,9 +184,8 @@
 .co-context-meta .co-context-pill { flex-shrink: 0; padding: 2px 7px; border: 1px solid var(--tone-line, var(--line-cool)); border-radius: 2px; background: var(--tone-bg, transparent); color: var(--tone, var(--text-tertiary)); font-style: normal; font-size: 11px; }
 .co-context-meta time { color: var(--green-deep); font-weight: 600; font-variant-numeric: tabular-nums; }
 .co-context-meta small { font-size: 11px; }
-.tone-meeting { --tone: var(--teal); --tone-bg: color-mix(in oklab, var(--teal) 7%, transparent); --tone-line: color-mix(in oklab, var(--teal) 40%, transparent); --tone-bar: #12646a; }
-/* 上一行的 --tone-bar 字面量被测试锁着；暗色下 3px 色条要跟着提亮。 */
-:root:not([data-theme="light"]) .tone-meeting { --tone-bar: var(--teal); }
+/* 色条与文字同取 --teal：明暗和皮肤（海会改写 --teal）都靠它切换，写死 hex 会让 3px 色条与文字色错开。 */
+.tone-meeting { --tone: var(--teal); --tone-bg: color-mix(in oklab, var(--teal) 7%, transparent); --tone-line: color-mix(in oklab, var(--teal) 40%, transparent); --tone-bar: var(--teal); }
 .co-context-trigger .tone-meeting, .co-context-trigger .tone-progress, .co-context-trigger .tone-pending, .co-context-trigger .tone-offer, .co-context-trigger .tone-reject, .co-context-trigger .tone-interview, .co-context-trigger .tone-neutral { display: contents; }
 .co-context-panel .co-picker-search input[role="combobox"] { width: 100%; }
 .co-context-list { padding-bottom: 20px; }

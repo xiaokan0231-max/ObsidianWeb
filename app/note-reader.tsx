@@ -89,7 +89,7 @@ function RelatedGroup({ title, notes, context, onOpen, copy, locale }: {
           const snippet = context?.(item);
           return (
             <button key={item.path} type="button" onClick={() => onOpen?.(item)}
-              style={{ "--related-accent": GROUPS[getGroup(item.path)].color } as CSSProperties}>
+              style={{ "--related-accent": GROUPS[getGroup(item.path)].cssVar } as CSSProperties}>
               <small>{localizedGroupLabel(getGroup(item.path), locale)}<span aria-hidden="true"> · </span>{localizedTypeLabel(getType(item), locale)}</small>
               <strong>{headingPlainText(getTitle(item))}</strong>
               {snippet && <span className="reader-related-context"><SnippetText parts={snippet} /></span>}

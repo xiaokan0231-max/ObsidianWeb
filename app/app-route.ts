@@ -13,7 +13,8 @@ export type AppView =
   | "graph"
   | "calendar"
   | "timeline"
-  | "library";
+  | "library"
+  | "settings";
 
 const VIEW_PATHS: Record<AppView, string> = {
   analytics: "/progress",
@@ -29,6 +30,7 @@ const VIEW_PATHS: Record<AppView, string> = {
   library: "/library",
   timeline: "/timeline",
   graph: "/graph",
+  settings: "/settings",
 };
 
 /** 全部视图。导航表与 ⌘K 的覆盖测试以它为准，新增一页时漏配会被测试拦住。 */

@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef } from "react";
+import { prefersReducedMotion } from "@/lib/motion";
 
 /*
  * 数字滚动。约束都来自这个项目的现实：
@@ -8,7 +9,7 @@ import { useLayoutEffect, useRef } from "react";
  * - 只改 React 自己建的那个文本节点的 nodeValue，不用 textContent（会换掉节点，React 之后
  *   写进一个已脱离的节点，显示就停在旧值上）。
  * - 页面不可见时 rAF 不跑（后台标签、预览面板），直接给终值，免得停在半截。
- * - 系统开了减弱动效就不滚。
+ * - 系统开了减弱动效、或设置里选了「总是减弱」就不滚。
  * `as` 让调用处直接渲染 <strong>/<b>/<dd> 本身，测试锁定了标签结构的地方不会多出一层 <span>。
  */
 type Tag = "span" | "strong" | "b" | "em" | "dd" | "p";
@@ -38,8 +39,7 @@ export function CountUp({
     if (!node || node.nodeType !== Node.TEXT_NODE || !Number.isFinite(value)) return;
     const text = node as Text;
     const final = formatRef.current(value);
-    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-      || document.visibilityState !== "visible";
+    const still = prefersReducedMotion() || document.visibilityState !== "visible";
     if (still || value === 0) {
       text.nodeValue = final;
       return;

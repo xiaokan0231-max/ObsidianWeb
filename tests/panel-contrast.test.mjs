@@ -29,15 +29,23 @@ test("暗い配色のパネルは、カード外観の一括規則に背景を�
   );
 
   // 暗いパネルは .panel と併記して特異性を上げてある
+  // 2026-10 皮肤：底色从写死的 #1a2821 换成 token（浅色反相面、暗色凸起面），让面板跟皮肤走。
+  // 这条测试守的是「.panel 并写的特异性」，不是某个色值，所以只把字面量换成 token，守法不变。
   assert.match(
     css,
-    /\.panel\.graph-preview-panel\s*\{[^}]*background:\s*#1a2821/,
+    /\.panel\.graph-preview-panel\s*\{[^}]*background:\s*var\(--surface-inverse\)/,
     "graph-preview-panel の暗い背景が単一クラスに戻っている＝一括規則に負ける",
+  );
+  // 暗色的覆盖同样要带 .panel，否则和浅色那条的特异性对不上。
+  assert.match(
+    css,
+    /:root:not\(\[data-theme="light"\]\) \.panel\.graph-preview-panel\s*\{[^}]*background:\s*var\(--surface-raised-solid\)/,
+    "暗色下 graph-preview-panel 的底色覆盖丢了 .panel 并写",
   );
   // 単一クラスのままの定義が復活していないこと
   assert.doesNotMatch(
     css,
-    /(^|\n)\.graph-preview-panel\s*\{[^}]*background:\s*#1a2821/,
+    /(^|\n)\.graph-preview-panel\s*\{[^}]*background:\s*var\(--surface-(?:inverse|raised-solid)\)/,
     "単一クラスの .graph-preview-panel で暗い背景を指定すると一括規則に奪われる",
   );
 });

@@ -14,8 +14,9 @@ export type PrimaryNavId =
   | "career"
   | "interview"
   | "training"
-  | "resources";
-export type NavIconName = "actions" | "career" | "interview" | "training" | "resources";
+  | "resources"
+  | "settings";
+export type NavIconName = "actions" | "career" | "interview" | "training" | "resources" | "settings";
 
 export type PrimaryNavigationItem = {
   id: PrimaryNavId;
@@ -24,6 +25,8 @@ export type PrimaryNavigationItem = {
   glyph: NavIconName;
   target: AppView;
   views: AppView[];
+  /** footer：渲染在侧栏底部（收起按钮上方），数据仍留在这张表里，⌘K 与可达性测试照常覆盖。 */
+  placement?: "footer";
 };
 
 export type SecondaryNavigationItem = {
@@ -76,6 +79,15 @@ export const NAVIGATION: PrimaryNavigationItem[] = [
     target: "library",
     views: ["library", "timeline", "graph"],
   },
+  {
+    id: "settings",
+    label: "设置",
+    mobileLabel: "设置",
+    glyph: "settings",
+    target: "settings",
+    views: ["settings"],
+    placement: "footer",
+  },
 ];
 
 export const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigationItem[]>> = {
@@ -107,6 +119,7 @@ const JAPANESE_PRIMARY_LABELS: Record<PrimaryNavId, { label: string; mobileLabel
   interview: { label: "面接対策", mobileLabel: "面接" },
   training: { label: "トレーニング", mobileLabel: "練習" },
   resources: { label: "資料ライブラリ", mobileLabel: "資料" },
+  settings: { label: "設定", mobileLabel: "設定" },
 };
 
 const JAPANESE_SECONDARY_LABELS: Record<Exclude<AppView, "calendar">, string> = {
@@ -122,6 +135,7 @@ const JAPANESE_SECONDARY_LABELS: Record<Exclude<AppView, "calendar">, string> = 
   library: "すべての資料",
   timeline: "タイムライン",
   graph: "関連図",
+  settings: "設定",
 };
 
 /** 只翻译显示文言，让两种语言共用同一套 URL 和视图归属。 */
@@ -187,6 +201,7 @@ const PAGE_COMMAND_HINTS: Record<AppView, { description: string; keywords: strin
   library: { description: "浏览全部笔记与资料", keywords: "资料 全部 笔记 资料库 library archive notes ノート 資料" },
   timeline: { description: "按时间回看事件与记录", keywords: "时间线 历史 时序 timeline history 年表 履歴" },
   graph: { description: "笔记之间的关系图", keywords: "关系 关系图 图谱 双链 graph network links 関係 グラフ" },
+  settings: { description: "皮肤配色、界面语言、侧栏与各页默认偏好", keywords: "设置 偏好 配置 皮肤 主题 配色 外观 语言 快捷键 settings preferences theme skin appearance 設定 環境設定 テーマ 着せ替え 外観" },
 };
 
 const JAPANESE_COMMAND_DESCRIPTIONS: Record<AppView, string> = {
@@ -203,6 +218,7 @@ const JAPANESE_COMMAND_DESCRIPTIONS: Record<AppView, string> = {
   library: "すべてのノート・資料を見る",
   timeline: "出来事・記録を時系列で振り返る",
   graph: "ノート同士のつながりを見る",
+  settings: "スキン・表示言語・サイドバーと各ページの既定動作",
 };
 
 /** 每个视图恰好一条，顺序与左栏一致。 */

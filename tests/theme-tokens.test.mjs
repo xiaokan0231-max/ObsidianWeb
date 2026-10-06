@@ -96,3 +96,34 @@ test("主题只认 dark / light，其余值回落到默认", () => {
   assert.equal(resolveUiTheme("light"), "light");
   assert.equal(resolveUiTheme("sepia"), resolveUiTheme(undefined));
 });
+
+/*
+ * 以下为皮肤引入时追加。原有断言只管正文四档与三组配对，金色文字和语义文字色没人检查——
+ * 浅色 --gold-text 曾经只有 4.46:1 也没报错。皮肤块另有 skin-tokens.test 逐套验算。
+ */
+for (const [label, theme] of [["浅色", light], ["暗色", dark]]) {
+  test(`${label}：金色文字与语义文字色对表面、凹陷面达到 4.5:1`, () => {
+    const texts = ["--gold-text", "--success", "--warning", "--warning-strong", "--danger", "--danger-strong", "--info", "--green", "--violet", "--teal"];
+    for (const text of texts) {
+      for (const surface of ["--surface", "--surface-sunken"]) {
+        const ratio = contrast(hex(theme, text), hex(theme, surface));
+        assert.ok(ratio >= 4.5, `${label} ${text} 对 ${surface} 只有 ${ratio.toFixed(2)}`);
+      }
+    }
+  });
+}
+
+test("分区色 token 在默认主题下与 GROUPS 现值逐位一致（换皮肤前后默认外观不变）", async () => {
+  const { GROUPS } = await import("../lib/memory-atlas-data.ts");
+  // 只解一层 var()：--group-* 要么是 hex，要么直接引用一个 hex token。
+  const resolve = (theme, name) => {
+    const value = theme.get(name);
+    const alias = value?.match(/^var\((--[\w-]+)\)$/)?.[1];
+    return (alias ? theme.get(alias) : value)?.toLowerCase();
+  };
+  for (const [label, theme] of [["浅色", light], ["暗色", dark]]) {
+    for (const [key, group] of Object.entries(GROUPS)) {
+      assert.equal(resolve(theme, `--group-${key}`), group.color.toLowerCase(), `${label} --group-${key}`);
+    }
+  }
+});

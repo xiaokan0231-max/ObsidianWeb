@@ -70,17 +70,21 @@ export type DerivedData = {
 };
 
 // GraphGroup をキーに固定してあるので、分区が増えた時に色を書き忘れると型で落ちる。
+// color 给 3D 舞台、关系图 canvas 和它们的图例用：舞台不随皮肤换色，图例必须和节点同色。
+// cssVar 给页面里的分区标签用，皮肤会换掉 --group-*；回落值写成同一个 hex，
+// 这样 token 缺席时标签仍是现在的颜色。
 export const GROUPS: Record<GroupKey, {
   label: string;
   short: string;
   color: string;
+  cssVar: string;
   tint: string;
 }> = {
-  self: { label: "关于我", short: "我", color: "#e66d45", tint: "#f9ddd0" },
-  career: { label: "求职", short: "职", color: "#2f6b59", tint: "#d8e9df" },
-  study: { label: "日语学习", short: "学", color: "#7466a9", tint: "#e3def2" },
-  analysis: { label: "AI 分析", short: "析", color: "#b5842f", tint: "#f3e6c8" },
-  system: { label: "系统", short: "规", color: "#66706c", tint: "#e5e7e4" },
+  self: { label: "关于我", short: "我", color: "#e66d45", cssVar: "var(--group-self, #e66d45)", tint: "#f9ddd0" },
+  career: { label: "求职", short: "职", color: "#2f6b59", cssVar: "var(--group-career, #2f6b59)", tint: "#d8e9df" },
+  study: { label: "日语学习", short: "学", color: "#7466a9", cssVar: "var(--group-study, #7466a9)", tint: "#e3def2" },
+  analysis: { label: "AI 分析", short: "析", color: "#b5842f", cssVar: "var(--group-analysis, #b5842f)", tint: "#f3e6c8" },
+  system: { label: "系统", short: "规", color: "#66706c", cssVar: "var(--group-system, #66706c)", tint: "#e5e7e4" },
 };
 
 // TODO の状態・優先度契約は lib/todo-status.mjs が正本（vault-check と同じ配列）。

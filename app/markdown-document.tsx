@@ -6,6 +6,7 @@ import { normalizeHeading } from "@/lib/memory-atlas-data";
 import { isAllowedHref, isAttachmentTarget, tokenizeInline, type InlineToken } from "@/lib/markdown-inline";
 import { calloutHead, collectFootnotes, fenceLanguage, parseListItem, type Footnotes } from "@/lib/markdown-syntax";
 import { highlightCode } from "@/lib/markdown-code";
+import { prefersReducedMotion } from "@/lib/motion";
 import type { Note } from "@/lib/notes";
 import type { UiLocale } from "@/lib/ui-locale";
 import { useCopyFlash } from "./copy-flash";
@@ -126,9 +127,8 @@ function jumpTo(selector: string) {
     // 落点在收起的 callout 里时先展开，不然滚过去的是一块看不见的地方。
     const fold = target.closest("details");
     if (fold) fold.open = true;
-    // JS 里显式写 smooth 会绕过 CSS 的减弱动效兜底，所以这里自己问一次。
-    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    target.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
+    // JS 里显式写 smooth 会绕过 CSS 的减弱动效兜底，所以这里自己问一次（含设置里的「总是减弱」）。
+    target.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
     target.focus({ preventScroll: true });
   };
 }

@@ -184,7 +184,7 @@ const LibraryCard = memo(function LibraryCard({ note, query, layout, index, hits
     <span className={`trust-badge ${trust.className}`}>{copy.trust[trust.className as keyof LibraryCopy["trust"]]}</span>
   );
   const style = {
-    "--note-accent": GROUPS[group].color,
+    "--note-accent": GROUPS[group].cssVar,
     "--card-index": index < STAGGERED_CARDS ? index : 0,
   } as CSSProperties;
   const time = <time dateTime={new Date(note.stat.mtime).toISOString()}>{formatDate(note.stat.mtime)}</time>;
@@ -452,7 +452,7 @@ function LibraryView({
                       className={filter === group ? "active" : ""}
                       onClick={() => { onFilter(group); resetPage(); }}
                     >
-                      <span><i style={{ background: GROUPS[group].color }} />{copy.groups[group]}</span>
+                      <span><i style={{ background: GROUPS[group].cssVar }} />{copy.groups[group]}</span>
                       <strong>{groupCounts[group]}</strong>
                     </button>
                   ))}

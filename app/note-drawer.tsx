@@ -188,7 +188,7 @@ export default function NoteDrawer({
       <aside ref={dialogRef} tabIndex={-1} className="note-drawer note-drawer--full" aria-label={copy.dialog} aria-modal="true" role="dialog"
         style={{ "--drawer-font-size": `${fontSize}px` } as CSSProperties}>
         <header className="drawer-header">
-          <div><span className="accent-ink" style={{ "--accent": GROUPS[group].color } as CSSProperties}>{GROUPS[group].label}</span><small>{note.path}</small></div>
+          <div><span className="accent-ink" style={{ "--accent": GROUPS[group].cssVar } as CSSProperties}>{GROUPS[group].label}</span><small>{note.path}</small></div>
           <div className="drawer-font-controls" role="group" aria-label={copy.fontSize}>
             <button type="button" aria-label={copy.smaller} disabled={readingSize <= 16} onClick={() => resizeFont(-2)}>A−</button>
             <output aria-live="polite">{fontSize}</output>

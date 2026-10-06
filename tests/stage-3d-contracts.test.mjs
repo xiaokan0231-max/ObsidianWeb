@@ -151,3 +151,41 @@ test("手势 UI：高频量直写 DOM，只有离散状态变化才 setState", (
   assert.ok(controls.includes("framePhase !== publishedFramePhase"));
   assert.ok(controls.includes("node.nodeValue = text"), "改 React 自己的文本节点，不能换掉它");
 });
+
+test("皮肤只染舞台的虚空：背景读 --stage-void，节点・星光・光效色不读主题", async () => {
+  // 本人定的范围（2026-10）：换皮肤时舞台只有深色背景（虚空、雾、clearColor）带一点色相。
+  // three-stage 是唯一读主题的地方，而且只读 --stage-void 这一个 token。
+  const themeReads = [...stage.matchAll(/getComputedStyle\([^)]*\)\.getPropertyValue\("([^"]+)"\)/g)].map((match) => match[1]);
+  assert.deepEqual(themeReads, ["--stage-void"]);
+  assert.equal(stage.match(/getComputedStyle\(/g)?.length, 1);
+  assert.ok(stage.includes("export const STAGE_VOID_FALLBACK = 0x030807"), "token 缺席时回落原舞台底色");
+  assert.ok(stage.includes("renderer.setClearColor(options.clearColor ?? readStageVoid(), 1)"));
+  // 切明暗或皮肤时就地改 clearColor 与雾色，不重建场景；改完叫醒按需渲染的闸门。
+  assert.ok(stage.includes("window.addEventListener(UI_THEME_EVENT, apply)"));
+  assert.ok(stage.includes("fog?.color.setHex(voidColor)"));
+  for (const view of [graph, corridor]) {
+    assert.ok(view.includes("new THREE.FogExp2(readStageVoid(),"), "雾色与 clearColor 同源");
+    assert.ok(view.includes("() => renderGate.invalidate())"), "换底色后要补画一帧");
+    assert.ok(view.includes("releaseStageVoid();"), "卸载时解绑主题监听");
+    assert.equal(view.includes("0x030807"), false, "视图里不再写死虚空色");
+    assert.equal(view.includes("getComputedStyle"), false, "视图不读主题：节点、星光、光效色保持舞台常量");
+    assert.equal(view.includes("UI_THEME_EVENT"), false, "主题监听只在 three-stage 的 syncStageVoid 里");
+  }
+  assert.equal(controls.includes("getComputedStyle"), false, "手势层同样不读主题");
+  // CSS：舞台底与载入层读 --stage-void（和 clearColor 同色），全屏、::backdrop、航道壳读亮一级的 --stage-bg；
+  // 回落值保留原色。
+  assert.ok(stageCss.includes("    var(--stage-void, #030807);\n}"), "舞台底的渐变最底层");
+  assert.match(stageCss, /\.space-graph-stage > \.space-graph-loading \{[^}]*background: var\(--stage-void, #030807\);/);
+  assert.match(stageCss, /\.space-graph-stage:fullscreen \{[^}]*background: var\(--stage-bg, #07110d\);/);
+  assert.match(stageCss, /\.space-graph-stage::backdrop \{\s*background: var\(--stage-bg, #07110d\);/);
+  assert.match(timelineCss, /\.time-corridor-layout \{[^}]*background: var\(--stage-bg, #18231e\);/);
+  // 舞台样式里出现的页面主题 token 只能是这两个舞台底色：节点卡、HUD、手势层不吃 --surface/--ink 之类。
+  const baseCss = await readFile("app/styles/base.css", "utf8");
+  // 只看颜色类：圆角、字号、动效时长等与主题无关的 token 舞台可以照用。
+  const pageTokens = new Set([...baseCss.matchAll(/^\s*(--[\w-]+):/gm)]
+    .map((match) => match[1])
+    .filter((token) => !/^--(radius|fs|font|dur|ease|z|page|control|ruby)-/.test(token)));
+  const stageTokens = new Set([...stageCss.matchAll(/var\((--[\w-]+)/g)].map((match) => match[1]));
+  const allowed = new Set(["--stage-void", "--stage-bg"]);
+  assert.deepEqual([...stageTokens].filter((token) => pageTokens.has(token) && !allowed.has(token)), []);
+});

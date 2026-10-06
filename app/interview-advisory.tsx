@@ -7,6 +7,7 @@ import { parseAnnotations, parseSeirikou, plainSei } from "@/lib/review";
 import { parseReviewFeedback, type ReviewFeedbackKind } from "@/lib/review-feedback";
 import { reviewSiblingPath } from "@/lib/review-paths";
 import { postJson } from "@/lib/client-api";
+import { prefersReducedMotion } from "@/lib/motion";
 import { appViewHref, reviewEvidenceSearch } from "./app-route";
 import { ADVISORY_STAGE_LABELS } from "./interview-insights-state";
 import { useInterviewAdvisorySync } from "./interview-advisory-sync";
@@ -127,9 +128,8 @@ function AdvisoryToc({ entries, rootRef }: { entries: { id: string; label: strin
     <h3>{locale === "ja" ? "このページの目次" : "本页目录"}</h3>
     <ol>{entries.map((entry) => <li key={entry.id}><a href={`#${entry.id}`} aria-current={current === entry.id ? "location" : undefined} onClick={(event) => {
       event.preventDefault();
-      // 显式 smooth 会绕过 CSS 的减弱动效兜底，自己问一次系统设置。
-      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-      rootRef.current?.querySelector<HTMLElement>(`#${CSS.escape(entry.id)}`)?.scrollIntoView({ block: "start", behavior: still ? "auto" : "smooth" });
+      // 显式 smooth 会绕过 CSS 的减弱动效兜底，自己问一次（系统设置或设置里的「总是减弱」）。
+      rootRef.current?.querySelector<HTMLElement>(`#${CSS.escape(entry.id)}`)?.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
     }}>{entry.label}</a></li>)}</ol>
   </nav>;
 }

@@ -75,6 +75,8 @@ import { SHELL_MESSAGES } from "./shell-messages";
 import { buildNavBadges, quickDueBadgeCount, type NavBadge, type NavBadges } from "@/lib/nav-badges";
 import type { QuickSummary } from "@/lib/language/quick-types";
 import { useExitTransition } from "./use-exit-transition";
+import SidebarFooter from "./sidebar-footer";
+import { prefersReducedMotion as reducedMotionPreferred } from "@/lib/motion";
 import {
   canStartViewTransition,
   createPreloadable,
@@ -97,6 +99,7 @@ const VIEW_MODULES = {
   jobs: createPreloadable(() => import("./jobs-view")),
   graph: createPreloadable(() => import("./graph-view")),
   library: createPreloadable(() => import("./library-view")),
+  settings: createPreloadable(() => import("./settings-view")),
   timeline: createPreloadable(() => import("./timeline-view")),
 };
 const InterviewReview = lazy(VIEW_MODULES.review.load);
@@ -110,6 +113,7 @@ const JobsAnalytics = lazy(VIEW_MODULES.analytics.load);
 const JobsView = lazy(VIEW_MODULES.jobs.load);
 const GraphView = lazy(VIEW_MODULES.graph.load);
 const LibraryView = lazy(VIEW_MODULES.library.load);
+const SettingsView = lazy(VIEW_MODULES.settings.load);
 const TimelineView = lazy(VIEW_MODULES.timeline.load);
 
 /** 日历是外壳的静态依赖，不在表里；其余页面按需预取，失败留给页面自己的错误边界。 */
@@ -127,8 +131,9 @@ function viewReady(view: AppView) {
   return !entry || entry.isLoaded() ? null : entry.preload();
 }
 
+// 设置中心的「总是减弱动效」写在 <html data-motion>，转场闸要和全站同一个判定。
 function prefersReducedMotion() {
-  return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+  return reducedMotionPreferred();
 }
 
 export type { Note };
@@ -143,6 +148,7 @@ function NavigationIcon({ name }: { name: NavIconName }) {
       {name === "interview" && <><path d="M4 5.5h16v11H9l-5 3.2z" /><path d="M8 9.5h8M8 12.5h5" /></>}
       {name === "training" && <><path d="m3.5 7 8.5-3 8.5 3-8.5 3z" /><path d="M6.2 8.2v5.6c3.6 2.8 8 2.8 11.6 0V8.2M20.5 7v7" /></>}
       {name === "resources" && <><path d="M5 4.5h12a2 2 0 0 1 2 2V20H7a2 2 0 0 1-2-2z" /><path d="M7 4.5v15.5M10 8h6M10 11.5h6M10 15h4" /></>}
+      {name === "settings" && <><path d="M4 7h9M18 7h2M4 12h3M11 12h9M4 17h11M19 17h1" /><circle cx="15.5" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="17" cy="17" r="2" /></>}
     </svg>
   );
 }
@@ -1391,7 +1397,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
         </a>
 
         <nav className="side-nav">
-          {navigation.map((item) => {
+          {navigation.filter((item) => item.placement !== "footer").map((item) => {
             const isActiveSection = item.views.includes(view);
             const subItems = isActiveSection ? railSecondary : [];
             const badge: NavBadge | undefined = navBadges[item.id as keyof NavBadges];
@@ -1451,6 +1457,14 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
             );
           })}
         </nav>
+
+        <SidebarFooter
+          items={navigation.filter((item) => item.placement === "footer")}
+          view={view}
+          onNavigate={navigateToView}
+          onPreload={preloadView}
+          renderIcon={(name) => <NavigationIcon name={name} />}
+        />
 
         <RailToggle />
       </aside>
@@ -1518,9 +1532,9 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           <LanguageSwitch />
         </header>
 
-        {error && notes.length === 0 ? (
+        {error && notes.length === 0 && view !== "settings" ? (
           <ConnectionError error={error} onRetry={() => void loadVault()} />
-        ) : loading && notes.length === 0 ? (
+        ) : loading && notes.length === 0 && view !== "settings" ? (
           <LoadingState view={view} />
         ) : (
           <ViewErrorBoundary key={view} label={view}>
@@ -1705,6 +1719,17 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   onFilter={setGroupFilter}
                   onQuery={setLibraryQuery}
                   onOpen={openNote}
+                />
+              )}
+              {view === "settings" && (
+                <SettingsView
+                  connection={{ ok: !error, loading, fetchedAt, error }}
+                  autoStats={autoStats}
+                  onToggleAutoStats={toggleAutoStats}
+                  derivedState={derivedState}
+                  statsError={statsError}
+                  onRebuildStats={() => void rebuildStats()}
+                  onReload={() => void loadVault({ fresh: true })}
                 />
               )}
               </Suspense>

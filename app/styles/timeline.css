@@ -14,12 +14,14 @@
 }
 
 /* grid：唯一的子元素（航道舞台／载入占位）跟着壳一起被拉满。
-   壳的高度在沉浸模式下由 flex 决定，子元素写 height:100% 会解析成 0。 */
+   壳的高度在沉浸模式下由 flex 决定，子元素写 height:100% 会解析成 0。
+   壳底平时被舞台盖满，万一露出来也该是舞台的底色（随皮肤，取比虚空亮一级的 --stage-bg），
+   而不是另一种写死的墨绿。 */
 .time-corridor-layout {
   display: grid;
   min-width: 0;
   min-height: 640px;
-  background: #18231e;
+  background: var(--stage-bg, #18231e);
 }
 
 /* 月份密度条：既是活动直方图（求职冲刺期一眼可见），也是跳转按钮和进度条。 */

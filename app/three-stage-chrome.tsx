@@ -15,6 +15,7 @@ import {
   useState,
 } from "react";
 import { isTypingTarget } from "@/lib/keyboard";
+import { prefersReducedMotion } from "@/lib/motion";
 
 // 3D 舞台の単键快捷键も同じ「入力中か」判定を使う（lib/keyboard.ts）。名前は既存 import 先に合わせて残す。
 export const isEditableTarget = isTypingTarget;
@@ -95,7 +96,7 @@ export function useStagePortal(options: {
       window.clearTimeout(openingTimerRef.current);
     }
     setOpeningId(id);
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reducedMotion = prefersReducedMotion();
     openingTimerRef.current = window.setTimeout(() => {
       void (async () => {
         if (openingRequestRef.current !== request) return;

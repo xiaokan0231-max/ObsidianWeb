@@ -21,6 +21,7 @@ import { relationExploration } from "@/lib/graph-relation-exploration.mjs";
 import { pickConstellationLabels } from "@/lib/knowledge-graph";
 import { estimateLabelWidth } from "@/lib/stage-interaction.mjs";
 import { approachValues, createRenderGate } from "@/lib/stage-motion.mjs";
+import { prefersReducedMotion } from "@/lib/motion";
 import {
   NODE_FRAGMENT_SHADER,
   NODE_VERTEX_SHADER,
@@ -39,8 +40,10 @@ import {
   disposeStage,
   fitDistance,
   projectLabelItems,
+  readStageVoid,
   seeded,
   type StageLabelItem,
+  syncStageVoid,
   writeStageFogUniforms,
   writeStageInteractionUniforms,
 } from "./three-stage";
@@ -445,7 +448,8 @@ export default function ThreeKnowledgeGraph({
     const scene = new THREE.Scene();
     // 旋臂随节点数拉长以后整体尺度变大了，雾的密度要跟着降，
     // 否则同一个系数会把外圈整条臂吃掉。
-    scene.fog = new THREE.FogExp2(0x030807, 0.024);
+    // 雾色与 clearColor 同读 --stage-void：远处淡进的是同一片虚空。
+    scene.fog = new THREE.FogExp2(readStageVoid(), 0.024);
 
     const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 80);
     const root = new THREE.Group();
@@ -553,7 +557,8 @@ export default function ThreeKnowledgeGraph({
     nodeGeometry.setAttribute("aFocus", new THREE.BufferAttribute(nodeFocusCurrent, 1));
     nodeGeometry.setAttribute("aSearch", new THREE.BufferAttribute(nodeSearch, 1));
 
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // 系统的 prefers-reduced-motion 与设置里的「总是减弱」由同一个入口判定，两处不会各说各话。
+    const reducedMotion = prefersReducedMotion();
     const nodeMaterial = new THREE.ShaderMaterial({
       vertexShader: NODE_VERTEX_SHADER,
       fragmentShader: NODE_FRAGMENT_SHADER,
@@ -577,6 +582,7 @@ export default function ThreeKnowledgeGraph({
     const bloom = createStageBloom(renderer, { samples: nodes.length < 1200 ? 4 : 0 });
     // 按需渲染的闸门：只在暂停或减弱动态、且一切都静止时才跳过 bloom 与标签投影。
     const renderGate = createRenderGate();
+    const releaseStageVoid = syncStageVoid(renderer, scene.fog as THREE.FogExp2, () => renderGate.invalidate());
 
     const searchSphereGeometry = new THREE.SphereGeometry(1, 28, 18);
     const searchSphereMaterial = createSearchShellMaterial();
@@ -2555,6 +2561,7 @@ export default function ThreeKnowledgeGraph({
     return () => {
       cancelAnimationFrame(readyFrame);
       renderer.setAnimationLoop(null);
+      releaseStageVoid();
       resizeObserver.disconnect();
       visibilityObserver.disconnect();
       controls.removeEventListener("change", onControlsChange);

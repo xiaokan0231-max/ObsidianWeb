@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createExitController, NOTE_EXIT_MS, type ExitController } from "@/lib/exit-transition";
+import { prefersReducedMotion } from "@/lib/motion";
 
 /**
  * 给「按 key 打开的一层」加退场：exit(finish) 先把 exiting 置真、等退场播完再执行原来的关闭逻辑。
@@ -25,7 +26,8 @@ export function useExitTransition(current: string | null, durationMs = NOTE_EXIT
   useEffect(() => {
     const controller = createExitController({
       current: () => currentRef.current,
-      reducedMotion: () => Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches),
+      // 每次退场时现问：设置里切成「总是减弱」后，不用重挂也立刻生效。
+      reducedMotion: prefersReducedMotion,
       onExiting: (key) => setExitingKey(key),
       onRelease: (key) => setExitingKey((value) => (value === key ? null : value)),
       scheduler: {

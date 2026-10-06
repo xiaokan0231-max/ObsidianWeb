@@ -18,6 +18,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { compareTimelineTimes, nearestTimelineDate } from "@/lib/timeline-browser";
 import type { TimelineScene, TimelineSceneNote } from "@/lib/timeline-scene";
 import { approachValues, createRenderGate, lensHandoff, settleHandoff, speedFeel } from "@/lib/stage-motion.mjs";
+import { prefersReducedMotion } from "@/lib/motion";
 import {
   NODE_FRAGMENT_SHADER,
   NODE_VERTEX_SHADER,
@@ -35,8 +36,10 @@ import {
   createStarfield,
   disposeStage,
   projectLabelItems,
+  readStageVoid,
   seeded,
   type StageLabelItem,
+  syncStageVoid,
   writeStageFogUniforms,
   writeStageInteractionUniforms,
 } from "./three-stage";
@@ -328,7 +331,8 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
 
     const stageScene = new THREE.Scene();
     let fogTargetDensity = FOG_DENSITY[viewModeRef.current];
-    const stageFog = new THREE.FogExp2(0x030807, fogTargetDensity);
+    // 雾色与 clearColor 同读 --stage-void：航道尽头淡进的是同一片虚空。
+    const stageFog = new THREE.FogExp2(readStageVoid(), fogTargetDensity);
     stageScene.fog = stageFog;
 
     const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 260);
@@ -400,7 +404,8 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     nodeGeometry.setAttribute("aFocus", new THREE.BufferAttribute(nodeFocusCurrent, 1));
     nodeGeometry.setAttribute("aSearch", new THREE.BufferAttribute(nodeSearch, 1));
 
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // 系统的 prefers-reduced-motion 与设置里的「总是减弱」由同一个入口判定，两处不会各说各话。
+    const reducedMotion = prefersReducedMotion();
     const nodeMaterial = new THREE.ShaderMaterial({
       vertexShader: NODE_VERTEX_SHADER,
       fragmentShader: NODE_FRAGMENT_SHADER,
@@ -422,6 +427,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     const bloom = createStageBloom(renderer, { samples: scene.notes.length < 1500 ? 4 : 0 });
     // 按需渲染的闸门：只在暂停或减弱动态、且一切都静止时才跳过 bloom 与标签投影。
     const renderGate = createRenderGate();
+    const releaseStageVoid = syncStageVoid(renderer, stageFog, () => renderGate.invalidate());
 
     // 搜索命中的标记与星图共用同一枚只亮边缘的薄壳（three-stage 的 SEARCH_SHELL）。
     // 之前是实心发光球，搜常用词时沿航道叠成一串白团，再过一遍 bloom 更糊。
@@ -1521,6 +1527,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
     return () => {
       cancelAnimationFrame(readyFrame);
       renderer.setAnimationLoop(null);
+      releaseStageVoid();
       resizeObserver.disconnect();
       visibilityObserver.disconnect();
       controls.dispose();

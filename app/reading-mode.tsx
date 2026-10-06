@@ -4,6 +4,7 @@ import { useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, use
 import { createPortal } from "react-dom";
 import type { ReadingHeading } from "@/lib/reading-document";
 import { isTypingTarget } from "@/lib/keyboard";
+import { prefersReducedMotion } from "@/lib/motion";
 import type { UiLocale } from "@/lib/ui-locale";
 import { useDialogFocus } from "./use-dialog-focus";
 import { copySelectionWithoutRuby } from "./ruby-copy";
@@ -98,9 +99,8 @@ function stepStageLine(scroller: HTMLElement, delta: 1 | -1) {
   const target = lines[Math.max(0, Math.min(lines.length - 1, current < 0 && delta > 0 ? 0 : current + delta))];
   lines.forEach((line) => line.removeAttribute("data-stage-current"));
   target.setAttribute("data-stage-current", "");
-  // JS 里显式写 smooth 会绕过 CSS 的减弱动效兜底，所以这里自己问一次。
-  const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  target.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
+  // JS 里显式写 smooth 会绕过 CSS 的减弱动效兜底，所以这里自己问一次（含设置里的「总是减弱」）。
+  target.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
 }
 
 export function captureReadingPosition(scroller: HTMLElement): ReadingPosition {
