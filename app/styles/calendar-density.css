@@ -723,6 +723,10 @@
 .calendar-view .calendar-event.status-closed,
 .calendar-view .agenda-item.status-closed { opacity: .62; }
 
+/* 已结束的卡片靠变淡与「終了」标记区分，不再铺灰底：灰底叠上变淡，整张卡显得发暗。 */
+.calendar-view .calendar-event.status-closed,
+.calendar-view .agenda-item.status-closed { --commitment-wash: var(--surface); }
+
 .calendar-view .calendar-event.status-closed:is(:hover, :focus-visible),
 .calendar-view .agenda-item.status-closed:is(:hover, :focus-within) { opacity: 1; }
 
