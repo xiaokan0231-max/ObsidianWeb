@@ -726,12 +726,6 @@
 .calendar-view .calendar-event.status-closed:is(:hover, :focus-visible),
 .calendar-view .agenda-item.status-closed:is(:hover, :focus-within) { opacity: 1; }
 
-.calendar-view .calendar-event.status-closed strong,
-.calendar-view .agenda-item.status-closed .agenda-copy > strong {
-  text-decoration: line-through;
-  text-decoration-color: color-mix(in oklab, var(--text-tertiary) 70%, transparent);
-}
-
 /* 终面多一圈描边：一眼看出这一格分量不同。 */
 .calendar-view .calendar-event:has(.round-final),
 .calendar-view .agenda-item:has(.round-final) {
@@ -1287,10 +1281,7 @@
 
 .calendar-view :is(.cw-block, .cw-chip).status-closed { opacity: .62; }
 .calendar-view :is(.cw-block, .cw-chip).status-closed:is(:hover, :focus-visible) { opacity: 1; }
-.calendar-view :is(.cw-block, .cw-chip).status-closed .cw-block-company {
-  text-decoration: line-through;
-  text-decoration-color: color-mix(in oklab, var(--text-tertiary) 70%, transparent);
-}
+/* 已结束的场次靠「終了」标记与变淡区分，公司名不再加删除线：删除线读起来像「取消」，而且难认。 */
 
 .calendar-view :is(.cw-block, .cw-chip):has(.round-final) {
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brand) 55%, transparent);
