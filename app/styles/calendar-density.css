@@ -20,8 +20,12 @@
   font-weight: 500;
 }
 
+/* 图例按 0 宽参与断行、再吃掉剩余宽度在自己的格子里折行：按内容宽断行时，桌面宽度下被挤到第二行的是
+ * 排在最后的工具组，第二行只剩右对齐的按钮、左边一大片空白。窄屏的 grid 规则不看 flex，不受影响。
+ * 最窄只收到最宽的一枚胶囊（min-content）：收到 0 时 1100 宽下图例只剩 33px，胶囊横向溢出压到工具组上。 */
 .calendar-toolbar .calendar-legend {
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  min-width: min-content;
   gap: 8px 12px;
   padding: 0;
   border: 0;
@@ -1077,14 +1081,15 @@
 
 .cw-day-head.today .cw-day-select time { color: var(--on-interactive); }
 
+/* 与月格「代投」同一记号：信息色＋按公司数加深的热度梯度。不用品牌橙，免得和「今天」的高亮读成一回事。 */
 .cw-ai {
   max-width: 100%;
   overflow: hidden;
   padding: 1px 8px;
-  border: 1px solid var(--brand-line);
+  border: 1px solid color-mix(in oklab, var(--info) 30%, transparent);
   border-radius: var(--radius-pill);
-  background: var(--brand-wash);
-  color: var(--interactive);
+  background: color-mix(in oklab, var(--info) 8%, transparent);
+  color: var(--info);
   font: inherit;
   font-size: 11px;
   font-weight: 650;
@@ -1094,7 +1099,11 @@
   cursor: pointer;
 }
 
-.cw-ai:hover { border-color: var(--interactive); }
+.cw-ai[data-heat="2"] { background: color-mix(in oklab, var(--info) 12%, transparent); }
+.cw-ai[data-heat="3"] { background: color-mix(in oklab, var(--info) 16%, transparent); }
+.cw-ai[data-heat="4"] { border-color: color-mix(in oklab, var(--info) 70%, transparent); background: color-mix(in oklab, var(--info) 20%, transparent); }
+.cw-ai:hover,
+.cw-ai[aria-expanded="true"] { border-color: var(--info); }
 .cw-ai:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 
 .cw-allday { border-bottom: 1px solid var(--line); }
@@ -1136,6 +1145,9 @@
 }
 
 .cw-times span {
+  /* 不让网格把标签撑满一整小时：translate -50% 要按文字自身高度算，才是「骑在横线上」；
+     撑满时会上移半小时（28px），10:00 的字落在 9:30 的位置。 */
+  align-self: start;
   padding-right: 8px;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
@@ -1284,6 +1296,11 @@
 }
 
 .calendar-view :is(.cw-block, .cw-chip).status-closed { opacity: .62; }
+/* 周视图与月格同一口径：已结束用灰色左缘、不带底色，红色只留在图例与月格的「終了」小方块上。 */
+.calendar-view :is(.cw-block, .cw-chip).status-closed:not(:hover) {
+  border-left-color: var(--text-tertiary);
+  background: var(--surface-raised-solid);
+}
 .calendar-view :is(.cw-block, .cw-chip).status-closed:is(:hover, :focus-visible) { opacity: 1; }
 /* 已结束的场次靠「終了」标记与变淡区分，公司名不再加删除线：删除线读起来像「取消」，而且难认。 */
 
