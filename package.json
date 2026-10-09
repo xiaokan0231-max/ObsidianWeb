@@ -6,6 +6,7 @@
     "node": ">=22.18.0"
   },
   "scripts": {
+    "publish:prepare": "node scripts/export-published-vault.mjs && npm run build",
     "dev": "./scripts/dev-with-obsidian.sh",
     "dev:web": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
     "dev:obsidian": "./scripts/dev-with-obsidian.sh",

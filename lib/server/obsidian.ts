@@ -1,5 +1,25 @@
 import { isOperationalPath } from "@/lib/vault-boundary.mjs";
 import { createVaultCache } from "./vault-cache.ts";
+import { createPublishedVaultReader } from "./published-vault.ts";
+import type { VaultScope } from "../vault-scope.ts";
+
+async function loadPublishedAsset(file: string) {
+  // 发布副本由部署资源提供；不回连本机，也不把个人笔记打进 JavaScript 源码。
+  const { env } = await import("cloudflare:workers");
+  const assets = (env as { ASSETS?: Fetcher }).ASSETS;
+  if (!assets) throw new Error("云端发布资源未配置");
+  const response = await assets.fetch(new Request(`http://localhost/_published-vault/${file}`));
+  if (!response.ok) throw new Error("云端内容尚未发布，请重新发布代码和笔记");
+  return response.json();
+}
+const publishedVault = createPublishedVaultReader(
+  () => loadPublishedAsset("manifest.json"),
+  async (file) => await loadPublishedAsset(file) as ObsidianNote[],
+);
+
+export function usesPublishedVault() {
+  return process.env.OBSIDIAN_DATA_SOURCE === "published";
+}
 
 export type ObsidianNote = {
   path: string;
@@ -57,6 +77,7 @@ async function requestJson<T>(path: string, accept?: string): Promise<T> {
 }
 
 export async function listMarkdownFiles(prefix = ""): Promise<string[]> {
+  if (usesPublishedVault()) return (await publishedVault.readAll()).map((note) => note.path).filter((path) => path.startsWith(prefix));
   const endpoint = prefix ? `/vault/${encodeURIComponent(prefix)}` : "/vault/";
   const listing = await requestJson<VaultListing>(endpoint);
   const notes: string[] = [];
@@ -93,6 +114,7 @@ async function mapConcurrent<T, R>(
 }
 
 export async function readNote(path: string) {
+  if (usesPublishedVault()) return publishedVault.readNote(path);
   return requestJson<ObsidianNote>(
     `/vault/${encodeURIComponent(path)}`,
     "application/vnd.olrapi.note+json",
@@ -137,7 +159,8 @@ const vaultCache = createVaultCache({
  * 读全库。默认走缓存（1 次 mtime 扫描 + 只重取变过的文件）；
  * force 用于「我不信缓存」的场景（页面上的 R 键），行为等于改动前的全量爬取。
  */
-export async function readAllNotes(options?: { force?: boolean }) {
+export async function readAllNotes(options?: { force?: boolean; scope?: VaultScope }) {
+  if (usesPublishedVault()) return publishedVault.readAll(options?.scope);
   return vaultCache.readAll(options);
 }
 
@@ -165,6 +188,7 @@ export async function noteExists(path: string) {
 }
 
 export async function writeNote(path: string, content: string) {
+  if (usesPublishedVault()) throw new Error("线上版本只供查看；请在本机更新后重新发布");
   await request(`/vault/${encodeURIComponent(path)}`, {
     method: "PUT",
     headers: headers("application/json", "text/markdown; charset=utf-8"),
@@ -175,6 +199,7 @@ export async function writeNote(path: string, content: string) {
 }
 
 export async function appendNote(path: string, content: string) {
+  if (usesPublishedVault()) throw new Error("线上版本只供查看；请在本机更新后重新发布");
   if (!(await noteExists(path))) {
     await writeNote(path, content.replace(/^\n+/, ""));
     return;
@@ -192,6 +217,7 @@ export async function patchHeading(
   heading: string,
   content: string,
 ) {
+  if (usesPublishedVault()) throw new Error("线上版本只供查看；请在本机更新后重新发布");
   await request(`/vault/${encodeURIComponent(path)}`, {
     method: "PATCH",
     headers: {

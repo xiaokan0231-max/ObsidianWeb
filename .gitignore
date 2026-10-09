@@ -53,6 +53,10 @@ next-env.d.ts
 # MediaPipe の wasm とモデル（計 34MB）。scripts/fetch-mediapipe.mjs が dev/build 前に用意する
 /public/mediapipe/
 
+# 发布时导出的 Vault 副本只进入部署产物，不进入公开源码仓库
+/public/_published-vault/
+/public/_published-vault.tmp/
+
 # 本机私有作业规则（个人事实・账号・具体案件）。公开仓库只保留机制
 /AGENTS.local.md
 /CLAUDE.local.md

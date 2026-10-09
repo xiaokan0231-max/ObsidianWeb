@@ -78,6 +78,11 @@ export default async function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        {process.env.OBSIDIAN_DATA_SOURCE === "published" && (
+          <aside style={{ position: "fixed", bottom: 12, right: 16, zIndex: 1000, padding: "6px 12px", borderRadius: 8, background: "var(--color-bg, #fff)", color: "var(--color-text, #222)", border: "1px solid var(--color-border, #ddd)", fontSize: 14 }}>
+            {locale === "ja" ? "公開済みの内容 · 閲覧専用" : "已发布内容 · 仅供浏览"}
+          </aside>
+        )}
         {/*
           首帧前恢复只存在本机的界面偏好：侧栏折叠态（否则每次刷新都会看到侧栏先展开再收起），
           以及「总是减弱动效」（否则首屏入场动画会先播一遍）。服务端读不到 localStorage，只能在这里补。

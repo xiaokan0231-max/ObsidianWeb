@@ -8,7 +8,7 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     const force = params.get("refresh") === "1";
     const scope = normalizeVaultScope(params.get("scope"));
-    const notes = await readAllNotes({ force });
+    const notes = await readAllNotes({ force, scope });
     const scopedNotes = notes.filter((note) => noteInVaultScope(note, scope));
     // 焦点回来时的照合：路径集合与最新 mtime 没变就 304，省掉每次十几 MB 的 JSON。
     const etag = vaultEtag(scope, scopedNotes);

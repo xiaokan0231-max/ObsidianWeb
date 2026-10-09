@@ -6,6 +6,8 @@
 由它实时构建案件看板、日历、面试准备、时间线、3D 知识图谱和学习闭环。
 Next.js (vinext) / React 19 / TypeScript，部署到 Cloudflare Workers。
 
+线上可以使用独立的只读 Vault 副本：运行 `npm run publish:prepare`，从 Obsidian 正式接口导出当前内容并构建网站；发布构建产物时，将 Sites 运行时变量 `OBSIDIAN_DATA_SOURCE` 设为 `published`。笔记资源随部署一起更新，不依赖本机在线；只构建代码不等于更新笔记，后续发布也应运行同一准备命令。导出内容位于被 Git 忽略的 `public/_published-vault/`，不得提交到公开源码仓库。线上副本拒绝写入和生成操作；本机默认仍使用实时 Obsidian 接口。
+
 ![求职作战室](public/og.jpg)
 
 右上角可切换中文／日本語。导航、搜索命令和常用菜单随界面语言切换，选择会在刷新后保留；笔记标题、正文与业务数据保留原文。

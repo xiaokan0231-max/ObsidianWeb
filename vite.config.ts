@@ -13,11 +13,13 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const localBindingConfig = {
   main: "./worker/index.ts",
+  assets: { binding: "ASSETS", run_worker_first: true },
   compatibility_flags: [
     "nodejs_compat",
     "nodejs_compat_populate_process_env",
   ],
   vars: {
+    OBSIDIAN_DATA_SOURCE: process.env.OBSIDIAN_DATA_SOURCE ?? "live",
     OBSIDIAN_API_URL:
       process.env.OBSIDIAN_API_URL ?? "http://127.0.0.1:27123",
     OBSIDIAN_API_KEY: process.env.OBSIDIAN_API_KEY ?? "",
