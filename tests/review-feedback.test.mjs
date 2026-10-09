@@ -3,8 +3,34 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   parseReviewFeedback,
+  renderReviewFeedbackEntry,
+  resolveReviewFeedbackTarget,
   uniqueReviewFeedback,
 } from "../lib/review-feedback.ts";
+
+test("opinion feedback stores the server snapshot and never carries agreement across revisions", () => {
+  const opinion = { id: "project_match", titleZh: "项目匹配", interpretationZh: "仍需确认项目。" };
+  const requested = { type: "advisory", id: opinion.id, revision: "2026-09-28T01:00:00Z", snapshot: "client can alter this" };
+  const target = resolveReviewFeedbackTarget(requested, { generatedAt: requested.revision, opinions: [opinion] });
+  assert.equal(target.snapshot, JSON.stringify(opinion));
+  const entry = { id: "f010", blockId: "", kind: "agree", date: "2026-09-28", text: "同意。", target };
+  const next = { ...entry, id: "f011", target: { ...target, revision: "2026-09-29T01:00:00Z" } };
+  const parsed = parseReviewFeedback(renderReviewFeedbackEntry(entry) + renderReviewFeedbackEntry(next));
+  assert.deepEqual(parsed, [entry, next]);
+  assert.equal(uniqueReviewFeedback([...parsed, entry]).length, 2);
+  assert.throws(() => resolveReviewFeedbackTarget(requested, { generatedAt: next.target.revision, opinions: [opinion] }), /已更新/);
+  assert.throws(() => resolveReviewFeedbackTarget({ ...requested, id: "missing" }, { generatedAt: requested.revision, opinions: [opinion] }), /找不到/);
+});
+
+test("insight targets remain independent from question judgments and malformed targets do not attach", () => {
+  const entry = { id: "f001", blockId: "", kind: "context", date: "2026-09-28", text: "原话只是条件性意愿。", target: { type: "insight", id: "next_step", revision: "v1", snapshot: '{"titleZh":"判断"}' } };
+  const note = renderReviewFeedbackEntry(entry);
+  assert.deepEqual(parseReviewFeedback(note), [entry]);
+  assert.deepEqual(parseReviewFeedback(note.replace("insight:next_step", "insight:wrong")), []);
+  assert.deepEqual(parseReviewFeedback(note.replace(/対象::.*/, "対象:: invalid json")), []);
+  const old = { id: "f000", blockId: "q01", kind: "agree", date: "2026-09-28", text: "保留本人原意。" };
+  assert.deepEqual(parseReviewFeedback(renderReviewFeedbackEntry(old) + note.replace("insight:next_step", "unknown")), [old]);
+});
 
 test("human feedback stays append-only and deduplicates identical judgments", () => {
   const note = `---
@@ -36,7 +62,9 @@ test("feedback is written separately, shown per AI block, and reused on regenera
   ]);
   assert.match(route, /interview-answer-feedback/);
   assert.match(route, /kind === "disagree" \|\| kind === "context"/);
-  assert.match(route, /deduplicated: true/);
+  // 去重は共通骨格の duplicate 分岐＋応答の deduplicated。文言でなく機構を固定する。
+  assert.match(route, /duplicate: \{ id: duplicate\.id \}/);
+  assert.match(route, /deduplicated: outcome\.deduplicated/);
   assert.match(deepRoute, /humanFeedback/);
   assert.match(ui, /你对这项 AI 评价/);
   assert.match(ui, />不同意</);
@@ -50,7 +78,11 @@ test("cross-interview trends require the same strategy tag in two interviews", a
     readFile("app/interview-review.tsx", "utf8"),
     readFile("lib/interview-trends.mjs", "utf8"),
   ]);
-  assert.match(ui, /item\.interviewKeys\.size >= 2/);
+  // 「何場で癖とみなすか」は lib 側の判定を呼ぶこと。閾値の数字を UI に書き戻すと、
+  // 片方だけ直した時に Web の傾向ページと generated ノートが黙って割れる。
+  assert.match(ui, /isRepeatedAcrossInterviews\(item\.interviewKeys\.size\)/);
+  assert.doesNotMatch(ui, /interviewKeys\.size >= \d/);
+  assert.match(trends, /export function isRepeatedAcrossInterviews/);
   assert.match(ui, /跨面试回答趋势/);
   assert.match(ui, /STRATEGY_TREND_META.*from "@\/lib\/interview-trends\.mjs"/s);
   assert.match(trends, /复合问题漏答/);

@@ -1,0 +1,1353 @@
+/* 側栏・頂栏・視圖切替の殻と 2D 関係図（globals.css から分割） */
+
+/* ===== 侧栏折叠（图标条） ===== */
+
+.rail-toggle {
+  margin-top: 12px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.rail-toggle:hover {
+  border-color: var(--line-strong);
+  background: color-mix(in oklab, var(--surface-overlay) 55%, transparent);
+  color: var(--ink);
+}
+
+.rail-toggle i {
+  font-style: normal;
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 200ms ease;
+}
+
+:root[data-rail="collapsed"] .app-shell {
+  grid-template-columns: 66px minmax(0, 1fr);
+}
+
+:root[data-rail="collapsed"] .sidebar {
+  padding: 30px 13px 24px;
+}
+
+:root[data-rail="collapsed"] .brand {
+  justify-content: center;
+}
+
+:root[data-rail="collapsed"] .brand-copy,
+:root[data-rail="collapsed"] .rail-toggle span {
+  display: none;
+}
+
+:root[data-rail="collapsed"] .side-nav {
+  margin-top: 36px;
+}
+
+:root[data-rail="collapsed"] .side-nav a {
+  justify-content: center;
+  padding: 0;
+}
+
+:root[data-rail="collapsed"] .side-nav a:hover {
+  transform: none;
+}
+
+/* 66px 的图标条里放不下缩进和竖线，子项靠「更小 + 紧跟在墨块下面」表达从属。 */
+:root[data-rail="collapsed"] .side-subnav {
+  margin: 3px 0 7px;
+  padding-left: 0;
+  border-left: 0;
+}
+
+:root[data-rail="collapsed"] .side-subnav a {
+  min-height: 32px;
+}
+
+:root[data-rail="collapsed"] .side-subnav a.active::before {
+  display: none;
+}
+
+/* 折叠时文字只做视觉隐藏，可访问名与搜索仍然拿得到。 */
+:root[data-rail="collapsed"] .side-nav a > span:last-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* 悬停 / 键盘聚焦时在右侧弹出中文标签。 */
+:root[data-rail="collapsed"] .side-nav a::after {
+  content: attr(data-label);
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  padding: 6px 11px;
+  border-radius: 3px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: 0 10px 24px color-mix(in oklab, var(--shadow-color) 24%, transparent);
+  transition: opacity 120ms ease;
+}
+
+:root[data-rail="collapsed"] .side-nav a:hover::after,
+:root[data-rail="collapsed"] .side-nav a:focus-visible::after {
+  opacity: 1;
+}
+
+:root[data-rail="collapsed"] .rail-toggle i {
+  transform: rotate(180deg);
+}
+
+/* ===== 侧栏角标（lib/nav-badges.ts）=====
+   日历＝今天已约定的场次，用填充色；求职＝选考中的件数，用中性凸起面，不抢日历的注意力。
+   DOM 里角标排在文字前（base.css 的 `span:last-child` 指文字），这里用 order 排到最右。 */
+.side-nav a > .nav-badge {
+  order: 1;
+  flex: 0 0 auto;
+  min-width: 20px;
+  height: 18px;
+  margin-left: auto;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  animation: pop-in var(--dur-base) var(--ease-spring) backwards;
+}
+
+.side-nav a > .nav-badge[data-kind="today"] {
+  color: var(--on-interactive);
+  background: var(--interactive-fill);
+}
+
+.side-nav a > .nav-badge[data-kind="selection"] {
+  color: var(--ink);
+  background: var(--surface-raised-solid);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* 训练中心＝快练待复习数：是「该回来练了」的提示，不是待处理的事，用成功色的浅底，不和日历的实心徽章抢。 */
+.side-nav a > .nav-badge[data-kind="due"] {
+  color: var(--success);
+  background: var(--success-wash);
+  box-shadow: inset 0 0 0 1px var(--success-line);
+}
+
+/* 暗色的当前分区本身就是 --surface-raised-solid 凸起面，同色徽章只剩一圈细线；改用凹面压一档。 */
+:root:not([data-theme="light"]):not([data-rail="collapsed"]) .side-nav > a.active > .nav-badge[data-kind="selection"] {
+  background: var(--surface-sunken);
+}
+
+/* 折叠态只剩 66px 图标条：缩成图标右上角的小圆点，数字留在链接的 aria-label 与悬停气泡里。 */
+:root[data-rail="collapsed"] .side-nav a > .nav-badge {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  min-width: 0;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  font-size: 0;
+  /* 一圈侧栏底色把圆点和图标分开，深浅两套主题都成立。 */
+  outline: 2px solid var(--surface-sunken);
+}
+
+/* 8px 的近白凸起面在浅色侧栏上几乎看不见；圆点不承载数字，改用中性的三级文字色实心点。 */
+:root[data-rail="collapsed"] .side-nav a > .nav-badge[data-kind="selection"] {
+  background: var(--text-tertiary);
+  box-shadow: none;
+}
+
+:root[data-rail="collapsed"] .side-nav a > .nav-badge[data-kind="due"] {
+  background: var(--success);
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell,
+  .sidebar,
+  .rail-toggle i {
+    transition: none;
+  }
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--success) 12%, transparent);
+}
+
+.status-dot.loading {
+  background: var(--gold);
+  animation: pulse 1s infinite alternate;
+}
+
+/* 超过 10 分钟没同步：状态点转金色提醒，悬停标题里有具体时刻。 */
+.topbar-source.aged .status-dot {
+  background: var(--gold);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--gold) 14%, transparent);
+}
+
+.status-dot.error {
+  background: var(--danger);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--danger) 12%, transparent);
+}
+
+.main-stage {
+  min-width: 0;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 38px;
+  background: color-mix(in oklab, var(--paper) 90%, transparent);
+  border-bottom: 1px solid color-mix(in oklab, var(--line) 84%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+/* 两种语言始终可见，切换后保留当前页面与筛选状态。 */
+.language-switch,
+.theme-switch {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-soft);
+}
+
+.language-switch button,
+.theme-switch button {
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.language-switch button[aria-pressed="true"],
+.theme-switch button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* 主题开关只放一个符号，按钮做成方的，和语言开关并排时不抢眼。 */
+.theme-switch button {
+  min-width: 26px;
+  padding-inline: 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.language-switch button:hover:not([aria-pressed="true"]),
+.theme-switch button:hover:not([aria-pressed="true"]) {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+/* 日语标签较长，地点与公司名称可收缩，右侧操作始终留在视口内。 */
+.topbar-where {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.topbar-where strong,
+.topbar-where small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * 二级导航按「书页标签」来做：只有选中的那一页和下面的正文连成一张纸，
+ * 靠 bottom: -1px 把 bar 的底线切开一段。所以 active 的底色必须等于正文的 --paper，
+ * bottom: -1px 和 border-bottom: 0 是一套的，只删其一就会看见纸浮起来。
+ */
+.section-nav {
+  position: sticky;
+  top: 76px;
+  z-index: 24;
+  min-height: 74px;
+  display: flex;
+  align-items: flex-end;
+  gap: 22px;
+  padding: 0 38px;
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--surface-sunken) 96%, transparent), color-mix(in oklab, var(--paper) 97%, transparent));
+  border-bottom: 1px solid color-mix(in oklab, var(--line-strong) 78%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+/* 面试作战・训练中心的子项在桌面端住左栏，这条带子只留给资料库。 */
+.section-nav[data-placement="rail"] {
+  display: none;
+}
+
+.section-nav-tabs {
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.mobile-brand {
+  display: none;
+}
+
+.search-icon {
+  color: var(--text-tertiary);
+  font-size: 21px;
+  line-height: 1;
+}
+
+.search-palette-input kbd {
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--text-faint);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  border-radius: 3px;
+}
+
+/* ⌘K 浮层。全库检索是导航工具，不该在每页占一条输入框。 */
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  /* 默认的 stretch 会把面板拉到整屏高，结果列表下面留一大块空白。 */
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(40px, 12vh, 120px) 20px 40px;
+  /* 遮罩用阴影基色而不是墨色：暗色下墨色是浅的，会变成一层发白的雾。 */
+  background: color-mix(in oklab, var(--shadow-color) 30%, transparent);
+  backdrop-filter: blur(3px);
+  animation: fade-in var(--dur-fast) var(--ease-out);
+}
+
+.search-palette-input {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 54px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.search-palette-input input {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.search-palette-input input::placeholder {
+  color: var(--text-faint);
+}
+
+/* 资料库自己的检索框，和下面的分区・场景筛选是一组。 */
+.library-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  transition: border-color 160ms ease;
+}
+
+.library-search:focus-within {
+  border-color: var(--text-faint);
+}
+
+.library-search .search-icon {
+  font-size: 18px;
+}
+
+.library-search input {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.library-search input::placeholder {
+  color: var(--text-faint);
+}
+
+.library-search > button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.library-search > button:hover {
+  color: var(--orange);
+}
+
+/* ===== 顶栏三段：我在哪 / 下一件 / 数据源 ===== */
+
+.topbar-where {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.topbar-where > span {
+  color: var(--orange);
+  font-family: "Songti SC", serif;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.topbar-where strong {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.topbar-where small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.topbar-where small::before {
+  content: "·";
+  margin-right: 9px;
+}
+
+/* 「下一件」是这一行里唯一有时限的信息，所以给它整行仅有的边框和朱色。 */
+.topbar-next {
+  min-width: 0;
+  height: 42px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--orange);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.topbar-next:hover {
+  border-color: var(--orange);
+  background: var(--surface);
+}
+
+.topbar-next small {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .13em;
+}
+
+.topbar-next em {
+  flex: 0 0 auto;
+  color: var(--orange);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.topbar-next strong {
+  overflow: hidden;
+  max-width: 260px;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-next i {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.topbar-source {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 没有「下一件」时，状态自己顶到右边。 */
+.topbar-next + .topbar-source {
+  margin-left: 0;
+}
+
+.topbar-source:first-of-type {
+  margin-left: auto;
+}
+
+.topbar-source:disabled {
+  cursor: wait;
+}
+
+.topbar-source-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar-source-copy strong {
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.topbar-source-copy small {
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.topbar-source:hover .topbar-source-copy strong {
+  color: var(--orange);
+}
+
+/* 按钮撤掉后，快捷键就是唯一入口——所以把它们写在明面上。 */
+.topbar-keys {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+}
+
+.topbar-keys span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.topbar-keys kbd {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--paper);
+  color: var(--text-faint);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+}
+
+.search-panel {
+  width: min(640px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* 横向留白由各段自己带（head/saved/results/help 都是 8px），这里留着会把输入框的下边线截断。 */
+  padding: 0 0 8px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: pop-in var(--dur-base) var(--ease-spring);
+}
+
+.search-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px 10px;
+  color: var(--text-faint);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.search-panel-head > span { flex: 1; }
+.search-loading { color: var(--warning); font-style: normal; }
+
+/* 「页面」「笔记」两段的小标题。 */
+.search-group-title {
+  margin: 8px 0 4px;
+  padding: 0 10px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+}
+
+.search-panel-head button {
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.saved-queries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 2px 8px 12px;
+}
+
+.saved-queries button {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 7px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.saved-queries button:hover {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+.search-results {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 0 8px;
+}
+
+.search-results > button {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  padding: 9px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.result-group {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 50%;
+}
+
+.result-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.result-copy strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-copy small {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 命中词：朱橙淡底，字色不变，扫一眼就知道这篇为什么被搜出来。 */
+.result-copy mark {
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--brand) 22%, transparent);
+  color: inherit;
+  padding: 0 1px;
+}
+
+.result-arrow {
+  color: var(--text-faint);
+}
+
+.empty-search {
+  padding: 28px 14px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.search-help {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 16px;
+  margin-top: 6px;
+  padding: 10px 14px 4px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.search-keys kbd {
+  margin: 0 3px 0 6px;
+  padding: 1px 5px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-overlay);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.search-keys kbd:first-child { margin-left: 0; }
+
+.search-help code {
+  color: var(--green);
+}
+
+.view-container {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 34px 38px 70px;
+}
+
+.eyebrow,
+.panel-kicker {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.18em;
+}
+
+.section-intro .eyebrow i {
+  width: 6px;
+  height: 6px;
+  background: var(--orange);
+  border-radius: 50%;
+}
+
+.panel {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 28px;
+}
+
+.panel-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 25px;
+}
+
+.panel-kicker {
+  display: block;
+  margin-bottom: 9px;
+  color: var(--text-faint);
+}
+
+.panel-heading h2 {
+  margin: 0;
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 23px;
+  font-weight: 560;
+}
+
+.panel-heading > button {
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.panel-heading > button:hover {
+  color: var(--orange);
+}
+
+/* 视图要的笔记还没到：骨架而不是「还没有 X」的假空态。 */
+.scope-loading { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 48px 24px; color: var(--muted); font-size: 14px; }
+.scope-loading-skeleton { flex: 0 0 100%; display: grid; gap: 12px; margin-top: 14px; }
+.scope-loading-skeleton > i { height: 14px; }
+.scope-loading-skeleton > i:nth-child(3n + 2) { width: 82%; }
+.scope-loading-skeleton > i:nth-child(3n) { width: 64%; }
+.scope-loading p { margin: 0; }
+.scope-loading-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); animation: scope-loading-pulse 1.2s ease-in-out infinite; }
+@keyframes scope-loading-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .scope-loading-dot { animation: none; opacity: .7; } }
+/* 单个视图渲染失败：与连接错误同一版式，但只占视图区，侧栏与顶栏照常。 */
+.view-error { max-width: 720px; margin: 48px auto; padding: 0 24px; }
+.view-error .error-code { font-family: var(--font-geist-mono), monospace; font-size: 11px; letter-spacing: .12em; color: var(--orange); }
+.view-error h1 { margin: 10px 0 8px; font-size: 24px; }
+.view-error p { color: var(--muted); }
+.view-error code { display: block; margin: 12px 0; padding: 10px 12px; background: var(--paper-deep); font-size: 12px; overflow-wrap: anywhere; }
+.view-error button { border: 1px solid var(--ink); border-radius: 4px; background: var(--ink); color: var(--paper); padding: 8px 14px; cursor: pointer; }
+
+/* 顶栏の派生統計ボタン：待重算は橙で目立たせ、自動／手動の切替は静かに。 */
+.topbar-stats {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.topbar-stats.state-stale { color: var(--orange); border-color: color-mix(in oklab, var(--brand) 45%, transparent); background: color-mix(in oklab, var(--brand) 8%, transparent); }
+.topbar-stats.state-rebuilding { opacity: 0.7; cursor: progress; }
+
+.learning-visual {
+  display: grid;
+  grid-template-columns: 135px minmax(0, 1fr);
+  align-items: center;
+  gap: 28px;
+  margin-top: 12px;
+}
+
+.learning-ring {
+  --progress: 0%;
+  width: 128px;
+  height: 128px;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(var(--violet) var(--progress), var(--line-soft) 0);
+  border-radius: 50%;
+}
+
+.learning-ring::before {
+  content: "";
+  grid-area: 1 / 1;
+  width: 102px;
+  height: 102px;
+  background: var(--surface);
+  border-radius: 50%;
+}
+
+.learning-ring div {
+  position: relative;
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.learning-ring strong {
+  font-family: "Songti SC", serif;
+  font-size: 34px;
+  font-weight: 500;
+}
+
+.learning-ring span {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.learning-copy p {
+  margin: 0 0 11px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.learning-copy p strong {
+  color: var(--ink);
+  font-family: "Songti SC", serif;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.learning-copy button,
+.graph-preview-copy button {
+  border: 0;
+  background: transparent;
+  padding: 6px 0;
+  color: var(--violet);
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.learning-copy button:hover,
+.graph-preview-copy button:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.learning-flow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 23px;
+  padding-top: 17px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.learning-flow span {
+  padding: 5px 7px;
+  background: var(--paper);
+  color: var(--text-tertiary);
+  font-size: 8px;
+}
+
+.learning-flow b {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+/* .panel と併記するのは特異性のため。ui-language.css の「カード外観をそろえる」
+   一括規則（.panel, .calendar-board, … { background-color: var(--surface-raised) }）が
+   ずっと後ろに居るので、単一クラスのままだと背景だけ奪われて
+   白文字＋明るい背景＝読めない、になる（実際にそうなっていた）。 */
+.panel.graph-preview-panel {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  min-height: 390px;
+  background: var(--surface-inverse);
+  border-color: var(--surface-inverse);
+  color: var(--text-on-inverse);
+}
+
+/* 暗色的反相面比浮层还亮一级，当这块大面板的底太跳；暗色改用凸起面（默认皮肤下正是原来的 #1a2821）。
+   各皮肤两档都是深色，上面的反相文字照常可读。 */
+:root:not([data-theme="light"]) .panel.graph-preview-panel {
+  background: var(--surface-raised-solid);
+  border-color: var(--surface-raised-solid);
+}
+
+.graph-preview-copy {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.graph-preview-copy .panel-kicker {
+  color: var(--text-on-inverse-muted);
+}
+
+.graph-preview-copy h2 {
+  margin: 4px 0 18px;
+  font-family: "Songti SC", serif;
+  font-size: 29px;
+  font-weight: 520;
+  line-height: 1.35;
+}
+
+.graph-preview-copy p {
+  margin: 0 0 16px;
+  color: var(--text-on-inverse-muted);
+  font-size: 10px;
+  line-height: 1.8;
+}
+
+.graph-preview-copy button {
+  width: fit-content;
+  color: var(--brand-on-inverse);
+}
+
+.mini-graph {
+  position: relative;
+  min-height: 330px;
+}
+
+.mini-graph::before {
+  content: "";
+  position: absolute;
+  inset: 8%;
+  background-image: radial-gradient(color-mix(in oklab, var(--highlight) 11%, transparent) 1px, transparent 1px);
+  background-size: 18px 18px;
+  mask-image: radial-gradient(circle, #000 35%, transparent 78%);
+}
+
+.mini-graph b {
+  position: absolute;
+  z-index: 2;
+  width: 7px;
+  height: 7px;
+  border: 1px solid color-mix(in oklab, var(--surface-overlay) 60%, transparent);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.mini-edge {
+  position: absolute;
+  height: 1px;
+  background: color-mix(in oklab, var(--highlight) 12%, transparent);
+  transform-origin: 0 0;
+}
+
+.mini-graph > strong {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 3;
+  width: 55px;
+  height: 55px;
+  display: grid;
+  place-items: center;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Songti SC", serif;
+  font-size: 20px;
+  font-weight: 500;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.section-intro {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 25px;
+  margin: 16px 0 28px;
+}
+
+.section-intro .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-faint);
+}
+
+.section-intro h1 {
+  margin: 8px 0 7px;
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: clamp(34px, 4vw, 52px);
+  font-weight: 520;
+  letter-spacing: -0.03em;
+}
+
+.section-intro p {
+  max-width: 610px;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.75;
+}
+
+.group-filters {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+}
+
+.group-filters button {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 0 10px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.group-filters button i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+/* 当前视图下的节点数。0 のときは押しても空なので、押す前に分かるようにする。 */
+.group-filters button b {
+  min-width: 15px;
+  padding: 1px 4px;
+  background: var(--surface-sunken);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.group-filters button.empty { opacity: 0.5; }
+.group-filters button.empty b { background: transparent; color: var(--text-on-inverse-muted); }
+.group-filters button.active b { background: color-mix(in oklab, var(--highlight) 28%, transparent); color: inherit; }
+
+/* 分区が空のときの説明。3D 星図の上に重ねる。 */
+.graph-empty-note {
+  position: absolute;
+  z-index: 6;
+  top: 50%;
+  left: 50%;
+  width: min(430px, calc(100% - 40px));
+  transform: translate(-50%, -50%);
+  padding: 22px 24px;
+  background: color-mix(in oklab, var(--surface) 97%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  box-shadow: 0 18px 48px color-mix(in oklab, var(--shadow-color) 16%, transparent);
+  text-align: center;
+}
+
+.graph-empty-note strong {
+  display: block;
+  margin-bottom: 9px;
+  font-family: "Songti SC", serif;
+  font-size: 15px;
+}
+
+.graph-empty-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.85;
+}
+
+.graph-empty-note button {
+  margin-top: 14px;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--orange);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--interactive);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.graph-empty-note button:hover { background: color-mix(in oklab, var(--brand) 10%, transparent); }
+
+.group-filters button:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-overlay);
+  color: var(--ink);
+}
+
+.group-filters button.active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--on-fill);
+}
+
+/* 关系图・时间线共用的舞台工具栏。3D 模式下这是舞台上方唯一的一行，
+   左右两簇都必须自己说明自己是什么——上面没有标题再兜底了。 */
+.stage-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.graph-control-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.graph-renderer-toggle {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+/* 三组开关并排时，只靠 aria-label 区分「全部」是哪个「全部」。 */
+.graph-renderer-toggle > span {
+  padding: 0 7px 0 5px;
+  color: var(--text-tertiary);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.graph-renderer-toggle button {
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 9px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.graph-renderer-toggle button:hover {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink);
+}
+
+.graph-renderer-toggle button.active {
+  background: var(--ink);
+  color: var(--on-fill);
+}
+
+.graph-layout {
+  position: relative; /* .graph-empty-note の位置基準 */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  min-height: 640px;
+  background: var(--surface-inverse);
+}
+
+.graph-layout[data-renderer="space"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* 顶部筛选器已经承担 3D 星图的图例，侧栏只会挤掉最需要的横向视野。 */
+.graph-layout[data-renderer="space"] > .graph-legend {
+  display: none;
+}
+/* 查找双链时保留阅读层；状态提示放在它上方，关闭提示也取消迟到的打开。 */
+.wiki-navigation-notice {
+  position: fixed;
+  inset: auto 24px 24px auto;
+  z-index: calc(var(--z-top, 100) + 100);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 520px;
+  padding: 12px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  font-size: 13px;
+}
+
+.wiki-navigation-notice button {
+  flex: none;
+  padding: 2px 5px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* ===== 页面切换：哪些部分单独过渡 =====
+ * 名字只在转场期间（<html data-view-transition>，见 lib/view-transition.ts）挂上：
+ * 平时带名字的元素会多一层层叠上下文，折叠侧栏的悬停提示、顶栏毛玻璃可能被波及。
+ * 侧栏与顶栏单独成组，根快照只剩正文区，新页上移 8px 时外壳纹丝不动；
+ * 固定在视口上的撤销条、双链查找提示也各自成组，不被截进根快照跟着淡出淡入、上移。
+ * 父项与子项同时处于 active，两者名字必须不同：重名会让浏览器跳过整个转场。 */
+:root[data-view-transition] .sidebar { view-transition-name: app-sidebar; }
+:root[data-view-transition] .topbar { view-transition-name: app-topbar; }
+/* 当前分区整块（底色、朱线连同文字）在两个导航项之间滑动；旧文字在途中淡成新文字。 */
+:root[data-view-transition] .side-nav > a.active { view-transition-name: nav-active; }
+:root[data-view-transition] .side-subnav a.active { view-transition-name: nav-sub-active; }
+/* 「我在哪」：宽度随新标题伸缩，旧标题淡出、新标题淡入，不是硬换一行字。 */
+:root[data-view-transition] .topbar-where { view-transition-name: page-title; }
+:root[data-view-transition] .undo-flash { view-transition-name: undo-flash; }
+:root[data-view-transition] .wiki-navigation-notice { view-transition-name: wiki-notice; }
+/* 写入失败提示同样固定在右下角、跨页常驻，跟着根快照淡出再上移淡入会闪一下。 */
+:root[data-view-transition] .global-write-banner { view-transition-name: write-banner; }
+/* 新旧标题宽度不同：默认快照按组宽度拉伸，文字会在 200ms 里被横向压扁再弹开。
+ * 改成按原尺寸靠左画，旧字淡出、新字淡入，宽度变化只体现在组的裁切上。 */
+::view-transition-old(page-title),
+::view-transition-new(page-title) {
+  width: auto;
+  height: auto;
+  object-fit: none;
+  object-position: left center;
+}
+::view-transition-group(page-title) { overflow: hidden; }
+
+/* 转场带进来的页面：新快照已经淡入上移，容器自己的 view-enter 再播就是双重入场。
+ * 属性挂在随 view 重挂的容器上，转场结束不会被摘掉，所以不会重播。 */
+.view-container[data-enter="transition"] {
+  animation: none;
+}

@@ -1,0 +1,247 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  auditJobCaseCompleteness,
+  detectVerification,
+  validateJobCaseFrontmatter,
+} from "../lib/job-case-schema.ts";
+
+const valid = {
+  case_id: "Acme_Data",
+  company: "Acme",
+  origin: "manual",
+  status: "応募済（2026-08-01・Green）",
+  status_updated: "2026-08-01",
+  channel: "Green",
+};
+
+const validV2 = {
+  case_id: "Acme_Data_v2",
+  company: "Acme",
+  origin: "ai-reco",
+  status: "未応募",
+  rating: 7.9,
+  rating_version: "v2",
+  fit_score_100: 82,
+  fit_rating_raw: 8.2,
+  fit_band_raw: "A",
+  fit_band_final: "B",
+  fit_band: "B",
+  cap_reasons: "[org_legibility_unknown]",
+  document_gap_waived: "no",
+  application_decision: "verify",
+  hard_gate: "hold",
+  salary_feasibility: "pass",
+  gate_employment_visa: "hold",
+  gate_salary: "pass",
+  gate_english: "pass",
+  gate_role_center: "pass",
+  gate_japanese_client: "pass",
+  gate_original: "pass",
+  score_technical_value: 25,
+  score_document_match: 8,
+  score_transferability: 13,
+  score_org_legibility: 8,
+  score_client_deployability: 20,
+  score_role_coherence: 8,
+  primary_cohort: "modern_data_platform",
+  problem_families: "[dwh, data_quality]",
+  exact_evidence: "absent",
+  role_family: "data_platform_lead",
+  client_frontload_current: "low",
+  salary_min: 800,
+  salary_max: 1200,
+  salary_range_class: "high_possible",
+  access_level: 0,
+  access_state: "not_sent",
+  fit_score_current: 82,
+  fit_revision_on: "2026-08-20",
+};
+
+const complete = [
+  "## 推荐理由",
+  "8分。",
+  "## 匹配点",
+  "- 必須「Spark」＝ 8年",
+  "## 注意点",
+  "- クラウド実務が薄い",
+  "## 主打材料",
+  "- 職務経歴書",
+  "## ✅ 原文核対済み",
+  "necessary",
+].join("\n");
+
+test("schema：形の正しい job-case は問題なし", () => {
+  assert.deepEqual(validateJobCaseFrontmatter(valid), []);
+});
+
+test("schema：AI応募执行者需要真实応募日和执行AI，作者与旧数据不推定为代投", () => {
+  const submitted = { ...valid, applied_on: "2026-08-01", application_actor: "ai", application_agent: "Codex" };
+  assert.deepEqual(validateJobCaseFrontmatter(submitted), []);
+  assert.deepEqual(validateJobCaseFrontmatter({ ...valid, ai_author: "Codex", origin: "ai-reco" }), []);
+  assert.ok(validateJobCaseFrontmatter({ ...submitted, applied_on: undefined }).some((problem) => /applied_on/.test(problem)));
+  assert.ok(validateJobCaseFrontmatter({ ...submitted, applied_on: "2026-02-30" }).some((problem) => /applied_on/.test(problem)));
+  assert.ok(validateJobCaseFrontmatter({ ...submitted, application_agent: "" }).some((problem) => /application_agent/.test(problem)));
+  assert.ok(validateJobCaseFrontmatter({ ...submitted, status: "未応募" }).some((problem) => /未応募/.test(problem)));
+  assert.ok(validateJobCaseFrontmatter({ ...submitted, application_actor: "author" }).some((problem) => /application_actor/.test(problem)));
+});
+
+test("schema：v2の六軸・cap・Gate・監査labelが整合していれば問題なし", () => {
+  assert.deepEqual(validateJobCaseFrontmatter(validV2), []);
+});
+
+test("schema：v2の未知label・六軸不一致・Gate集約不一致を止める", () => {
+  const problems = validateJobCaseFrontmatter({
+    ...validV2,
+    primary_cohort: "modern_cloud_anything",
+    fit_score_100: 81,
+    hard_gate: "pass",
+  });
+  assert.ok(problems.some((p) => /primary_cohort .*未知/u.test(p)));
+  assert.ok(problems.some((p) => /6軸合計 82 と fit_score_100 81/u.test(p)));
+  assert.ok(problems.some((p) => /hard_gate は各Gateの最悪値 hold/u.test(p)));
+});
+
+test("schema：REJECTを高ratingのままWebへ出せない", () => {
+  const problems = validateJobCaseFrontmatter({
+    ...validV2,
+    gate_english: "reject",
+    hard_gate: "reject",
+  });
+  assert.ok(problems.some((p) => /hard_gate reject なら fit_band_final は D/u.test(p)));
+});
+
+test("schema：低いdocument matchをBのまま表示できない", () => {
+  const problems = validateJobCaseFrontmatter({
+    ...validV2,
+    fit_score_100: 77,
+    fit_rating_raw: 7.7,
+    fit_band_raw: "B",
+    rating: 7.7,
+    score_document_match: 3,
+  });
+  assert.ok(problems.some((p) => /fit_band_final は最大C/u.test(p)));
+});
+
+test("schema：年収非公開はmin/maxなしで表現できる", () => {
+  const problems = validateJobCaseFrontmatter({
+    ...validV2,
+    salary_min: undefined,
+    salary_max: undefined,
+    salary_range_class: "undisclosed",
+    salary_feasibility: "hold",
+    gate_salary: "hold",
+  });
+  assert.deepEqual(problems, []);
+});
+
+test("schema：status の列挙外は列挙を添えて落とす", () => {
+  const problems = validateJobCaseFrontmatter({ ...valid, status: "選考中" });
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /status "選考中" は列挙に無い/u);
+});
+
+test("schema：channel と status_updated は status 次第で必須になる", () => {
+  const problems = validateJobCaseFrontmatter({
+    case_id: "A",
+    company: "B",
+    origin: "manual",
+    status: "面接中",
+  });
+  assert.ok(problems.some((p) => /`channel` が要る/u.test(p)));
+  assert.ok(problems.some((p) => /`status_updated` が要る/u.test(p)));
+});
+
+test("schema：保留は日付が定まらない状態なので status_updated を要求しない", () => {
+  // 無い日付を作らせないための例外。ここを必須にすると嘘の日付が入る。
+  const problems = validateJobCaseFrontmatter({
+    case_id: "A",
+    company: "B",
+    origin: "manual",
+    status: "保留（募集終了）",
+  });
+  assert.deepEqual(problems, []);
+});
+
+test("schema：実在しない日付・範囲外 rating・依存フィールド欠落を捕まえる", () => {
+  const problems = validateJobCaseFrontmatter({
+    ...valid,
+    status_updated: "2026-02-30",
+    rating: 11,
+    follow_up_at: "2026-08-20",
+    next_event_at: "2026-08-05 25:00",
+  });
+  assert.ok(problems.some((p) => /status_updated .*実在する YYYY-MM-DD ではない/u.test(p)));
+  assert.ok(problems.some((p) => /rating .*0〜10 の数値ではない/u.test(p)));
+  assert.ok(problems.some((p) => /follow_up_at があるなら waiting_for も必要/u.test(p)));
+  assert.ok(problems.some((p) => /next_event_at .*YYYY-MM-DD HH:MM ではない/u.test(p)));
+});
+
+test("完成度：進行中なのに未採点・節なし・核対マークなしを警告する", () => {
+  // 2026-08-04 実証：一次面接が確定している案件が rating も評価節も無いまま
+  // 3週間 Web に並んでいた。形式検査は全部通っていた。
+  const warnings = auditJobCaseCompleteness({ ...valid, status: "面接中" }, "## 経緯\n本文");
+  assert.ok(warnings.some((w) => /rating が無い/u.test(w)));
+  assert.ok(warnings.some((w) => /推荐理由・匹配点・注意点・主打材料/u.test(w)));
+  assert.ok(warnings.some((w) => /`## ✅` で始まる見出しが無い/u.test(w)));
+});
+
+test("完成度：揃っていれば警告ゼロ", () => {
+  const warnings = auditJobCaseCompleteness({ ...valid, rating: 8 }, complete);
+  assert.deepEqual(warnings, []);
+});
+
+test("完成度：⚠️ 見出しは「要確認」なので核対マーク欠落として二重に鳴らさない", () => {
+  const content = complete.replace("## ✅ 原文核対済み", "## ⚠️ 英語要件が未確認");
+  const warnings = auditJobCaseCompleteness({ ...valid, rating: 8 }, content);
+  assert.deepEqual(warnings, []);
+});
+
+test("完成度：終わった案件は採点も節も要求しない", () => {
+  // 不採用・未応募まで巻き込むと警告が数十件になり、誰も読まなくなる。
+  for (const status of ["不採用（2026-07-30・書類選考）", "未応募"]) {
+    assert.deepEqual(auditJobCaseCompleteness({ ...valid, status }, "本文だけ"), []);
+  }
+});
+
+test("核対判定：逐語ブロックの節は ✅ 見出しと同じく原文確認済みとみなす", () => {
+  // 2026-08-04 実測：38件が逐語ブロックを持ちながら「未核对」と出ていた。
+  // ✅ を持つのは 07-20 頃の retrofit ノートだけで、確認の有無ではなく世代の差だった。
+  assert.equal(
+    detectVerification("## 必須要件（求人原文・逐語）\n```\n・Spark 経験\n```"),
+    "verified",
+  );
+  assert.equal(detectVerification("## ✅ 原文核対済み"), "verified");
+  assert.equal(detectVerification("## 経緯\n応募した"), "unchecked");
+});
+
+test("核対判定：⚠️ と「未検証」はリスク側なので逐語ブロックがあっても要確認に倒す", () => {
+  // 古い「確認済」と新しい「要確認」が同居した時に後者を勝たせる。
+  const content = "## 必須要件（求人原文・逐語）\n```\n・Spark\n```\n## ⚠️ 語学欄が未取得";
+  assert.equal(detectVerification(content), "warned");
+  assert.equal(detectVerification("## 必須要件（求人原文・逐語）\n未検証の項目あり"), "warned");
+});
+
+test("完成度：過ぎた next_event_at は進行中の案件でだけ指摘する", () => {
+  const stale = auditJobCaseCompleteness(
+    { ...valid, status: "面接中", rating: 8, applied_on: "2026-07-20", next_event_at: "2026-08-01 10:00" },
+    complete,
+    { today: "2026-08-04" },
+  );
+  assert.ok(stale.some((w) => /2026-08-01 が過ぎている/u.test(w)));
+
+  const future = auditJobCaseCompleteness(
+    { ...valid, status: "面接中", rating: 8, applied_on: "2026-07-20", next_event_at: "2026-08-10 10:00" },
+    complete,
+    { today: "2026-08-04" },
+  );
+  assert.deepEqual(future, []);
+});
+
+test("完成度：応募済以降で応募日がどこにも無ければ警告、applied_on か括弧内の日付があれば黙る", () => {
+  const missing = auditJobCaseCompleteness({ ...valid, status: "面接中", rating: 8 }, complete, { today: "2026-08-04" });
+  assert.ok(missing.some((w) => /applied_on/u.test(w)), "status_updated は拒否日に上書きされるので応募日は別枠に要る");
+  assert.deepEqual(auditJobCaseCompleteness({ ...valid, status: "面接中", rating: 8, applied_on: "2026-07-20" }, complete, { today: "2026-08-04" }), []);
+  assert.deepEqual(auditJobCaseCompleteness({ ...valid, status: "応募済（2026-07-20・Green経由）", rating: 8 }, complete, { today: "2026-08-04" }), []);
+});

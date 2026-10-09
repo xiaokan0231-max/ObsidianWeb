@@ -10,19 +10,76 @@ import {
 } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import {
+  GraphHandControls,
+  type GraphHandNavigationFrame,
+  type GraphHandRelationFeedback,
+  type GraphHandTargetFeedback,
+  type GraphTrackedHandFrame,
+} from "./graph-hand-controls";
+import { relationExploration } from "@/lib/graph-relation-exploration.mjs";
+import { pickConstellationLabels } from "@/lib/knowledge-graph";
+import { estimateLabelWidth } from "@/lib/stage-interaction.mjs";
+import { approachValues, createRenderGate } from "@/lib/stage-motion.mjs";
+import { prefersReducedMotion } from "@/lib/motion";
+import {
+  NODE_FRAGMENT_SHADER,
+  NODE_VERTEX_SHADER,
+  SEARCH_SHELL_LIMIT,
+  createCometTexture,
+  createFlightController,
+  createFocusArtifact,
+  createLabelLayer,
+  createNebulaTexture,
+  createSearchShellMaterial,
+  createStageBloom,
+  createStageInteractionUniforms,
+  createStagePointerEffects,
+  createStageRenderer,
+  createStarfield,
+  disposeStage,
+  fitDistance,
+  projectLabelItems,
+  readStageVoid,
+  seeded,
+  type StageLabelItem,
+  syncStageVoid,
+  writeStageFogUniforms,
+  writeStageInteractionUniforms,
+} from "./three-stage";
+import {
+  isEditableTarget,
+  StageControls,
+  StagePortal,
+  StageSearchRadar,
+  StageShortcuts,
+  useStageFullscreen,
+  useStagePortal,
+  useStageSearch,
+} from "./three-stage-chrome";
 
 export type KnowledgeGraphSceneNode = {
   id: string;
   title: string;
+  nodeKind: "note" | "company" | "skill";
   group: string;
   groupLabel: string;
   color: string;
   degree: number;
+  path: string;
+  kindLabel: string;
+  updatedLabel: string;
+  outbound: number;
+  excerpt: string;
+  openable: boolean;
 };
 
 export type KnowledgeGraphSceneLink = {
   source: string;
   target: string;
+  relation: string;
+  relationLabel: string;
+  directed: boolean;
 };
 
 type Props = {
@@ -30,176 +87,343 @@ type Props = {
   links: KnowledgeGraphSceneLink[];
   onOpen: (id: string) => void;
   onFallback: () => void;
+  /** 进入星图时要锁定的节点（外壳从 URL 的 ?focus= 传入）。进场运镜结束后再飞过去。 */
+  initialFocusId?: string | null;
+  /** 用户锁定／取消锁定节点时回调，外壳据此写回 URL，2D／3D 切换停在同一个节点。 */
+  onFocusChange?: (id: string | null) => void;
 };
 
-type Flight = {
-  startedAt: number;
-  duration: number;
-  fromCamera: THREE.Vector3;
-  fromTarget: THREE.Vector3;
-  toCamera: THREE.Vector3;
-  toTarget: THREE.Vector3;
-};
-
+// 分区中心落在四条旋臂的中段，系统节点沉入核心；标签、灯光和点击热区都以这些锚点对齐。
+// 旋臂本身由节点布局函数继续向内外延伸，所以首屏读成一座星系，而不是五个互不相干的气泡。
 const GROUP_CENTERS: Record<string, [number, number, number]> = {
-  self: [-3.8, 2.15, 0.6],
-  career: [3.8, 2.05, -0.2],
-  study: [-3.65, -2.45, -0.15],
-  analysis: [3.7, -2.35, 0.7],
-  system: [0, 0, -1.25],
+  self: [3.65, -0.05, 0.9],
+  career: [-0.05, 2.78, -0.5],
+  study: [-3.62, 0.12, 0.3],
+  analysis: [0.12, -2.76, -1.2],
+  system: [0, 0, -2.45],
 };
 
-const NODE_VERTEX_SHADER = `
-  attribute float aSize;
+// 四个业务分区不是四座互不相干的泡泡，而是同一枚记忆星系的四条旋臂。
+// system 留在核心，既保留分区语义，也让全景拥有官网那种一眼可读的整体轮廓。
+const GROUP_ARM_PHASE: Record<string, number> = {
+  self: -2.1,
+  career: -2.1 + Math.PI / 2,
+  study: -2.1 + Math.PI,
+  analysis: -2.1 + Math.PI * 1.5,
+};
+const GROUP_HIT_ROTATION: Record<string, number> = {
+  self: 0.02,
+  career: Math.PI / 2,
+  study: -0.02,
+  analysis: Math.PI / 2,
+  system: 0,
+};
+
+const SPECTRAL_PALETTE = [
+  // 重复冷白不是笔误：Astra 的丰富感来自“色温差”，不是平均分配彩虹色。
+  // 绝大多数星体保持冰白／蓝白，少量琥珀与桃色作为视觉节拍。
+  "#f7fbff",
+  "#e7f4ff",
+  "#cbe9ff",
+  "#f4fbff",
+  "#d8efff",
+  "#fff5ea",
+  "#ffd0b6",
+  "#ffad86",
+  "#8edfff",
+];
+
+// 常驻机位带一点右上方的 3/4 侧角：正对 z 轴的机位没有视差，纵深读不出来。
+// 手横穿整个摄像头画面时，相当于鼠标横拖整个画布。1 就是 1:1 的空间映射；
+// 调大转得更快、调小更稳，是唯一需要凭手感调的那个旋钮。
+const HAND_ORBIT_GAIN = 1;
+
+const HOME_DIRECTION = new THREE.Vector3(0.17, 0.14, 1).normalize();
+// 首次进场的出发机位方向（另一侧高处），俯冲到常驻机位的运镜由飞行控制器完成。
+const ENTRY_DIRECTION = new THREE.Vector3(-0.85, 0.55, 1).normalize();
+
+// 动态标签池的规模：DOM 里常驻这么多个名字，随选中和镜头位置重新绑定。
+const NODE_LABEL_POOL = 14;
+// 连线流光的速度（沿线参数每秒走多少）。3 秒走完一条关系，快了像警示灯。
+const LINK_FLOW_SPEED = 0.34;
+
+// 分区内关系保留为细线；跨区关系在全景只留下极淡的个体痕迹，主要由下方
+// 聚合航道表达。锁定节点后 aFocus 会把真实关系重新展开。
+const GRAPH_LINK_VERTEX_SHADER = /* glsl */ `
   attribute float aFocus;
-  attribute float aPhase;
+  attribute float aBase;
+  attribute float aT;
+  attribute float aFlowPhase;
   varying vec3 vColor;
   varying float vFocus;
-  uniform float uTime;
-  uniform float uMotion;
+  varying float vBase;
+  varying float vFog;
+  varying float vT;
+  uniform float uFogDensity;
+  uniform float uFogStrength;
 
   void main() {
     vColor = color;
     vFocus = aFocus;
-    float pulse = 1.0 + sin(uTime * 1.5 + aPhase) * 0.08 * uMotion;
+    vBase = aBase;
+    // 每条边只有两个顶点，aT 在起点 0、终点 1，片元里插值出沿线进度；
+    // 加上每条边自己的相位，几百根线的光带不会齐步走。
+    vT = aT + aFlowPhase;
     vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+    // 星点吃雾、连线不吃，远端的臂淡下去了线却还是满亮——整张图会读成
+    // 「一张线框盖在星云上」而不是一个体积。这里和节点着色器用同一条雾。
+    float fogDistance = length(viewPosition.xyz);
+    float fogExponent = uFogDensity * fogDistance;
+    vFog = mix(1.0, exp(-fogExponent * fogExponent), uFogStrength);
     gl_Position = projectionMatrix * viewPosition;
-    gl_PointSize = aSize * pulse * (300.0 / max(3.0, -viewPosition.z));
   }
 `;
 
-const NODE_FRAGMENT_SHADER = `
+const GRAPH_LINK_FRAGMENT_SHADER = /* glsl */ `
   varying vec3 vColor;
   varying float vFocus;
+  varying float vBase;
+  varying float vFog;
+  varying float vT;
+  uniform float uSearchActive;
+  uniform float uTime;
+  uniform float uFlow;
 
   void main() {
-    float distanceFromCenter = length(gl_PointCoord - vec2(0.5));
-    if (distanceFromCenter > 0.5) discard;
-    float corona = smoothstep(0.5, 0.22, distanceFromCenter);
-    float body = smoothstep(0.29, 0.08, distanceFromCenter);
-    float core = smoothstep(0.14, 0.0, distanceFromCenter);
-    float ring = smoothstep(0.38, 0.32, distanceFromCenter)
-      - smoothstep(0.29, 0.23, distanceFromCenter);
-    float alpha = max(corona * 0.72, body) * mix(0.82, 1.0, vFocus);
-    vec3 color = vColor * 1.42 + ring * vec3(0.48) + core * vec3(1.0) + vFocus * vec3(0.28);
-    gl_FragColor = vec4(color, alpha);
+    float baseAlpha = mix(0.022, 0.145, vBase);
+    float searchVisibility = mix(1.0, mix(0.16, 1.0, vFocus), uSearchActive);
+    // 一段从起点流向终点的亮带：fract 让它循环，两侧 smoothstep 让头尾都是软的。
+    // 强度跟 vFocus 走——被照亮的关系自己在流动，全景只剩极淡的一丝，
+    // 不至于把整座星系变成一张闪烁的电路板。
+    float flowPosition = fract(vT - uTime * ${LINK_FLOW_SPEED});
+    float band = smoothstep(0.0, 0.16, flowPosition) * smoothstep(0.34, 0.16, flowPosition);
+    float flow = band * mix(0.035 * vBase, 0.42, vFocus) * uFlow;
+    // 聚焦时的上限压到 bloom 阈值之下：单根线不辉光，只有几十根在 hub 处
+    // 叠起来才溢出——线读成光，而不是烧成一团白。流光那一小段允许越过去。
+    float alpha = min(1.0, mix(baseAlpha, 0.62, vFocus) + flow) * searchVisibility * vFog;
+    gl_FragColor = vec4(vColor + vFocus * vec3(0.2) + flow * vec3(0.55), alpha);
   }
 `;
-
-const LINK_VERTEX_SHADER = `
-  attribute float aFocus;
-  varying vec3 vColor;
-  varying float vFocus;
-
-  void main() {
-    vColor = color;
-    vFocus = aFocus;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const LINK_FRAGMENT_SHADER = `
-  varying vec3 vColor;
-  varying float vFocus;
-
-  void main() {
-    float alpha = mix(0.16, 0.88, vFocus);
-    gl_FragColor = vec4(vColor + vFocus * vec3(0.2), alpha);
-  }
-`;
-
-function seeded(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return ((hash >>> 0) % 100000) / 100000;
-}
-
-function easeInOutCubic(value: number) {
-  return value < 0.5
-    ? 4 * value * value * value
-    : 1 - Math.pow(-2 * value + 2, 3) / 2;
-}
 
 export default function ThreeKnowledgeGraph({
   nodes,
   links,
   onOpen,
   onFallback,
+  initialFocusId = null,
+  onFocusChange,
 }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const resetViewRef = useRef<() => void>(() => undefined);
+  const overviewRef = useRef<(fullscreen: boolean) => void>(() => undefined);
+  const selectNodeRef = useRef<(id: string) => void>(() => undefined);
+  const gestureFrameRef = useRef<(frame: GraphHandNavigationFrame | null) => void>(
+    () => undefined,
+  );
+  const updateSearchRef = useRef<(ids: string[], active: boolean) => void>(
+    () => undefined,
+  );
+  const searchRequestRef = useRef<{ ids: string[]; active: boolean }>({
+    ids: [],
+    active: false,
+  });
   const pauseRef = useRef(false);
-  const onOpenRef = useRef(onOpen);
+  const dossierModeRef = useRef<"dock" | "focus">("dock");
+  // 开场运镜只在本次会话第一次装载星图时播放；分区筛选会重建场景，不该重播。
+  const entryPlayedRef = useRef(false);
   const onFallbackRef = useRef(onFallback);
+  const onFocusChangeRef = useRef(onFocusChange);
+  // 外壳传进来的 focus（URL）。场景每次重建时读它重新锁定；用户自己锁定／取消时
+  // 先记进 reportedFocusRef 再回调，这样 URL 回流成 prop 时能认出是自己发的，不会再飞一次。
+  const initialFocusRef = useRef(initialFocusId);
+  const reportedFocusRef = useRef<string | null>(initialFocusId);
+  const focusRequestRef = useRef<(id: string) => void>(() => undefined);
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [dossierMode, setDossierMode] = useState<"dock" | "focus">("dock");
+  const [dossierZoom, setDossierZoom] = useState(1);
+  const [shortcutHelp, setShortcutHelp] = useState(false);
+  const [handTargets, setHandTargets] = useState<GraphHandTargetFeedback[]>([]);
+  const [handRelation, setHandRelation] = useState<GraphHandRelationFeedback>(null);
+  const { fullscreen, toggleFullscreen } = useStageFullscreen(stageRef);
 
-  const toggleFullscreen = useCallback(async () => {
-    const stage = stageRef.current;
-    if (!stage || !document.fullscreenEnabled) return;
-    try {
-      if (document.fullscreenElement === stage) {
-        await document.exitFullscreen();
-      } else {
-        await stage.requestFullscreen();
-      }
-    } catch {
-      // 埋め込みブラウザが権限を拒否しても、星図本体と他の操作は壊さない。
-    }
-  }, []);
-
+  // 等一帧再飞：切全屏会先触发一次画布尺寸变化，aspect 更新之后算出来的
+  // 全景距离才是对的，否则会按旧比例取景，飞完还得再纠一次。
+  // 首帧不动：那时进场运镜正在播，插一脚会把它拦腰截断。
+  const fullscreenSeenRef = useRef<boolean | null>(null);
   useEffect(() => {
-    const syncFullscreen = () => {
-      setFullscreen(document.fullscreenElement === stageRef.current);
-    };
-    const handleShortcut = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (
-        event.key.toLowerCase() !== "f" ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return;
-      }
-      event.preventDefault();
-      void toggleFullscreen();
-    };
-    document.addEventListener("fullscreenchange", syncFullscreen);
-    document.addEventListener("keydown", handleShortcut);
-    return () => {
-      document.removeEventListener("fullscreenchange", syncFullscreen);
-      document.removeEventListener("keydown", handleShortcut);
-    };
-  }, [toggleFullscreen]);
-
-  useEffect(() => {
-    onOpenRef.current = onOpen;
-  }, [onOpen]);
+    if (fullscreenSeenRef.current === fullscreen) return undefined;
+    const first = fullscreenSeenRef.current === null;
+    fullscreenSeenRef.current = fullscreen;
+    if (first) return undefined;
+    const frame = window.requestAnimationFrame(() => overviewRef.current(fullscreen));
+    return () => window.cancelAnimationFrame(frame);
+  }, [fullscreen]);
 
   useEffect(() => {
     onFallbackRef.current = onFallback;
   }, [onFallback]);
 
   useEffect(() => {
+    onFocusChangeRef.current = onFocusChange;
+  }, [onFocusChange]);
+
+  useEffect(() => {
+    initialFocusRef.current = initialFocusId;
+    // 外部改了 focus（后退键、在 2D 里换了中心）：已经锁着同一个就不动，否则飞过去。
+    // 外部清空不动镜头——用户可能只是在 2D 里点了「重新选择」，3D 没必要被拽回全景。
+    // 但「已上报」要一起清掉：否则 URL 被清空后再点同一颗星，reportFocus 会以为
+    // 已经报过而不回调，URL 就一直空着。
+    if (!initialFocusId) {
+      reportedFocusRef.current = null;
+      return;
+    }
+    if (initialFocusId === reportedFocusRef.current) return;
+    reportedFocusRef.current = initialFocusId;
+    focusRequestRef.current(initialFocusId);
+  }, [initialFocusId]);
+
+  useEffect(() => {
     pauseRef.current = paused;
   }, [paused]);
+
+  useEffect(() => {
+    dossierModeRef.current = dossierMode;
+  }, [dossierMode]);
 
   const nodeById = useMemo(
     () => new Map(nodes.map((node) => [node.id, node])),
     [nodes],
   );
+  const canOpen = useCallback((id: string) => Boolean(nodeById.get(id)?.openable), [nodeById]);
+  const { openingId, openNode } = useStagePortal({ stageRef, onOpen, canOpen });
+  const pickSearchResult = useCallback((id: string) => selectNodeRef.current(id), []);
+  const searchTiebreak = useCallback(
+    (left: KnowledgeGraphSceneNode, right: KnowledgeGraphSceneNode) => right.degree - left.degree,
+    [],
+  );
+  const search = useStageSearch({
+    items: nodes,
+    inputRef: searchInputRef,
+    onPick: pickSearchResult,
+    tiebreak: searchTiebreak,
+  });
   const activeNode = nodeById.get(selectedId ?? hoveredId ?? "") ?? null;
+  const selectedNode = nodeById.get(selectedId ?? "") ?? null;
+  const openingNode = nodeById.get(openingId ?? "") ?? null;
+  const selectedNeighbors = useMemo(() => {
+    if (!selectedId) return [];
+    const neighbors = new Map<string, {
+      node: KnowledgeGraphSceneNode;
+      relationLabel: string;
+      direction: "out" | "in" | "both";
+    }>();
+    links.forEach((link) => {
+      const neighborId = link.source === selectedId
+        ? link.target
+        : link.target === selectedId
+          ? link.source
+          : "";
+      const node = nodeById.get(neighborId);
+      if (!node) return;
+      const direction = link.directed
+        ? link.source === selectedId ? "out" : "in"
+        : "both";
+      const key = `${neighborId}\u0000${link.relation}`;
+      neighbors.set(key, { node, relationLabel: link.relationLabel, direction });
+    });
+    return [...neighbors.values()]
+      .toSorted((left, right) => {
+        const byDegree = right.node.degree - left.node.degree;
+        return byDegree || left.relationLabel.localeCompare(right.relationLabel, "zh-CN");
+      })
+      .slice(0, 8);
+  }, [links, nodeById, selectedId]);
+
+  const changeDossierZoom = useCallback((amount: number) => {
+    setDossierZoom((current) => (
+      Math.round(Math.min(1.35, Math.max(0.85, current + amount)) * 100) / 100
+    ));
+  }, []);
+
+  useEffect(() => {
+    const request = {
+      ids: search.results.map((node) => node.id),
+      active: Boolean(search.normalizedQuery),
+    };
+    searchRequestRef.current = request;
+    updateSearchRef.current(request.ids, request.active);
+  }, [search.normalizedQuery, search.results]);
+
+  useEffect(() => {
+    const handleDossierShortcut = (event: KeyboardEvent) => {
+      // 笔记抽屉或阅读层盖在舞台上时舞台是 inert 的：此时 R/P/O 不该在背后重置镜头、
+      // 暂停或打开另一篇笔记。别的层已经处理过的按键（defaultPrevented）也让出去。
+      if (
+        event.defaultPrevented ||
+        stageRef.current?.closest("[inert]") ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        isEditableTarget(event.target)
+      ) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (event.key === "?") {
+        event.preventDefault();
+        setShortcutHelp((current) => !current);
+        return;
+      }
+      if (key === "r") {
+        event.preventDefault();
+        resetViewRef.current();
+        return;
+      }
+      if (key === "p") {
+        event.preventDefault();
+        setPaused((current) => !current);
+        return;
+      }
+      if (!selectedId) return;
+      if (key === "d") {
+        event.preventDefault();
+        setDossierMode((current) => current === "dock" ? "focus" : "dock");
+        return;
+      }
+      if (key === "o") {
+        event.preventDefault();
+        openNode(selectedId);
+        return;
+      }
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        changeDossierZoom(0.1);
+        return;
+      }
+      if (event.key === "-") {
+        event.preventDefault();
+        changeDossierZoom(-0.1);
+        return;
+      }
+      if (event.key === "0") {
+        event.preventDefault();
+        setDossierZoom(1);
+        return;
+      }
+      if (event.key === "Escape" && dossierMode === "focus") {
+        event.preventDefault();
+        event.stopPropagation();
+        setDossierMode("dock");
+      }
+    };
+    document.addEventListener("keydown", handleDossierShortcut);
+    return () => document.removeEventListener("keydown", handleDossierShortcut);
+  }, [changeDossierZoom, dossierMode, openNode, selectedId]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -209,63 +433,119 @@ export default function ThreeKnowledgeGraph({
     setHoveredId(null);
     setSelectedId(null);
 
-    let renderer: THREE.WebGLRenderer;
-    try {
-      renderer = new THREE.WebGLRenderer({
-        antialias: nodes.length < 1200,
-        alpha: false,
-        powerPreference: "high-performance",
-      });
-    } catch {
+    const stage = createStageRenderer({
+      host,
+      antialias: nodes.length < 1200,
+      pixelRatioCap: nodes.length > 1200 ? 1.25 : 1.75,
+      ariaLabel: `Obsidian 3D 记忆星图，共 ${nodes.length} 个节点；单击聚焦，双击打开完整笔记，拖拽旋转，方向键选择`,
+    });
+    if (!stage) {
       onFallbackRef.current();
       return;
     }
-
-    const canvas = renderer.domElement;
-    canvas.setAttribute("role", "img");
-    canvas.setAttribute(
-      "aria-label",
-      `Obsidian 2.5D 记忆星图，共 ${nodes.length} 个节点；方向键选择，回车打开笔记`,
-    );
-    canvas.tabIndex = 0;
-    host.appendChild(canvas);
-
-    renderer.setClearColor(0x101b17, 1);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.setPixelRatio(
-      Math.min(window.devicePixelRatio || 1, nodes.length > 1200 ? 1.25 : 1.75),
-    );
+    const { renderer, canvas } = stage;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x101b17, 0.035);
+    // 旋臂随节点数拉长以后整体尺度变大了，雾的密度要跟着降，
+    // 否则同一个系数会把外圈整条臂吃掉。
+    // 雾色与 clearColor 同读 --stage-void：远处淡进的是同一片虚空。
+    scene.fog = new THREE.FogExp2(readStageVoid(), 0.024);
 
     const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 80);
     const root = new THREE.Group();
     scene.add(root);
+    scene.add(new THREE.HemisphereLight(0xd8fff0, 0x07110d, 1.7));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.4);
+    keyLight.position.set(3, 6, 8);
+    scene.add(keyLight);
+    Object.entries(GROUP_CENTERS).forEach(([group, center]) => {
+      const groupNode = nodes.find((node) => node.group === group);
+      if (!groupNode) return;
+      const light = new THREE.PointLight(groupNode.color, 5.2, 7.5, 1.65);
+      light.position.set(center[0], center[1], center[2] + 2.1);
+      scene.add(light);
+    });
 
     const positions = new Float32Array(nodes.length * 3);
     const colors = new Float32Array(nodes.length * 3);
     const sizes = new Float32Array(nodes.length);
+    const baseSizes = new Float32Array(nodes.length);
     const phases = new Float32Array(nodes.length);
+    // nodeFocus／linkFocus 是「目标」明暗，交互只写它们；真正上传给 GPU 的是
+    // *Current，在 animate 里按指数趋近目标。之前直接写缓冲，悬停和选中时
+    // 邻居一帧全亮，而镜头还在走 820ms 的缓动，两种节奏打架。
     const nodeFocus = new Float32Array(nodes.length);
+    const nodeFocusCurrent = new Float32Array(nodes.length);
+    const nodeSearch = new Float32Array(nodes.length);
+    // 搜索壳的旋转基值是确定的，构建时算一次；之前帧内每个命中都跑三次 seeded(模板字符串)。
+    const searchSpins = new Float32Array(nodes.length * 3);
     const positionById = new Map<string, THREE.Vector3>();
+    const visualColorById = new Map<string, string>();
     const indexById = new Map<string, number>();
 
+    // 旋臂长度随该分区的节点数走。以前每条臂都用同一段半径，
+    // 结果 365 个求职节点和 4 个系统节点挤在一样长的槽里，线密度差了近百倍——
+    // 叠加混合下密的那条必然糊成一团死白。铺开它，星点才各自看得见。
+    const groupCounts = nodes.reduce<Record<string, number>>((counts, node) => {
+      counts[node.group] = (counts[node.group] ?? 0) + 1;
+      return counts;
+    }, {});
+    const armSpanFor = (group: string) => 5.55 * THREE.MathUtils.clamp(
+      Math.pow((groupCounts[group] ?? 1) / 110, 0.42),
+      0.58,
+      1.7,
+    );
+    const armSpreadFor = (group: string) => THREE.MathUtils.clamp(
+      Math.pow((groupCounts[group] ?? 1) / 110, 0.22),
+      0.72,
+      1.34,
+    );
+
     nodes.forEach((node, index) => {
-      const [centerX, centerY, centerZ] = GROUP_CENTERS[node.group] ?? GROUP_CENTERS.system;
-      const angle = seeded(node.id) * Math.PI * 2;
-      const radius = 0.65 + seeded(`${node.id}:radius`) * 2.25;
+      const isCore = node.group === "system" || GROUP_ARM_PHASE[node.group] === undefined;
+      const armSpan = armSpanFor(node.group);
+      const armSpread = armSpreadFor(node.group);
+      // 指数必须大于 1：u^k (k>1) 把点压向内圈，星系才有一个亮核心、
+      // 臂梢自然稀疏。之前用的 0.72 是反的——粒子被推到外圈，
+      // 结果中心是空的、外面挤成一圈，既没有重心也容易糊。
+      const radialProgress = Math.pow(seeded(`${node.id}:radius`), 1.45);
+      const radius = isCore ? 0.22 + radialProgress * 1.12 : 1.12 + radialProgress * armSpan;
+      const angle = isCore
+        ? seeded(node.id) * Math.PI * 2
+        : GROUP_ARM_PHASE[node.group]
+          // 缠绕总量固定：臂再长也只转这么多，否则长臂会绕回去压到邻居身上。
+          + radius * (2.6 / armSpan)
+          + (seeded(`${node.id}:angle`) - 0.5) * (0.11 + radialProgress * 0.17) * armSpread;
       const position = new THREE.Vector3(
-        centerX + Math.cos(angle) * radius,
-        centerY + Math.sin(angle) * radius * 0.66,
-        centerZ + (seeded(`${node.id}:depth`) - 0.5) * 2.45,
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius * 0.76,
+        (isCore ? -2.15 : -0.25)
+          + (seeded(`${node.id}:depth`) - 0.5)
+            * (isCore ? 1.9 : (1.5 + radialProgress * 3.3) * armSpread),
       );
-      const color = new THREE.Color(node.color);
+      const spectrumSeed = seeded(`${node.id}:spectrum`);
+      const spectralAccent = new THREE.Color(
+        SPECTRAL_PALETTE[Math.floor(spectrumSeed * SPECTRAL_PALETTE.length)],
+      );
+      // 分区色仍提供语义底色，但每颗记忆拥有自己的光谱偏移；否则 365 个求职节点
+      // 会合并成一整片相同的绿色，旋臂有形状却没有能量层次。
+      const color = new THREE.Color(node.color)
+        .lerp(spectralAccent, (isCore ? 0.48 : 0.3) + spectrumSeed * 0.3)
+        .lerp(new THREE.Color("#ffffff"), seeded(`${node.id}:white`) * 0.18)
+        .offsetHSL((spectrumSeed - 0.5) * 0.018, 0.035, 0.045);
       positions.set(position.toArray(), index * 3);
       colors.set(color.toArray(), index * 3);
-      sizes[index] = 0.82 + Math.min(1.08, Math.sqrt(node.degree + 1) * 0.17);
+      // 明暗跨度是这类星野的骨架：绝大多数点要小到几乎只是一粒微光，
+      // 被引用最多的那几个才亮成主角。旧曲线的下限是 0.82、上限 1.9，
+      // 只有 2.3 倍差距，所以满屏都是同一号亮点，看不出主次。
+      baseSizes[index] = 0.34 + Math.min(2.06, Math.pow(node.degree + 1, 0.62) * 0.3);
+      sizes[index] = baseSizes[index];
       phases[index] = seeded(`${node.id}:phase`) * Math.PI * 2;
+      searchSpins[index * 3] = seeded(`${node.id}:search-x`) * Math.PI;
+      searchSpins[index * 3 + 1] = seeded(`${node.id}:search-y`) * Math.PI;
+      searchSpins[index * 3 + 2] = seeded(`${node.id}:search-z`) * Math.PI;
       positionById.set(node.id, position);
+      visualColorById.set(node.id, `#${color.getHexString()}`);
       indexById.set(node.id, index);
     });
 
@@ -274,15 +554,21 @@ export default function ThreeKnowledgeGraph({
     nodeGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     nodeGeometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
     nodeGeometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
-    nodeGeometry.setAttribute("aFocus", new THREE.BufferAttribute(nodeFocus, 1));
+    nodeGeometry.setAttribute("aFocus", new THREE.BufferAttribute(nodeFocusCurrent, 1));
+    nodeGeometry.setAttribute("aSearch", new THREE.BufferAttribute(nodeSearch, 1));
 
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // 系统的 prefers-reduced-motion 与设置里的「总是减弱」由同一个入口判定，两处不会各说各话。
+    const reducedMotion = prefersReducedMotion();
     const nodeMaterial = new THREE.ShaderMaterial({
       vertexShader: NODE_VERTEX_SHADER,
       fragmentShader: NODE_FRAGMENT_SHADER,
       uniforms: {
         uTime: { value: 0 },
         uMotion: { value: reducedMotion ? 0 : 1 },
+        uSearchActive: { value: 0 },
+        uFocusDistance: { value: 0 },
+        uFocusRange: { value: 0 },
+        ...createStageInteractionUniforms(0),
       },
       vertexColors: true,
       transparent: true,
@@ -290,31 +576,178 @@ export default function ThreeKnowledgeGraph({
       blending: THREE.AdditiveBlending,
     });
     const nodePoints = new THREE.Points(nodeGeometry, nodeMaterial);
-    nodePoints.renderOrder = 3;
+    nodePoints.renderOrder = 4;
     root.add(nodePoints);
+    const pointerEffects = createStagePointerEffects(host, canvas);
+    const bloom = createStageBloom(renderer, { samples: nodes.length < 1200 ? 4 : 0 });
+    // 按需渲染的闸门：只在暂停或减弱动态、且一切都静止时才跳过 bloom 与标签投影。
+    const renderGate = createRenderGate();
+    const releaseStageVoid = syncStageVoid(renderer, scene.fog as THREE.FogExp2, () => renderGate.invalidate());
 
-    // 常驻少量高连接节点的标签，让星图不再只是一片“看不清是什么”的光点。
-    const labelLayer = document.createElement("div");
-    labelLayer.className = "space-graph-label-layer";
-    host.appendChild(labelLayer);
-    const labeledNodes = Object.keys(GROUP_CENTERS).flatMap((group) =>
-      nodes
-        .filter((node) => node.group === group)
-        .toSorted((left, right) => right.degree - left.degree)
-        .slice(0, 3),
+    const searchSphereGeometry = new THREE.SphereGeometry(1, 28, 18);
+    const searchSphereMaterial = createSearchShellMaterial();
+    const searchSpheres = new THREE.InstancedMesh(
+      searchSphereGeometry,
+      searchSphereMaterial,
+      nodes.length,
     );
-    const labelItems = labeledNodes.flatMap((node) => {
-      const position = positionById.get(node.id);
-      if (!position) return [];
-      const label = document.createElement("span");
-      label.style.setProperty("--label-accent", node.color);
-      const dot = document.createElement("i");
-      const text = document.createElement("b");
-      text.textContent = node.title.length > 22 ? `${node.title.slice(0, 22)}…` : node.title;
-      label.append(dot, text);
-      labelLayer.appendChild(label);
-      return [{ node, position, label }];
+    searchSpheres.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    searchSpheres.renderOrder = 3;
+    const searchMatrix = new THREE.Object3D();
+    let searchSphereScale = 0.15;
+    nodes.forEach((node, index) => {
+      const position = positionById.get(node.id)!;
+      searchMatrix.position.copy(position);
+      searchMatrix.scale.setScalar(0.0001);
+      searchMatrix.updateMatrix();
+      searchSpheres.setMatrixAt(index, searchMatrix.matrix);
+      searchSpheres.setColorAt(
+        index,
+        new THREE.Color(node.color).lerp(new THREE.Color("#ffffff"), 0.12),
+      );
     });
+    searchSpheres.instanceMatrix.needsUpdate = true;
+    if (searchSpheres.instanceColor) searchSpheres.instanceColor.needsUpdate = true;
+    root.add(searchSpheres);
+
+    // 星图上的名字分两层：五块分区铭牌常驻；节点名字走一个固定大小的标签池，
+    // 随选中与镜头注视点重新绑定（照航道 DATE_LABEL_POOL 的做法）。之前只在
+    // 构建时给每区前 3 个高连接节点挂名，飞近选中的星后，被照亮的邻居全是无名光点。
+    const labelLayer = createLabelLayer(host);
+    type PooledNodeLabel = StageLabelItem & {
+      element: HTMLElement;
+      title: HTMLElement;
+      nodeId: string | null;
+    };
+    const nodeLabels: PooledNodeLabel[] = Array.from({ length: Math.min(NODE_LABEL_POOL, nodes.length) }, () => {
+      const element = document.createElement("span");
+      const dot = document.createElement("i");
+      const title = document.createElement("b");
+      element.appendChild(dot);
+      element.appendChild(title);
+      element.dataset.visible = "false";
+      labelLayer.appendChild(element);
+      return {
+        element,
+        title,
+        nodeId: null,
+        position: new THREE.Vector3(),
+        offsetY: 13,
+        stagger: true,
+        width: 0,
+      };
+    });
+    const groupLabelItems = Object.entries(GROUP_CENTERS).flatMap(([group, center]) => {
+      const groupNodes = nodes.filter((node) => node.group === group);
+      const groupNode = groupNodes[0];
+      if (!groupNode) return [];
+      const label = document.createElement("span");
+      label.className = "space-graph-group-label";
+      label.style.setProperty("--label-accent", groupNode.color);
+      const title = document.createElement("strong");
+      title.textContent = groupNode.groupLabel;
+      const count = document.createElement("small");
+      count.textContent = `${groupNodes.length} 个节点`;
+      label.appendChild(title);
+      label.appendChild(count);
+      labelLayer.appendChild(label);
+      return [{
+        group,
+        position: new THREE.Vector3(center[0], center[1] + 1.62, center[2] + 0.45),
+        label,
+      }];
+    });
+    const groupStageLabels: StageLabelItem[] = groupLabelItems.map(({ position, label }) => ({
+      position,
+      element: label,
+      offsetY: -8,
+    }));
+    let stageLabelItems: StageLabelItem[] = groupStageLabels;
+    // 标签的明暗状态由当前焦点决定；focusAttributes／关系探索各自换掉这个判定。
+    let labelActiveFor: (id: string) => string = () => "";
+    let searchMatches = new Set<string>();
+    let searchActive = false;
+    const refreshLabelStates = () => {
+      nodeLabels.forEach((label) => {
+        if (!label.nodeId) return;
+        label.element.dataset.active = labelActiveFor(label.nodeId);
+        label.element.dataset.search = searchActive
+          ? searchMatches.has(label.nodeId) ? "match" : "dim"
+          : "";
+      });
+    };
+    const bindNodeLabels = (ids: string[]) => {
+      const bound: StageLabelItem[] = [];
+      nodeLabels.forEach((label, index) => {
+        const node = nodeById.get(ids[index] ?? "");
+        const position = node ? positionById.get(node.id) : undefined;
+        if (!node || !position) {
+          label.nodeId = null;
+          label.element.dataset.visible = "false";
+          // 明暗状态也要清：refreshLabelStates 跳过空槽，留着 selected/match 的旧名字会钉在原位。
+          label.element.dataset.active = "";
+          label.element.dataset.search = "";
+          return;
+        }
+        if (label.nodeId !== node.id) {
+          label.nodeId = node.id;
+          const text = node.title.length > 22 ? `${node.title.slice(0, 22)}…` : node.title;
+          label.title.textContent = text;
+          label.element.style.setProperty("--label-accent", node.color);
+          label.width = estimateLabelWidth(text, 12);
+        }
+        label.position.copy(position);
+        bound.push(label);
+      });
+      stageLabelItems = [...groupStageLabels, ...bound];
+      refreshLabelStates();
+    };
+
+    let labelBindKey = "";
+    // 命中的下标列表：帧内只遍历命中，不再每帧扫全部节点。
+    let searchHitIndices: number[] = [];
+    // uSearchActive 也走渐变：搜索一开，非命中的星应该是沉下去，不是瞬间熄灯。
+    let searchTarget = 0;
+    let searchCurrent = 0;
+    const applySearchMatches = (ids: string[], active: boolean) => {
+      const matches = new Set(ids);
+      const showSearchShells = active && matches.size > 0 && matches.size <= SEARCH_SHELL_LIMIT;
+      searchActive = active;
+      searchMatches = matches;
+      searchTarget = active ? 1 : 0;
+      searchSphereScale = matches.size <= 4 ? 0.19 : matches.size <= 7 ? 0.155 : 0.125;
+      searchHitIndices = [];
+      nodes.forEach((node, index) => {
+        const matched = matches.has(node.id);
+        nodeSearch[index] = matched ? 1 : 0;
+        if (active && matched) searchHitIndices.push(index);
+        sizes[index] = baseSizes[index] * (active && matched
+          ? showSearchShells ? 1.34 : 1.72
+          : 1);
+        searchMatrix.position.copy(positionById.get(node.id)!);
+        searchMatrix.rotation.set(
+          searchSpins[index * 3],
+          searchSpins[index * 3 + 1],
+          searchSpins[index * 3 + 2],
+        );
+        searchMatrix.scale.setScalar(
+          showSearchShells && matched ? searchSphereScale : 0.0001,
+        );
+        searchMatrix.updateMatrix();
+        searchSpheres.setMatrixAt(index, searchMatrix.matrix);
+      });
+      searchSpheres.visible = showSearchShells;
+      searchSpheres.instanceMatrix.needsUpdate = true;
+      (nodeGeometry.getAttribute("aSize") as THREE.BufferAttribute).needsUpdate = true;
+      (nodeGeometry.getAttribute("aSearch") as THREE.BufferAttribute).needsUpdate = true;
+      labelBindKey = "";
+      renderGate.invalidate();
+    };
+    updateSearchRef.current = applySearchMatches;
+    applySearchMatches(
+      searchRequestRef.current.ids,
+      searchRequestRef.current.active,
+    );
 
     const validLinks = links.filter(
       (link) => positionById.has(link.source) && positionById.has(link.target),
@@ -322,6 +755,10 @@ export default function ThreeKnowledgeGraph({
     const linkPositions = new Float32Array(validLinks.length * 6);
     const linkColors = new Float32Array(validLinks.length * 6);
     const linkFocus = new Float32Array(validLinks.length * 2);
+    const linkFocusCurrent = new Float32Array(validLinks.length * 2);
+    const linkBase = new Float32Array(validLinks.length * 2);
+    const linkT = new Float32Array(validLinks.length * 2);
+    const linkFlowPhase = new Float32Array(validLinks.length * 2);
     const adjacency = new Map<string, Set<string>>();
 
     validLinks.forEach((link, index) => {
@@ -329,8 +766,16 @@ export default function ThreeKnowledgeGraph({
       const target = positionById.get(link.target)!;
       const sourceColor = new THREE.Color(nodeById.get(link.source)?.color ?? "#9fb5a8");
       const targetColor = new THREE.Color(nodeById.get(link.target)?.color ?? "#9fb5a8");
+      const sameGroup = nodeById.get(link.source)?.group === nodeById.get(link.target)?.group;
       linkPositions.set([...source.toArray(), ...target.toArray()], index * 6);
       linkColors.set([...sourceColor.toArray(), ...targetColor.toArray()], index * 6);
+      linkBase[index * 2] = sameGroup ? 1 : 0;
+      linkBase[index * 2 + 1] = sameGroup ? 1 : 0;
+      linkT[index * 2] = 0;
+      linkT[index * 2 + 1] = 1;
+      const flowPhase = seeded(`${link.source}:${link.target}:flow`);
+      linkFlowPhase[index * 2] = flowPhase;
+      linkFlowPhase[index * 2 + 1] = flowPhase;
       if (!adjacency.has(link.source)) adjacency.set(link.source, new Set());
       if (!adjacency.has(link.target)) adjacency.set(link.target, new Set());
       adjacency.get(link.source)!.add(link.target);
@@ -340,10 +785,20 @@ export default function ThreeKnowledgeGraph({
     const linkGeometry = new THREE.BufferGeometry();
     linkGeometry.setAttribute("position", new THREE.BufferAttribute(linkPositions, 3));
     linkGeometry.setAttribute("color", new THREE.BufferAttribute(linkColors, 3));
-    linkGeometry.setAttribute("aFocus", new THREE.BufferAttribute(linkFocus, 1));
+    linkGeometry.setAttribute("aFocus", new THREE.BufferAttribute(linkFocusCurrent, 1));
+    linkGeometry.setAttribute("aBase", new THREE.BufferAttribute(linkBase, 1));
+    linkGeometry.setAttribute("aT", new THREE.BufferAttribute(linkT, 1));
+    linkGeometry.setAttribute("aFlowPhase", new THREE.BufferAttribute(linkFlowPhase, 1));
     const linkMaterial = new THREE.ShaderMaterial({
-      vertexShader: LINK_VERTEX_SHADER,
-      fragmentShader: LINK_FRAGMENT_SHADER,
+      vertexShader: GRAPH_LINK_VERTEX_SHADER,
+      fragmentShader: GRAPH_LINK_FRAGMENT_SHADER,
+      uniforms: {
+        uSearchActive: { value: 0 },
+        uTime: { value: 0 },
+        uFlow: { value: reducedMotion ? 0 : 1 },
+        uFogDensity: { value: 0 },
+        uFogStrength: { value: 1 },
+      },
       vertexColors: true,
       transparent: true,
       depthWrite: false,
@@ -352,6 +807,67 @@ export default function ThreeKnowledgeGraph({
     const linkLines = new THREE.LineSegments(linkGeometry, linkMaterial);
     linkLines.renderOrder = 1;
     root.add(linkLines);
+    // uSearchActive 由 animate 统一渐变写入节点与连线两份材质。
+    updateSearchRef.current = applySearchMatches;
+
+    // 全景只画每对星域之间的一条聚合航道。关系数量通过粗细和亮度表达，
+    // 避免数百条跨区边叠成“光墙”；节点聚焦时仍会展开真实边。
+    const channelPairs = new Map<string, {
+      left: string;
+      right: string;
+      count: number;
+    }>();
+    validLinks.forEach((link) => {
+      const sourceGroup = nodeById.get(link.source)?.group;
+      const targetGroup = nodeById.get(link.target)?.group;
+      if (!sourceGroup || !targetGroup || sourceGroup === targetGroup) return;
+      const [left, right] = [sourceGroup, targetGroup].toSorted();
+      const key = `${left}\u0000${right}`;
+      const pair = channelPairs.get(key) ?? { left, right, count: 0 };
+      pair.count += 1;
+      channelPairs.set(key, pair);
+    });
+    const channelGroup = new THREE.Group();
+    const channelItems: Array<{
+      groups: [string, string];
+      material: THREE.MeshBasicMaterial;
+      baseOpacity: number;
+    }> = [];
+    const maxChannelCount = Math.max(1, ...[...channelPairs.values()].map((pair) => pair.count));
+    channelPairs.forEach(({ left, right, count }) => {
+      const leftCenter = new THREE.Vector3(...GROUP_CENTERS[left]);
+      const rightCenter = new THREE.Vector3(...GROUP_CENTERS[right]);
+      const midpoint = leftCenter.clone().lerp(rightCenter, 0.5);
+      const direction = rightCenter.clone().sub(leftCenter);
+      const normal = new THREE.Vector3(-direction.y, direction.x, 0).normalize();
+      midpoint.addScaledVector(normal, 0.22 + seeded(`${left}:${right}:channel`) * 0.26);
+      midpoint.z += 0.38 + seeded(`${left}:${right}:channel-z`) * 0.34;
+      const curve = new THREE.QuadraticBezierCurve3(leftCenter, midpoint, rightCenter);
+      const weight = Math.log1p(count) / Math.log1p(maxChannelCount);
+      const leftColor = new THREE.Color(nodes.find((node) => node.group === left)?.color ?? "#9fb5a8");
+      const rightColor = new THREE.Color(nodes.find((node) => node.group === right)?.color ?? "#9fb5a8");
+      const color = leftColor.lerp(rightColor, 0.5).lerp(new THREE.Color("#ffffff"), 0.08);
+      const baseOpacity = 0.1 + weight * 0.16;
+      const material = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: baseOpacity,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const channel = new THREE.Mesh(
+        new THREE.TubeGeometry(curve, 32, 0.006 + weight * 0.009, 6, false),
+        material,
+      );
+      channel.renderOrder = 2;
+      channelGroup.add(channel);
+      channelItems.push({ groups: [left, right], material, baseOpacity });
+    });
+    root.add(channelGroup);
+
+    const relationRibbons = new THREE.Group();
+    relationRibbons.renderOrder = 2;
+    root.add(relationRibbons);
 
     const pulseLimit = Math.max(1, Math.min(80, validLinks.length));
     const pulsePositions = new Float32Array(pulseLimit * 3);
@@ -359,17 +875,22 @@ export default function ThreeKnowledgeGraph({
     const pulseGeometry = new THREE.BufferGeometry();
     pulseGeometry.setAttribute("position", new THREE.BufferAttribute(pulsePositions, 3));
     pulseGeometry.setAttribute("color", new THREE.BufferAttribute(pulseColors, 3));
+    const pulseTexture = createCometTexture();
     const pulseMaterial = new THREE.PointsMaterial({
-      size: 0.115,
+      size: 0.24,
       sizeAttenuation: true,
       vertexColors: true,
+      map: pulseTexture,
+      alphaTest: 0.018,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.94,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
     const pulsePoints = new THREE.Points(pulseGeometry, pulseMaterial);
     pulsePoints.renderOrder = 4;
+    // 减弱动态下流光与呼吸都已停，脉冲也不该再沿线跑；配合渲染闸门还会变成一动鼠标就跳。
+    pulsePoints.visible = !reducedMotion;
     root.add(pulsePoints);
     const ambientPulseStep = Math.max(1, Math.ceil(validLinks.length / pulseLimit));
     const ambientPulseLinks = validLinks
@@ -377,91 +898,161 @@ export default function ThreeKnowledgeGraph({
       .slice(0, pulseLimit);
     let pulseLinks: KnowledgeGraphSceneLink[] = ambientPulseLinks;
     pulseGeometry.setDrawRange(0, pulseLinks.length);
+    // 脉冲颜色构建时解析一次；之前每帧对每个脉冲 set(十六进制字符串) 重新解析。
+    const pulseColorById = new Map(nodes.map((node) => [node.id, new THREE.Color(node.color)]));
+    const pulseFallbackColor = new THREE.Color("#ffffff");
+    // 此刻画了飘带的关系。脉冲只有在飘带上才沿曲线走；常态连线是直线，
+    // 曲线上的光点会飘在线外约一个光点直径——全景下看着像没对准。
+    const ribbonLinks = new Set<KnowledgeGraphSceneLink>();
 
-    const haloGeometry = new THREE.RingGeometry(2.5, 2.53, 96);
+    // 分区仍保留不可见点击热区，但不再画椭圆外壳。旋臂自己承担空间边界，
+    // 避免星系被读成几个套着线框的气泡。
+    const groupHitGeometry = new THREE.SphereGeometry(1, 18, 10);
+    const groupHitTargets: THREE.Mesh[] = [];
     Object.entries(GROUP_CENTERS).forEach(([group, center]) => {
       const groupNode = nodes.find((node) => node.group === group);
       if (!groupNode) return;
-      const haloMaterial = new THREE.MeshBasicMaterial({
-        color: groupNode.color,
-        transparent: true,
-        opacity: 0.075,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const halo = new THREE.Mesh(haloGeometry, haloMaterial);
-      halo.position.set(...center);
-      halo.scale.set(1.2, 0.76, 1);
-      halo.renderOrder = 0;
-      root.add(halo);
+
+      const hitTarget = new THREE.Mesh(
+        groupHitGeometry,
+        new THREE.MeshBasicMaterial({
+          transparent: true,
+          opacity: 0,
+          side: THREE.DoubleSide,
+          depthTest: false,
+          depthWrite: false,
+          colorWrite: false,
+        }),
+      );
+      hitTarget.position.set(...center);
+      if (group === "system") hitTarget.scale.set(1.55, 1.08, 1.42);
+      else hitTarget.scale.set(armSpanFor(group) * 0.66, 1.08, 1.62);
+      hitTarget.rotation.z = GROUP_HIT_ROTATION[group] ?? 0;
+      hitTarget.userData.group = group;
+      root.add(hitTarget);
+      groupHitTargets.push(hitTarget);
     });
 
-    const nebulaCanvas = document.createElement("canvas");
-    nebulaCanvas.width = 192;
-    nebulaCanvas.height = 192;
-    const nebulaContext = nebulaCanvas.getContext("2d");
-    if (nebulaContext) {
-      const gradient = nebulaContext.createRadialGradient(96, 96, 0, 96, 96, 96);
-      gradient.addColorStop(0, "rgba(255,255,255,.72)");
-      gradient.addColorStop(0.2, "rgba(255,255,255,.23)");
-      gradient.addColorStop(0.58, "rgba(255,255,255,.07)");
-      gradient.addColorStop(1, "rgba(255,255,255,0)");
-      nebulaContext.fillStyle = gradient;
-      nebulaContext.fillRect(0, 0, 192, 192);
-    }
-    const nebulaTexture = new THREE.CanvasTexture(nebulaCanvas);
-    Object.entries(GROUP_CENTERS).forEach(([group, center], groupIndex) => {
-      const groupNode = nodes.find((node) => node.group === group);
-      if (!groupNode) return;
-      const nebulaMaterial = new THREE.SpriteMaterial({
-        map: nebulaTexture,
-        color: groupNode.color,
-        transparent: true,
-        opacity: group === "system" ? 0.12 : 0.18,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const nebula = new THREE.Sprite(nebulaMaterial);
-      nebula.position.set(center[0], center[1], center[2] - 1.6);
-      nebula.scale.set(7.2 + groupIndex * 0.16, 4.4, 1);
-      nebula.renderOrder = -1;
-      root.add(nebula);
+    const nebulaTexture = createNebulaTexture();
+    // 星系中心必须先是一个“光源”，再是四个分类标签。两层不同纵横比的加法光晕
+    // 模拟 Astra 的高能核心；全屏 bloom 只让最亮的点溢出，核心的体量感靠这两层自己给。
+    const coreGlowMaterial = new THREE.SpriteMaterial({
+      map: nebulaTexture,
+      color: 0xfff4de,
+      transparent: true,
+      opacity: 0.34,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const coreGlow = new THREE.Sprite(coreGlowMaterial);
+    coreGlow.position.set(0, 0, -1.5);
+    coreGlow.scale.set(5.2, 3.9, 1);
+    coreGlow.renderOrder = 1;
+    root.add(coreGlow);
+    const coreSpark = new THREE.Sprite(coreGlowMaterial.clone());
+    (coreSpark.material as THREE.SpriteMaterial).opacity = 0.62;
+    (coreSpark.material as THREE.SpriteMaterial).color.set(0xffffff);
+    coreSpark.position.set(0, 0, -1.24);
+    coreSpark.scale.set(1.9, 1.42, 1);
+    coreSpark.renderOrder = 2;
+    root.add(coreSpark);
+
+    // 旋臂上的星云底色：只有点没有体积，臂与臂之间读不出「气」。每条臂沿同一条
+    // 螺线放几张大号分区色光斑，透明度压到 0.04–0.07，叠加混合下只是一层薄雾。
+    // 总数封顶 16 张（大 Sprite 的透明过度绘制是主要代价），挂在 root 上随星系一起转。
+    const armGroups = Object.keys(GROUP_ARM_PHASE).filter((group) => (groupCounts[group] ?? 0) > 0);
+    const nebulaPerArm = armGroups.length > 0 ? Math.min(4, Math.floor(16 / armGroups.length)) : 0;
+    armGroups.forEach((group) => {
+      const groupColor = new THREE.Color(nodes.find((node) => node.group === group)?.color ?? "#9fb5a8")
+        .lerp(new THREE.Color("#ffffff"), 0.12);
+      const armSpan = armSpanFor(group);
+      for (let index = 0; index < nebulaPerArm; index += 1) {
+        const progress = (index + 0.5) / nebulaPerArm;
+        const radius = 1.12 + Math.pow(progress, 1.2) * armSpan;
+        const angle = GROUP_ARM_PHASE[group] + radius * (2.6 / armSpan)
+          + (seeded(`${group}:nebula:${index}:angle`) - 0.5) * 0.18;
+        const material = new THREE.SpriteMaterial({
+          map: nebulaTexture,
+          color: groupColor,
+          transparent: true,
+          opacity: 0.04 + seeded(`${group}:nebula:${index}:opacity`) * 0.03,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        });
+        const nebula = new THREE.Sprite(material);
+        const size = 2.6 + (1 - progress) * 1.6 + seeded(`${group}:nebula:${index}:size`) * 0.9;
+        nebula.position.set(
+          Math.cos(angle) * radius,
+          Math.sin(angle) * radius * 0.76,
+          -0.6 + (seeded(`${group}:nebula:${index}:depth`) - 0.5) * 1.4,
+        );
+        nebula.scale.set(size * 1.35, size * 0.82, 1);
+        nebula.renderOrder = -1;
+        root.add(nebula);
+      }
     });
 
     const galaxyGroups = Object.entries(GROUP_CENTERS).filter(([group]) =>
       nodes.some((node) => node.group === group),
     );
-    const dustCount = Math.min(1300, Math.max(520, nodes.length * 4));
+    const dustCount = Math.min(1900, Math.max(900, nodes.length * 5));
     const dustPositions = new Float32Array(dustCount * 3);
     const dustColors = new Float32Array(dustCount * 3);
+    const dustSizes = new Float32Array(dustCount);
+    const dustPhases = new Float32Array(dustCount);
+    const dustFocus = new Float32Array(dustCount);
+    const dustSearch = new Float32Array(dustCount);
     for (let index = 0; index < dustCount; index += 1) {
-      const [group, center] = galaxyGroups[index % galaxyGroups.length];
-      const radius = Math.pow(seeded(`dust:${index}:radius`), 0.72) * 3.1;
-      const arm = index % 3;
-      const angle =
-        radius * 1.55 +
-        arm * (Math.PI * 2 / 3) +
-        (seeded(`dust:${index}:angle`) - 0.5) * 0.72;
+      const [group] = galaxyGroups[index % galaxyGroups.length];
+      const isCore = group === "system";
+      const dustSpan = armSpanFor(group) * 1.12;
+      const radialProgress = Math.pow(seeded(`dust:${index}:radius`), 1.3);
+      const radius = isCore ? radialProgress * 1.5 : 0.8 + radialProgress * dustSpan;
+      const angle = isCore
+        ? seeded(`dust:${index}:angle`) * Math.PI * 2
+        : (GROUP_ARM_PHASE[group] ?? 0)
+          + radius * (2.6 / dustSpan)
+          + (seeded(`dust:${index}:angle`) - 0.5) * 0.26 * armSpreadFor(group);
       dustPositions.set([
-        center[0] + Math.cos(angle) * radius,
-        center[1] + Math.sin(angle) * radius * 0.56,
-        center[2] - 0.45 + (seeded(`dust:${index}:depth`) - 0.5) * 1.7,
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius * 0.76,
+        (isCore ? -2.25 : -0.45)
+          + (seeded(`dust:${index}:depth`) - 0.5) * (isCore ? 2.1 : 1.8 + radialProgress * 2.6),
       ], index * 3);
+      const spectrumSeed = seeded(`dust:${index}:spectrum`);
+      const spectralAccent = new THREE.Color(
+        SPECTRAL_PALETTE[Math.floor(spectrumSeed * SPECTRAL_PALETTE.length)],
+      );
       const groupColor = new THREE.Color(
         nodes.find((node) => node.group === group)?.color ?? "#9fb5a8",
-      ).lerp(new THREE.Color("#ffffff"), 0.22);
+      )
+        .lerp(spectralAccent, 0.56 + spectrumSeed * 0.3)
+        .lerp(new THREE.Color("#ffffff"), 0.12 + seeded(`dust:${index}:white`) * 0.22);
       dustColors.set(groupColor.toArray(), index * 3);
+      dustSizes[index] = 0.1 + seeded(`dust:${index}:size`) * 0.16;
+      dustPhases[index] = seeded(`dust:${index}:phase`) * Math.PI * 2;
     }
     const dustGeometry = new THREE.BufferGeometry();
     dustGeometry.setAttribute("position", new THREE.BufferAttribute(dustPositions, 3));
     dustGeometry.setAttribute("color", new THREE.BufferAttribute(dustColors, 3));
-    const dustMaterial = new THREE.PointsMaterial({
-      size: 0.035,
-      sizeAttenuation: true,
+    dustGeometry.setAttribute("aSize", new THREE.BufferAttribute(dustSizes, 1));
+    dustGeometry.setAttribute("aPhase", new THREE.BufferAttribute(dustPhases, 1));
+    dustGeometry.setAttribute("aFocus", new THREE.BufferAttribute(dustFocus, 1));
+    dustGeometry.setAttribute("aSearch", new THREE.BufferAttribute(dustSearch, 1));
+    const dustMaterial = new THREE.ShaderMaterial({
+      vertexShader: NODE_VERTEX_SHADER,
+      fragmentShader: NODE_FRAGMENT_SHADER,
+      uniforms: {
+        uTime: { value: 0 },
+        uMotion: { value: reducedMotion ? 0 : 1 },
+        uSearchActive: { value: 0 },
+        uFocusDistance: { value: 0 },
+        uFocusRange: { value: 0 },
+        ...createStageInteractionUniforms(1),
+      },
       vertexColors: true,
       transparent: true,
-      opacity: 0.58,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
@@ -469,45 +1060,76 @@ export default function ThreeKnowledgeGraph({
     galaxyDust.renderOrder = 0;
     root.add(galaxyDust);
 
-    const focusRingGeometry = new THREE.RingGeometry(0.31, 0.37, 72);
-    const focusRingMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.9,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const focusRing = new THREE.Mesh(focusRingGeometry, focusRingMaterial);
-    focusRing.visible = false;
-    focusRing.renderOrder = 5;
-    root.add(focusRing);
+    const focusArtifact = createFocusArtifact(pulseTexture);
+    root.add(focusArtifact.group);
 
-    const backgroundPositions = new Float32Array(360 * 3);
-    for (let index = 0; index < 360; index += 1) {
-      const radius = 8 + seeded(`background:${index}`) * 18;
-      const theta = seeded(`background:${index}:theta`) * Math.PI * 2;
-      const phi = Math.acos(2 * seeded(`background:${index}:phi`) - 1);
-      backgroundPositions.set([
-        radius * Math.sin(phi) * Math.cos(theta),
-        radius * Math.sin(phi) * Math.sin(theta),
-        radius * Math.cos(phi),
-      ], index * 3);
-    }
-    const backgroundGeometry = new THREE.BufferGeometry();
-    backgroundGeometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(backgroundPositions, 3),
-    );
-    const backgroundMaterial = new THREE.PointsMaterial({
-      color: 0xcfe2d7,
-      size: 0.027,
-      transparent: true,
-      opacity: 0.48,
-      depthWrite: false,
-    });
-    const background = new THREE.Points(backgroundGeometry, backgroundMaterial);
-    scene.add(background);
+    // 手伸进星图时的“实体接触点”。屏幕准星负责告诉用户手在哪里，这组 Three
+    // 几何则真正钉在星图坐标上：抓取后相机移动，光环仍和被抓住的节点/空间一起走。
+    type GestureVisual = {
+      anchor: THREE.Group;
+      outer: THREE.Mesh;
+      inner: THREE.Mesh;
+      ray: THREE.Line<THREE.BufferGeometry, THREE.LineDashedMaterial>;
+      grabbed: boolean;
+      pinchProgress: number;
+    };
+    const createGestureVisual = (color: number): GestureVisual => {
+      const material = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.82,
+        depthTest: false,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const coreMaterial = material.clone();
+      coreMaterial.opacity = 0.94;
+      const anchor = new THREE.Group();
+      const outer = new THREE.Mesh(
+        new THREE.TorusGeometry(0.24, 0.012, 8, 48),
+        material,
+      );
+      const inner = new THREE.Mesh(
+        new THREE.TorusGeometry(0.13, 0.008, 8, 36),
+        material.clone(),
+      );
+      inner.rotation.x = Math.PI * 0.34;
+      anchor.add(
+        outer,
+        inner,
+        new THREE.Mesh(new THREE.SphereGeometry(0.035, 14, 10), coreMaterial),
+      );
+      anchor.visible = false;
+      anchor.renderOrder = 12;
+      root.add(anchor);
+
+      // 每只手都拥有独立射线；角色换手时只交换颜色语义，不依赖 MediaPipe 数组顺序。
+      const rayMaterial = new THREE.LineDashedMaterial({
+        color,
+        transparent: true,
+        opacity: 0.52,
+        depthTest: false,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        dashSize: 0.12,
+        gapSize: 0.08,
+      });
+      const ray = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+        rayMaterial,
+      );
+      ray.visible = false;
+      ray.renderOrder = 11;
+      scene.add(ray);
+      return { anchor, outer, inner, ray, grabbed: false, pinchProgress: 0 };
+    };
+    const gestureVisuals: Record<"primary" | "secondary", GestureVisual> = {
+      primary: createGestureVisual(0x83f2c5),
+      secondary: createGestureVisual(0x76d9ff),
+    };
+
+    const starfield = createStarfield();
+    scene.add(starfield.points);
 
     nodeGeometry.computeBoundingBox();
     const bounds = nodeGeometry.boundingBox ?? new THREE.Box3(
@@ -516,142 +1138,1061 @@ export default function ThreeKnowledgeGraph({
     );
     const homeTarget = bounds.getCenter(new THREE.Vector3());
     const boundsSize = bounds.getSize(new THREE.Vector3());
-    const fitDistance = (aspect: number) => {
-      const verticalFov = THREE.MathUtils.degToRad(camera.fov);
-      const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(0.3, aspect));
-      const verticalDistance = boundsSize.y / (2 * Math.tan(verticalFov / 2));
-      const horizontalDistance = boundsSize.x / (2 * Math.tan(horizontalFov / 2));
-      return Math.max(10.5, Math.max(verticalDistance, horizontalDistance) * 1.24 + boundsSize.z * 0.45);
-    };
+    // margin 小于 1 等于往里裁：星点会铺满整个画框，读不出边界，
+    // 也就读不出「这是一座星系」。留一圈黑才有形。
+    // 全屏是「让我看全貌」这个动作本身，所以留白比窗口里更宽一档。
+    let viewMargin = 0.98;
+    const fitHomeDistance = (aspect: number) => fitDistance({
+      fovDeg: camera.fov,
+      aspect,
+      size: boundsSize,
+      minDistance: 7.2,
+      margin: viewMargin,
+      depthFactor: 0.16,
+    });
     let homeCamera = homeTarget.clone().add(
-      new THREE.Vector3(0, 0, fitDistance(camera.aspect)),
+      HOME_DIRECTION.clone().multiplyScalar(fitHomeDistance(camera.aspect)),
     );
     camera.position.copy(homeCamera);
 
     const controls = new OrbitControls(camera, canvas);
     controls.target.copy(homeTarget);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.065;
+    // 松手后的滑行来自这里的阻尼，减弱动态下也要停。
+    controls.enableDamping = !reducedMotion;
+    controls.dampingFactor = 0.038;
     controls.enablePan = true;
     controls.panSpeed = 0.55;
-    controls.rotateSpeed = 0.42;
+    controls.rotateSpeed = 0.62;
     controls.zoomSpeed = 0.72;
     controls.minDistance = 3.6;
     controls.maxDistance = 30;
-    controls.minPolarAngle = Math.PI * 0.31;
-    controls.maxPolarAngle = Math.PI * 0.69;
-    controls.minAzimuthAngle = -Math.PI * 0.28;
-    controls.maxAzimuthAngle = Math.PI * 0.28;
+    controls.minPolarAngle = Math.PI * 0.18;
+    controls.maxPolarAngle = Math.PI * 0.82;
+    controls.minAzimuthAngle = -Math.PI * 0.7;
+    controls.maxAzimuthAngle = Math.PI * 0.7;
     controls.update();
+    // 滚轮缩放在 OrbitControls 的事件里就同步 update 掉了，animate 里的 update 返回 false；
+    // 不在 change 上置脏，暂停或减弱动态时滚轮拉近了画面却不动。
+    const onControlsChange = () => renderGate.invalidate();
+    controls.addEventListener("change", onControlsChange);
 
     const raycaster = new THREE.Raycaster();
     raycaster.params.Points!.threshold = 0.27;
     const pointer = new THREE.Vector2();
     const selectedRef = { current: null as string | null };
     const hoveredRef = { current: null as string | null };
-    let flight: Flight | null = null;
+    const selectedGroupRef = { current: null as string | null };
+    const hoveredGroupRef = { current: null as string | null };
     let pointerStart: [number, number] | null = null;
     let keyboardIndex = 0;
     let visible = true;
+    const previousHands = new Map<string, GraphTrackedHandFrame>();
+    let gestureGrabbed = false;
+    let gestureFocusActive = false;
+    let gestureTargetId: string | null = null;
+    const pinchTargets = new Map<string, {
+      id: string | null;
+      worldPosition: THREE.Vector3;
+    }>();
+    // 捏合闭合的最后一两帧会把掌心质心拉偏，press 当帧的命中常常已滑出节点。
+    // 记住每只手最近一次命中的节点，按下时在短窗口内回溯，锁定“捏合动作
+    // 开始前瞄准的目标”——否则本想选节点的捏合被锁成空间，120ms 后变成拖动。
+    const lastNodeHits = new Map<string, {
+      id: string;
+      worldPosition: THREE.Vector3;
+      at: number;
+    }>();
+    let publishedHandTargets = "";
+    const gestureInertia = new THREE.Vector3();
+    // 手势平移的排出缓冲：识别帧率只有约 24fps，把位移直接搬给相机会一格一格跳。
+    // gestureFrame 只往这里累加，animate 在渲染帧里按比例排出，拖动变成连续滑动。
+    const gesturePan = new THREE.Vector3();
+    let lastPanDrainAt = 0;
+    let dualTransformActive = false;
+    let dualAnchorWorld: THREE.Vector3 | null = null;
+    let relationCandidate: { id: string; since: number } | null = null;
+    let relationTargetId: string | null = null;
+    let relationTargetLocked = false;
+    let activeRelationKey = "";
 
-    const setFlight = (toCamera: THREE.Vector3, toTarget: THREE.Vector3, duration = 820) => {
-      flight = {
-        startedAt: performance.now(),
-        duration,
-        fromCamera: camera.position.clone(),
-        fromTarget: controls.target.clone(),
-        toCamera,
-        toTarget,
-      };
+    // 鼠标甩动的阻尼残余存在 OrbitControls 内部，enabled=false 拦不住
+    // update() 继续释放它（残余约一秒的漂移会叠在手势拖动上）。关掉阻尼跑
+    // 一次 update 让残余一次性结清并归零，再交给手势接管。
+    //
+    // 只结清鼠标留下的残余。单手转视角走的也是 OrbitControls 的旋转入口，
+    // 它留下的残余是手势自己的滑行；松手后一秒内再捏住、释放宽限期里重新捏拢、
+    // 第二只手入镜——每一次都会把这段残余瞬间跳完（实测 10–20°），拖动就抖一下。
+    let orbitResidualFromPointer = false;
+    controls.addEventListener("end", () => { orbitResidualFromPointer = true; });
+    const flushOrbitInertia = () => {
+      if (!orbitResidualFromPointer) return;
+      orbitResidualFromPointer = false;
+      const damping = controls.enableDamping;
+      controls.enableDamping = false;
+      controls.update();
+      controls.enableDamping = damping;
     };
 
-    const focusAttributes = (id: string | null) => {
+    const flightController = createFlightController({
+      camera,
+      target: controls.target,
+      warp: {
+        material: starfield.material,
+        baseSize: 0.042,
+        baseOpacity: 0.58,
+      },
+    });
+
+    // 首次进场的开场运镜：从另一侧高处俯冲到常驻机位，让视差在第一秒
+    // 就把星图的纵深立起来。分区筛选导致的场景重建不重复播放，减弱动态时跳过。
+    if (!entryPlayedRef.current) {
+      entryPlayedRef.current = true;
+      if (!reducedMotion) {
+        camera.position.copy(
+          homeTarget.clone().add(
+            ENTRY_DIRECTION.clone().multiplyScalar(fitHomeDistance(camera.aspect) * 1.42),
+          ),
+        );
+        controls.update();
+        flightController.start(homeCamera.clone(), homeTarget.clone(), 1650);
+      }
+    }
+
+    // 曲線はリンクごとに決定的（節点座標は構築後に動かない）なのでキャッシュする。
+    // 素のままだと脈衝が毎フレーム・毎リンクで Vector3 3個＋曲線＋seeded の文字列2本を
+    // 作り直し、80 リンクで秒間数万個の一時オブジェクトが GC を叩き続ける。
+    const relationCurveCache = new Map<KnowledgeGraphSceneLink, THREE.QuadraticBezierCurve3>();
+    const relationCurve = (link: KnowledgeGraphSceneLink) => {
+      const cached = relationCurveCache.get(link);
+      if (cached) return cached;
+      const source = positionById.get(link.source)!;
+      const target = positionById.get(link.target)!;
+      const midpoint = source.clone().lerp(target, 0.5);
+      const direction = target.clone().sub(source);
+      const normal = new THREE.Vector3(-direction.y, direction.x, 0.5).normalize();
+      const bend = 0.16 + seeded(`${link.source}:${link.target}:bend`) * 0.3;
+      midpoint.addScaledVector(normal, bend);
+      midpoint.z += (seeded(`${link.source}:${link.target}:z`) - 0.5) * 0.42;
+      const curve = new THREE.QuadraticBezierCurve3(source, midpoint, target);
+      relationCurveCache.set(link, curve);
+      return curve;
+    };
+    // 帧内の書き込み先は使い回す。getPoint(t, target) / toArray(array, offset) は
+    // three が最初から用意している無分配経路。
+    const pulsePoint = new THREE.Vector3();
+    // 明暗目标写完后置这个标记，animate 才开始逐帧趋近；收敛后清掉，不再每帧上传缓冲。
+    let focusEasing = false;
+    // 锁定物当前标着谁：换了目标才重播 300ms 的出场，悬停引起的重算不重播。
+    let artifactTargetId: string | null = null;
+
+    // 「今 relationRibbons に何が入っているか」。空文字＝何も入っていない。
+    // 関係探索の飄帯も同じ容器を使うので、専用の印を入れて「無選択（空文字）」と区別する
+    // ——同値だと、探索を抜けた後の focusAttributes(null) が「変化なし」と判断して
+    // 掃除を飛ばし、探索の飄帯が画面に残り続ける。
+    const EXPLORATION_RIBBONS = "exploration";
+    let ribbonsKey = "";
+    const clearRelationRibbons = () => {
+      ribbonsKey = "";
+      ribbonLinks.clear();
+      [...relationRibbons.children].forEach((child) => {
+        relationRibbons.remove(child);
+        if (!(child instanceof THREE.Mesh)) return;
+        child.geometry.dispose();
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((material) => material.dispose());
+      });
+    };
+
+    const emphasizeGroup = (group: string | null, locked: boolean) => {
+      groupLabelItems.forEach((item) => {
+        item.label.dataset.active = item.group === group
+          ? locked ? "selected" : "hovered"
+          : group ? "dim" : "";
+      });
+      channelItems.forEach((channel) => {
+        const involved = Boolean(group) && channel.groups.includes(group!);
+        channel.material.opacity = group
+          ? channel.baseOpacity * (involved ? locked ? 1.85 : 1.55 : 0.24)
+          : channel.baseOpacity;
+      });
+    };
+
+    const focusAttributes = (id: string | null, group: string | null = null) => {
+      const lockedNode = Boolean(id && selectedRef.current === id);
       const neighbors = id ? adjacency.get(id) ?? new Set<string>() : new Set<string>();
       nodes.forEach((node, index) => {
-        nodeFocus[index] = node.id === id ? 1 : neighbors.has(node.id) ? 0.42 : 0;
+        nodeFocus[index] = node.id === id
+          ? 0.3
+          : neighbors.has(node.id)
+            ? 0.42
+            : group && node.group === group ? 0.16 : 0;
       });
-      (nodeGeometry.getAttribute("aFocus") as THREE.BufferAttribute).needsUpdate = true;
 
       validLinks.forEach((link, index) => {
-        const active = id && (link.source === id || link.target === id) ? 1 : 0;
+        const sourceGroup = nodeById.get(link.source)?.group;
+        const targetGroup = nodeById.get(link.target)?.group;
+        const sameGroup = sourceGroup === targetGroup;
+        const touchesNode = id && (link.source === id || link.target === id);
+        const belongsToGroup = group && sameGroup && sourceGroup === group;
+        const active = touchesNode && lockedNode
+          ? 1
+          : touchesNode && sameGroup
+            ? 0.18
+            : belongsToGroup ? 0.2 : 0;
         linkFocus[index * 2] = active;
         linkFocus[index * 2 + 1] = active;
       });
-      (linkGeometry.getAttribute("aFocus") as THREE.BufferAttribute).needsUpdate = true;
+      focusEasing = true;
+      renderGate.invalidate();
 
       pulseLinks = id
         ? validLinks
             .filter((link) => link.source === id || link.target === id)
+            .filter((_, index) => lockedNode || index % 3 === 0)
             .slice(0, pulseLimit)
-        : ambientPulseLinks;
+        : group
+          ? validLinks
+              .filter((link) => (
+                nodeById.get(link.source)?.group === group ||
+                nodeById.get(link.target)?.group === group
+              ))
+              .filter((_, index) => index % 3 === 0)
+              .slice(0, pulseLimit)
+          : ambientPulseLinks;
       pulseGeometry.setDrawRange(0, pulseLinks.length);
+      channelGroup.visible = !lockedNode;
 
-      const focusPosition = id ? positionById.get(id) : undefined;
-      focusRing.visible = Boolean(focusPosition);
-      if (focusPosition && id) {
-        focusRing.position.copy(focusPosition);
-        focusRingMaterial.color.set(nodeById.get(id)?.color ?? "#ffffff");
+      const lockedId = selectedRef.current;
+      const focusPosition = lockedId ? positionById.get(lockedId) : undefined;
+      focusArtifact.setVisible(Boolean(focusPosition));
+      if (focusPosition && lockedId) {
+        const activeGraphNode = nodeById.get(lockedId);
+        const accent = activeGraphNode?.color ?? "#ffffff";
+        const artifactAccent = activeGraphNode?.group === "system"
+          ? "#48c5a6"
+          : accent;
+        focusArtifact.setPosition(focusPosition);
+        focusArtifact.setAccent(artifactAccent);
+        if (artifactTargetId !== lockedId) focusArtifact.reveal();
       }
-      labelItems.forEach(({ node, label }) => {
-        label.dataset.active =
-          node.id === id ? "selected" : neighbors.has(node.id) ? "neighbor" : "";
+      artifactTargetId = focusPosition ? lockedId : null;
+      // 飄帯は selectedRef.current だけで決まる（hover では変わらない）。锁定中は
+      // onPointerMove が hover のたびにここへ来るので、鍵が同じなら拆して建て直さない
+      // ——TubeGeometry(28,·,7)×32 で一回あたり約 300KB の白建になる。
+      // showRelationExploration の activeRelationKey と同じ守り方。
+      if (ribbonsKey !== (selectedRef.current ?? "")) {
+        clearRelationRibbons();
+        ribbonsKey = selectedRef.current ?? "";
+        if (selectedRef.current) {
+        validLinks
+          .filter((link) => (
+            link.source === selectedRef.current || link.target === selectedRef.current
+          ))
+          .slice(0, 32)
+          .forEach((link) => {
+            const accent = new THREE.Color(
+              nodeById.get(
+                link.source === selectedRef.current ? link.target : link.source,
+              )?.color ?? "#ffffff",
+            ).lerp(new THREE.Color("#ffffff"), 0.36);
+            const ribbon = new THREE.Mesh(
+              new THREE.TubeGeometry(relationCurve(link), 28, 0.0055, 7, false),
+              // 不用 MeshPhysicalMaterial：只要 transmission > 0，three 就会为
+              // 折射再把整个场景渲染一遍（4×MSAA 半浮点靶）。加法混合下折射
+              // 本来就几乎看不见，辉光由 bloom 补。
+              new THREE.MeshBasicMaterial({
+                color: accent,
+                transparent: true,
+                opacity: 0.5,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+              }),
+            );
+            ribbon.renderOrder = 2;
+            relationRibbons.add(ribbon);
+            ribbonLinks.add(link);
+          });
+        }
+      }
+      labelActiveFor = (nodeId) => (
+        nodeId === id ? "selected" : neighbors.has(nodeId) ? "neighbor" : ""
+      );
+      refreshLabelStates();
+      const activeGroup = id ? nodeById.get(id)?.group ?? null : group;
+      emphasizeGroup(
+        activeGroup,
+        Boolean(id ? selectedRef.current === id : group && selectedGroupRef.current === group),
+      );
+    };
+
+    const showRelationExploration = (sourceId: string, targetId: string, locked: boolean) => {
+      const relation = relationExploration(nodes, validLinks, sourceId, targetId, 6);
+      const relationKey = `${sourceId}\u0000${targetId}\u0000${locked ? "1" : "0"}`;
+      if (relationKey === activeRelationKey) return;
+      activeRelationKey = relationKey;
+      const pathIds = new Set(relation.pathIds);
+      const commonIds = new Set(relation.commonNeighborIds);
+      const pathLinks = new Set(relation.pathLinks);
+      nodes.forEach((node, index) => {
+        nodeFocus[index] = node.id === sourceId || node.id === targetId
+          ? 0.72
+          : pathIds.has(node.id) ? 0.54 : commonIds.has(node.id) ? 0.3 : 0;
+      });
+      validLinks.forEach((link, index) => {
+        const active = pathLinks.has(link) ? 1 : 0;
+        linkFocus[index * 2] = active;
+        linkFocus[index * 2 + 1] = active;
+      });
+      focusEasing = true;
+      renderGate.invalidate();
+      pulseLinks = relation.pathLinks.slice(0, pulseLimit);
+      pulseGeometry.setDrawRange(0, pulseLinks.length);
+      channelGroup.visible = false;
+      clearRelationRibbons();
+      relation.pathLinks.forEach((link) => {
+        const accent = new THREE.Color(nodeById.get(link.target)?.color ?? "#76d9ff")
+          .lerp(new THREE.Color("#ffffff"), 0.26);
+        const ribbon = new THREE.Mesh(
+          new THREE.TubeGeometry(relationCurve(link), 36, locked ? 0.015 : 0.01, 7, false),
+          new THREE.MeshBasicMaterial({
+            color: accent,
+            transparent: true,
+            opacity: locked ? 0.82 : 0.58,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          }),
+        );
+        ribbon.renderOrder = 3;
+        relationRibbons.add(ribbon);
+        ribbonLinks.add(link);
+      });
+      // 容器の中身を印にも反映する。ここを更新し忘れると、探索を抜けた後の
+      // focusAttributes(null) が「空文字のまま＝変化なし」と見て掃除を飛ばす。
+      ribbonsKey = EXPLORATION_RIBBONS;
+      labelActiveFor = (nodeId) => (
+        nodeId === sourceId || nodeId === targetId
+          ? "selected"
+          : pathIds.has(nodeId) || commonIds.has(nodeId) ? "neighbor" : ""
+      );
+      refreshLabelStates();
+      emphasizeGroup(null, false);
+      const pathLabels = relation.pathLinks.map((link, index) => {
+        const from = relation.pathIds[index];
+        const forward = link.source === from;
+        const arrow = link.directed ? forward ? "→" : "←" : "↔";
+        return `${arrow} ${link.relationLabel || link.relation || "关联"}`;
+      });
+      setHandRelation({
+        sourceLabel: nodeById.get(sourceId)?.title ?? sourceId,
+        targetLabel: nodeById.get(targetId)?.title ?? targetId,
+        connected: relation.connected,
+        pathLength: relation.pathLinks.length,
+        commonCount: relation.commonNeighborIds.length,
+        pathLabels,
+        locked,
       });
     };
 
+    const clearRelationExploration = (restore = true) => {
+      if (!activeRelationKey && !relationTargetId) return;
+      activeRelationKey = "";
+      relationCandidate = null;
+      relationTargetId = null;
+      relationTargetLocked = false;
+      setHandRelation(null);
+      if (restore) {
+        focusAttributes(
+          selectedRef.current,
+          selectedRef.current
+            ? nodeById.get(selectedRef.current)?.group ?? null
+            : selectedGroupRef.current,
+        );
+      }
+    };
+
+    // URL 带来的焦点：开场运镜还在飞就先记下，等它落地（animate 里检查）再飞过去，
+    // 免得把俯冲拦腰截断；没有运镜时下一帧就飞。
+    let pendingFocusId: string | null = null;
+    const reportFocus = (id: string | null) => {
+      if (reportedFocusRef.current === id) return;
+      reportedFocusRef.current = id;
+      onFocusChangeRef.current?.(id);
+    };
+
+    const burstScratch = new THREE.Vector3();
     const selectNode = (id: string) => {
       const index = indexById.get(id);
       const localPosition = positionById.get(id);
       if (index === undefined || !localPosition) return;
+      pendingFocusId = null;
       keyboardIndex = index;
       selectedRef.current = id;
+      selectedGroupRef.current = null;
+      clearRelationExploration(false);
       setSelectedId(id);
-      focusAttributes(id);
+      reportFocus(id);
+      focusAttributes(id, nodeById.get(id)?.group ?? null);
       const worldPosition = nodePoints.localToWorld(localPosition.clone());
-      setFlight(
+      // 锁定的那一刻让微尘从被选的星向外荡开一圈。用星的屏幕坐标，不用指针：
+      // 键盘、搜索、邻居按钮选中时，指针根本不在那颗星上。
+      if (!reducedMotion) {
+        const projected = burstScratch.copy(worldPosition).project(camera);
+        if (projected.z < 1 && Math.abs(projected.x) <= 1.05 && Math.abs(projected.y) <= 1.05) {
+          pointerEffects.motion.burst(projected.x, projected.y, 0.6);
+        }
+      }
+      flightController.start(
         worldPosition.clone().add(new THREE.Vector3(0, 0.12, 5.1)),
         worldPosition,
+      );
+    };
+    selectNodeRef.current = selectNode;
+    focusRequestRef.current = (id: string) => {
+      if (!indexById.has(id)) return;
+      pendingFocusId = id;
+      renderGate.invalidate();
+    };
+    const requestedFocus = initialFocusRef.current;
+    if (requestedFocus && indexById.has(requestedFocus)) pendingFocusId = requestedFocus;
+
+    const selectGroup = (group: string) => {
+      const centerTuple = GROUP_CENTERS[group];
+      if (!centerTuple) return;
+      const center = root.localToWorld(new THREE.Vector3(...centerTuple));
+      const direction = camera.position.clone().sub(controls.target).normalize();
+      selectedRef.current = null;
+      selectedGroupRef.current = group;
+      pendingFocusId = null;
+      clearRelationExploration(false);
+      setSelectedId(null);
+      setHoveredId(null);
+      reportFocus(null);
+      focusAttributes(null, group);
+      flightController.start(
+        center.clone().add(direction.multiplyScalar(13.2)),
+        center,
+        850,
       );
     };
 
     const resetView = () => {
       selectedRef.current = null;
       hoveredRef.current = null;
+      selectedGroupRef.current = null;
+      hoveredGroupRef.current = null;
+      pendingFocusId = null;
+      clearRelationExploration(false);
       setSelectedId(null);
       setHoveredId(null);
+      setDossierMode("dock");
+      reportFocus(null);
       focusAttributes(null);
-      setFlight(homeCamera.clone(), homeTarget.clone(), 900);
+      flightController.start(homeCamera.clone(), homeTarget.clone(), 900);
     };
     resetViewRef.current = resetView;
 
-    const hitTest = (event: PointerEvent | MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      pointer.set(
-        ((event.clientX - rect.left) / rect.width) * 2 - 1,
-        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    // 按 F 是「让我看全貌」，不是一次顺带的窗口尺寸变化。所以这里显式飞回全景，
+    // 而不是指望 resize 的副作用——那条路在有选中时会被跳过，于是你带着放大的
+    // 镜头切进全屏，看到的还是刚才那一小块。这里不清空选中：看全景和保留选中
+    // 并不冲突。
+    overviewRef.current = (isFullscreen: boolean) => {
+      viewMargin = isFullscreen ? 1.16 : 0.98;
+      camera.updateProjectionMatrix();
+      homeCamera = homeTarget.clone().add(
+        HOME_DIRECTION.clone().multiplyScalar(fitHomeDistance(camera.aspect)),
       );
+      // 只有进全屏才把镜头拉回全景。退出时只更新取景基准，不动镜头——
+      // 退出不是「让我看全貌」，把人辛苦转到的角度收走反而是打扰。
+      if (isFullscreen) flightController.start(homeCamera.clone(), homeTarget.clone(), 760);
+    };
+
+    const setRayFromNormalized = (x: number, y: number) => {
+      pointer.set(x * 2 - 1, -(y * 2 - 1));
       raycaster.setFromCamera(pointer, camera);
+    };
+    const setRayFromClient = (clientX: number, clientY: number, rect: DOMRect) => {
+      setRayFromNormalized(
+        (clientX - rect.left) / Math.max(1, rect.width),
+        (clientY - rect.top) / Math.max(1, rect.height),
+      );
+    };
+    const hitTestAt = (clientX: number, clientY: number, rect: DOMRect) => {
+      setRayFromClient(clientX, clientY, rect);
       const hit = raycaster.intersectObject(nodePoints, false)[0];
       return hit?.index === undefined ? null : nodes[hit.index]?.id ?? null;
+    };
+    const hitTestGroupAt = (clientX: number, clientY: number, rect: DOMRect) => {
+      setRayFromClient(clientX, clientY, rect);
+      const hit = raycaster.intersectObjects(groupHitTargets, false)[0];
+      return typeof hit?.object.userData.group === "string"
+        ? hit.object.userData.group as string
+        : null;
+    };
+    // 点击与双击按当场的矩形算，命中要准；悬停走指针层缓存的矩形，
+    // 免得每次移动都触发一次同步布局。
+    const hitTest = (event: PointerEvent | MouseEvent) =>
+      hitTestAt(event.clientX, event.clientY, canvas.getBoundingClientRect());
+    const hitTestGroup = (event: PointerEvent | MouseEvent) =>
+      hitTestGroupAt(event.clientX, event.clientY, canvas.getBoundingClientRect());
+
+    const gestureHitTest = (x: number, y: number) => {
+      setRayFromNormalized(x, y);
+      // 手掌射线比鼠标命中区更宽，靠近节点就自动吸附，远距离操作不要求像素级稳定。
+      raycaster.params.Points!.threshold = 0.58;
+      const hit = raycaster.intersectObject(nodePoints, false)[0];
+      raycaster.params.Points!.threshold = 0.27;
+      const id = hit?.index === undefined ? null : nodes[hit.index]?.id ?? null;
+      if (id) {
+        const localPosition = positionById.get(id);
+        if (localPosition) {
+          return {
+            id,
+            worldPosition: nodePoints.localToWorld(localPosition.clone()),
+          };
+        }
+      }
+
+      // 没碰到星点也要能“抓空气”：以当前 Orbit target 所在的视平面求交，
+      // 让锚点落在用户正在观察的那一层，而不是跳到任意固定 z。
+      const viewNormal = camera.getWorldDirection(new THREE.Vector3());
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+        viewNormal,
+        controls.target,
+      );
+      const worldPosition = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+      return worldPosition ? { id: null, worldPosition } : null;
+    };
+
+    const publishHandTargets = (
+      hands: GraphTrackedHandFrame[],
+      hits: Map<string, { id: string | null; worldPosition: THREE.Vector3 }>,
+    ) => {
+      // 短暂丢帧但仍握着锁定目标的手也要占位：一旦从 targets 里消失，
+      // 识别层的 holdMs 分流会在恢复帧读不到 kind 而从 360ms 跳到 120ms，
+      // 节点上的短捏被吞成空间拖动。
+      const targets = hands.filter((hand) => hand.visible || hits.has(hand.id)).map((hand) => {
+        const id = hits.get(hand.id)?.id ?? null;
+        const node = id ? nodeById.get(id) : null;
+        return node
+          ? {
+              handId: hand.id,
+              id: node.id,
+              label: node.title,
+              color: visualColorById.get(node.id) ?? node.color,
+              kind: "node" as const,
+            }
+          : {
+              handId: hand.id,
+              id: null,
+              label: "空间",
+              color: hand.role === "primary" ? "#83f2c5" : "#76d9ff",
+              kind: "space" as const,
+            };
+      }).toSorted((left, right) => left.handId.localeCompare(right.handId));
+      const key = targets.map((target) => `${target.handId}:${target.id ?? "space"}`).join("|");
+      if (key === publishedHandTargets) return;
+      publishedHandTargets = key;
+      setHandTargets(targets);
+    };
+    const clearHandTargets = () => {
+      if (publishedHandTargets === "") return;
+      publishedHandTargets = "";
+      setHandTargets([]);
+    };
+
+    const restoreGestureFocus = () => {
+      if (!gestureFocusActive) return;
+      gestureFocusActive = false;
+      focusAttributes(
+        selectedRef.current,
+        selectedRef.current
+          ? nodeById.get(selectedRef.current)?.group ?? null
+          : selectedGroupRef.current,
+      );
+    };
+
+    const showGestureAnchor = (
+      hand: GraphTrackedHandFrame,
+      worldPosition: THREE.Vector3,
+      id: string | null,
+    ) => {
+      const visual = gestureVisuals[hand.role];
+      visual.grabbed = hand.grabbed;
+      visual.pinchProgress = hand.pinchProgress;
+      visual.anchor.position.copy(root.worldToLocal(worldPosition.clone()));
+      const accent = new THREE.Color(
+        hand.grabbed
+          ? "#ff9563"
+          : id
+            ? visualColorById.get(id) ?? nodeById.get(id)?.color ?? "#83f2c5"
+            : hand.role === "primary" ? "#83f2c5" : "#76d9ff",
+      );
+      visual.anchor.children.forEach((child) => {
+        if (!(child instanceof THREE.Mesh)) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((material) => {
+          if (material instanceof THREE.MeshBasicMaterial) material.color.copy(accent);
+        });
+      });
+      visual.anchor.scale.setScalar(hand.grabbed ? 1.18 : 0.86);
+      visual.anchor.visible = true;
+    };
+
+    const showGestureContact = (
+      hand: GraphTrackedHandFrame,
+      worldPosition: THREE.Vector3,
+      id: string | null,
+    ) => {
+      const visual = gestureVisuals[hand.role];
+      showGestureAnchor(hand, worldPosition, id);
+      setRayFromNormalized(hand.pointerX, hand.pointerY);
+      const start = raycaster.ray.origin.clone().addScaledVector(raycaster.ray.direction, 0.72);
+      const positions = visual.ray.geometry.getAttribute("position") as THREE.BufferAttribute;
+      positions.setXYZ(0, start.x, start.y, start.z);
+      positions.setXYZ(1, worldPosition.x, worldPosition.y, worldPosition.z);
+      positions.needsUpdate = true;
+      visual.ray.computeLineDistances();
+      visual.ray.visible = true;
+      const color = hand.grabbed
+        ? "#ff9563"
+        : id
+          ? visualColorById.get(id) ?? nodeById.get(id)?.color ?? "#83f2c5"
+          : hand.role === "primary" ? "#83f2c5" : "#76d9ff";
+      visual.ray.material.color.set(color);
+      visual.ray.material.opacity = hand.grabbed ? 0.9 : hand.pinching ? 0.72 : 0.42;
+      visual.ray.material.dashSize = hand.grabbed ? 100 : 0.12 + hand.pinchProgress * 0.5;
+      visual.ray.material.gapSize = hand.grabbed ? 0.001 : 0.08 - hand.pinchProgress * 0.055;
+    };
+
+    const hideGestureAnchors = () => {
+      Object.values(gestureVisuals).forEach((visual) => {
+        visual.anchor.visible = false;
+        visual.ray.visible = false;
+        visual.grabbed = false;
+        visual.pinchProgress = 0;
+      });
+    };
+
+    // 摄像头输入也驱动鼠标使用的同一套能量探针：掌心移动会吸引粒子，捏住会进入
+    // drag 状态，双手变换则把力场放在两手中点。这样射线、相机和粒子不再各说各话。
+    // 上一帧探针是否处于抓住状态，以及它最后的位置：手飞出画面时要在原地
+    // 补一次「松手」，涟漪才会出现；否则走的是取消路径，什么反馈都没有。
+    let probeGrabbedLastFrame = false;
+    let probeLastX = 0.5;
+    let probeLastY = 0.5;
+    const syncGestureEffects = (
+      frame: GraphHandNavigationFrame,
+      hits: Map<string, { id: string | null; worldPosition: THREE.Vector3 }>,
+    ) => {
+      const visibleHands = frame.hands.filter((hand) => hand.visible);
+      const primary = visibleHands.find((hand) => hand.id === frame.primaryHandId)
+        ?? visibleHands.find((hand) => hand.role === "primary")
+        ?? visibleHands[0];
+      if (!primary) {
+        if (probeGrabbedLastFrame) {
+          pointerEffects.setExternalInteraction({
+            x: probeLastX,
+            y: probeLastY,
+            energy: 0.4,
+            dragging: false,
+          });
+          probeGrabbedLastFrame = false;
+        }
+        pointerEffects.setExternalInteraction(null);
+        return;
+      }
+      // 只有真正进入双手变换才把探针放到两手中点；dual-ready 只是「第二只手在场」，
+      // 这时单手转视角很可能还在进行，探针不该跟着跳。
+      const dual = frame.mode === "dual-transform";
+      const centerX = dual
+        ? frame.transform?.centerX
+          ?? visibleHands.reduce((sum, hand) => sum + hand.pointerX, 0) / visibleHands.length
+        : primary.pointerX;
+      const centerY = dual
+        ? frame.transform?.centerY
+          ?? visibleHands.reduce((sum, hand) => sum + hand.pointerY, 0) / visibleHands.length
+        : primary.pointerY;
+      const aimedId = hits.get(primary.id)?.id ?? null;
+      const accent = frame.mode === "dual-transform"
+        ? "#c29bff"
+        : primary.grabbed
+          ? "#ff8f70"
+          : aimedId
+            ? visualColorById.get(aimedId) ?? nodeById.get(aimedId)?.color ?? "#83f2c5"
+            : primary.role === "primary" ? "#83f2c5" : "#76d9ff";
+      const energy = frame.mode === "calibration"
+        ? 0.28
+        : frame.mode === "palm-menu"
+          ? 0.38
+          : dual
+            ? frame.mode === "dual-transform" ? 1 : 0.78
+            : primary.grabbed
+              ? 1
+              : primary.pinching
+                ? 0.68 + primary.pinchProgress * 0.3
+                : 0.5;
+      pointerEffects.setExternalInteraction({
+        x: centerX,
+        y: centerY,
+        energy,
+        dragging: frame.mode === "dual-transform" || primary.grabbed,
+        charging: primary.pinching && !primary.grabbed && frame.mode !== "dual-transform",
+        progress: primary.pinchProgress,
+        accent,
+      });
+      probeGrabbedLastFrame = frame.mode === "dual-transform" || primary.grabbed;
+      probeLastX = centerX;
+      probeLastY = centerY;
+    };
+
+    const runGestureAction = (
+      action: GraphHandNavigationFrame["action"],
+      aimedId: string | null,
+    ) => {
+      if (!action) return;
+      if (action.type === "select-target") {
+        if (aimedId) selectNode(aimedId);
+        return;
+      }
+      if (action.type === "toggle-relation-target") {
+        const sourceId = selectedRef.current;
+        if (!sourceId || !aimedId || aimedId === sourceId) return;
+        if (relationTargetLocked && relationTargetId === aimedId) {
+          clearRelationExploration();
+        } else {
+          relationTargetId = aimedId;
+          relationTargetLocked = true;
+          showRelationExploration(sourceId, aimedId, true);
+        }
+        return;
+      }
+      if (action.type === "reset-view") {
+        resetView();
+        return;
+      }
+      if (action.type === "focus-neighbors") {
+        const targetId = selectedRef.current ?? aimedId;
+        if (targetId) focusAttributes(targetId, nodeById.get(targetId)?.group ?? null);
+        return;
+      }
+      if (action.type === "open-selected") {
+        const targetId = selectedRef.current ?? aimedId;
+        if (targetId) {
+          selectNode(targetId);
+          openNode(targetId);
+        }
+        return;
+      }
+      if (action.type === "toggle-pause") {
+        setPaused((current) => !current);
+        return;
+      }
+      const currentIndex = selectedRef.current
+        ? indexById.get(selectedRef.current) ?? keyboardIndex
+        : keyboardIndex;
+      const direction = action.type === "select-next" ? 1 : -1;
+      keyboardIndex = (currentIndex + direction + nodes.length) % nodes.length;
+      selectNode(nodes[keyboardIndex].id);
+    };
+
+    // 单手仍沿用“瞄准—短捏—长捏”；双手变换有更高优先级，进入时取消
+    // 未提交的单手运动，并以选中节点或双手中点所在空间作为稳定锚点。
+    gestureFrameRef.current = (frame) => {
+      renderGate.invalidate();
+      if (!frame) {
+        pointerEffects.setExternalInteraction(null);
+        previousHands.clear();
+        gestureGrabbed = false;
+        gestureTargetId = null;
+        pinchTargets.clear();
+        lastNodeHits.clear();
+        gesturePan.set(0, 0, 0);
+        dualTransformActive = false;
+        dualAnchorWorld = null;
+        controls.enabled = true;
+        hideGestureAnchors();
+        hoveredRef.current = null;
+        setHoveredId(null);
+        clearHandTargets();
+        clearRelationExploration();
+        restoreGestureFocus();
+        return;
+      }
+
+      hideGestureAnchors();
+      const hits = new Map<string, { id: string | null; worldPosition: THREE.Vector3 }>();
+      const releasedPinchTargets = new Map<string, {
+        id: string | null;
+        worldPosition: THREE.Vector3;
+      }>();
+      frame.hands.filter((hand) => hand.visible).forEach((hand) => {
+        const hit = gestureHitTest(hand.pointerX, hand.pointerY);
+        if (!hit) return;
+        hits.set(hand.id, hit);
+        showGestureContact(hand, hit.worldPosition, hit.id);
+        // 只在“瞄准”状态下记忆节点：拖动扫掠时射线会划过一堆节点，
+        // 若也记下来，下一次紧接着的空间捏合会被错误回溯锁到路过的节点。
+        if (hit.id && !hand.pinching && !hand.grabbed) {
+          lastNodeHits.set(hand.id, {
+            id: hit.id,
+            worldPosition: hit.worldPosition.clone(),
+            at: performance.now(),
+          });
+        }
+        const previous = previousHands.get(hand.id);
+        if (hand.pinching && !previous?.pinching) {
+          const recent = lastNodeHits.get(hand.id);
+          const locked = !hit.id && recent && performance.now() - recent.at <= 150
+            ? { id: recent.id, worldPosition: recent.worldPosition.clone() }
+            : { id: hit.id, worldPosition: hit.worldPosition.clone() };
+          pinchTargets.set(hand.id, locked);
+        }
+        if (!hand.pinching && previous?.pinching) {
+          const lockedTarget = pinchTargets.get(hand.id);
+          if (lockedTarget) releasedPinchTargets.set(hand.id, lockedTarget);
+          pinchTargets.delete(hand.id);
+        }
+      });
+      // 捏住期间对外发布“按下时锁定”的目标，而不是实时命中：捏合会把掌心
+      // 质心拉偏，实时目标常在按下到松手之间滑出节点，识别层的短捏选择
+      // 会因为看到 kind=space 而把事件丢掉——锁定目标才是用户的本意。
+      const publishedHits = new Map(hits);
+      pinchTargets.forEach((locked, handId) => publishedHits.set(handId, locked));
+      publishHandTargets(frame.hands, publishedHits);
+      // 探针的颜色也跟锁定目标走，捏住期间不会因为射线滑出节点而跳色。
+      syncGestureEffects(frame, publishedHits);
+      const actionHit = frame.action
+        ? releasedPinchTargets.get(frame.action.handId)
+          ?? pinchTargets.get(frame.action.handId)
+          ?? hits.get(frame.action.handId)
+        : null;
+      runGestureAction(frame.action, actionHit?.id ?? null);
+
+      if (frame.mode === "calibration" || frame.mode === "palm-menu") {
+        gestureGrabbed = false;
+        controls.enabled = true;
+        frame.hands.forEach((hand) => previousHands.set(hand.id, hand));
+        return;
+      }
+
+      if (frame.mode === "dual-transform") {
+        controls.enabled = false;
+        gestureGrabbed = true;
+        if (!frame.transform) {
+          // 双手暂停帧（一只手在释放宽限期）：保持接管但不动相机。
+          // 落回下面的单手分支会把对称运动的一半当成全额平移灌进相机。
+          frame.hands.forEach((hand) => previousHands.set(hand.id, hand));
+          return;
+        }
+        if (!dualTransformActive) {
+          flightController.cancel();
+          flushOrbitInertia();
+          gestureInertia.set(0, 0, 0);
+          const selectedPosition = selectedRef.current
+            ? positionById.get(selectedRef.current)
+            : null;
+          dualAnchorWorld = selectedPosition
+            ? nodePoints.localToWorld(selectedPosition.clone())
+            : gestureHitTest(frame.transform.centerX, frame.transform.centerY)?.worldPosition ?? controls.target.clone();
+          dualTransformActive = true;
+        }
+        camera.updateMatrixWorld();
+        const offset = camera.position.clone().sub(controls.target);
+        const distance = offset.length();
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+        const translation = right.multiplyScalar(-frame.transform.dx * distance * 1.35)
+          .add(up.multiplyScalar(frame.transform.dy * distance * 1.35));
+        gesturePan.add(translation);
+        gestureInertia.copy(translation).multiplyScalar(0.14);
+        const anchor = dualAnchorWorld ?? controls.target;
+        const unclampedFactor = 1 / frame.transform.scaleRatio;
+        const nextDistance = THREE.MathUtils.clamp(
+          camera.position.distanceTo(controls.target) * unclampedFactor,
+          controls.minDistance,
+          controls.maxDistance,
+        );
+        const zoomFactor = nextDistance / Math.max(0.001, camera.position.distanceTo(controls.target));
+        // 偏移必须先算完再写回：copy(anchor) 会先执行、再求 add 的实参，
+        // 链式写法里 clone() 克隆到的已经是 anchor，偏移恒为零向量，
+        // 相机每次缩放/旋转都直接坍缩到锚点上。
+        const zoomCameraOffset = camera.position.clone().sub(anchor).multiplyScalar(zoomFactor);
+        const zoomTargetOffset = controls.target.clone().sub(anchor).multiplyScalar(zoomFactor);
+        camera.position.copy(anchor).add(zoomCameraOffset);
+        controls.target.copy(anchor).add(zoomTargetOffset);
+        if (frame.transform.rotationDelta !== 0) {
+          const yaw = -frame.transform.rotationDelta * 1.4;
+          const worldUp = new THREE.Vector3(0, 1, 0);
+          const yawCameraOffset = camera.position.clone().sub(anchor).applyAxisAngle(worldUp, yaw);
+          const yawTargetOffset = controls.target.clone().sub(anchor).applyAxisAngle(worldUp, yaw);
+          camera.position.copy(anchor).add(yawCameraOffset);
+          controls.target.copy(anchor).add(yawTargetOffset);
+        }
+        camera.updateMatrixWorld();
+        frame.hands.forEach((hand) => previousHands.set(hand.id, hand));
+        return;
+      }
+
+      if (dualTransformActive) {
+        dualTransformActive = false;
+        dualAnchorWorld = null;
+        frame.hands.forEach((hand) => previousHands.set(hand.id, hand));
+      }
+
+      gestureGrabbed = false;
+      controls.enabled = true;
+      const primary = frame.hands.find((hand) => hand.id === frame.primaryHandId)
+        ?? frame.hands.find((hand) => hand.role === "primary");
+      const previousPrimary = primary ? previousHands.get(primary.id) : null;
+      const primaryHit = primary ? hits.get(primary.id) ?? null : null;
+      const pinchTarget = primary ? pinchTargets.get(primary.id) ?? null : null;
+      const displayTarget = primary?.pinching && pinchTarget ? pinchTarget : primaryHit;
+      if (primary?.grabbed) {
+        controls.enabled = false;
+        gestureGrabbed = true;
+        if (!previousPrimary?.grabbed) {
+          flightController.cancel();
+          flushOrbitInertia();
+          gestureInertia.set(0, 0, 0);
+        }
+        if (displayTarget) showGestureContact(primary, displayTarget.worldPosition, displayTarget.id);
+        // 手滑出画面的那几帧不吃位移：识别器最后给出的坐标常常是一整段跳变，
+        // 灌进去镜头会猛甩一下才停。抓住状态保持，等它回来或宽限期到。
+        if (previousPrimary?.grabbed && primary.visible) {
+          const deadZone = (value: number, threshold: number, limit: number) => (
+            Math.abs(value) < threshold ? 0 : THREE.MathUtils.clamp(value, -limit, limit)
+          );
+          const clamp01 = (value: number) => THREE.MathUtils.clamp(value, 0, 1);
+          const dx = deadZone(clamp01(primary.x) - clamp01(previousPrimary.x), 0.0035, 0.055);
+          const dy = deadZone(clamp01(primary.y) - clamp01(previousPrimary.y), 0.0035, 0.055);
+          camera.updateMatrixWorld();
+          // 捏住拖动＝按住鼠标拖动＝转视角。角度换算沿用 OrbitControls 自己那条
+          // （_handleMouseMoveRotate 把像素除以画面高再乘 2π），于是阻尼、极角与
+          // 方位角上限全部与鼠标共用一套，不需要另写一份相机数学。
+          //
+          // 单位统一取「画面高的几分之几」：手的 x 是除以摄像头画面宽得来的，
+          // y 是除以画面高，直接拿去用会让横向比纵向快一个宽高比（16:9 上 1.78 倍）。
+          // 乘回 frameAspect 才是等距的——同样一段手部位移，横着和竖着转一样多。
+          const orbitUnitsX = dx * Math.max(0.0001, frame.frameAspect) * HAND_ORBIT_GAIN;
+          const orbitUnitsY = dy * HAND_ORBIT_GAIN;
+          if (orbitUnitsX !== 0) {
+            controls.rotateLeft(2 * Math.PI * orbitUnitsX * controls.rotateSpeed);
+          }
+          if (orbitUnitsY !== 0) {
+            controls.rotateUp(2 * Math.PI * orbitUnitsY * controls.rotateSpeed);
+          }
+          // 角度惯性由 OrbitControls 的阻尼提供，这里不再另加平移余势。
+          // 单手不再推拉：掌心尺寸是 2D 投影，手腕一俯仰就变，站着不动也会缩放。
+          // 缩放交给双手张合，和触控板的心智模型一致。
+          gestureInertia.set(0, 0, 0);
+          camera.updateMatrixWorld();
+        }
+      }
+
+      if (displayTarget) {
+        if (primary) showGestureContact(primary, displayTarget.worldPosition, displayTarget.id);
+        if (displayTarget.id !== gestureTargetId) {
+          gestureTargetId = displayTarget.id;
+          hoveredRef.current = displayTarget.id;
+          setHoveredId(displayTarget.id);
+          if (displayTarget.id && !selectedRef.current) {
+            gestureFocusActive = true;
+            focusAttributes(
+              displayTarget.id,
+              nodeById.get(displayTarget.id)?.group ?? null,
+            );
+          } else if (!displayTarget.id) {
+            restoreGestureFocus();
+          }
+        }
+      }
+
+      const secondary = frame.hands.find((hand) => hand.role === "secondary" && hand.visible);
+      const secondaryId = secondary ? hits.get(secondary.id)?.id ?? null : null;
+      const sourceId = selectedRef.current;
+      if (sourceId && relationTargetLocked && relationTargetId) {
+        showRelationExploration(sourceId, relationTargetId, true);
+      } else if (sourceId && secondaryId && secondaryId !== sourceId) {
+        const now = performance.now();
+        if (relationCandidate?.id !== secondaryId) {
+          if (relationTargetId) clearRelationExploration();
+          relationCandidate = { id: secondaryId, since: now };
+        } else if (now - relationCandidate.since >= 180) {
+          relationTargetId = secondaryId;
+          showRelationExploration(sourceId, secondaryId, false);
+        }
+      } else if (!relationTargetLocked) {
+        relationCandidate = null;
+        if (relationTargetId) clearRelationExploration();
+      }
+      frame.hands.forEach((hand) => previousHands.set(hand.id, hand));
+      [...previousHands.keys()].forEach((id) => {
+        if (!frame.hands.some((hand) => hand.id === id)) {
+          previousHands.delete(id);
+          lastNodeHits.delete(id);
+          pinchTargets.delete(id);
+        }
+      });
     };
 
     const onPointerDown = (event: PointerEvent) => {
       pointerStart = [event.clientX, event.clientY];
+      renderGate.invalidate();
     };
+    // 悬停命中合并到每帧最多一次：高回报率鼠标一帧能来好几个 pointermove，
+    // 每个都对全部星点做一次射线检测纯属浪费。事件里只记坐标，animate 里结算。
+    let hoverPending = false;
+    let hoverClientX = 0;
+    let hoverClientY = 0;
     const onPointerMove = (event: PointerEvent) => {
-      const id = hitTest(event);
-      canvas.style.cursor = id ? "pointer" : "grab";
-      if (id === hoveredRef.current) return;
+      hoverPending = true;
+      hoverClientX = event.clientX;
+      hoverClientY = event.clientY;
+      renderGate.invalidate();
+    };
+    const resolveHover = () => {
+      hoverPending = false;
+      const cachedRect = pointerEffects.rect;
+      const rect = cachedRect.width > 0 && cachedRect.height > 0
+        ? cachedRect
+        : canvas.getBoundingClientRect();
+      const id = hitTestAt(hoverClientX, hoverClientY, rect);
+      const group = id ? nodeById.get(id)?.group ?? null : hitTestGroupAt(hoverClientX, hoverClientY, rect);
+      pointerEffects.setAccent(
+        id
+          ? visualColorById.get(id) ?? nodeById.get(id)?.color ?? "#dff7ec"
+          : group
+            ? nodes.find((node) => node.group === group)?.color ?? "#dff7ec"
+            : "#dff7ec",
+      );
+      canvas.style.cursor = id ? "pointer" : group ? "zoom-in" : "grab";
+      if (id === hoveredRef.current && group === hoveredGroupRef.current) return;
       hoveredRef.current = id;
+      hoveredGroupRef.current = group;
       setHoveredId(id);
-      focusAttributes(id ?? selectedRef.current);
+      const lockedId = selectedRef.current;
+      const lockedGroup = selectedGroupRef.current;
+      focusAttributes(
+        lockedId ?? id,
+        lockedId ? nodeById.get(lockedId)?.group ?? null : lockedGroup ?? group,
+      );
     };
     const onPointerLeave = () => {
+      hoverPending = false;
+      renderGate.invalidate();
       hoveredRef.current = null;
+      hoveredGroupRef.current = null;
       setHoveredId(null);
       canvas.style.cursor = "grab";
-      focusAttributes(selectedRef.current);
+      focusAttributes(
+        selectedRef.current,
+        selectedRef.current
+          ? nodeById.get(selectedRef.current)?.group ?? null
+          : selectedGroupRef.current,
+      );
     };
     const onPointerUp = (event: PointerEvent) => {
+      renderGate.invalidate();
       if (!pointerStart) return;
       const moved = Math.hypot(
         event.clientX - pointerStart[0],
@@ -660,19 +2201,31 @@ export default function ThreeKnowledgeGraph({
       pointerStart = null;
       if (moved > 5) return;
       const id = hitTest(event);
-      if (id) selectNode(id);
+      if (id) {
+        selectNode(id);
+        return;
+      }
+      const group = hitTestGroup(event);
+      if (group) selectGroup(group);
     };
     const onDoubleClick = (event: MouseEvent) => {
       const id = hitTest(event);
-      if (id) onOpenRef.current(id);
+      if (id) openNode(id);
     };
     const onKeyDown = (event: KeyboardEvent) => {
+      renderGate.invalidate();
       if (event.key === "Escape") {
+        if (dossierModeRef.current === "focus") {
+          event.preventDefault();
+          event.stopPropagation();
+          setDossierMode("dock");
+          return;
+        }
         resetView();
         return;
       }
       if (event.key === "Enter" && selectedRef.current) {
-        onOpenRef.current(selectedRef.current);
+        openNode(selectedRef.current);
         return;
       }
       if (!["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) {
@@ -700,13 +2253,16 @@ export default function ThreeKnowledgeGraph({
       if (!entry) return;
       const width = Math.max(1, entry.contentRect.width);
       const height = Math.max(1, entry.contentRect.height);
+      pointerEffects.resize();
+      renderGate.invalidate();
       renderer.setSize(width, height, false);
+      bloom?.setSize(width, height);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       homeCamera = homeTarget.clone().add(
-        new THREE.Vector3(0, 0, fitDistance(camera.aspect)),
+        HOME_DIRECTION.clone().multiplyScalar(fitHomeDistance(camera.aspect)),
       );
-      if (!selectedRef.current) {
+      if (!selectedRef.current && !selectedGroupRef.current) {
         camera.position.copy(homeCamera);
         controls.target.copy(homeTarget);
         controls.update();
@@ -717,73 +2273,287 @@ export default function ThreeKnowledgeGraph({
     const visibilityObserver = new IntersectionObserver(
       ([entry]) => {
         visible = entry?.isIntersecting ?? true;
+        if (visible) renderGate.invalidate();
       },
       { threshold: 0.01 },
     );
     visibilityObserver.observe(host);
 
+    let lastFrameAt = performance.now();
+    let ambientWeight = 1;
+    let tiltWeight = 1;
+    // 标签池重绑的依据：上次绑定时的注视点（root 局部坐标）和镜头距离。
+    const labelFocus = new THREE.Vector3();
+    const lastLabelFocus = new THREE.Vector3(Infinity, Infinity, Infinity);
+    let lastLabelDistance = 0;
+    const labelCandidates = nodes.map((node) => {
+      const position = positionById.get(node.id)!;
+      return {
+        id: node.id,
+        degree: node.degree,
+        group: node.group,
+        x: position.x,
+        y: position.y,
+        z: position.z,
+      };
+    });
+    const panStep = new THREE.Vector3();
+    const cameraInRoot = new THREE.Vector3();
+    const rebindNodeLabels = (cameraDistance: number, flying: boolean) => {
+      const selected = selectedRef.current;
+      const key = selected
+        ? `selected:${selected}`
+        : searchActive && searchMatches.size > 0 && searchMatches.size <= NODE_LABEL_POOL
+          ? `search:${[...searchMatches].join("\u0000")}`
+          : "ambient";
+      root.worldToLocal(labelFocus.copy(controls.target));
+      const moved = labelFocus.distanceTo(lastLabelFocus);
+      const zoomed = lastLabelDistance > 0
+        ? Math.abs(Math.log(cameraDistance / lastLabelDistance))
+        : Infinity;
+      // 只在选中变化、搜索命中变化，或注视点／镜头距离变得够多时才重绑；
+      // 拖着转视角时注视点不动，标签就不换人。飞行途中注视点每帧都在走，
+      // 按距离阈值重绑会让名字一路换人闪烁，所以只认键变化，落地后再按位置补一次。
+      if (
+        key === labelBindKey
+        && (key !== "ambient" || flying || (moved < 0.6 && zoomed < 0.22))
+      ) return;
+      labelBindKey = key;
+      lastLabelFocus.copy(labelFocus);
+      lastLabelDistance = cameraDistance;
+      const ids = selected
+        ? pickConstellationLabels({
+            candidates: labelCandidates,
+            focus: labelFocus,
+            radius: 1,
+            limit: nodeLabels.length,
+            selectedId: selected,
+            neighborIds: adjacency.get(selected) ?? [],
+          })
+        : key.startsWith("search:")
+          ? [...searchMatches]
+          : pickConstellationLabels({
+              candidates: labelCandidates,
+              focus: labelFocus,
+              // 远看时半径大，近似按被引用数挑全图主角；拉近后只挑眼前的。
+              radius: Math.max(1.6, cameraDistance * 0.42),
+              limit: nodeLabels.length,
+              perGroupLimit: Math.max(3, Math.ceil(nodeLabels.length / Math.max(1, galaxyGroups.length)) + 1),
+            });
+      bindNodeLabels(ids);
+    };
+
     const animate = (now: number) => {
       if (!visible) return;
       const seconds = now / 1000;
+      const frameDelta = Math.min(0.05, Math.max(0.001, (now - lastFrameAt) / 1000));
+      lastFrameAt = now;
+      const moving = !pauseRef.current && !reducedMotion;
+      pointerEffects.tick(now, moving);
+      if (hoverPending) resolveHover();
       nodeMaterial.uniforms.uTime.value = seconds;
-      nodeMaterial.uniforms.uMotion.value = pauseRef.current || reducedMotion ? 0 : 1;
+      nodeMaterial.uniforms.uMotion.value = moving ? 1 : 0;
+      writeStageInteractionUniforms(nodeMaterial.uniforms, pointerEffects);
+      // 节点吃七成雾（还要能读），尘埃吃满——远处沉进背景，纵深才出来。
+      writeStageFogUniforms(nodeMaterial.uniforms, scene.fog as THREE.FogExp2, 0.55);
+      dustMaterial.uniforms.uTime.value = seconds;
+      dustMaterial.uniforms.uMotion.value = moving ? 1 : 0;
+      writeStageInteractionUniforms(dustMaterial.uniforms, pointerEffects);
+      writeStageFogUniforms(dustMaterial.uniforms, scene.fog as THREE.FogExp2, 1.35);
+      writeStageFogUniforms(linkMaterial.uniforms, scene.fog as THREE.FogExp2, 1.0);
+      // 暂停时光带停在原地会像卡住的进度条，所以直接收掉，继续时再出来。
+      if (moving) linkMaterial.uniforms.uTime.value = seconds;
+      linkMaterial.uniforms.uFlow.value = moving ? 1 : 0;
 
-      if (flight) {
-        const rawProgress = Math.min(1, (now - flight.startedAt) / flight.duration);
-        const progress = easeInOutCubic(rawProgress);
-        camera.position.lerpVectors(flight.fromCamera, flight.toCamera, progress);
-        controls.target.lerpVectors(flight.fromTarget, flight.toTarget, progress);
-        if (rawProgress >= 1) flight = null;
+      // 明暗渐变：目标由交互写好，这里按指数趋近（帧率无关），收敛后不再上传缓冲。
+      // 减弱动态时 rate=1，一步到位。
+      const easeRate = reducedMotion ? 1 : 1 - Math.exp(-frameDelta * 7);
+      let easing = false;
+      if (focusEasing) {
+        const nodeState = approachValues(nodeFocusCurrent, nodeFocus, easeRate);
+        const linkState = approachValues(linkFocusCurrent, linkFocus, easeRate);
+        if (nodeState > 0) (nodeGeometry.getAttribute("aFocus") as THREE.BufferAttribute).needsUpdate = true;
+        if (linkState > 0) (linkGeometry.getAttribute("aFocus") as THREE.BufferAttribute).needsUpdate = true;
+        focusEasing = nodeState === 2 || linkState === 2;
+        easing = focusEasing;
+      }
+      if (searchCurrent !== searchTarget) {
+        searchCurrent += (searchTarget - searchCurrent) * easeRate;
+        if (Math.abs(searchTarget - searchCurrent) < 0.002) searchCurrent = searchTarget;
+        nodeMaterial.uniforms.uSearchActive.value = searchCurrent;
+        linkMaterial.uniforms.uSearchActive.value = searchCurrent;
+        easing = true;
       }
 
-      if (!pauseRef.current && !reducedMotion && !selectedRef.current) {
-        root.rotation.y = Math.sin(seconds * 0.11) * 0.055;
-        root.rotation.x = Math.cos(seconds * 0.08) * 0.018;
-        background.rotation.y = seconds * 0.004;
-        galaxyDust.rotation.z = Math.sin(seconds * 0.07) * 0.025;
+      if (searchActive && searchSpheres.visible && searchHitIndices.length > 0) {
+        for (const index of searchHitIndices) {
+          const pulse = moving
+            ? 1 + Math.sin(seconds * 1.5 + phases[index]) * 0.055
+            : 1;
+          searchMatrix.position.copy(positionById.get(nodes[index].id)!);
+          searchMatrix.rotation.set(
+            searchSpins[index * 3] + (moving ? seconds * 0.04 : 0),
+            searchSpins[index * 3 + 1] + (moving ? seconds * 0.065 : 0),
+            searchSpins[index * 3 + 2],
+          );
+          searchMatrix.scale.setScalar(searchSphereScale * pulse);
+          searchMatrix.updateMatrix();
+          searchSpheres.setMatrixAt(index, searchMatrix.matrix);
+        }
+        searchSpheres.instanceMatrix.needsUpdate = true;
       }
 
-      if (focusRing.visible) {
-        const ringPulse = pauseRef.current || reducedMotion
-          ? 1
-          : 1 + Math.sin(seconds * 3.1) * 0.18;
-        focusRing.scale.setScalar(ringPulse);
-        focusRingMaterial.opacity = 0.62 + Math.sin(seconds * 3.1) * 0.22;
+      const flying = flightController.active;
+      flightController.tick(now);
+      // URL 带来的焦点等开场运镜落地再飞，见 focusRequestRef。
+      if (pendingFocusId && !flightController.active) {
+        const focusId = pendingFocusId;
+        pendingFocusId = null;
+        selectNode(focusId);
       }
+
+      if (moving) {
+        const coreBreath = 1 + Math.sin(seconds * 0.72) * 0.055
+          + pointerEffects.energy * 0.035;
+        coreGlow.scale.set(5.2 * coreBreath, 3.9 * coreBreath, 1);
+        coreGlowMaterial.opacity = 0.31 + Math.sin(seconds * 0.72) * 0.035
+          + pointerEffects.energy * 0.06;
+        coreSpark.scale.set(
+          1.9 * (1 + pointerEffects.dragEnergy * 0.16 + pointerEffects.releaseImpulse * 0.42),
+          1.42 * (1 + pointerEffects.energy * 0.08 + pointerEffects.releaseImpulse * 0.22),
+          1,
+        );
+      }
+
+      // 双手平移在渲染帧里按比例排出缓冲，识别帧之间也在滑动（单手已改为转视角，不再写入）。
+      // 排出速率按真实帧间隔换算（半衰期＝一个 60fps 帧），渲染掉帧的机器
+      // 不会越掉越黏。飞行运镜接管相机时丢弃残余，免得补间结束后凭空再飘。
+      const panDt = lastPanDrainAt > 0 ? Math.min(120, now - lastPanDrainAt) : 16.7;
+      lastPanDrainAt = now;
+      const panning = gesturePan.lengthSq() > 0;
+      if (flightController.active) {
+        gesturePan.set(0, 0, 0);
+      } else if (panning) {
+        const drainRatio = 1 - Math.pow(0.5, panDt / 16.7);
+        panStep.copy(gesturePan).multiplyScalar(drainRatio);
+        camera.position.add(panStep);
+        controls.target.add(panStep);
+        gesturePan.multiplyScalar(1 - drainRatio);
+        if (gesturePan.lengthSq() < 0.00000001) gesturePan.set(0, 0, 0);
+      }
+
+      // 松手后只保留很轻的一段余势，并快速衰减；它让拖动不是“硬刹车”，
+      // 又不会像持续惯性那样破坏精确定位。
+      const coasting = !gestureGrabbed && !reducedMotion && gestureInertia.lengthSq() > 0.0000005;
+      if (coasting) {
+        camera.position.add(gestureInertia);
+        controls.target.add(gestureInertia);
+        gestureInertia.multiplyScalar(0.78);
+      } else if (!gestureGrabbed) {
+        gestureInertia.set(0, 0, 0);
+      }
+
+      // 自转和指针视差都走同一个连续权重：以前是布尔闸门直接赋值，
+      // 选中一个节点的瞬间自转会「啪」地停在当前角度，再取消又跳回去。
+      const ambientWanted = moving
+        && !selectedRef.current
+        && !selectedGroupRef.current
+        && !gestureGrabbed
+        ? 1
+        : 0;
+      ambientWeight += (ambientWanted - ambientWeight) * (1 - Math.exp(-frameDelta * 4.2));
+      // 抓取中不加视差：dualAnchorWorld 是一次性锁定的世界坐标，
+      // 舞台一歪，被抓住的节点就从锚点上滑走了。
+      const tiltWanted = !moving || gestureGrabbed ? 0 : 1;
+      tiltWeight += (tiltWanted - tiltWeight) * (1 - Math.exp(-frameDelta * 5.5));
+      root.rotation.y = Math.sin(seconds * 0.11) * 0.08 * ambientWeight
+        + pointerEffects.tiltY * tiltWeight;
+      root.rotation.x = Math.cos(seconds * 0.08) * 0.028 * ambientWeight
+        + pointerEffects.tiltX * tiltWeight;
+      galaxyDust.rotation.z = Math.sin(seconds * 0.07) * 0.032 * ambientWeight;
+
+      focusArtifact.tick(seconds, moving);
+
+      let gestureVisible = false;
+      Object.values(gestureVisuals).forEach((visual) => {
+        if (!visual.anchor.visible) return;
+        gestureVisible = true;
+        visual.anchor.lookAt(root.worldToLocal(cameraInRoot.copy(camera.position)));
+        visual.outer.rotation.z = seconds * (
+          visual.grabbed ? 1.8 : 0.85 + visual.pinchProgress * 0.9
+        );
+        visual.inner.rotation.z = -seconds * (
+          visual.grabbed ? 2.4 : 1.15 + visual.pinchProgress * 1.2
+        );
+        const pulse = 1 + Math.sin(seconds * (visual.grabbed ? 7 : 4)) * 0.075;
+        visual.anchor.scale.setScalar((
+          visual.grabbed ? 1.2 : 0.82 + visual.pinchProgress * 0.3
+        ) * pulse);
+      });
 
       if (!pauseRef.current && pulseLinks.length > 0) {
         pulseLinks.forEach((link, index) => {
-          const source = positionById.get(link.source)!;
-          const target = positionById.get(link.target)!;
           const progress = (seconds * 0.23 + index / Math.max(1, pulseLinks.length)) % 1;
-          const position = source.clone().lerp(target, progress);
-          const color = new THREE.Color(
-            nodeById.get(progress < 0.5 ? link.source : link.target)?.color ?? "#ffffff",
-          );
-          pulsePositions.set(position.toArray(), index * 3);
-          pulseColors.set(color.toArray(), index * 3);
+          // 有飘带的关系沿飘带的曲线走；其余（全景的环境脉冲）沿可见的直线走。
+          if (ribbonLinks.has(link)) {
+            relationCurve(link).getPoint(progress, pulsePoint);
+          } else {
+            pulsePoint.lerpVectors(
+              positionById.get(link.source)!,
+              positionById.get(link.target)!,
+              progress,
+            );
+          }
+          const color = pulseColorById.get(progress < 0.5 ? link.source : link.target)
+            ?? pulseFallbackColor;
+          pulsePoint.toArray(pulsePositions, index * 3);
+          color.toArray(pulseColors, index * 3);
         });
         (pulseGeometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
         (pulseGeometry.getAttribute("color") as THREE.BufferAttribute).needsUpdate = true;
       }
 
-      controls.update();
+      const controlsMoved = controls.update(frameDelta);
+      starfield.setInteraction(
+        pointerEffects.pointer.x,
+        pointerEffects.pointer.y,
+        pointerEffects.energy,
+        pointerEffects.dragEnergy > 0.12,
+        pointerEffects.energy < 0.08,
+      );
+      starfield.tick(seconds, moving);
+
+      // 假景深的对焦面放在镜头注视点上：选中飞近时前后景自然虚化，
+      // 全景时范围随距离放宽，整座星系基本都在景深内。
+      const cameraDistance = camera.position.distanceTo(controls.target);
+      const focusRange = 2 + cameraDistance * 0.75;
+      nodeMaterial.uniforms.uFocusDistance.value = cameraDistance;
+      nodeMaterial.uniforms.uFocusRange.value = focusRange;
+      dustMaterial.uniforms.uFocusDistance.value = cameraDistance;
+      dustMaterial.uniforms.uFocusRange.value = focusRange;
+
+      // 只有暂停或减弱动态时才考虑省掉这一帧，而且要所有会动的东西都停了：
+      // 飞行、OrbitControls 阻尼、指针能量与动量场、手势、明暗渐变。
+      // 闸门本身还会再等 45 帧，给没列进来的尾巴（星场回位等）留余量。
+      const active = moving
+        || flying
+        || flightController.active
+        || controlsMoved
+        || easing
+        || panning
+        || coasting
+        || gestureGrabbed
+        || gestureVisible
+        || pointerEffects.energy > 0.01
+        || pointerEffects.dragEnergy > 0.01
+        || pointerEffects.motion.active;
+      if (!renderGate.shouldRender(active)) return;
+
       scene.updateMatrixWorld(true);
-      labelItems.forEach(({ position, label }) => {
-        const projected = nodePoints.localToWorld(position.clone()).project(camera);
-        const onScreen =
-          projected.z > -1 &&
-          projected.z < 1 &&
-          Math.abs(projected.x) < 1.08 &&
-          Math.abs(projected.y) < 1.08;
-        label.dataset.visible = onScreen ? "true" : "false";
-        if (onScreen) {
-          const x = (projected.x * 0.5 + 0.5) * host.clientWidth;
-          const y = (-projected.y * 0.5 + 0.5) * host.clientHeight;
-          label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, 13px)`;
-        }
-      });
-      renderer.render(scene, camera);
+      rebindNodeLabels(cameraDistance, flightController.active);
+      projectLabelItems(stageLabelItems, nodePoints, camera, host, { staggerRow: 17 });
+      if (bloom) bloom.render(scene, camera);
+      else renderer.render(scene, camera);
     };
     renderer.setAnimationLoop(animate);
     const readyFrame = window.requestAnimationFrame(() => setReady(true));
@@ -791,9 +2561,13 @@ export default function ThreeKnowledgeGraph({
     return () => {
       cancelAnimationFrame(readyFrame);
       renderer.setAnimationLoop(null);
+      releaseStageVoid();
       resizeObserver.disconnect();
       visibilityObserver.disconnect();
+      controls.removeEventListener("change", onControlsChange);
       controls.dispose();
+      bloom?.dispose();
+      pointerEffects.dispose();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerleave", onPointerLeave);
@@ -801,24 +2575,23 @@ export default function ThreeKnowledgeGraph({
       canvas.removeEventListener("dblclick", onDoubleClick);
       canvas.removeEventListener("keydown", onKeyDown);
       canvas.removeEventListener("webglcontextlost", onContextLost);
-      scene.traverse((object) => {
-        if (object instanceof THREE.Mesh || object instanceof THREE.Points || object instanceof THREE.LineSegments) {
-          object.geometry?.dispose();
-          const materials = Array.isArray(object.material) ? object.material : [object.material];
-          materials.forEach((material) => material.dispose());
-        }
-        if (object instanceof THREE.Sprite) {
-          object.material.dispose();
-        }
-      });
+      disposeStage(scene);
       nebulaTexture.dispose();
-      haloGeometry.dispose();
+      pulseTexture.dispose();
+      groupHitGeometry.dispose();
       renderer.dispose();
       labelLayer.remove();
       canvas.remove();
       resetViewRef.current = () => undefined;
+      overviewRef.current = () => undefined;
+      selectNodeRef.current = () => undefined;
+      updateSearchRef.current = () => undefined;
+      gestureFrameRef.current = () => undefined;
+      focusRequestRef.current = () => undefined;
+      setHandTargets([]);
+      setHandRelation(null);
     };
-  }, [links, nodeById, nodes]);
+  }, [links, nodeById, nodes, openNode]);
 
   if (nodes.length === 0) {
     return <div className="space-graph-empty">这个分区暂时没有可绘制的笔记。</div>;
@@ -830,6 +2603,8 @@ export default function ThreeKnowledgeGraph({
       className="space-graph-stage"
       data-ready={ready ? "true" : "false"}
       data-fullscreen={fullscreen ? "true" : "false"}
+      data-selected={selectedNode ? "true" : "false"}
+      data-dossier-mode={selectedNode ? dossierMode : "none"}
     >
       <div ref={hostRef} className="space-graph-webgl" />
       {!ready && (
@@ -842,43 +2617,198 @@ export default function ThreeKnowledgeGraph({
         <span>MEMORY CONSTELLATION</span>
         <strong>思考的轨迹，以光连接。</strong>
       </div>
-      {activeNode && (
+      <StageSearchRadar
+        inputRef={searchInputRef}
+        search={search}
+        meta={(node) => `${node.kindLabel} · ${node.groupLabel}`}
+        resultsId="space-graph-search-results"
+        placeholder="搜索标题与全文"
+        inputAriaLabel="在关系图中搜索标题与全文"
+        listAriaLabel="关系图全文搜索结果"
+        clearAriaLabel="清空关系图搜索"
+        hitUnit="节点"
+        enterLabel="飞向节点"
+        emptyHint="尝试更短的关键词，或搜索正文中的日语、公司名和技术词。"
+      />
+      {activeNode && !selectedNode && (
         <div
-          className="space-graph-node-card"
+          className="space-graph-node-card space-graph-node-peek"
           style={{ "--node-accent": activeNode.color } as CSSProperties}
           role="status"
         >
           <span>{activeNode.groupLabel}</span>
           <strong>{activeNode.title}</strong>
           <small>{activeNode.degree} 条可见关系</small>
-          {selectedId && (
-            <button type="button" onClick={() => onOpen(selectedId)}>
-              打开这篇笔记 <b>↗</b>
-            </button>
-          )}
         </div>
       )}
-      <div className="space-graph-controls">
-        <button
-          type="button"
-          aria-label={fullscreen ? "退出全屏" : "全屏查看星图，快捷键 F"}
-          onClick={() => void toggleFullscreen()}
+      {selectedNode && (
+        <aside
+          className="space-graph-dossier"
+          data-mode={dossierMode}
+          style={{
+            "--node-accent": selectedNode.color,
+            "--dossier-zoom": dossierZoom,
+          } as CSSProperties}
+          aria-label={`${selectedNode.title}的节点档案`}
         >
-          {fullscreen ? "退出全屏" : "全屏"} <kbd>F</kbd>
-        </button>
-        <button type="button" onClick={() => resetViewRef.current()}>
-          回到全景
-        </button>
-        <button
-          type="button"
-          aria-pressed={paused}
-          onClick={() => setPaused((value) => !value)}
-        >
-          {paused ? "继续呼吸" : "暂停动态"}
-        </button>
-      </div>
+          <i className="space-graph-dossier-scan" aria-hidden="true" />
+          <header>
+            <div>
+              <span>NODE SIGNAL · 已锁定</span>
+              <small>{selectedNode.groupLabel}</small>
+            </div>
+            <div className="space-graph-dossier-actions">
+              <button
+                type="button"
+                aria-label={dossierMode === "focus" ? "将节点档案停靠到右侧" : "居中放大节点档案"}
+                onClick={() => setDossierMode((current) => current === "dock" ? "focus" : "dock")}
+              >
+                {dossierMode === "focus" ? "停靠" : "居中"} <kbd>D</kbd>
+              </button>
+              <button
+                type="button"
+                aria-label="缩小节点档案文字"
+                onClick={() => changeDossierZoom(-0.1)}
+              >
+                −
+              </button>
+              <output aria-label={`节点档案缩放 ${Math.round(dossierZoom * 100)}%`}>
+                {Math.round(dossierZoom * 100)}%
+              </output>
+              <button
+                type="button"
+                aria-label="放大节点档案文字"
+                onClick={() => changeDossierZoom(0.1)}
+              >
+                +
+              </button>
+              <button
+                type="button"
+                aria-label="收起节点档案并返回全景"
+                onClick={() => resetViewRef.current()}
+              >
+                ×
+              </button>
+            </div>
+          </header>
+          <div className="space-graph-dossier-body">
+            <div className="space-graph-dossier-orbit" aria-hidden="true">
+              <i />
+              <i />
+              <b />
+            </div>
+            <div className="space-graph-dossier-title">
+              <span>{selectedNode.kindLabel}</span>
+              <h2>{selectedNode.title}</h2>
+            </div>
+            <dl>
+              <div><dt>连接</dt><dd>{selectedNode.degree}</dd></div>
+              <div><dt>外链</dt><dd>{selectedNode.outbound}</dd></div>
+              <div><dt>更新</dt><dd>{selectedNode.updatedLabel}</dd></div>
+            </dl>
+            <div className="space-graph-dossier-copy">
+              <span>内容预览 · 可滚动查看全文</span>
+              <p>{selectedNode.excerpt || "这篇记忆暂时没有可提取的正文摘要。"}</p>
+            </div>
+            {selectedNeighbors.length > 0 && (
+              <div className="space-graph-dossier-neighbors">
+                <span>最近的记忆轨道</span>
+                <div>
+                  {selectedNeighbors.map(({ node: neighbor, relationLabel, direction }) => (
+                    <button
+                      type="button"
+                      key={`${neighbor.id}:${relationLabel}:${direction}`}
+                      onClick={() => selectNodeRef.current(neighbor.id)}
+                      style={{ "--neighbor-accent": neighbor.color } as CSSProperties}
+                    >
+                      <span>{neighbor.title}</span>
+                      <small>
+                        {direction === "out" ? "→" : direction === "in" ? "←" : "↔"} {relationLabel}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <code>{selectedNode.path}</code>
+          </div>
+          {selectedNode.openable ? (
+            <button
+              type="button"
+              className="space-graph-enter-memory"
+              onClick={() => openNode(selectedNode.id)}
+            >
+              <span>
+                <small>ENTER MEMORY</small>
+                展开完整记忆
+              </span>
+              <b aria-hidden="true">→</b>
+            </button>
+          ) : (
+            <div className="space-graph-entity-hint">
+              派生实体 · 请选择关系节点继续探索
+            </div>
+          )}
+          <footer>
+            <span>
+              {selectedNode.openable
+                ? <>双击节点或按 <kbd>Enter</kbd> 也可穿越</>
+                : "实体由 Vault 的结构化字段实时生成"}
+            </span>
+            <button type="button" onClick={() => setShortcutHelp(true)}>
+              查看快捷键 <kbd>?</kbd>
+            </button>
+          </footer>
+        </aside>
+      )}
+      {openingNode && (
+        <StagePortal
+          accent={openingNode.color}
+          kicker="MEMORY GATE · SYNCHRONIZING"
+          title={openingNode.title}
+          note="正在展开完整记忆"
+        />
+      )}
+      <StageControls
+        fullscreen={fullscreen}
+        fullscreenAriaLabel="全屏查看星图，快捷键 F"
+        onToggleFullscreen={() => void toggleFullscreen()}
+        resetLabel="回到全景"
+        onResetView={() => resetViewRef.current()}
+        paused={paused}
+        onTogglePaused={() => setPaused((value) => !value)}
+        shortcutHelp={shortcutHelp}
+        onToggleShortcuts={() => setShortcutHelp((current) => !current)}
+      />
+      {fullscreen && (
+        <GraphHandControls
+          active={fullscreen}
+          onFrame={(frame) => gestureFrameRef.current(frame)}
+          targets={handTargets}
+          selectedLabel={selectedNode?.title ?? null}
+          relation={handRelation}
+        />
+      )}
+      {shortcutHelp && (
+        <StageShortcuts
+          title="星图快捷键"
+          ariaLabel="星图快捷键"
+          onClose={() => setShortcutHelp(false)}
+          entries={[
+            { keys: ["/"], label: "全文搜索" },
+            { keys: ["F"], label: "全屏" },
+            { keys: ["D"], label: "档案居中／停靠" },
+            { keys: ["O"], label: "打开完整记忆" },
+            { keys: ["＋", "－"], label: "文字缩放" },
+            { keys: ["0"], label: "恢复 100%" },
+            { keys: ["←", "→"], label: "切换节点" },
+            { keys: ["P"], label: "暂停／继续动态" },
+            { keys: ["R"], label: "回到全景" },
+          ]}
+        />
+      )}
       <div className="space-graph-caption">
-        <span>拖动探索 · 滚轮缩放 · 双击打开</span>
+        <span>单击锁定 · 拖动探索 · 双击穿越</span>
         <strong>{nodes.length} 个节点 · {links.length} 条连接</strong>
       </div>
       <details className="space-graph-index">
@@ -887,7 +2817,7 @@ export default function ThreeKnowledgeGraph({
           {nodes
             .toSorted((left, right) => right.degree - left.degree)
             .map((node) => (
-              <button type="button" key={node.id} onClick={() => onOpen(node.id)}>
+              <button type="button" key={node.id} onClick={() => openNode(node.id)}>
                 <i style={{ background: node.color }} />
                 <span>{node.title}</span>
                 <small>{node.degree}</small>

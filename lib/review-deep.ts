@@ -1,36 +1,80 @@
-export type AnswerComprehension = "clear" | "partial" | "likely_missed";
-export type AnswerRelevance = "direct" | "partial" | "off_target";
-export type AnswerQuality = "strong" | "mixed" | "weak" | "neutral";
-export type AnswerStrategyTag =
-  | "compound-question-miss"
-  | "no-conclusion-first"
-  | "negative-oversharing"
-  | "weak-evidence"
-  | "over-absolute"
-  | "role-mismatch"
-  | "numbers-confusion";
+import {
+  DEDUCTION_SEVERITY_BANDS,
+  REVIEW_COMPREHENSION_VALUES,
+  REVIEW_DIMENSION_WEIGHTS,
+  REVIEW_LIMITS,
+  REVIEW_QUALITY_VALUES,
+  REVIEW_RELEVANCE_VALUES,
+  REVIEW_STRATEGY_TAGS,
+} from "./review-contract.mjs";
+import { renderInterviewAdvisory, type InterviewAdvisory } from "./interview-advisory.ts";
+import { computeAssessmentScores } from "./assessment-scoring.mjs";
 
-export type ReviewDimensionKey =
-  | "questionUnderstanding"
-  | "coverage"
-  | "directness"
-  | "evidenceCredibility"
-  | "riskControl";
+// 枚举本体不在这里，在 review-contract.mjs——那份同时被 codex-bridge 的 JSON schema
+// 和 skill 的校验器读。在这里再写一遍联合类型，就等于多一个不会变红的副本。
+export type AnswerComprehension = (typeof REVIEW_COMPREHENSION_VALUES)[number];
+export type AnswerRelevance = (typeof REVIEW_RELEVANCE_VALUES)[number];
+export type AnswerQuality = (typeof REVIEW_QUALITY_VALUES)[number];
+export type AnswerStrategyTag = (typeof REVIEW_STRATEGY_TAGS)[number];
+
+export type ReviewDimensionKey = keyof typeof REVIEW_DIMENSION_WEIGHTS;
+
+/** 扣分档。档位决定分数带，所以「轻微」在任何一场都不可能扣掉 15 分。 */
+export type ReviewDeductionSeverity = keyof typeof DEDUCTION_SEVERITY_BANDS;
+
+// 分数带来自契约，label / hintZh 是只在界面出现的中文说明，留在这一层。
+export const DEDUCTION_SEVERITY_META: Record<
+  ReviewDeductionSeverity,
+  { label: string; hintZh: string; min: number; max: number }
+> = {
+  major: { label: "失误", hintZh: "核心子问漏答・答非所问・明确的招聘风险表达", ...DEDUCTION_SEVERITY_BANDS.major },
+  moderate: { label: "缺口", hintZh: "答到了但明显不完整，或要对方追问才对齐", ...DEDUCTION_SEVERITY_BANDS.moderate },
+  minor: { label: "轻微", hintZh: "点状瑕疵，不改变面试官的判断", ...DEDUCTION_SEVERITY_BANDS.minor },
+  opportunity: { label: "机会成本", hintZh: "没做错，但白白少赚一次加分", ...DEDUCTION_SEVERITY_BANDS.opportunity },
+};
+
+const DEDUCTION_SEVERITIES = Object.keys(
+  DEDUCTION_SEVERITY_META,
+) as ReviewDeductionSeverity[];
+
+/** 一条可举证的扣分：扣在哪道题、扣几分、为什么、下次怎么不扣。 */
+export type ReviewDeduction = {
+  /** qNN。找不到对应块时留空，只失去跳转能力，分数照扣（否则会被静默抹平）。 */
+  blockId: string;
+  points: number;
+  severity: ReviewDeductionSeverity;
+  recovery?: "unresolved" | "partial" | "repaired" | "unknown";
+  labelZh: string;
+  detailZh: string;
+  fixZh: string;
+  evidenceSentenceIds: string[];
+};
 
 export type InterviewAnswerDimension = {
-  score: number;
+  score: number | null;
+  baseScore?: 75 | 85 | 95 | null;
+  basisZh?: string;
+  positiveEvidenceBlockIds?: string[];
+  level?: "supported" | "partial" | "core_gap" | "not_assessed";
   rationaleZh: string;
   evidenceBlockIds: string[];
+  /**
+   * 历史账本从100起扣；有据分从举证基准起扣，空数组不证明优秀。
+   * 分数由服务器推导，不采用模型自报的 score——
+   * 「说不出扣在哪就扣不动分」，避免旧版那种理由全是好话、分数却只有 86 的幽灵扣分。
+   */
+  deductions?: ReviewDeduction[];
 };
 
 export type InterviewAnswerDimensions = Record<ReviewDimensionKey, InterviewAnswerDimension>;
 
+// key 的写死顺序＝报告与界面的排列顺序，和契约里的顺序保持一致。
 export const REVIEW_DIMENSION_META: Record<ReviewDimensionKey, { label: string; weight: number }> = {
-  questionUnderstanding: { label: "问题理解", weight: 0.2 },
-  coverage: { label: "覆盖完整度", weight: 0.2 },
-  directness: { label: "直接性", weight: 0.2 },
-  evidenceCredibility: { label: "证据可信度", weight: 0.2 },
-  riskControl: { label: "风险控制", weight: 0.2 },
+  questionUnderstanding: { label: "问题理解", weight: REVIEW_DIMENSION_WEIGHTS.questionUnderstanding },
+  coverage: { label: "覆盖完整度", weight: REVIEW_DIMENSION_WEIGHTS.coverage },
+  directness: { label: "直接性", weight: REVIEW_DIMENSION_WEIGHTS.directness },
+  evidenceCredibility: { label: "证据可信度", weight: REVIEW_DIMENSION_WEIGHTS.evidenceCredibility },
+  riskControl: { label: "风险控制", weight: REVIEW_DIMENSION_WEIGHTS.riskControl },
 };
 
 export type InterviewAnswerBlockReview = {
@@ -50,35 +94,44 @@ export type InterviewAnswerBlockReview = {
   improvedAnswerJa: string;
 };
 
+export type AssessmentScoring = {
+  methodVersion: "2026-10-v3";
+  assessedDimensions: ReviewDimensionKey[];
+  rawMean: number | null;
+  roundedMean: number | null;
+  cap: number | null;
+  formulaZh: string;
+};
+
 export type InterviewAnswerReview = {
   generatedAt: string;
   model: string;
-  overallScore: number;
+  overallScore: number | null;
+  evaluationMode?: "evidence" | "scored_evidence";
+  evaluation?: { conclusionZh: string; coverageZh: string; limitsZh: string; scoringEligible?: boolean; eligibilityZh?: string; materialScope?: "full_available_text" | "limited" };
+  scoring?: AssessmentScoring;
   /** schema v1 の旧レポートには無い。新規生成では必須。 */
   dimensions?: InterviewAnswerDimensions;
+  /** 整场面试的自然语言导读，与回答质量评分分开；旧报告可缺省。 */
+  overviewZh?: string;
   summaryZh: string;
   strengths: string[];
   weaknesses: string[];
   priorityBlockIds: string[];
   blocks: InterviewAnswerBlockReview[];
+  /** 独立生成的顾问评论；旧报告缺省，不参与回答质量评分。 */
+  advisory?: InterviewAdvisory;
 };
 
 const DATA_MARKER = "<!-- interview-answer-review-data -->";
-const STRATEGY_TAGS: readonly AnswerStrategyTag[] = [
-  "compound-question-miss",
-  "no-conclusion-first",
-  "negative-oversharing",
-  "weak-evidence",
-  "over-absolute",
-  "role-mismatch",
-  "numbers-confusion",
-];
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function texts(value: unknown, limit = 12) {
+// limit 必须显式标 number：契约里的上限是字面量类型，不标注会把参数窄成 12，
+// 传 8 / 30 的调用点全部变成 TS2345。
+function texts(value: unknown, limit: number = REVIEW_LIMITS.listItems) {
   return Array.isArray(value) ? value.map(text).filter(Boolean).slice(0, limit) : [];
 }
 
@@ -90,9 +143,54 @@ function boundedScore(value: unknown) {
   return Math.max(0, Math.min(100, Number(value) || 0));
 }
 
+function normalizeDeductions(
+  value: unknown,
+  sentencesByBlock: Map<string, Set<string>>,
+  scoredMode = false,
+): ReviewDeduction[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (item && typeof item === "object" ? (item as Record<string, unknown>) : {}))
+    .map((item): ReviewDeduction => {
+      const severity = oneOf(item.severity, DEDUCTION_SEVERITIES, "moderate");
+      const band = DEDUCTION_SEVERITY_META[severity];
+      const detailZh = text(item.detailZh);
+      const rawBlockId = text(item.blockId);
+      const blockId = sentencesByBlock.has(rawBlockId) ? rawBlockId : "";
+      // 別の設問の sNN を引いた証拠は落とす。残すと「証拠句」ボタンが
+      // 関係ない質問へ飛び、扣分の根拠を確かめに行った人を騙すことになる。
+      // 点数は残す：出典が一つ間違っていただけで減点自体が消えるのは行き過ぎ。
+      const allowedSentences = sentencesByBlock.get(blockId);
+      return {
+        blockId,
+        points: scoredMode ? Number(item.points) : Math.min(band.max, Math.max(band.min, Math.round(Number(item.points) || 0))),
+        severity,
+        ...(item.recovery ? { recovery: oneOf(item.recovery, ["unresolved", "partial", "repaired", "unknown"] as const, "unknown") } : {}),
+        labelZh: text(item.labelZh) || detailZh.slice(0, 40),
+        detailZh,
+        fixZh: text(item.fixZh),
+        evidenceSentenceIds: texts(item.evidenceSentenceIds, REVIEW_LIMITS.deductionEvidenceSentenceIds)
+          .filter((id) => (allowedSentences ? allowedSentences.has(id) : false)),
+      };
+    })
+    // 一句说明都没有的条目不是扣分，是黑箱：宁可不扣，也不能让分数被无法追查的项拿走。
+    .filter((item) => item.labelZh)
+    // 这行只是最后的兜底：prompt 已经把上限连同「合并同类项」一起告诉模型，
+    // validate-review.mjs 也会对超额条数判错。这里仍然只能静默砍——砍掉扣分
+    // 等于把这一维的分数调高，而砍完的结果依旧自洽，落盘后无从发现。
+    // 所以别把防线寄托在这一行上。
+    .slice(0, REVIEW_LIMITS.deductionsPerDimension);
+}
+
+function scoreFromDeductions(deductions: ReviewDeduction[]) {
+  return Math.max(0, 100 - deductions.reduce((total, item) => total + item.points, 0));
+}
+
 function normalizeDimensions(
   value: unknown,
-  allowedBlockIds: Set<string>,
+  sentencesByBlock: Map<string, Set<string>>,
+  evidenceMode = false,
+  scoredMode = false,
 ): InterviewAnswerDimensions | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const source = value as Record<string, unknown>;
@@ -101,34 +199,66 @@ function normalizeDimensions(
   return Object.fromEntries(
     keys.map((key) => {
       const item = source[key] as Record<string, unknown>;
+      const hasLedger = Array.isArray(item.deductions);
+      const deductions = normalizeDeductions(item.deductions, sentencesByBlock, scoredMode);
       return [key, {
-        score: boundedScore(item.score),
+        score: evidenceMode ? null : hasLedger ? scoreFromDeductions(deductions) : boundedScore(item.score),
+        ...(item.level ? { level: oneOf(item.level, ["supported", "partial", "core_gap", "not_assessed"] as const, "not_assessed") } : {}),
+        ...(scoredMode ? {
+          baseScore: [75, 85, 95].includes(Number(item.baseScore)) && item.baseScore !== null ? item.baseScore as 75 | 85 | 95 : null,
+          basisZh: text(item.basisZh),
+          positiveEvidenceBlockIds: texts(item.positiveEvidenceBlockIds, REVIEW_LIMITS.dimensionEvidenceBlockIds).filter(id => sentencesByBlock.has(id)),
+        } : {}),
         rationaleZh: text(item.rationaleZh),
-        evidenceBlockIds: texts(item.evidenceBlockIds, 12).filter((id) => allowedBlockIds.has(id)),
+        evidenceBlockIds: texts(item.evidenceBlockIds, REVIEW_LIMITS.dimensionEvidenceBlockIds).filter((id) => sentencesByBlock.has(id)),
+        // 旧レポートでは键自体を生やさない：JSON 往復で消える undefined を持つと
+        // 保存前後で形が変わり、round-trip の同一性が壊れる。
+        ...(hasLedger ? { deductions } : {}),
       }];
     }),
   ) as InterviewAnswerDimensions;
 }
 
-export function scoreFromDimensions(dimensions: InterviewAnswerDimensions) {
+function scoreFromDimensions(dimensions: InterviewAnswerDimensions) {
   const keys = Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[];
   return Math.round(
     keys.reduce(
-      (total, key) => total + dimensions[key].score * REVIEW_DIMENSION_META[key].weight,
+      (total, key) => total + (dimensions[key].score ?? 0) * REVIEW_DIMENSION_META[key].weight,
       0,
     ),
   );
 }
 
+/** schema v2 的旧报告只有分数和一段理由，没有扣分明细；界面要据此退回旧版渲染。 */
+export function hasDeductionLedger(dimensions: InterviewAnswerDimensions | undefined) {
+  if (!dimensions) return false;
+  return (Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).some((key) =>
+    Array.isArray(dimensions[key].deductions),
+  );
+}
+
+export type FlatDeduction = ReviewDeduction & { dimension: ReviewDimensionKey };
+
+/** 把五维的扣分摊平成一张「本场最贵的失误」排行，按分数降序。 */
+export function allDeductions(dimensions: InterviewAnswerDimensions | undefined): FlatDeduction[] {
+  if (!dimensions) return [];
+  return (Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[])
+    .flatMap((dimension) =>
+      (dimensions[dimension].deductions ?? []).map((item) => ({ ...item, dimension })),
+    )
+    .sort((left, right) => right.points - left.points);
+}
+
 export function normalizeInterviewAnswerReview(
   value: Record<string, unknown>,
   meta: { generatedAt: string; model: string },
-  allowedBlockIds: Set<string>,
+  /** qNN → その設問に属する sNN。証拠が別の設問へ飛ぶのをここで止める。 */
+  sentencesByBlock: Map<string, Set<string>>,
 ): InterviewAnswerReview {
   const rawBlocks = Array.isArray(value.blocks) ? value.blocks : [];
   const blocks = rawBlocks
     .map((item) => (item && typeof item === "object" ? (item as Record<string, unknown>) : {}))
-    .filter((item) => allowedBlockIds.has(text(item.blockId)))
+    .filter((item) => sentencesByBlock.has(text(item.blockId)))
     .map((item): InterviewAnswerBlockReview => ({
       blockId: text(item.blockId),
       questionTitle: text(item.questionTitle),
@@ -136,32 +266,54 @@ export function normalizeInterviewAnswerReview(
       askedPoints: texts(item.askedPoints),
       answeredPoints: texts(item.answeredPoints),
       missedPoints: texts(item.missedPoints),
-      comprehension: oneOf(
-        item.comprehension,
-        ["clear", "partial", "likely_missed"] as const,
-        "partial",
+      comprehension: oneOf(item.comprehension, REVIEW_COMPREHENSION_VALUES, "partial"),
+      relevance: oneOf(item.relevance, REVIEW_RELEVANCE_VALUES, "partial"),
+      quality: oneOf(item.quality, REVIEW_QUALITY_VALUES, "neutral"),
+      strategyTags: texts(item.strategyTags, REVIEW_STRATEGY_TAGS.length).filter(
+        (tag): tag is AnswerStrategyTag => REVIEW_STRATEGY_TAGS.includes(tag as AnswerStrategyTag),
       ),
-      relevance: oneOf(item.relevance, ["direct", "partial", "off_target"] as const, "partial"),
-      quality: oneOf(item.quality, ["strong", "mixed", "weak", "neutral"] as const, "neutral"),
-      strategyTags: texts(item.strategyTags, STRATEGY_TAGS.length).filter(
-        (tag): tag is AnswerStrategyTag => STRATEGY_TAGS.includes(tag as AnswerStrategyTag),
-      ),
-      evidenceSentenceIds: texts(item.evidenceSentenceIds, 30).filter((id) => /^s\d+[a-z]?$/.test(id)),
+      evidenceSentenceIds: texts(item.evidenceSentenceIds, REVIEW_LIMITS.blockEvidenceSentenceIds)
+        .filter((id) => /^s\d+[a-z]?$/.test(id)),
       evaluationZh: text(item.evaluationZh),
       improvementZh: text(item.improvementZh),
       improvedAnswerJa: text(item.improvedAnswerJa),
     }));
 
-  const dimensions = normalizeDimensions(value.dimensions, allowedBlockIds);
+  const scored = value.evaluationMode === "scored_evidence";
+  const dimensions = normalizeDimensions(value.dimensions, sentencesByBlock, value.evaluationMode === "evidence" || scored, scored);
+  const evidence = value.evaluationMode === "evidence";
+  const rawEvaluation = value.evaluation && typeof value.evaluation === "object" ? value.evaluation as Record<string, unknown> : {};
+  // 旧非数值报告保留原语义；新有据分必须从所选基准和实际事件算，缺证不补成100。
+  if (evidence && dimensions) for (const dimension of Object.values(dimensions)) {
+    dimension.score = null;
+    dimension.level ??= "not_assessed";
+  }
+  const evaluation = {
+    conclusionZh: text(rawEvaluation.conclusionZh) || "资料不足，尚未形成有据结论",
+    coverageZh: text(rawEvaluation.coverageZh) || "仅分析本次输入文本",
+    limitsZh: text(rawEvaluation.limitsZh) || "未提供的材料与未检验能力不作评价",
+    ...(scored ? {
+      scoringEligible: rawEvaluation.scoringEligible === true,
+      eligibilityZh: text(rawEvaluation.eligibilityZh),
+      materialScope: oneOf(rawEvaluation.materialScope, ["full_available_text", "limited"] as const, "limited"),
+    } : {}),
+  };
+  const computed = scored ? computeAssessmentScores({ dimensions, evaluation }) as { dimensions: InterviewAnswerDimensions; overallScore: number | null; scoring: AssessmentScoring } : null;
   return {
     generatedAt: meta.generatedAt,
     model: meta.model,
-    overallScore: dimensions ? scoreFromDimensions(dimensions) : boundedScore(value.overallScore),
-    dimensions,
+    ...(evidence || scored ? { evaluationMode: scored ? "scored_evidence" as const : "evidence" as const, evaluation } : {}),
+    ...(computed ? { scoring: computed.scoring } : {}),
+    overallScore: computed ? computed.overallScore : evidence ? null : dimensions ? scoreFromDimensions(dimensions) : boundedScore(value.overallScore),
+    dimensions: computed && dimensions ? computed.dimensions : dimensions,
+    ...(text(value.overviewZh) ? { overviewZh: text(value.overviewZh) } : {}),
     summaryZh: text(value.summaryZh),
     strengths: texts(value.strengths),
     weaknesses: texts(value.weaknesses),
-    priorityBlockIds: texts(value.priorityBlockIds).filter((id) => allowedBlockIds.has(id)),
+    // 上限现在只在 review-contract.mjs 定义一次。曾经这里用的是默认值 12、skill 侧写 8，
+    // 模型多返回的块原样写进 Vault，等到事后跑 validate-review.mjs 才报错——那时已经落盘了。
+    priorityBlockIds: texts(value.priorityBlockIds, REVIEW_LIMITS.priorityBlockIds)
+      .filter((id) => sentencesByBlock.has(id)),
     blocks,
   };
 }
@@ -193,15 +345,83 @@ function list(items: string[]) {
   return items.length ? items.map((item) => `- ${item}`).join("\n") : "- なし";
 }
 
+/** レンダラが必ず書き直す見出し。ここに無い節は「機械が作れないもの」として扱う。 */
+const RENDERED_HEADINGS = new Set([
+  "综合导读",
+  "全体評価",
+  "採点内訳（各20%）",
+  "強み",
+  "弱み",
+  "关键问题与修复状态",
+  "有据维度评价",
+  "材料完整度与限制",
+  "有据评分与计算依据",
+]);
+
+/**
+ * 前回の本文から、レンダラが再現できない節だけを取り出す。
+ *
+ * この関数が無かったせいで、Web からの再生成が Vault モードのスキルや人が書いた
+ * 「次回面接で主に伝えること」「旧復盤から修正すべき点」を黙って消した。
+ * 再生成は派生値を作り直す操作であって、作り直せないものを捨てる権利は無い。
+ * qNN 節は JSON から必ず再生成されるので対象外。
+ */
+export function carryOverSections(previousContent: string) {
+  if (!previousContent) return "";
+  // 顾问块由 JSON 正本独立渲染；不能把它当未知章节再抄一份。
+  const body = previousContent.split(DATA_MARKER)[0]
+    .replace(/<!-- interview-advisory:start -->[\s\S]*?<!-- interview-advisory:end -->\s*/g, "");
+  const sections: string[] = [];
+  // 見出し行で切って、qNN 節に入ったら打ち切る（そこから先は全部再生成対象）。
+  const parts = body.split(/^(#{2,3} .*)$/m);
+  for (let index = 1; index < parts.length; index += 2) {
+    const heading = parts[index].replace(/^#{2,3} /, "").trim();
+    if (/^q\d+\b/.test(heading)) break;
+    if (RENDERED_HEADINGS.has(heading)) continue;
+    sections.push(`${parts[index]}\n${parts[index + 1] ?? ""}`.trimEnd());
+  }
+  return sections.join("\n\n");
+}
+
 export function renderInterviewAnswerReview(
   review: InterviewAnswerReview,
-  meta: { company: string; date: string; round: string; sourceName: string; annotationName: string },
+  meta: {
+    company: string;
+    date: string;
+    round: string;
+    sourceName: string;
+    /** 批注ノートが実在する時だけ渡す。無いのにリンクを書くと vault:check が壊れリンクとして弾く。 */
+    annotationName: string | null;
+    /** 回答品質批注（本人の同意・反対・補足）。同じく実在する時だけ。 */
+    feedbackName?: string | null;
+    /** carryOverSections() の戻り値。前回本文のうち機械が再現できない節。 */
+    carriedSections?: string;
+    /** 回答质量重生成时显式携带旧顾问层，不重新生成或规范化它。 */
+    preservedAdvisory?: InterviewAdvisory;
+  },
 ) {
-  const dimensionSection = review.dimensions
-    ? `### 採点内訳（各20%）\n${(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[])
+  const advisory = meta.preservedAdvisory ?? review.advisory;
+  const durableReview = advisory ? { ...review, advisory } : review;
+  const dimensionSection = review.evaluationMode === "scored_evidence" ? `${renderEvidenceEvaluation(review)}\n\n${renderScoredEvaluation(review)}` : review.evaluationMode === "evidence" ? renderEvidenceEvaluation(review) : review.dimensions
+    ? `### 採点内訳（各20%）\n\n${(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[])
         .map((key) => {
           const dimension = review.dimensions?.[key];
-          return `- **${REVIEW_DIMENSION_META[key].label} ${dimension?.score ?? 0}**：${dimension?.rationaleZh ?? ""}（証拠: ${dimension?.evidenceBlockIds.join("・") || "なし"}）`;
+          const label = REVIEW_DIMENSION_META[key].label;
+          const head = `- **${label} ${dimension?.score ?? 0}**：${dimension?.rationaleZh ?? ""}（証拠: ${dimension?.evidenceBlockIds.join("・") || "なし"}）`;
+          const deductions = dimension?.deductions;
+          if (!deductions) return head;
+          if (!deductions.length) return `${head}\n  - 減点なし（100）`;
+          // 算式を書いておく：数字と説明が別々に育って食い違うのを防ぐ。
+          const formula = `100 ${deductions.map((item) => `− ${item.points}`).join(" ")} = ${dimension?.score ?? 0}`;
+          const rows = deductions
+            .map((item) =>
+              `  - **−${item.points}**（${DEDUCTION_SEVERITY_META[item.severity].label}）${item.blockId ? `${item.blockId} ` : ""}${item.labelZh}\n` +
+              `    - 何が起きたか：${item.detailZh || "—"}\n` +
+              `    - 次はこうする：${item.fixZh || "—"}\n` +
+              `    - 証拠：${item.evidenceSentenceIds.join("・") || "なし"}`,
+            )
+            .join("\n");
+          return `${head}\n  - 内訳：${formula}\n${rows}`;
         })
         .join("\n")}`
     : "";
@@ -244,8 +464,7 @@ company: ${meta.company}
 date: ${meta.date}
 round: ${meta.round}
 source_note: "[[${meta.sourceName}]]"
-annotation_note: "[[${meta.annotationName}]]"
-generated_at: ${review.generatedAt}
+${meta.annotationName ? `annotation_note: "[[${meta.annotationName}]]"\n` : ""}${meta.feedbackName ? `feedback_note: "[[${meta.feedbackName}]]"\n` : ""}generated_at: ${review.generatedAt}
 model: ${review.model}
 layer: ai-derived
 ---
@@ -253,10 +472,11 @@ layer: ai-derived
 
 > 文法の採点ではなく、質問理解・論点網羅・回答の直接性・日本面接での戦略リスクを評価する AI 派生レポート。
 > 元の整理稿と本人の裁定・批注が更新された場合は Web から再生成する。
-
+${review.overviewZh ? `\n## 综合导读\n\n${review.overviewZh}\n` : ""}
+${advisory ? `\n${renderInterviewAdvisory(advisory)}\n` : ""}
 ## 全体評価
 
-**${review.overallScore} / 100** — ${review.summaryZh}
+${review.evaluationMode === "scored_evidence" ? `${review.evaluation?.conclusionZh ?? "资料不足"}\n\n${review.overallScore === null ? "不提供总分：资料或可评维未满足门槛。" : `**${review.overallScore} / 100（有据参考分）**`} ${review.evaluation?.eligibilityZh ?? ""}\n\n${review.summaryZh}` : review.evaluationMode === "evidence" ? `不提供新总分。${review.evaluation?.conclusionZh ?? "资料不足"}\n\n${review.summaryZh}` : `**${review.overallScore} / 100** — ${review.summaryZh}`}
 
 ${dimensionSection}
 
@@ -265,12 +485,38 @@ ${list(review.strengths)}
 
 ### 弱み
 ${list(review.weaknesses)}
-
+${meta.carriedSections ? `\n${meta.carriedSections}\n` : ""}
 ${blockSections}
 
 ${DATA_MARKER}
 \`\`\`json
-${JSON.stringify(review, null, 2)}
+${JSON.stringify(durableReview, null, 2)}
 \`\`\`
 `;
+}
+
+
+export const EVIDENCE_LEVEL_LABELS = {
+  supported: "已展示（限所引内容）", partial: "局部缺口", core_gap: "关键缺口未恢复", not_assessed: "未评估／证据不足",
+};
+export const RECOVERY_LABELS = { unresolved: "未恢复", partial: "部分恢复", repaired: "已恢复", unknown: "恢复情况未明确" };
+
+/** 新报告先呈现严重性与恢复情况，历史分数仅由旧格式读取。 */
+export function renderEvidenceEvaluation(review: InterviewAnswerReview) {
+  const issues = allDeductions(review.dimensions).filter(i => i.severity !== "opportunity")
+    .sort((a, b) => Number(b.severity === "major" && b.recovery === "unresolved") - Number(a.severity === "major" && a.recovery === "unresolved") || b.points - a.points);
+  const rows = issues.map(i => `- **${i.severity === "major" ? "严重" : i.severity === "moderate" ? "中等" : "轻微"} · ${RECOVERY_LABELS[i.recovery ?? "unknown"]}** ${i.blockId} ${i.labelZh}\n  - 证据：${i.evidenceSentenceIds.join("・")}；${i.detailZh}\n  - 下一步：${i.fixZh}`).join("\n");
+  const dimensions = Object.entries(review.dimensions ?? {}).map(([key, d]) => `- **${REVIEW_DIMENSION_META[key as ReviewDimensionKey].label}：${EVIDENCE_LEVEL_LABELS[d.level ?? "not_assessed"]}** ${d.rationaleZh}（${d.evidenceBlockIds.join("・") || "无足够证据"}）`).join("\n");
+  return `### 关键问题与修复状态\n\n${rows || "目前资料未确认可归责问题；不等于未检验能力优秀。"}\n\n### 有据维度评价\n\n${dimensions}\n\n### 材料完整度与限制\n\n${review.evaluation?.coverageZh ?? "仅本次输入"}\n\n${review.evaluation?.limitsZh ?? "资料不足部分不评价"}`;
+}
+
+/** 基准、正证与损失并列；未评维和门槛不得伪装为平均里的满分。 */
+export function renderScoredEvaluation(review: InterviewAnswerReview) {
+  const rows = (Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).map(key => {
+    const d = review.dimensions?.[key];
+    if (!d || d.score === null) return `- **${REVIEW_DIMENSION_META[key].label}：未评估** ${d?.basisZh ?? "资料不足"}`;
+    const events = (d.deductions ?? []).map(item => `  - −${item.points}：${item.blockId} ${item.labelZh}（${RECOVERY_LABELS[item.recovery ?? "unknown"]}）；${item.detailZh}（${item.evidenceSentenceIds.join("・")}）`).join("\n");
+    return `- **${REVIEW_DIMENSION_META[key].label} ${d.score}**：基准${d.baseScore}；${d.basisZh}\n  - 正证：${d.positiveEvidenceBlockIds?.join("・") || "没有额外正证升级；75仅标准参考线"}\n${events || "  - 无已举证扣分；不表示优秀"}`;
+  }).join("\n");
+  return `### 有据评分与计算依据\n\n${rows}\n\n${review.scoring?.formulaZh ?? "尚无确定性计算"}\n\n${review.evaluation?.eligibilityZh ?? ""}`;
 }

@@ -1,8 +1,10 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { publishedRequestResponse } from "../lib/server/published-access";
 
 interface Env {
+  OBSIDIAN_DATA_SOURCE?: string;
   ASSETS: Fetcher;
   DB: D1Database;
   IMAGES: {
@@ -28,6 +30,9 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const published = env.OBSIDIAN_DATA_SOURCE === "published";
+    const guarded = publishedRequestResponse(request, published);
+    if (guarded) return guarded;
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
@@ -40,7 +45,11 @@ const worker = {
       }, allowedWidths);
     }
 
-    return handler.fetch(request, env, ctx);
+    const response = await handler.fetch(request, env, ctx);
+    if (!published) return response;
+    const headers = new Headers(response.headers);
+    headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   },
 };
 

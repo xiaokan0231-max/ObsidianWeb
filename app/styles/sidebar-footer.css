@@ -1,0 +1,16 @@
+/*
+ * 侧栏底部入口：margin-top:auto 把它和下面的「收起」一起压到侧栏底部，
+ * 主导航那段的大留白（clamp 8vh）与折叠态的 36px 都不该作用到这里。
+ * 选择器带上 .side-nav 与折叠态前缀，特异性高过 base.css / shell.css 里 .side-nav 的 margin-top。
+ */
+.sidebar > .side-nav.side-nav-footer {
+  flex: none;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  overflow: visible;
+}
+
+:root[data-rail="collapsed"] .sidebar > .side-nav.side-nav-footer {
+  margin-top: auto;
+}

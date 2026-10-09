@@ -1,17 +1,23 @@
 import { tokyoParts } from "@/lib/dojo/utils";
+import { assertSameOrigin } from "@/lib/server/api";
 import { errorResponse } from "@/lib/server/api";
 import { invokeCodex } from "@/lib/server/codex-bridge";
 import { loadDojoState } from "@/lib/server/dojo-store";
 import {
   buildLanguageSourceContext,
+  languageBankContentFingerprint,
+  latestLanguageBankEntry,
   loadLanguageState,
   normalizeLanguageBank,
   renderLanguageBank,
 } from "@/lib/server/language-store";
+import { supersedeCurrentArtifacts } from "@/lib/server/generated-artifact";
 import { readAllNotes, uniquePath, writeNote } from "@/lib/server/obsidian";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
+    // 同源でない呼び出し（他サイト・非ブラウザ）は vault を書かせない。403 は errorResponse が返す。
+    assertSameOrigin(request);
     const notes = await readAllNotes();
     const source = buildLanguageSourceContext(notes);
     if (!source.sourceCount) throw new Error("Vault 中没有可用于训练库的资料。");
@@ -56,7 +62,7 @@ export async function POST() {
         })),
       },
     });
-    const bank = normalizeLanguageBank(
+    const normalizedBank = normalizeLanguageBank(
       result.output,
       {
         generatedAt: new Date().toISOString(),
@@ -67,16 +73,30 @@ export async function POST() {
       previousState.bank?.units ?? [],
       notes,
     );
+    const bank = {
+      ...normalizedBank,
+      contentFingerprint: languageBankContentFingerprint(normalizedBank),
+    };
     if (bank.units.length < 36) {
       throw new Error(
         `Codex 只生成了 ${bank.units.length} 个有效单元，低于最低36个；训练库没有写入，请重试。`,
       );
+    }
+    const latest = latestLanguageBankEntry(notes);
+    if (latest?.bank.contentFingerprint === bank.contentFingerprint) {
+      return Response.json({
+        ok: true,
+        unchanged: true,
+        path: latest.note.path,
+        state: previousState,
+      });
     }
     const parts = tokyoParts();
     const path = await uniquePath(
       `80_AI分析/日本語訓練/${parts.date}_${parts.fileTime}_日本語訓練バンク.md`,
     );
     await writeNote(path, renderLanguageBank(bank));
+    await supersedeCurrentArtifacts(notes, "language-bank");
     return Response.json({ ok: true, path, state: await loadLanguageState() });
   } catch (error) {
     return errorResponse(error, "建立日语训练库失败");

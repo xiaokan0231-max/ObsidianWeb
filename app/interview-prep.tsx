@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -11,9 +12,41 @@ import {
   type InterviewPrepItem,
 } from "@/lib/interview-prep";
 import { parseInline } from "@/lib/interview-prep-doc";
+import ScopeLoading from "./scope-loading";
 import type { Note } from "@/lib/notes";
 import { Inlines } from "./prep-doc-render";
 import { copySelectionWithoutRuby } from "./ruby-copy";
+import { isTypingTarget, PrepSearchBox, useSlashFocus } from "./prep-search";
+import { useCopyFlash } from "./copy-flash";
+import ReadingMode from "./reading-mode";
+import { headingPlainText } from "@/lib/reading-document";
+import { OPEN_NOTE_LABEL } from "@/lib/ui-labels";
+import { textCodec, useUrlState } from "./use-url-state";
+import { menuLabel } from "@/lib/ui-menu-labels";
+import { useUiLocale } from "./ui-locale";
+
+const PREP_MENU_JA: Record<string, string> = {
+  "搜索问题、能力或关键词（/ 聚焦）": "質問・能力・キーワードを検索（/ でフォーカス）",
+  "搜索标准回答": "標準回答を検索",
+  "答案分类": "回答の分類",
+  "全部": "すべて",
+  "面试问题": "面接の質問",
+  // 以下是回答库「全文阅读」阅读层的文案：眉题、返回、元数据与每篇回答的栏目名。
+  "面试标准回答库": "面接標準回答集",
+  "准备材料": "準備資料",
+  "返回回答库": "回答集に戻る",
+  "{n} 篇回答": "{n} 件の回答",
+  "全部分类 · 连续阅读": "全分類 · 通して読む",
+  "优先必练": "最優先で練習",
+  "{p}级": "{p} ランク",
+  "问题": "質問",
+  "回答目的": "回答の目的",
+  "标准参考答案": "標準の参考回答",
+  "30秒版": "30 秒版",
+  "回答结构": "回答の構成",
+  "使用边界": "使える範囲",
+  "事实与证据": "事実と証拠",
+};
 
 function GuidanceBlock({
   title,
@@ -22,7 +55,9 @@ function GuidanceBlock({
 }: {
   title: string;
   text: string;
-  tone?: "warm" | "safe";
+  // 取值必须和 globals.css 的 .prep-guidance-card.<tone> 修饰类一一对应。
+  // 加新语气＝同时加 CSS 规则，否则就是编译通过但没样式的死值（"safe" 当初就是这么留下的）
+  tone?: "warm";
 }) {
   if (!text) return null;
   return (
@@ -37,23 +72,43 @@ export default function InterviewPrep({
   notes,
   onOpen,
   initialCardId,
+  loading = false,
+  syncUrl = false,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
   /** 本场面试のドキュメントから `[[面接標準回答集#pNN …]]` を踏んで来たときに開くカード */
   initialCardId?: string | null;
+  /** この視図の scope がまだ届いていない：空状態ではなく読取中を出す。 */
+  loading?: boolean;
+  /**
+   * 分类与选中的卡片写进 URL。只有独立的回答库页才开：同一组件也在本场面试上以浮层打开，
+   * 浮层若改写 URL，会把底下那一页的查询串弄乱。
+   */
+  syncUrl?: boolean;
 }) {
+  const { locale } = useUiLocale();
+  const ui = (label: string) => locale === "ja" ? PREP_MENU_JA[label] ?? menuLabel(label, locale) : label;
   const library = useMemo(() => findInterviewPrepLibrary(notes), [notes]);
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("全部");
-  // 飛び込みで来たカードを最初の選択にする。以降は本人の選択が優先される
-  const [selectedId, setSelectedId] = useState<string | null>(initialCardId ?? null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [categoryParam, setCategory] = useUrlState("cat", "全部", textCodec, { enabled: syncUrl });
+  const [readerOpen, setReaderOpen] = useState(false);
+  const readingHeadings = useMemo(() => (library?.items ?? []).map((item) => ({
+    id: `reader-answer-${item.id}`,
+    text: headingPlainText(item.title),
+  })), [library]);
+  // 飛び込みで来たカードを最初の選択にする。以降は本人の選択が優先される。
+  // 空文字＝未選択（URL から消える）。浮層では syncUrl が無いので initialCardId がそのまま初期値になる。
+  const [selectedId, setSelectedId] = useUrlState("card", initialCardId ?? "", textCodec, { enabled: syncUrl });
+  const { copiedId, flash } = useCopyFlash();
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const categories = useMemo(
     () => library ? ["全部", ...new Set(library.items.map((item) => item.category))] : ["全部"],
     [library],
   );
+  // URL の分類が改名・削除で無くなっていたら「全部」扱い：空の一覧で行き止まりにしない。
+  const category = categories.includes(categoryParam) ? categoryParam : "全部";
   const filteredItems = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase();
     return (library?.items ?? []).filter((item) => {
@@ -74,10 +129,12 @@ export default function InterviewPrep({
     filteredItems[0] ??
     null;
 
+  useSlashFocus(searchRef);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (isTypingTarget(event.target)) return;
       const index = Number(event.key) - 1;
       if (!Number.isInteger(index)) return;
       if (index < 0 || index >= Math.min(filteredItems.length, 9)) return;
@@ -86,15 +143,16 @@ export default function InterviewPrep({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [filteredItems]);
+    // setSelectedId は useUrlState が返す useState の setter そのもの（参照は不変）。
+  }, [filteredItems, setSelectedId]);
 
   const copyAnswer = async (item: InterviewPrepItem) => {
     await navigator.clipboard.writeText(interviewPrepPlainText(item.standardAnswer));
-    setCopiedId(item.id);
-    window.setTimeout(() => setCopiedId((current) => current === item.id ? null : current), 1600);
+    flash(item.id);
   };
 
   if (!library) {
+    if (loading) return <div className="prep-view"><ScopeLoading label="标准回答库" /></div>;
     return (
       <div className="prep-view">
         <div className="prep-empty">
@@ -109,16 +167,14 @@ export default function InterviewPrep({
   return (
     <div className="prep-view">
       <section className="prep-command">
-        <label>
-          <span aria-hidden="true">⌕</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索问题、能力或关键词…"
-            aria-label="搜索标准回答"
-          />
-        </label>
-        <div className="prep-categories" role="tablist" aria-label="答案分类">
+        <PrepSearchBox
+          value={query}
+          onChange={setQuery}
+          inputRef={searchRef}
+          placeholder={ui("搜索问题、能力或关键词（/ 聚焦）")}
+          label={ui("搜索标准回答")}
+        />
+        <div className="prep-categories" role="tablist" aria-label={ui("答案分类")}>
           {categories.map((item) => (
             <button
               key={item}
@@ -128,13 +184,16 @@ export default function InterviewPrep({
               className={category === item ? "active" : ""}
               onClick={() => {
                 setCategory(item);
-                setSelectedId(null);
+                setSelectedId("");
               }}
-            >{item}</button>
+            >{item === "全部" ? ui("全部") : item}</button>
           ))}
         </div>
         <button className="prep-source" type="button" onClick={() => onOpen(library.note)}>
-          打开 Obsidian 原笔记 ↗
+          {ui(OPEN_NOTE_LABEL)} ↗
+        </button>
+        <button type="button" className="reader-entry" onClick={() => setReaderOpen(true)}>
+          {ui("全文阅读")}
         </button>
       </section>
 
@@ -142,7 +201,7 @@ export default function InterviewPrep({
         <p className="prep-no-result">没有符合当前搜索和分类的答案。</p>
       ) : (
         <div className="prep-workbench">
-          <nav className="prep-question-list" aria-label="面试问题">
+          <nav className="prep-question-list" aria-label={ui("面试问题")}>
             <header>
               <div>
                 <span>{filteredItems.length}</span>
@@ -225,6 +284,44 @@ export default function InterviewPrep({
             </article>
           )}
         </div>
+      )}
+      {readerOpen && (
+        <ReadingMode
+          documentKey={`prep-library:${library.note.path}`}
+          title={ui("面试标准回答库")}
+          eyebrow={ui("准备材料")}
+          metadata={[ui("{n} 篇回答").replace("{n}", String(library.items.length)), ui("全部分类 · 连续阅读")]}
+          headings={readingHeadings}
+          onClose={() => setReaderOpen(false)}
+          backLabel={ui("返回回答库")}
+        >
+          {library.items.map((item, index) => (
+            <section className="reader-section reader-prose" id={`reader-answer-${item.id}`} key={item.id}>
+              <header data-reading-anchor={`reader-answer-${item.id}`}>
+                <span className="nr-chapter-number">{String(index + 1).padStart(2, "0")}</span>
+                <h2>{headingPlainText(item.title)}</h2>
+              </header>
+              <p className="reader-section-meta">
+                {item.category} · {item.priority === "S" ? ui("优先必练") : ui("{p}级").replace("{p}", item.priority)}
+                {item.tags.length > 0 ? ` · ${item.tags.join(" / ")}` : ""}
+              </p>
+              {[
+                ["问题", item.question, "ja"],
+                ["回答目的", item.purpose, undefined],
+                ["标准参考答案", item.standardAnswer, "ja"],
+                ["30秒版", item.shortAnswer, "ja"],
+                ["回答结构", item.structure, undefined],
+                ["使用边界", item.boundary, undefined],
+                ["事实与证据", item.evidence, undefined],
+              ].map(([label, content, lang], fieldIndex) => content ? (
+                <section className="reader-answer-field" data-reading-anchor={`reader-answer-${item.id}-${fieldIndex}`} key={label}>
+                  <h3>{label ? ui(label) : label}</h3>
+                  <p lang={lang}><Inlines nodes={parseInline(content)} /></p>
+                </section>
+              ) : null)}
+            </section>
+          ))}
+        </ReadingMode>
       )}
     </div>
   );

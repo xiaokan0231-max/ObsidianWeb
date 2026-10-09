@@ -2,6 +2,7 @@
 // 刻意不引第三方依赖：这两个脚本要能在任何时候直接 node 跑起来。
 
 import { readdir, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   CHANNEL_REQUIRED_FROM,
@@ -12,7 +13,7 @@ import {
 import { JOB_CASE_TYPE, isOperationalPath } from "../lib/vault-boundary.mjs";
 
 export const VAULT =
-  process.env.OBSIDIAN_VAULT_PATH ?? "/Users/kanxiao/obsidian/xiaokan";
+  process.env.OBSIDIAN_VAULT_PATH ?? join(homedir(), "obsidian/xiaokan");
 
 export const JOB_CASE_ROOT = join(VAULT, "20_求職");
 export const LEDGER = join(VAULT, "20_求職/_不採用台帳_正.md");
@@ -25,7 +26,11 @@ export const TRENDS = join(VAULT, "20_求職/_素材/面接傾向_横断.md");
 /** CSV は iCloud 側にある（vault 外）。無い環境でも壊れないよう呼び出し側で握る。 */
 export const REJECTIONS_CSV =
   process.env.REJECTIONS_CSV ??
-  "/Users/kanxiao/Library/Mobile Documents/com~apple~CloudDocs/日本就职/面试/履歴書/分析/job_search_rejections.csv";
+  join(
+    homedir(),
+    "Library/Mobile Documents/com~apple~CloudDocs",
+    "日本就职/面试/履歴書/分析/job_search_rejections.csv",
+  );
 
 export { CHANNEL_REQUIRED_FROM, JOB_STATUSES, KNOWN_CHANNELS };
 
@@ -61,6 +66,57 @@ export function parseFrontmatter(text) {
   return out;
 }
 
+/**
+ * 上の parseFrontmatter は寛容で、壊れた YAML も黙って読めてしまう。
+ * 一方 Web 側の実データは Obsidian の**厳格な** YAML パーサを通るので、
+ * 「vault:check は通ったのに Obsidian では frontmatter 全体が無効」が起こりうる。
+ * 2026-08-04 実証：`salary` を二重に書いた job-case が check 通過・Obsidian 側は
+ * キー0個（＝type が消えて案件ごと Web から消滅）。検査器が消費者より甘い、が事故の形。
+ *
+ * ここでは依存を増やさずに、Obsidian が拒否する構造だけを名指しで拾う。
+ * 「YAML として妥当か」ではなく「厳格パーサが落ちる既知の形か」を見る。
+ */
+export function findFrontmatterDefects(text) {
+  const matched = text.match(FRONTMATTER);
+  if (!matched) return [];
+
+  const defects = [];
+  const seen = new Map();
+  let listKey = null;
+  matched[1].split(/\r?\n/).forEach((raw, index) => {
+    const line = index + 1;
+    if (/^\s+-\s+/.test(raw) && listKey) return;
+    const pair = raw.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
+    if (!pair) return;
+    const [, key, value] = pair;
+    listKey = value === "" ? key : null;
+
+    if (seen.has(key)) {
+      defects.push(`frontmatter のキー \`${key}\` が重複（${seen.get(key)} 行目と ${line} 行目）`);
+    } else {
+      seen.set(key, line);
+    }
+
+    // 引用符で囲っていない値の中の `: ` と ` #` は、厳格パーサではマッピング／コメント扱いになる。
+    const quoted = /^(['"]).*\1$/.test(value);
+    if (!quoted && value !== "") {
+      if (/:\s/.test(value)) {
+        defects.push(`\`${key}\` の値に引用符なしの「半角コロン+空白」がある（${line} 行目）`);
+      }
+      if (/\s#/.test(value)) {
+        defects.push(`\`${key}\` の値に引用符なしの「空白+#」がある（${line} 行目）`);
+      }
+      // `|` と `>` は**ブロックスカラー**の正規の書き方なので弾かない
+      // （`next_action: |` の複数行が実在する）。厳格パーサが落ちるのは
+      // アンカー・エイリアス・タグ・ディレクティブ・予約文字の側だけ。
+      if (/^[&*!%@`]/.test(value)) {
+        defects.push(`\`${key}\` の値が YAML 指示子 \`${value[0]}\` で始まっている（${line} 行目）`);
+      }
+    }
+  });
+  return defects;
+}
+
 /** 状態は `不採用（…）` のように補足が付く。括弧の手前だけを見る。 */
 export function baseStatus(value) {
   return normalizeJobStatus(value) ?? "";
@@ -93,6 +149,34 @@ export async function listMarkdownFiles(dir = VAULT) {
     }
   }
   return out;
+}
+
+/** 参照キーの正規化。lib/knowledge-graph.ts の normalizeIndexKey と同じ規則にする。 */
+export function vaultRefKey(value) {
+  return String(value).normalize("NFKC").trim().replace(/\.md$/iu, "");
+}
+
+/**
+ * vault に実在する全ファイルの参照キー（相対パスと basename の両方）。
+ *
+ * listMarkdownFiles は 90_归档・99_系统/模板・AGENTS.md を意図的に落とすが、
+ * それらは Obsidian からは普通に辿れる実体で、リンクは切れていない。画像や PDF も同じ。
+ * 「グラフの対象外」を「参照先が無い」と報告すると、スクショを1枚貼っただけで
+ * vault:check が落ち、Stop hook が毎回のターンを止め pre-commit が無関係な commit を拒む。
+ * 実体の有無で判定するので、本当に消えた添付・改名されたノートは今まで通り検出できる。
+ */
+export async function listVaultFileKeys(dir = VAULT, keys = new Set()) {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith(".")) continue;
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await listVaultFileKeys(path, keys);
+      continue;
+    }
+    keys.add(vaultRefKey(path.slice(VAULT.length + 1)));
+    keys.add(vaultRefKey(entry.name));
+  }
+  return keys;
 }
 
 /** `owns: [A, B]`（インライン）と `owns:` 直下のリスト、両方の書き方を ID 配列にする。 */

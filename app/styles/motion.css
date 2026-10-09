@@ -1,0 +1,25 @@
+/*
+ * 设置中心「减弱动效：总是减弱」的全局兜底。<html data-motion="reduce"> 由 layout 的首帧脚本按
+ * localStorage（echo:motion）恢复，切换时由 lib/motion.ts 直接改属性。「跟随系统」不写这个属性，
+ * 交给 base.css 末尾的 prefers-reduced-motion 兜底——这里的值与那里逐条一致，两条路效果相同。
+ *
+ * 压时长而不是取消动画：取消会让 animationend / transitionend 永远不来，等这些事件收尾的状态会卡住；
+ * 装饰性的交错延迟一并归零。各视图里 @media (prefers-reduced-motion) 下写的 animation: none
+ * 在这里由「0.01ms 播一次」近似替代，结果同样是静止在终态。
+ */
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* 页面转场的伪元素挂在 :root 上，上面的 * / ::before / ::after 选不中，只能单独关（同 base.css）。 */
+:root[data-motion="reduce"]::view-transition-group(*),
+:root[data-motion="reduce"]::view-transition-old(*),
+:root[data-motion="reduce"]::view-transition-new(*) {
+  animation: none !important;
+}

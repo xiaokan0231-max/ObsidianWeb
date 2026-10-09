@@ -1,0 +1,594 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { resolveCalendarInterview } from "../lib/calendar-interview.ts";
+import { noteInVaultScope } from "../lib/vault-scope.ts";
+
+import {
+  buildCalendarEvents,
+  buildCommitments,
+  buildDerivedData,
+  calendarCompanyIdentity,
+  calendarEventTime,
+  extractLinks,
+  careerStatus,
+  libraryScopeMatches,
+  mergePendingWrites,
+  PENDING_WRITE_TTL_MS,
+  noteMatches,
+  trustLayer,
+  typeLabel,
+} from "../lib/memory-atlas-data.ts";
+
+const MTIME = Date.parse("2026-07-01T00:00:00Z");
+const NOW = new Date("2026-08-03T00:00:00+09:00");
+
+function note(path, type, frontmatter = {}, body = "", mtime = MTIME) {
+  const name = path.split("/").pop().replace(/\.md$/u, "");
+  return {
+    path,
+    stat: { ctime: 0, mtime, size: body.length },
+    tags: [],
+    frontmatter: { type, ...frontmatter },
+    content: `---\ntype: ${type}\n---\n# ${name}\n\n${body}\n`,
+  };
+}
+
+const dates = (events) => events.map((event) => `${event.date} ${event.time}`.trim());
+
+test("日历：已确认的同日结束时间只补充显示，不改变开始时间和顺序", () => {
+  const events = buildCalendarEvents([
+    note("后场.md", "todo", {
+      company: "株式会社テスト後場", next_event_at: "2026-08-10 11:00",
+      next_event_end_at: "2026-08-10 11:30",
+    }),
+    note("前场.md", "job-case", {
+      company: "株式会社テスト前場", next_event_at: "2026-08-10 10:00",
+      next_event_end_at: "2026-08-10 10:30",
+    }, "- 2026-08-01 15:00 一次面接"),
+  ], NOW);
+  assert.deepEqual(dates(events), ["2026-08-10 10:00", "2026-08-10 11:00"]);
+  assert.deepEqual(events.map((event) => event.endTime), ["10:30", "11:30"]);
+  assert.deepEqual(events.map(calendarEventTime), ["10:00–10:30", "11:00–11:30"]);
+});
+
+test("日历：缺失、跨日、无效或倒置的结束时间不推算范围", () => {
+  for (const end of [undefined, "2026-08-11 10:30", "10:30", "2026-08-10 25:00", "2026-08-10 09:30", "2026-08-10 10:00"]) {
+    const [event] = buildCalendarEvents([
+      note("案件.md", "job-case", {
+        company: "株式会社テスト", next_event_at: "2026-08-10 10:00", next_event_end_at: end,
+      }, "所要時間30分"),
+    ], NOW);
+    assert.equal(event.endTime, undefined);
+    assert.equal(calendarEventTime(event), "10:00");
+  }
+  assert.equal(calendarEventTime({ time: "", endTime: "10:30" }), "");
+});
+
+test("日历：合并同一场次时只在开始时刻一致时保留明确结束时间", () => {
+  for (const reviewTime of ["10:00", "11:00"]) {
+    const events = buildCalendarEvents([
+      note("面谈记录.md", "review", { company: "株式会社テスト", date: "2026-08-10", time: reviewTime }),
+      note("案件.md", "job-case", {
+        company: "株式会社テスト", next_event_at: "2026-08-10 10:00", next_event_end_at: "2026-08-10 10:30",
+      }),
+    ], NOW);
+    assert.equal(events.length, reviewTime === "10:00" ? 1 : 2);
+    const event = events.find((item) => item.time === reviewTime);
+    assert.equal(event.endTime, reviewTime === "10:00" ? "10:30" : undefined);
+  }
+});
+
+test("日历：todo の next_event_at は単一案件に紐づかない予定の正本", () => {
+  const events = buildCalendarEvents([
+    note("20_求職/_TODO/ワークポート面談.md", "todo", {
+      company: "ワークポート",
+      next_event_at: "2026-08-10 14:30",
+    }),
+    note("20_求職/_TODO/完了した面談.md", "todo", {
+      company: "旧エージェント",
+      status: "完了",
+      next_event_at: "2026-08-11 10:00",
+    }),
+  ], NOW);
+  // 2026-07-24 ワークポート面談が job-case 側に無く日历から漏れた実証への回帰テスト。
+  assert.deepEqual(dates(events), ["2026-08-10 14:30"]);
+  assert.equal(events[0].company, "ワークポート");
+  assert.equal(events[0].phase, "upcoming");
+});
+
+test("日历：job-case の next_event_at は面接などの語を含まなくても予定になる", () => {
+  const events = buildCalendarEvents([
+    note("20_求職/Acme/Acme_Data.md", "job-case", {
+      company: "Acme",
+      next_event_at: "2026-08-10 14:30",
+    }, "- 2026-08-10 一次面接の話が出ている"),
+  ], NOW);
+  // job-inbox-sync が指示する書式は純粋な日時。語を要求すると書いた予定が黙って消える。
+  assert.deepEqual(dates(events), ["2026-08-10 14:30"]);
+  assert.equal(events[0].phase, "upcoming");
+});
+
+test("日历：当前行动不能替已确认日程推测轮次", () => {
+  const events = buildCalendarEvents([
+    note("案件.md", "job-case", {
+      company: "株式会社テスト", next_event_at: "2026-08-05 17:30",
+      next_action: "一次面接の振り返りと最終面接の準備",
+    }),
+  ], NOW);
+  assert.deepEqual(dates(events), ["2026-08-05 17:30"]);
+  assert.equal(events[0].label, "面谈");
+});
+
+test("日历：種別が読める出所が勝った時は next_action で上書きしない", () => {
+  const events = buildCalendarEvents([
+    note("20_求職/Acme/Acme_Data.md", "job-case", {
+      company: "Acme",
+      next_event_at: "2026-08-06 10:00 最終面接",
+      next_action: "一次面接の振り返りをまとめる",
+    }),
+  ], NOW);
+  // next_action は「次にやること」であって予定の種別とは限らない。
+  // source 側から読めるなら、そちらが正。
+  assert.equal(events[0].label, "最终面试");
+});
+
+test("日历：正文只保留证据，不自动把提及的面试日期变成日程", () => {
+  const events = buildCalendarEvents([
+    note("20_求職/Acme/Acme_Data.md", "job-case", { company: "Acme" }, [
+      "- 2026-08-12 一次面接（Teams）",
+      "- 2026-08-20 面接のお礼メールを送る",
+      "- 2026-08-25 二次面接の準備をする",
+    ].join("\n")),
+  ], NOW);
+  assert.deepEqual(events, []);
+});
+
+test("日历：本文の叙述を予定として拾わない（約束していない面談を出さない）", () => {
+  // 2026-08-08 実測の誤検出3型。いずれも「予定」ではなく叙述・引用・履歴なのに、
+  // 会社名つきで日历に出ていた＝相手と約束していない面談が画面に現れる。
+  const events = buildCalendarEvents([
+    note("20_求職/Acme/Acme_Data.md", "job-case", { company: "Acme" }, [
+      "経緯は [[ワークポート面談対応]] の 2026-08-10 追記に集約した。",
+      "| 2026-08-11 | ワークポート面談実施 → 「企業提出可」の整理 |",
+      "| 2026-08-12 | GEEKLY | 面談の前に謝絶、企業紹介ゼロ |",
+    ].join("\n")),
+  ], NOW);
+  assert.deepEqual(events, [], "ノート名・表の履歴行・「面談の前に」は予定ではない");
+});
+
+test("日历：同步标题和准备行动不生成面试，实际约定仍保留", () => {
+  const body = [
+    "## 2026-08-03 補正同期：一次面接の日時確定",
+    "## 2026-08-04 同步：面试时间更新",
+    "- 2026-08-05 面试准备",
+    "- 2026-08-06 一次面接の準備",
+    "- 2026-08-10 14:30 一次面接 [[面接準備]]",
+  ].join("\n");
+  for (const scheduled of ["", "2026-08-10 14:30"]) {
+    const events = buildCalendarEvents([
+      note("20_求職/株式会社テスト/案件.md", "job-case", {
+        company: "株式会社テスト",
+        next_event_at: scheduled,
+        next_action: "2026-08-07 一次面接の準備",
+      }, body),
+    ], NOW);
+    assert.deepEqual(dates(events), scheduled ? ["2026-08-10 14:30"] : []);
+  }
+});
+
+test("日历：引用和标题里的更正、编辑、重评分日期不生成面试", () => {
+  const body = [
+    "> 🔴 **2026-08-20 訂正（この段落は履歴。書類・面接でそのまま使わない）**：",
+    "## 2026-08-21 更正：面试中的技术表述",
+    "> **2026-08-22 編集：面談で使う表現の注意点**",
+    "- 2026-08-23 再採点：技術面接官の参加は未確認",
+    "### 2026-08-24 重新评分：面试中的匹配证据",
+    "- 2026-08-12 14:30 一次面接（Teams）",
+  ].join("\n");
+  const owner = note("20_求職/株式会社テスト/案件.md", "job-case", {
+    company: "株式会社テスト",
+    next_action: "2026-08-25 面接用の説明を修正する",
+  }, body);
+  assert.deepEqual(buildCalendarEvents([owner], NOW), []);
+
+  // 更正记录与实际面谈同日时，只排除正文推测，保留已确认日程的结构化来源。
+  const scheduled = { ...owner, frontmatter: {
+    ...owner.frontmatter, next_event_at: "2026-08-20 10:00", next_action: "カジュアル面談",
+  } };
+  assert.deepEqual(dates(buildCalendarEvents([scheduled], NOW)), [
+    "2026-08-20 10:00",
+  ]);
+});
+
+test("日程与行动分开：准备期限和企业跟进只保留在承诺投影", () => {
+  const notes = [
+    note("案件.md", "job-case", {
+      company: "株式会社テスト", next_event_at: "2026-08-10 14:30",
+      waiting_for: "company", follow_up_at: "2026-08-06",
+    }),
+    note("准备待办.md", "todo", {
+      status: "未着手", category: "面接準備", due: "2026-08-05", action: "準備する",
+    }),
+  ];
+  const derived = buildDerivedData(notes, NOW);
+  assert.deepEqual(dates(derived.calendarEvents), ["2026-08-10 14:30"]);
+  assert.deepEqual(derived.commitments.map((item) => item.kind), ["action", "follow-up", "event"]);
+});
+
+test("日历：同じ会社・同じ日は信頼度が高い出所だけを残す", () => {
+  const events = buildCalendarEvents([
+    note("20_求職/Acme/2026-07-20_一次面接.md", "review", {
+      company: "Acme",
+      date: "2026-07-20",
+    }),
+    note("20_求職/Acme/Acme_Data.md", "job-case", { company: "Acme" }, "- 2026-07-20 一次面接あり"),
+  ], NOW);
+  assert.equal(events.length, 1, "同じ面接が証拠と案件で二重表示されてはいけない");
+  assert.match(events[0].note.path, /2026-07-20_一次面接\.md$/u);
+  assert.equal(events[0].phase, "past");
+});
+
+test("日历：法人格・空白・下線だけが違う会社名は同じ予定として束ねる", () => {
+  assert.equal(
+    calendarCompanyIdentity("株式会社Nova Systems"),
+    calendarCompanyIdentity("Nova_Systems"),
+  );
+  const events = buildCalendarEvents([
+    note("20_求職/Nova/2026-08-13_最終面接.md", "review", {
+      company: "Nova_Systems",
+      date: "2026-08-13",
+    }),
+    note("20_求職/Nova/Nova_Data.md", "job-case", {
+      company: "株式会社Nova Systems",
+      next_event_at: "2026-08-13 13:30",
+      next_action: "最終面接（対面）",
+    }),
+  ], NOW);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].company, "株式会社Nova Systems");
+  assert.equal(events[0].time, "13:30");
+});
+
+test("日历：同じ会社の複数职位は case_id で分け、各准备稿へ結ぶ", () => {
+  const notes = [
+    note("20_求職/株式会社テスト/backend.md", "job-case", {
+      case_id: "test-backend",
+      company: "株式会社テスト",
+      next_event_at: "2026-08-13 10:00",
+      next_action: "一次面接",
+    }),
+    note("20_求職/株式会社テスト/platform.md", "job-case", {
+      case_id: "test-platform",
+      company: "株式会社テスト",
+      next_event_at: "2026-08-13 15:00",
+      next_action: "二次面接",
+    }),
+    note("20_求職/株式会社テスト/backend_prep.md", "interview-prep", { case_id: "test-backend" }),
+    note("20_求職/株式会社テスト/platform_prep.md", "interview-prep", { case_id: "test-platform" }),
+  ];
+  const events = buildCalendarEvents(notes, NOW);
+  assert.equal(events.length, 2);
+  assert.deepEqual(events.map((event) => event.caseId), ["test-backend", "test-platform"]);
+  assert.deepEqual(events.map((event) => event.prepPath), [
+    "20_求職/株式会社テスト/backend_prep.md",
+    "20_求職/株式会社テスト/platform_prep.md",
+  ]);
+});
+
+test("日历：下一次日程清除或推进后，已结束面谈仍从场次记录显示", () => {
+  const prep = note("20_求職/株式会社テスト/一面準備.md", "interview-prep", {
+    company: "株式会社テスト", case: "[[案件#選考|案件]]",
+    date: "2026-08-02", time: "17:00", round: "カジュアル面談",
+    session_status: "completed",
+  });
+  for (const nextEvent of ["", "2026-08-10 10:00"]) {
+    const notes = [
+      note("20_求職/株式会社テスト/案件.md", "job-case", {
+        case_id: "test-case", company: "株式会社テスト",
+        next_event_at: nextEvent, next_action: "二次面接の準備",
+      }),
+      prep,
+    ];
+    const events = buildCalendarEvents(notes, new Date(2026, 7, 3, 12));
+    const past = events.find((event) => event.date === "2026-08-02");
+    assert.ok(past, "下一次日程不能充当面谈历史的唯一来源");
+    assert.equal(events.length, nextEvent ? 2 : 1);
+    assert.equal(past.time, "17:00");
+    assert.equal(past.label, "轻松面谈");
+    assert.equal(past.phase, "past");
+    assert.equal(past.caseId, "test-case");
+    assert.equal(past.prepPath, prep.path);
+    assert.equal(resolveCalendarInterview(past, notes)?.view, "review");
+  }
+});
+
+test("日历：确定场次与案件日程去重，准备稿按日期关联而非取最后一份", () => {
+  const pastPrep = note("20_求職/株式会社テスト/过去准备.md", "interview-prep", {
+    company: "株式会社テスト", case: "[[案件]]",
+    date: "2026-08-01", time: "15:00", round: "カジュアル面談", session_status: "completed",
+  });
+  const futurePrep = note("20_求職/株式会社テスト/下轮准备.md", "interview-prep", {
+    company: "株式会社テスト", case: "[[案件]]",
+    date: "2026-08-10", start_time: "10:00", round: "一次面接", session_status: "scheduled",
+  });
+  const owner = note("20_求職/株式会社テスト/案件.md", "job-case", {
+    case_id: "test-case", company: "株式会社テスト",
+    next_event_at: "2026-08-10 10:00", next_action: "一次面接の準備",
+  });
+  for (const notes of [[owner, futurePrep, pastPrep], [pastPrep, futurePrep, owner]]) {
+    const events = buildCalendarEvents(notes, NOW);
+    assert.deepEqual(dates(events), ["2026-08-01 15:00", "2026-08-10 10:00"]);
+    assert.deepEqual(events.map((event) => event.prepPath), [pastPrep.path, futurePrep.path]);
+    assert.equal(resolveCalendarInterview(events[1], notes)?.path, futurePrep.path);
+  }
+});
+
+test("日历：场次日期兼容旧稿，未定、取消、无日期和关联冲突不生成事件", () => {
+  const notes = [
+    note("旧稿.md", "interview-prep", { company: "株式会社テスト", date: "2026-08-01", round: "一次面接" }),
+    ...["preparing", "pending", "cancelled"].map((status) => note(`${status}.md`, "interview-prep", {
+      company: status, date: "2026-08-10", schedule_status: status,
+    })),
+    note("2026-08-10_无日期.md", "interview-prep", { updated: "2026-08-10", session_status: "scheduled" }),
+    ...["2026-02-30", "2026-13-01", "未定"].map((date) => note(`${date}.md`, "interview-prep", {
+      company: "株式会社テスト", date, session_status: "scheduled",
+    })),
+    note("案件.md", "job-case", { case_id: "test-case" }),
+    note("冲突.md", "interview-prep", {
+      company: "株式会社テスト", case: "[[案件]]", case_id: "another-case", date: "2026-08-11",
+    }),
+  ];
+  assert.deepEqual(dates(buildCalendarEvents(notes, NOW)), ["2026-08-01"]);
+});
+
+test("日历：独立面谈的待办完成后保留已确认场次，不借用其他日期的时刻", () => {
+  const notes = [
+    note("20_求職/_TODO/面談.md", "todo", {
+      company: "株式会社テスト", status: "完了", next_event_at: "2026-08-01 14:00",
+    }),
+    note("20_求職/株式会社テスト/面談準備.md", "interview-prep", {
+      company: "株式会社テスト", meeting: "[[20_求職/_TODO/面談]]",
+      date: "2026-08-01", starts_at: "2026-08-10 10:00", round: "エージェント面談",
+      session_status: "scheduled",
+    }),
+  ];
+  const events = buildCalendarEvents(notes, NOW);
+  assert.deepEqual(dates(events), ["2026-08-01"]);
+  assert.equal(events[0].label, "猎头面谈");
+  assert.equal(events[0].phase, "past");
+});
+
+test("日历：加载旧复盘前后，同一场历史面谈仍只有一条", () => {
+  const notes = [
+    note("案件.md", "job-case", { company: "株式会社テスト", case_id: "test-case" }),
+    note("准备.md", "interview-prep", {
+      company: "株式会社テスト", case: "[[案件]]", date: "2026-08-01",
+      time: "10:00", round: "一次面接", session_status: "completed",
+    }),
+    ...["review", "transcript"].map((type) => note(`${type}.md`, type, {
+      company: "株式会社テスト", date: "2026-08-01", time: "10:00", round: "一次面接",
+    })),
+  ];
+  for (const loaded of [notes.filter((item) => noteInVaultScope(item, "actions")), notes, [...notes].reverse()]) {
+    const events = buildCalendarEvents(loaded, NOW);
+    assert.deepEqual(dates(events), ["2026-08-01 10:00"]);
+    assert.equal(events[0].caseId, "test-case");
+  }
+
+  // 同公司同日的另一个案件也符合时，旧复盘不能随意归给其中之一。
+  const ambiguous = [...notes,
+    note("另案.md", "job-case", { company: "株式会社テスト", case_id: "another-case" }),
+    note("另一份准备.md", "interview-prep", {
+      company: "株式会社テスト", case: "[[另案]]", date: "2026-08-01",
+      time: "10:00", round: "一次面接", session_status: "completed",
+    }),
+  ];
+  assert.deepEqual(buildCalendarEvents(ambiguous, NOW).map((event) => event.caseId).sort(),
+    ["", "another-case", "test-case"]);
+});
+
+test("承诺：事件、本人期限、外部跟进使用同一排序投影", () => {
+  const commitments = buildCommitments([
+    note("20_求職/_TODO/返信.md", "todo", { status: "未着手", due: "2026-08-04", action: "返信する" }),
+    note("20_求職/株式会社テスト/case.md", "job-case", {
+      case_id: "test-case",
+      company: "株式会社テスト",
+      waiting_for: "company",
+      follow_up_at: "2026-08-05",
+      next_event_at: "2026-08-06 10:00",
+      next_action: "一次面接",
+    }),
+  ], NOW);
+  assert.deepEqual(commitments.map((item) => `${item.kind}:${item.date}`), [
+    "action:2026-08-04",
+    "follow-up:2026-08-05",
+    "event:2026-08-06",
+  ]);
+});
+
+test("首页の派生数字：孤立・案件順・証拠の完全度", () => {
+  const derived = buildDerivedData([
+    note("99_系统/_索引.md", "moc"),
+    note("99_系统/誰からも引かれない.md", "material"),
+    note("99_系统/引かれる側.md", "material"),
+    note("10_关于我/自己.md", "self", {}, "[[引かれる側]] を見る。"),
+    note("20_求職/Acme/Acme_Data.md", "job-case", { status_updated: "2026-07-20" }),
+    note("20_求職/Beta/Beta_Data.md", "job-case", { status_updated: "2026-07-25" }),
+    note("20_求職/Acme/_Acme.md", "company", { company: "Acme" }),
+    note("20_求職/Acme/2026-07-20_面接.md", "review", {
+      company: "Acme",
+      date: "2026-07-20",
+      result: "通過",
+    }),
+    note("20_求職/Acme/逐字稿.md", "transcript", { company: "Acme", date: "2026-07-20" }),
+    note("99_系统/模板/review.md", "review", { company: "見本" }),
+  ], NOW);
+
+  // 孤立＝出リンクが無く、名前でも引かれていないノート。moc（目次）は数えない。
+  // この fixture で外れるのは _索引(moc)・自己(出リンクあり)・引かれる側(被リンク) の3本だけ。
+  assert.equal(derived.orphanCount, 7);
+  assert.deepEqual(derived.cases.map((item) => item.path.split("/").pop()), ["Beta_Data.md", "Acme_Data.md"]);
+  assert.equal(derived.reviews.length, 1, "模板は証拠に数えない");
+  assert.equal(derived.evidenceCount, 3);
+  // 逐字稿だけ reviewed が無いので 2/3。
+  assert.equal(Math.round(derived.evidenceCompleteness), 67);
+  assert.equal(derived.links, 1);
+});
+
+test("图书馆の絞り込みは type と分区の両方から決まる", () => {
+  const analysis = note("80_AI分析/観点.md", "ai-report");
+  const todo = note("20_求職/_TODO/返信.md", "todo");
+  const study = note("30_日本語学習/誤用辞典.md", "study");
+  const self = note("10_关于我/自己.md", "self");
+
+  assert.equal(libraryScopeMatches(self, "evidence"), true);
+  assert.equal(libraryScopeMatches(analysis, "evidence"), false);
+  assert.equal(libraryScopeMatches(todo, "action"), true);
+  assert.equal(libraryScopeMatches(study, "language"), true);
+  assert.equal(libraryScopeMatches(analysis, "analysis"), true);
+  assert.equal(libraryScopeMatches(todo, "analysis"), false);
+  assert.equal(libraryScopeMatches(todo, "all"), true);
+});
+
+test("信頼層と応募状態のラベル付け", () => {
+  assert.equal(trustLayer(note("10_关于我/自己.md", "self")).className, "trust-authority");
+  assert.equal(trustLayer(note("20_求職/Acme/Acme_Data.md", "job-case")).className, "trust-evidence");
+  assert.equal(trustLayer(note("80_AI分析/観点.md", "ai-report")).className, "trust-analysis");
+  assert.equal(trustLayer(note("99_系统/索引.md", "moc")).className, "trust-reference");
+
+  assert.equal(careerStatus("面接中").tone, "interview");
+  assert.equal(careerStatus("内定").tone, "offer", "内定不再和未応募一样落灰");
+  assert.equal(careerStatus("不採用（2026-07-21・書類選考）").tone, "reject");
+  assert.equal(careerStatus("不採用（2026-07-21・書類選考）").label, "不採用");
+  assert.equal(careerStatus("").label, "未分類");
+  assert.equal(typeLabel("job-case"), "应募案件");
+  assert.equal(typeLabel("未知の型"), "未知の型");
+});
+
+test("検索の type: / status: / folder: 前置詞", () => {
+  const todo = note("20_求職/_TODO/返信.md", "todo", { status: "未着手" });
+  assert.equal(noteMatches(todo, "type:todo"), true);
+  assert.equal(noteMatches(todo, "type:review"), false);
+  assert.equal(noteMatches(todo, "status:未着手"), true);
+  assert.equal(noteMatches(todo, "folder:_TODO"), true);
+  assert.equal(noteMatches(todo, "folder:30_"), false);
+  assert.equal(noteMatches(todo, "返信"), true);
+  assert.equal(noteMatches(todo, ""), true);
+});
+
+test("値の | は OR、空白区切りの token 同士は AND", () => {
+  const applied = note("20_求職/A社/_A社.md", "job-case", { status: "応募済" });
+  const rejected = note("20_求職/B社/_B社.md", "job-case", { status: "不採用（2026-07-21）" });
+
+  // 「進行中の選考」＝ 7 つの enum のうち 3 つ。OR がないと 1 本のクエリで書けない。
+  assert.equal(noteMatches(applied, "status:応募済|書類通過|面接中"), true);
+  assert.equal(noteMatches(rejected, "status:応募済|書類通過|面接中"), false);
+  assert.equal(noteMatches(rejected, "status:不採用|保留"), true);
+  assert.equal(noteMatches(applied, "type:job-case|todo"), true);
+  assert.equal(noteMatches(applied, "folder:20_求職|30_日本語学習"), true);
+
+  // token をまたぐと従来どおり AND のまま。
+  assert.equal(noteMatches(applied, "type:job-case status:応募済|面接中"), true);
+  assert.equal(noteMatches(applied, "type:todo status:応募済|面接中"), false);
+});
+
+// 🔴 単条差し替え（patchNote）に変えた後の穴。全量取得は在途中に発行されたものが
+// 後から着地し得るので、素直に採用すると書いたばかりの内容が写前の値で黙って消える。
+test("在途の全量スナップショットは、まだ追いついていない書き込みを上書きしない", () => {
+  const written = note("20_求職/A/A_Data.md", "job-case", { status: "不採用" }, "書いた後の本文");
+  const staleSnapshot = [
+    note("20_求職/A/A_Data.md", "job-case", { status: "応募済" }, "書く前の本文"),
+    note("99_系统/_索引.md", "moc", {}, "索引"),
+  ];
+  const pending = new Map([[written.path, { note: written, at: 1_000 }]]);
+
+  const { notes, settled } = mergePendingWrites(staleSnapshot, pending, 1_500);
+  const merged = notes.find((item) => item.path === written.path);
+  assert.match(merged.content, /書いた後の本文/, "写前スナップショットに潰されない");
+  assert.equal(merged.frontmatter.status, "不採用");
+  assert.deepEqual(settled, [], "サーバがまだ追いついていないので台帳に残す");
+  assert.equal(notes.length, 2, "他のノートはスナップショット側をそのまま使う");
+});
+
+test("サーバが追いついたら台帳から落とす（永久に貼り付かない）", () => {
+  const written = note("20_求職/A/A_Data.md", "job-case", { status: "不採用" }, "書いた後の本文");
+  const freshSnapshot = [note("20_求職/A/A_Data.md", "job-case", { status: "不採用" }, "書いた後の本文")];
+
+  const { settled } = mergePendingWrites(freshSnapshot, new Map([[written.path, { note: written, at: 1_000 }]]), 1_500);
+  assert.deepEqual(settled, [written.path]);
+});
+
+test("台帳が空なら受け取った配列をそのまま返す（余計なコピーも並べ替えもしない）", () => {
+  const snapshot = [note("a.md", "moc", {}, "a")];
+  const { notes, settled } = mergePendingWrites(snapshot, new Map());
+  assert.equal(notes, snapshot);
+  assert.deepEqual(settled, []);
+});
+
+// 🔴 リンクの数え方は「本文からは例示コードを除く・frontmatter の構造化関係は数える」。
+// 片方に寄せると首页の孤立統計と知識図譜が割れる（実測：孤点 16 → 22 に膨らんだ）。
+test("リンク抽出：frontmatter の構造化関係は数え、コードフェンス内の例示は数えない", () => {
+  const content = [
+    "---",
+    "type: language-expression-course-progress",
+    'source_note: "[[AI活用推進_語彙]]"',
+    "---",
+    "# 進捗",
+    "",
+    "本文からは [[本物のリンク]] を拾う。",
+    "",
+    "```markdown",
+    "例示なので数えない: [[コード内のリンク]]",
+    "```",
+    "",
+    "`[[行内コードのリンク]]` も数えない。",
+    "<!-- [[コメント内のリンク]] も数えない -->",
+  ].join("\n");
+
+  const links = extractLinks(content);
+  assert.deepEqual(links.sort(), ["AI活用推進_語彙", "本物のリンク"]);
+});
+
+test("リンク抽出：frontmatter からしか繋がっていないノートは孤立ではない", () => {
+  // 進捗ノート・批注ノートの実際の形。ここを孤立と数えると、図譜では連結して見えるのに
+  // 首页の健康度だけが下がる——同じ問いに二つの答えがある状態に戻る。
+  const progress = note("30_日本語学習/専門コースログ/x_進捗.md", "language-expression-course-progress");
+  const withLink = {
+    ...progress,
+    content: `---\ntype: language-expression-course-progress\nsource_note: "[[素材ノート]]"\n---\n# 進捗\n`,
+  };
+  assert.deepEqual(extractLinks(withLink.content), ["素材ノート"]);
+});
+
+// 🔴 突き合わせは本文の一致でしか出来ないので、Obsidian 側で手編集された等で
+// サーバと食い違ったままになると、期限が無ければ自分の版を永久に貼り続ける
+// （その間サーバの実際の内容が画面に出てこない）。時間で降りる。
+test("台帳の書き込みは期限が来たらサーバ側へ譲る（永久に貼り付かない）", () => {
+  const written = note("20_求職/A/A_Data.md", "job-case", { status: "不採用" }, "こちらの版");
+  const serverDiverged = [note("20_求職/A/A_Data.md", "job-case", { status: "保留" }, "Obsidian で手編集された版")];
+  const pending = new Map([[written.path, { note: written, at: 1_000 }]]);
+
+  // 期限内はこちらが勝つ
+  const inside = mergePendingWrites(serverDiverged, pending, 1_000 + PENDING_WRITE_TTL_MS - 1);
+  assert.match(inside.notes[0].content, /こちらの版/);
+  assert.deepEqual(inside.settled, []);
+
+  // 期限を過ぎたらサーバ側を正とし、台帳から落とす
+  const outside = mergePendingWrites(serverDiverged, pending, 1_000 + PENDING_WRITE_TTL_MS + 1);
+  assert.match(outside.notes[0].content, /Obsidian で手編集された版/);
+  assert.deepEqual(outside.settled, [written.path]);
+});
+
+test("サーバのスナップショットに無い書き込みは期限内だけ残す（新規作成 → 幽霊にしない）", () => {
+  const created = note("20_求職/A/2026-08-16_一次面接_批注.md", "study-annotation", {}, "初回の批注");
+  const snapshotWithout = [note("99_系统/_索引.md", "moc", {}, "索引")];
+  const pending = new Map([[created.path, { note: created, at: 1_000 }]]);
+
+  const inside = mergePendingWrites(snapshotWithout, pending, 1_500);
+  assert.equal(inside.notes.length, 2, "作りたての批注ノートが消えない");
+
+  // サーバ側で本当に消された（あるいは改名された）場合、期限が過ぎれば追随する
+  const outside = mergePendingWrites(snapshotWithout, pending, 1_000 + PENDING_WRITE_TTL_MS + 1);
+  assert.equal(outside.notes.length, 1);
+  assert.deepEqual(outside.settled, [created.path]);
+});

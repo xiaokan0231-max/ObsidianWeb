@@ -1,0 +1,357 @@
+/* 面接準備（回答库）（globals.css から分割） */
+
+/* ============================================================
+   面试准备（prep）——面试前可直接检索的标准参考答案库
+   ============================================================ */
+
+.prep-view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-bottom: 72px;
+}
+
+.prep-view [lang="ja"] {
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", var(--font-geist-sans), sans-serif;
+}
+
+.prep-card-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: var(--ink);
+  background: var(--paper);
+  animation: fade-in 180ms ease;
+}
+
+.prep-card-overlay-bar {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 28px;
+  color: var(--text-on-inverse);
+  background: color-mix(in oklab, var(--surface-inverse) 96%, transparent);
+  border-bottom: 1px solid color-mix(in oklab, var(--highlight) 12%, transparent);
+  box-shadow: 0 8px 28px color-mix(in oklab, var(--shadow-color) 18%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.prep-card-overlay-bar > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in oklab, var(--highlight) 28%, transparent);
+  background: color-mix(in oklab, var(--highlight) 8%, transparent);
+  color: var(--text-on-inverse);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.prep-card-overlay-bar > button:hover {
+  border-color: color-mix(in oklab, var(--highlight) 58%, transparent);
+  background: color-mix(in oklab, var(--highlight) 14%, transparent);
+}
+
+.prep-card-overlay-bar > button > span { font-size: 17px; }
+.prep-card-overlay-bar > div { min-width: 0; text-align: center; }
+.prep-card-overlay-bar small {
+  display: block;
+  color: var(--text-on-inverse-muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.13em;
+}
+.prep-card-overlay-bar strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  font-family: "Songti SC", serif;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prep-card-overlay-bar > span {
+  color: var(--text-on-inverse-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.prep-card-overlay-bar kbd {
+  padding: 2px 5px;
+  border: 1px solid color-mix(in oklab, var(--highlight) 22%, transparent);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+}
+
+.prep-card-overlay-content {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 24px 38px 70px;
+}
+
+.prep-command {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.prep-command > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.prep-command > label > span { color: var(--muted); font-size: 17px; }
+.prep-command input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 12px; }
+
+.prep-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.prep-categories button,
+.prep-source {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.prep-categories button.active {
+  border-color: var(--green);
+  background: var(--green);
+  color: var(--on-fill);
+}
+
+.prep-source { color: var(--green); white-space: nowrap; }
+.prep-source:hover { border-color: var(--green); }
+
+.prep-workbench {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.36fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.prep-question-list {
+  position: sticky;
+  top: 14px;
+  display: flex;
+  max-height: calc(100dvh - 120px);
+  flex-direction: column;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.prep-question-list > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: color-mix(in oklab, var(--surface) 96%, transparent);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+}
+
+.prep-question-list > header > div { display: flex; align-items: baseline; gap: 5px; }
+.prep-question-list > header span { font-family: var(--font-geist-mono), monospace; font-size: 18px; }
+.prep-question-list > header small, .prep-question-list > header p { margin: 0; color: var(--muted); font-size: 11px; }
+.prep-question-list kbd { padding: 2px 5px; background: var(--paper-deep); border: 1px solid var(--line); font-family: var(--font-geist-mono), monospace; font-size: 11px; }
+
+.prep-question-list > button {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.prep-question-list > button:last-child { border-bottom: 0; }
+.prep-question-list > button:hover { background: var(--success-wash); }
+.prep-question-list > button.active { background: var(--success-wash); box-shadow: inset 3px 0 var(--green); }
+.prep-index { color: var(--muted); font-family: var(--font-geist-mono), monospace; font-size: 11px; text-align: center; }
+.prep-question-copy { display: flex; min-width: 0; flex-direction: column; }
+.prep-question-copy small { color: var(--orange); font-size: 11px; }
+.prep-question-copy strong { overflow: hidden; margin-top: 3px; font-family: "Songti SC", serif; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.prep-question-copy em { overflow: hidden; margin-top: 3px; color: var(--muted); font-style: normal; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.prep-question-list > button > i { color: var(--green); font-style: normal; opacity: 0; transform: translateX(-4px); transition: 150ms ease; }
+.prep-question-list > button.active > i { opacity: 1; transform: translateX(0); }
+
+.prep-answer {
+  min-width: 0;
+  padding: 24px 27px 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 35px color-mix(in oklab, var(--shadow-color) 6%, transparent);
+}
+
+.prep-answer > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.prep-answer-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.prep-answer-meta span { padding: 3px 8px; background: var(--paper-deep); color: var(--muted); font-family: var(--font-geist-mono), monospace; font-size: 11px; }
+.prep-answer-meta span.priority { background: var(--danger-wash); color: var(--danger); }
+.prep-answer h2 { margin: 8px 0 4px; font-family: "Songti SC", serif; font-size: clamp(24px, 2.5vw, 32px); line-height: 1.25; }
+.prep-answer > header p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.prep-answer-id { color: var(--text-on-inverse-muted); font-family: var(--font-geist-mono), monospace; font-size: 20px; }
+
+.prep-purpose {
+  display: grid;
+  grid-template-columns: 146px minmax(0, 1fr);
+  gap: 14px;
+  margin: 16px 0 0;
+  padding: 11px 13px;
+  background: var(--paper);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.prep-purpose span { color: var(--gold-text); font-size: 11px; font-weight: 650; }
+
+.prep-standard {
+  margin-top: 16px;
+  padding: 18px 20px 20px;
+  background:
+    linear-gradient(125deg, color-mix(in oklab, var(--green) 4%, transparent), transparent 54%),
+    var(--surface);
+  border: 1px solid var(--line-cool);
+  border-left: 4px solid var(--green);
+}
+
+.prep-standard > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.prep-standard > header span { color: var(--green); font-family: var(--font-geist-mono), monospace; font-size: 11px; letter-spacing: 0.12em; }
+.prep-standard h3 { margin: 3px 0 0; font-family: "Songti SC", serif; font-size: 19px; }
+.prep-standard button { padding: 6px 10px; border: 1px solid var(--success-line); background: transparent; color: var(--green); font-size: 11px; cursor: pointer; }
+.prep-standard button:hover { background: var(--green); color: var(--on-fill); }
+.prep-standard > p { margin: 15px 0 0; color: var(--green-deep); font-size: 15px; line-height: 2.15; white-space: pre-wrap; }
+.prep-standard ruby { ruby-position: over; }
+.prep-standard rt {
+  color: var(--green);
+  font-size: var(--ruby-size);
+  font-weight: 400;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.prep-short {
+  margin-top: 10px;
+  padding: 13px 16px;
+  background: var(--surface-inverse-violet);
+  color: var(--text-on-inverse);
+}
+
+.prep-short > span { color: var(--violet-on-inverse); font-size: 11px; }
+.prep-short > p { margin: 6px 0 0; font-size: 14px; line-height: 1.85; white-space: pre-wrap; }
+
+.prep-guidance-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.prep-guidance-card {
+  padding: 14px 15px;
+  background: var(--paper);
+  border-top: 3px solid var(--violet);
+}
+
+.prep-guidance-card.warm { border-top-color: var(--orange); }
+.prep-guidance-card h3 { margin: 0 0 8px; color: var(--muted); font-size: 11px; }
+.prep-guidance-card p, .prep-evidence p { margin: 0; font-size: 12px; line-height: 1.75; white-space: pre-wrap; }
+
+.prep-evidence {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px dashed var(--line-strong);
+}
+
+.prep-evidence > span { display: block; margin-bottom: 6px; color: var(--green); font-size: 11px; font-weight: 650; }
+.prep-evidence p { color: var(--muted); }
+
+.prep-empty,
+.prep-no-result {
+  padding: 70px 30px;
+  background: var(--surface);
+  border: 1px dashed var(--line);
+  text-align: center;
+}
+
+.prep-empty > span { color: var(--green); font-family: var(--font-geist-mono), monospace; font-size: 11px; letter-spacing: 0.14em; }
+.prep-empty h1 { margin: 8px 0; font-family: "Songti SC", serif; font-size: 30px; }
+.prep-empty p, .prep-no-result { color: var(--muted); font-size: 12px; }
+
+@media (max-width: 980px) {
+  .prep-command { grid-template-columns: 1fr auto; }
+  .prep-categories { grid-column: 1 / -1; grid-row: 2; }
+  .prep-workbench { grid-template-columns: 230px minmax(0, 1fr); }
+  .prep-answer { padding: 21px 20px 24px; }
+  .prep-guidance-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 720px) {
+  .prep-card-overlay-bar {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    padding-inline: 14px;
+  }
+  .prep-card-overlay-bar > span { display: none; }
+  .prep-card-overlay-bar > div { text-align: right; }
+  .prep-card-overlay-content { padding: 16px 16px 50px; }
+  .prep-workbench { grid-template-columns: 1fr; }
+  .prep-question-list { position: static; max-height: 360px; }
+  .prep-purpose { grid-template-columns: 1fr; gap: 4px; }
+}
+
+@media (max-width: 520px) {
+  .prep-command { grid-template-columns: 1fr; }
+  .prep-source { grid-row: auto; justify-self: stretch; }
+  .prep-categories { grid-column: auto; grid-row: auto; }
+  .prep-answer > header, .prep-standard > header { align-items: flex-start; flex-direction: column; }
+  .prep-answer-id { display: none; }
+}

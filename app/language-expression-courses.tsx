@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   deriveLanguageExpressionProgress,
   findLanguageExpressionCourses,
@@ -14,8 +21,66 @@ import {
   type SafeRewriteCard,
 } from "@/lib/language-expression-course";
 import { parseInline } from "@/lib/interview-prep-doc";
-import type { Note } from "@/lib/notes";
+import { postJson } from "@/lib/client-api";
+import ScopeLoading from "./scope-loading";
+import { isTypingTarget as isEditableTarget } from "@/lib/keyboard";
+import { getTitle, type Note } from "@/lib/notes";
+import { isLanguageScenarioResource } from "@/lib/vault-scope";
 import { Inlines } from "./prep-doc-render";
+import { notifyUrlChange } from "./use-url-state";
+import { useUiLocale } from "./ui-locale";
+import { createTrainingCopy, trainingTopicCopy } from "@/lib/special-training-i18n";
+import { EXPRESSION_WORKBENCH_COPY } from "./language-expression-copy";
+import LanguageScenarioCourse from "./language-scenario-course";
+import LanguageTextbook from "./language-textbook";
+import { useTextbookSearch } from "./use-textbook-position";
+import { findLanguageTextbookChapters, languageChapterHref } from "@/lib/language-textbook";
+import { readTextbookPosition, resolveTextbookPosition, type TextbookPosition } from "@/lib/language-textbook-position";
+import { findInterviewQuestionCollections, questionCollectionHref } from "@/lib/interview-question-collection";
+import InterviewQuestionCollectionView, { type QuestionCollectionFilterChange } from "./interview-question-collection";
+import InterviewLanguageLearning from "./interview-language-learning";
+import { languageIndexOf, languageIndexHref, questionLocation } from "@/lib/interview-language";
+import { QUESTION_TOPICS } from "@/lib/interview-question-collection";
+import { specialCourseHref, specialQuestionModuleHref, specialTrainingHref, specialTrainingRoute } from "@/lib/special-training-navigation";
+import { SpecialTrainingBreadcrumbs, SpecialTrainingDashboard, SpecialTrainingModule } from "./special-training-dashboard";
+import { useSpecialTrainingCopy } from "./special-training-copy";
+
+const QUESTION_URL_KEYS = ["questionSet", "questionTopic", "questionReview", "questionKind", "questionSearch", "questionPage", "questionView", "languageCategory", "languagePoint", "questionId", "languageReturnCategory"];
+
+// 练习方式的名称从界面字典派生，课程与练习素材仍按原文显示。
+const EXPRESSION_MENU_COPY = {
+  ...EXPRESSION_WORKBENCH_COPY,
+  "专项课程目录": ["专项课程目录", "専門コース一覧"],
+  "学习顺序与覆盖说明": ["学习顺序与覆盖说明", "学習順序と出典の説明"],
+  "学习顺序": ["学习顺序", "学習順序"],
+  "来源覆盖": ["来源覆盖", "出典の範囲"],
+  "{count} 门课程": ["{count} 门课程", "{count} コース"],
+  "{chunks} 词块 · {patterns} 句型": ["{chunks} 词块 · {patterns} 句型", "表現 {chunks} 件 · 文型 {patterns} 件"],
+  "专项训练方式": ["专项训练方式", "専門トレーニングの練習方式"],
+  "中译日词块": ["中译日词块", "中国語から日本語の表現へ"],
+  "固定搭配补全": ["固定搭配补全", "定型表現の穴埋め"],
+  "句型替换": ["句型替换", "文型の置き換え"],
+  "随机表达": ["随机表达", "ランダム発話"],
+  "安全改写": ["安全改写", "適切な言い換え"],
+  "词": ["词", "語"],
+  "搭": ["搭", "連"],
+  "句": ["句", "型"],
+  "说": ["说", "話"],
+  "改": ["改", "改"],
+  "先看中文功能，主动提取日语表达。": ["先看中文功能，主动提取日语表达。", "中国語で意図を確認し、日本語表現を思い出す。"],
+  "把词块放回自然、常用的搭配中。": ["把词块放回自然、常用的搭配中。", "表現を自然でよく使う組み合わせに当てはめる。"],
+  "用同一个骨架替换不同观点和内容。": ["用同一个骨架替换不同观点和内容。", "同じ文型で意見や内容を置き換える。"],
+  "抽取原因、对策和句型，自由说二至四句。": ["抽取原因、对策和句型，自由说二至四句。", "原因・対策・文型を選び、自由に 2〜4 文話す。"],
+  "修正真实口误，换掉绝对化或越界表达。": ["修正真实口误，换掉绝对化或越界表达。", "実際の言い間違いや、断定しすぎた表現を修正する。"],
+  "词块范围": ["词块范围", "表現の範囲"],
+  "核心词块": ["核心词块", "基本表現"],
+  "扩展词块": ["扩展词块", "発展表現"],
+} as const satisfies Record<string, readonly [string, string]>;
+
+function useExpressionMenu() {
+  const { locale } = useUiLocale();
+  return createTrainingCopy(EXPRESSION_MENU_COPY, locale);
+}
 
 type PracticeMode =
   | "recall"
@@ -35,6 +100,8 @@ type ProgressResponse = {
   deduplicated: boolean;
   state: ProgressState;
   path: string;
+  /** 更新後の進捗ノート。これで notes 配列を1件差し替え、全量再取得を省く。 */
+  note?: Note;
 };
 
 type RewriteItem =
@@ -168,12 +235,54 @@ function readStoredStudyState(): StoredStudyState {
   }
 }
 
-function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.isContentEditable ||
-    ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
-  );
+// 学習位置は localStorage が出所なので、React ステートに写し取らず外部ストアとして購読する。
+// useEffect + setState で読み込むと「初回レンダー → setState → 再レンダー」のカスケードになり、
+// SSR とハイドレーションの食い違いも自前で面倒を見ることになる。
+// useSyncExternalStore なら「まだ読んでいない = null」をサーバーと初回ハイドレーションに返し、
+// マウント後の切り替えを React 側が担保してくれる。
+const EMPTY_STUDY_STATE: StoredStudyState = {
+  version: 1,
+  activeCourseId: "",
+  positions: {},
+};
+
+const studyStateListeners = new Set<() => void>();
+// null = まだ localStorage を読んでいない。
+let studyStateSnapshot: StoredStudyState | null = null;
+
+function subscribeStudyState(listener: () => void) {
+  studyStateListeners.add(listener);
+  // subscribe はマウント後にしか走らないので、ここで読めばハイドレーションは崩れない。
+  // 値が null から変わったことは、React が subscribe 直後のスナップショット比較で拾う。
+  if (studyStateSnapshot === null) {
+    studyStateSnapshot = readStoredStudyState();
+  }
+  return () => {
+    studyStateListeners.delete(listener);
+  };
+}
+
+function getStudyStateSnapshot() {
+  return studyStateSnapshot;
+}
+
+function getServerStudyStateSnapshot(): StoredStudyState | null {
+  return null;
+}
+
+function updateStudyState(
+  update: (current: StoredStudyState) => StoredStudyState,
+) {
+  studyStateSnapshot = update(studyStateSnapshot ?? EMPTY_STUDY_STATE);
+  try {
+    window.localStorage.setItem(
+      STUDY_POSITION_STORAGE_KEY,
+      JSON.stringify(studyStateSnapshot),
+    );
+  } catch {
+    // 保存領域が使えない環境でも、当日の練習操作そのものは止めない。
+  }
+  for (const listener of studyStateListeners) listener();
 }
 
 function allowsRevealShortcut(target: EventTarget | null) {
@@ -204,11 +313,12 @@ function evidenceLabel(reference: string) {
 }
 
 function EvidenceRefs({ references }: { references: string[] }) {
+  const { t } = useExpressionMenu();
   if (!references.length) return null;
   return (
     <p className="expression-evidence">
-      <b>来自面试稿</b>
-      {references.map(evidenceLabel).join(" ／ ")}
+      <b>{t("来自面试稿")}</b>
+      <span lang="">{references.map(evidenceLabel).join(" ／ ")}</span>
     </p>
   );
 }
@@ -237,17 +347,7 @@ async function postProgress(input: {
   exercise: LanguageExpressionExercise;
   action: "completed" | "reopened";
 }) {
-  const response = await fetch("/api/language/topics/progress", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-    body: JSON.stringify({ eventId: makeEventId(), ...input }),
-  });
-  const body = await response.json() as ProgressResponse & { error?: string };
-  if (!response.ok) {
-    throw new Error(body.error || `保存失败 (${response.status})`);
-  }
-  return body;
+  return postJson<ProgressResponse & { ok?: boolean; error?: string }>("/api/language/topics/progress", { eventId: makeEventId(), ...input });
 }
 
 function courseProgress(course: LanguageExpressionCourse, notes: Note[]): ProgressState {
@@ -324,132 +424,181 @@ function currentSequentialQuestion(
   return null;
 }
 
-export default function LanguageExpressionCourses({
+function LanguageExpressionCourses({
   notes,
+  onOpen,
+  onOpenWiki,
   onVaultChanged,
+  onNoteWritten,
+  loading = false,
 }: {
   notes: Note[];
+  onOpen: (note: Note) => void;
+  onOpenWiki: (target: string, section?: string) => void;
+  /** この視図の scope がまだ届いていない：空状態ではなく読取中を出す。 */
+  loading?: boolean;
   onVaultChanged: () => Promise<void>;
+  /** 進捗保存の応答に載る更新後ノートを1件差し替える。全量再取得（onVaultChanged）の代替。 */
+  onNoteWritten?: (note: Note) => void;
 }) {
+  const { t } = useExpressionMenu();
+  const ui = useSpecialTrainingCopy();
   const courses = useMemo(() => findLanguageExpressionCourses(notes), [notes]);
-  const [selectedCourseId, setSelectedCourseId] = useState("");
-  const [storedStudyState, setStoredStudyState] = useState<StoredStudyState | null>(null);
-
-  useEffect(() => {
-    setStoredStudyState(readStoredStudyState());
-  }, []);
-
-  useEffect(() => {
-    if (!storedStudyState) return;
-    try {
-      window.localStorage.setItem(
-        STUDY_POSITION_STORAGE_KEY,
-        JSON.stringify(storedStudyState),
-      );
-    } catch {
-      // 保存領域が使えない環境でも、当日の練習操作そのものは止めない。
-    }
-  }, [storedStudyState]);
-
-  const rememberPosition = useCallback((
-    courseId: string,
-    position: StudyPosition,
-  ) => {
-    setStoredStudyState((current) => {
-      const base = current ?? {
-        version: 1 as const,
-        activeCourseId: courseId,
-        positions: {},
-      };
-      return {
-        ...base,
-        activeCourseId: courseId,
-        positions: {
-          ...base.positions,
-          [courseId]: position,
-        },
-      };
-    });
-  }, []);
-
-  const chooseCourse = (courseId: string) => {
-    setSelectedCourseId(courseId);
-    setStoredStudyState((current) => ({
-      ...(current ?? {
-        version: 1 as const,
-        activeCourseId: courseId,
-        positions: {},
-      }),
-      activeCourseId: courseId,
-    }));
+  const chapters = useMemo(() => findLanguageTextbookChapters(notes), [notes]);
+  const questionCollections = useMemo(() => findInterviewQuestionCollections(notes), [notes]);
+  const languageIndexes = useMemo(() => new Map(questionCollections.map(({collection}) => [collection.collectionId, languageIndexOf(collection)])), [questionCollections]);
+  const resources = useMemo(() => notes.filter(isLanguageScenarioResource).sort((a, b) => {
+    const rank = (note: Note) => note.frontmatter.material_kind === "language-scenario-guide" ? 0 : 1;
+    return rank(a) - rank(b) || getTitle(a).localeCompare(getTitle(b)) || a.path.localeCompare(b.path);
+  }), [notes]);
+  const resourceLinks = resources.length > 0 && <section className="expression-course-resources" aria-label={t("学习顺序与覆盖说明")}>
+    <h2>{t("学习顺序与覆盖说明")}</h2>
+    <div>{resources.map((note) => <button type="button" key={note.path} onClick={() => onOpen(note)}>
+      <small>{t(note.frontmatter.material_kind === "language-scenario-guide" ? "学习顺序" : "来源覆盖")}</small>
+      <span lang="und">{getTitle(note)} <i aria-hidden="true">↗</i></span>
+    </button>)}</div>
+  </section>;
+  const search = useTextbookSearch();
+  const locationParams = new URLSearchParams(search);
+  const route = specialTrainingRoute(search);
+  const storedStudyState = useSyncExternalStore(
+    subscribeStudyState,
+    getStudyStateSnapshot,
+    getServerStudyStateSnapshot,
+  );
+  const navigate = (href: string, replace = false) => {
+    // 层级导航保留目录历史；只在搜索等原位更新时 replace。
+    window.history[replace ? "replaceState" : "pushState"]({ ...(window.history.state ?? {}), __echoNote: null }, "", href);
+    notifyUrlChange();
   };
+  const rememberPosition = useCallback((courseId: string, position: StudyPosition) => {
+    updateStudyState(current => ({ ...current, activeCourseId: courseId,
+      positions: { ...current.positions, [courseId]: position } }));
+  }, []);
+  const chooseCourse = (courseId: string) => {
+    navigate(specialCourseHref(window.location.search, courseId));
+    updateStudyState(current => ({ ...current, activeCourseId: courseId }));
+  };
+  const chooseChapter = (chapterId: string, requestedPosition?: TextbookPosition) => {
+    if (route.kind === "chapter" && chapterId === route.chapterId && !requestedPosition) return;
+    const target = chapters.find(item => item.chapterId === chapterId);
+    const position = target?.module ? requestedPosition ?? resolveTextbookPosition(target.module, "", readTextbookPosition(chapterId)) : undefined;
+    navigate(languageChapterHref(new URL(specialTrainingHref(window.location.search), window.location.href).search, chapterId, position));
+  };
+  const chooseQuestionTopic = (collectionId: string, topicId?: string) => {
+    const params = new URLSearchParams(window.location.search);
+    for (const key of ["specialModule", "questionCatalog", "questionPage", "questionView", "languageCategory", "languagePoint", "questionId", "languageReturnCategory"]) params.delete(key);
+    if (locationParams.get("questionSet") !== collectionId) for (const key of ["questionReview", "questionKind", "questionSearch"]) params.delete(key);
+    if (params.get("questionReview") === "excluded") params.delete("questionReview");
+    navigate(questionCollectionHref(params.toString(), collectionId, topicId));
+  };
+  const changeQuestionFilters = (collectionId: string, change: QuestionCollectionFilterChange, replace = false) => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete("questionId");
+    const defaults = { review: "accepted", sourceKind: "all", query: "", page: 1 };
+    for (const [field, key] of [["review", "questionReview"], ["sourceKind", "questionKind"], ["query", "questionSearch"], ["page", "questionPage"]] as const) {
+      if (change[field] !== undefined) {
+        if (change[field] === defaults[field]) params.delete(key);
+        else params.set(key, String(change[field]));
+      }
+    }
+    if (change.page === undefined) params.delete("questionPage");
+    if (change.review === "excluded") params.set("questionTopic", "all");
+    navigate(questionCollectionHref(params.toString(), collectionId, params.get("questionTopic") ?? "all"), replace);
+  };
+  const chooseLanguagePoint = (collectionId: string, dimensionId?: string, pointId?: string, questionId?: string) => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("specialModule") === "questions" && params.get("questionCatalog") === "language") {
+      // 当前用法的分类与进入前的目录筛选分开，返回“全部”时不丢失原位置。
+      params.set("languageReturnCategory", params.get("languageCategory") ?? "all");
+    }
+    params.delete("specialModule"); params.delete("questionCatalog");
+    const target = new URL(languageIndexHref(params.toString(), collectionId, dimensionId, pointId), window.location.href);
+    if (questionId) target.searchParams.set("questionId", questionId);
+    navigate(`${target.pathname}${target.search}`);
+  };
+  const openOriginalQuestion = (collectionId: string, questionId: string) => {
+    const collection = questionCollections.find(item => item.collection.collectionId === collectionId)?.collection;
+    const location = collection && questionLocation(collection, questionId);
+    if (!location) return;
+    const params = new URLSearchParams(window.location.search);
+    for (const key of [...QUESTION_URL_KEYS, "specialModule", "questionCatalog"]) params.delete(key);
+    params.set("questionId", location.representativeQuestionId);
+    if (location.page > 1) params.set("questionPage", String(location.page));
+    navigate(questionCollectionHref(params.toString(), collectionId, location.topicId));
+  };
+  const catalogProps = { chapters, courses, questionCollections, languageIndexes, search, onNavigate: navigate,
+    onSelectChapter: chooseChapter, onSelectCourse: chooseCourse, onSelectQuestionTopic: chooseQuestionTopic, onSelectLanguagePoint: chooseLanguagePoint };
+  const breadcrumb = (title?: string, titleLang?: string) => <SpecialTrainingBreadcrumbs search={search} module={route.kind === "home" ? undefined : route.module}
+    moduleHref={route.kind === "language" ? specialQuestionModuleHref(search, "language", locationParams.get("languageReturnCategory") ?? locationParams.get("languageCategory") ?? undefined) : undefined}
+    title={title} titleLang={titleLang} onNavigate={navigate} />;
 
-  const selected =
-    courses.find(
-      (course) =>
-        course.courseId === (
-          selectedCourseId ||
-          storedStudyState?.activeCourseId
-        ),
-    ) ?? courses[0];
-
-  if (!selected) {
-    return (
-      <div className="expression-courses-view">
-        <section className="expression-empty">
-          <b>語</b>
-          <div>
-            <small>COURSE CATALOG</small>
-            <h2>还没有可用的专项课程</h2>
-            <p>在 Vault 中加入带有 language-expression-course 标记的素材后，这里会自动出现。</p>
-          </div>
-        </section>
-      </div>
-    );
+  // 首页与目录不挂载详情；教材的阅读 effect 因此无法把裸入口改写成首章。
+  if (route.kind === "home" || route.kind === "module" || (route.kind === "course" && route.courseId === "catalog")) {
+    const activeModule = route.kind === "module" ? route.module : route.kind === "course" ? "practice" : undefined;
+    return <div className="expression-courses-view" lang={ui.locale}>{breadcrumb()}{loading ? <ScopeLoading label={ui.t("专项训练")} message={ui.t("正在读取专项训练材料…")} /> : <>
+      {activeModule ? <SpecialTrainingModule {...catalogProps} module={activeModule} /> : <SpecialTrainingDashboard {...catalogProps} />}
+      {resources.length > 0 && <details className="special-material-resources"><summary>{ui.t("学习顺序与来源说明")}</summary>{resourceLinks}</details>}
+    </>}</div>;
   }
 
-  return (
-    <div className="expression-courses-view">
-      <div className="expression-course-shell">
-        <aside className="expression-catalog" aria-label="专项课程目录">
-          <div className="expression-catalog-heading">
-            <small>COURSE CATALOG</small>
-            <strong>{courses.length} 门课程</strong>
-          </div>
-          {courses.map((course) => (
-            <button
-              type="button"
-              key={course.courseId}
-              className={course.courseId === selected.courseId ? "active" : ""}
-              onClick={() => chooseCourse(course.courseId)}
-            >
-              <span>{course.topic}</span>
-              <strong>{course.title}</strong>
-              <small>
-                {course.chunks.length} 词块 · {course.patterns.length} 句型
-              </small>
-            </button>
-          ))}
-        </aside>
+  if (route.kind === "questions" || route.kind === "language") {
+    const resource = questionCollections.find(item => item.collection.collectionId === route.collectionId);
+    const languageIndex = resource && languageIndexes.get(resource.collection.collectionId);
+    const back = () => navigate(specialQuestionModuleHref(window.location.search, route.kind === "language" ? "language" : "intent", locationParams.get("languageReturnCategory") ?? locationParams.get("languageCategory") ?? undefined));
+    const sourcePoint = languageIndex?.points.find(point => point.id === locationParams.get("languagePoint"));
+    const topic = QUESTION_TOPICS.find(topic => topic.id === locationParams.get("questionTopic"));
+    const title = route.kind === "language" ? sourcePoint?.titleZh ?? ui.t("语言用法")
+      : topic ? trainingTopicCopy(topic, ui.locale).title : ui.t("提问与上下文");
+    if (resource && route.kind === "language") {
+      return <div className="expression-courses-view" lang={ui.locale}>{breadcrumb(title, route.kind === "language" && sourcePoint ? "zh-CN" : undefined)}{languageIndex ? <InterviewLanguageLearning collection={resource.collection} index={languageIndex}
+        dimensionId={locationParams.get("languageCategory") ?? "all"} pointId={locationParams.get("languagePoint") ?? undefined} questionId={locationParams.get("questionId") ?? undefined}
+        onSelectPoint={(dimensionId, pointId) => chooseLanguagePoint(resource.collection.collectionId, dimensionId, pointId)}
+        onSelectQuestion={(questionId, dimensionId, pointId) => chooseLanguagePoint(resource.collection.collectionId, dimensionId, pointId, questionId)}
+        onOpenQuestion={questionId => openOriginalQuestion(resource.collection.collectionId, questionId)}
+        onBrowseQuestions={() => chooseQuestionTopic(resource.collection.collectionId, "all")} onBack={back} onOpenWiki={onOpenWiki} />
+        : <section className="question-empty"><h1>{ui.t("提问语言学习")}</h1><p>{ui.t("语言材料尚未载入或需要核对，原问题集仍可正常阅读。")}</p><button type="button" onClick={() => chooseQuestionTopic(resource.collection.collectionId, "all")}>{ui.t("按提问主题浏览")}</button></section>}</div>;
+    }
+    return <div className="expression-courses-view" lang={ui.locale}>{breadcrumb(title, route.kind === "language" && sourcePoint ? "zh-CN" : undefined)}{resource ? <InterviewQuestionCollectionView collection={resource.collection}
+      topicId={locationParams.get("questionTopic") ?? "all"} onSelectTopic={topicId => chooseQuestionTopic(resource.collection.collectionId, topicId)}
+      review={locationParams.get("questionReview") ?? "accepted"} sourceKind={locationParams.get("questionKind") ?? "all"} query={locationParams.get("questionSearch") ?? ""}
+      page={Number(locationParams.get("questionPage") ?? 1)} onFilterChange={(change, replace) => changeQuestionFilters(resource.collection.collectionId, change, replace)}
+      languageIndex={languageIndex ?? undefined} focusedQuestionId={locationParams.get("questionId") ?? undefined}
+      onOpenLanguage={languageIndex ? (dimensionId, pointId, questionId) => chooseLanguagePoint(resource.collection.collectionId, dimensionId, pointId, questionId) : undefined}
+      onBack={back} onOpenWiki={onOpenWiki} /> : <section className="question-empty"><h1>{ui.t("面试官问题集")}</h1><p role={loading ? "status" : undefined}>{loading ? ui.t("正在读取问题集材料…") : ui.t("这个问题集尚未载入，或材料格式需要核对。")}</p><button type="button" onClick={back}>{ui.t("返回研读目录")}</button></section>}</div>;
+  }
 
-        <CourseWorkbench
-          key={selected.courseId}
-          course={selected}
-          notes={notes}
-          onVaultChanged={onVaultChanged}
-          positionReady={storedStudyState !== null}
-          initialPosition={storedStudyState?.positions[selected.courseId]}
-          onPositionChange={rememberPosition}
-        />
-      </div>
+  if (route.kind === "chapter") {
+    const chapter = chapters.find(item => item.chapterId === route.chapterId) ?? (!route.chapterId ? chapters[0] : undefined);
+    return <div className="expression-courses-view" lang={ui.locale}>{breadcrumb(chapter?.title ?? ui.t("学习章节"), chapter ? "zh-CN" : undefined)}{chapter ? <LanguageTextbook chapters={chapters} chapter={chapter}
+      onSelectChapter={chooseChapter} onOpenWiki={onOpenWiki} hasPractice={courses.length > 0}
+      hasChapterPractice={courses.some(course => course.courseId === chapter.exerciseCourseId)}
+      onPractice={courseId => courseId ? chooseCourse(courseId) : navigate(specialTrainingHref(window.location.search, "practice"))} />
+      : <section className="expression-empty"><p role={loading ? "status" : undefined}>{loading ? ui.t("正在读取学习章节…") : ui.t("这个章节尚未载入或已调整，请从目录选择。")}</p><button type="button" onClick={() => navigate(specialTrainingHref(window.location.search, "textbook"))}>{ui.t("返回章节目录")}</button></section>}</div>;
+  }
+
+  const selected = courses.find(course => course.courseId === route.courseId);
+  if (!selected) return <div className="expression-courses-view" lang={ui.locale}>{breadcrumb(ui.t("练习课程"))}<section className="expression-empty"><p role={loading ? "status" : undefined}>{loading ? ui.t("正在读取练习课程…") : ui.t("这个课程尚未载入或已调整，请从目录选择。")}</p><button type="button" onClick={() => navigate(specialTrainingHref(window.location.search, "practice"))}>{ui.t("返回练习目录")}</button></section></div>;
+  return <div className="expression-courses-view" lang={ui.locale}>{breadcrumb(selected.title, "und")}
+    <div className="expression-course-shell">
+      <aside className="expression-catalog" aria-label={t("专项课程目录")}>
+        <div className="expression-catalog-heading"><small>{ui.t("练习课程")}</small><strong>{t("{count} 门课程", { count: courses.length })}</strong></div>
+        {courses.map(course => <button type="button" key={course.courseId} className={course.courseId === selected.courseId ? "active" : ""} onClick={() => chooseCourse(course.courseId)}>
+          <span lang="und">{course.topic}</span><strong lang="und">{course.title}</strong><small>{course.scenario ? ui.t("情境练习 · 约 {minutes} 分钟", { minutes: course.scenario.durationMinutes }) : t("{chunks} 词块 · {patterns} 句型", { chunks: course.chunks.length, patterns: course.patterns.length })}</small>
+        </button>)}
+      </aside>
+      {selected.scenario ? <LanguageScenarioCourse key={selected.courseId} course={selected} notes={notes} onVaultChanged={onVaultChanged} onNoteWritten={onNoteWritten} /> : <CourseWorkbench
+        key={`${selected.courseId}:${storedStudyState ? "restored" : "initial"}`} course={selected} notes={notes} onVaultChanged={onVaultChanged} onNoteWritten={onNoteWritten}
+        positionReady={storedStudyState !== null} initialPosition={storedStudyState?.positions[selected.courseId]} onPositionChange={rememberPosition} />}
     </div>
-  );
+  </div>;
 }
 
 function CourseWorkbench({
   course,
   notes,
   onVaultChanged,
+  onNoteWritten,
   positionReady,
   initialPosition,
   onPositionChange,
@@ -457,20 +606,29 @@ function CourseWorkbench({
   course: LanguageExpressionCourse;
   notes: Note[];
   onVaultChanged: () => Promise<void>;
+  onNoteWritten?: (note: Note) => void;
   positionReady: boolean;
   initialPosition?: StudyPosition;
   onPositionChange: (courseId: string, position: StudyPosition) => void;
 }) {
+  const { t, label: menuLabel, locale, number } = useExpressionMenu();
   const derivedProgress = useMemo(
     () => courseProgress(course, notes),
     [course, notes],
   );
   const [localProgress, setLocalProgress] = useState<ProgressState | null>(null);
   const progress = localProgress ?? derivedProgress;
-  const [mode, setMode] = useState<PracticeMode>("recall");
-  const [chunkLevel, setChunkLevel] = useState<ChunkLevel>("core");
-  const [cursor, setCursor] = useState<PracticeCursor>({ ...DEFAULT_CURSOR });
-  const [positionRestored, setPositionRestored] = useState(false);
+  // initialPosition はマウント時の初期値としてだけ使う。以降に変わっても追わない
+  // （保存位置が届いた時は、呼び出し側が key を変えてこのコンポーネントを作り直す）。
+  const [mode, setMode] = useState<PracticeMode>(
+    initialPosition?.mode ?? "recall",
+  );
+  const [chunkLevel, setChunkLevel] = useState<ChunkLevel>(
+    initialPosition?.chunkLevel ?? "core",
+  );
+  const [cursor, setCursor] = useState<PracticeCursor>(
+    () => initialPosition?.cursor ?? { ...DEFAULT_CURSOR },
+  );
   const [revealed, setRevealed] = useState(false);
   const [resourceOpen, setResourceOpen] = useState(false);
   const [improvSelection, setImprovSelection] = useState({
@@ -479,21 +637,17 @@ function CourseWorkbench({
     pattern: 0,
   });
   const [busyKey, setBusyKey] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  // 只存消息键和参数，切换语言时重新显示文案，不重放保存操作。
+  const [message, setMessage] = useState<{
+    key: "已记录第 {count} 次随机表达" | "已标记为练过" | "已重新打开练习";
+    count?: number;
+  } | null>(null);
+  const [error, setError] = useState<{ key: "无法保存进度"; detail?: string } | null>(null);
 
+  // positionReady が false の間は書かない。localStorage を読み終える前に既定値を
+  // 書き戻すと、保存済みの位置を読む前に潰してしまう。
   useEffect(() => {
-    if (!positionReady || positionRestored) return;
-    if (initialPosition) {
-      setMode(initialPosition.mode);
-      setChunkLevel(initialPosition.chunkLevel);
-      setCursor(initialPosition.cursor);
-    }
-    setPositionRestored(true);
-  }, [course.courseId, initialPosition, positionReady, positionRestored]);
-
-  useEffect(() => {
-    if (!positionRestored) return;
+    if (!positionReady) return;
     onPositionChange(course.courseId, {
       mode,
       chunkLevel,
@@ -506,7 +660,7 @@ function CourseWorkbench({
     cursor,
     mode,
     onPositionChange,
-    positionRestored,
+    positionReady,
   ]);
 
   const completed = useMemo(
@@ -528,15 +682,17 @@ function CourseWorkbench({
     ...course.safeRewrites,
   ].filter((item) => completed.has(completionKey("rewrite", item.id))).length;
 
-  const save = async (
+  // useCallback なのは、下の keydown を張る useEffect が依存に save を持つため。
+  // 素の関数だと毎レンダーで作り直され、リスナーの張り替えが起き続ける。
+  const save = useCallback(async (
     itemId: string,
     exercise: LanguageExpressionExercise,
     action: "completed" | "reopened",
   ) => {
     const key = completionKey(exercise, itemId);
     setBusyKey(key);
-    setError("");
-    setMessage("");
+    setError(null);
+    setMessage(null);
     try {
       const result = await postProgress({
         courseId: course.courseId,
@@ -547,20 +703,21 @@ function CourseWorkbench({
       setLocalProgress(result.state);
       setMessage(
         exercise === "improv"
-          ? `已记录第 ${result.state.improvCount} 次随机表达`
-          : action === "completed"
-            ? "已标记为练过"
-            : "已重新打开练习",
+          ? { key: "已记录第 {count} 次随机表达", count: result.state.improvCount }
+          : { key: action === "completed" ? "已标记为练过" : "已重新打开练习" },
       );
-      await onVaultChanged();
+      // state はもう画面に反映済み。vault 側の進捗ノートは応答の note で1件差し替え、
+      // 以前ここで走っていた全量再取得（サーバ 300 GET + 6MB）を省く。
+      if (result.note && onNoteWritten) onNoteWritten(result.note);
+      else await onVaultChanged();
       return true;
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "无法保存进度");
+      setError({ key: "无法保存进度", detail: saveError instanceof Error ? saveError.message : undefined });
       return false;
     } finally {
       setBusyKey("");
     }
-  };
+  }, [course.courseId, onNoteWritten, onVaultChanged]);
 
   const switchMode = (nextMode: PracticeMode) => {
     if (nextMode === "improv") {
@@ -576,8 +733,8 @@ function CourseWorkbench({
     setMode(nextMode);
     setRevealed(false);
     setResourceOpen(false);
-    setMessage("");
-    setError("");
+    setMessage(null);
+    setError(null);
   };
 
   const move = useCallback((
@@ -591,14 +748,14 @@ function CourseWorkbench({
     }));
     setRevealed(false);
     setResourceOpen(false);
-    setMessage("");
+    setMessage(null);
   }, []);
 
   const changeChunkLevel = (level: ChunkLevel) => {
     setChunkLevel(level);
     setCursor((current) => ({ ...current, recall: 0, collocation: 0 }));
     setRevealed(false);
-    setMessage("");
+    setMessage(null);
   };
 
   const redrawImprov = () => {
@@ -619,7 +776,7 @@ function CourseWorkbench({
       ),
     }));
     setResourceOpen(false);
-    setMessage("");
+    setMessage(null);
   };
 
   const questionCount = useMemo(
@@ -633,7 +790,7 @@ function CourseWorkbench({
 
   useEffect(() => {
     if (
-      !positionRestored ||
+      !positionReady ||
       busyKey ||
       mode === "improv" ||
       questionCount <= 0
@@ -691,29 +848,29 @@ function CourseWorkbench({
     currentQuestion,
     mode,
     move,
-    positionRestored,
+    positionReady,
     questionCount,
     revealed,
     save,
   ]);
 
   return (
-    <main className="expression-workbench">
+    <main className="expression-workbench" lang={locale}>
       <header className="expression-course-header">
         <div>
-          <small>{course.topic} · FLEXIBLE OUTPUT</small>
-          <h2>{course.title}</h2>
-          <p>不背整段台本；系统会记住上次位置。← 返回上一题，→ 自动标记当前题并前进，Space 查看答案。</p>
+          <small><span lang="">{course.topic}</span> · {t("FLEXIBLE OUTPUT")}</small>
+          <h2 lang="">{course.title}</h2>
+          <p>{t("不背整段台本；系统会记住上次位置。← 返回上一题，→ 自动标记当前题并前进，Space 查看答案。")}</p>
         </div>
         <dl>
-          <div><dt>核心词块</dt><dd>{recallDone}<span>/{coreChunks.length}</span></dd></div>
-          <div><dt>核心句型</dt><dd>{patternDone}<span>/{corePatterns.length}</span></dd></div>
-          <div><dt>纠错改写</dt><dd>{rewriteDone}<span>/{rewriteCount}</span></dd></div>
-          <div><dt>随机表达</dt><dd>{progress.improvCount}<span> 次</span></dd></div>
+          <div><dt>{t("核心词块")}</dt><dd>{number(recallDone)}<span>/{number(coreChunks.length)}</span></dd></div>
+          <div><dt>{t("核心句型")}</dt><dd>{number(patternDone)}<span>/{number(corePatterns.length)}</span></dd></div>
+          <div><dt>{t("纠错改写")}</dt><dd>{number(rewriteDone)}<span>/{number(rewriteCount)}</span></dd></div>
+          <div><dt>{t("随机表达")}</dt><dd>{number(progress.improvCount)}<span>{t(" 次")}</span></dd></div>
         </dl>
       </header>
 
-      <nav className="expression-mode-tabs" aria-label="专项训练方式">
+      <nav className="expression-mode-tabs" aria-label={t("专项训练方式")}>
         {MODES.map((item) => (
           <button
             type="button"
@@ -721,15 +878,16 @@ function CourseWorkbench({
             className={mode === item.id ? "active" : ""}
             onClick={() => switchMode(item.id)}
           >
-            <i aria-hidden="true">{item.short}</i>
-            <span><strong>{item.label}</strong><small>{item.description}</small></span>
+            <i aria-hidden="true">{menuLabel(item.short)}</i>
+            <span><strong>{menuLabel(item.label)}</strong><small>{menuLabel(item.description)}</small></span>
           </button>
         ))}
       </nav>
 
       {(message || error) && (
-        <div className={`expression-message ${error ? "error" : ""}`}>
-          {error || message}
+        <div className={`expression-message ${error ? "error" : ""}`} role={error ? "alert" : "status"}>
+          {error ? <>{t(error.key)}{error.detail && <>：<span lang={Object.hasOwn(EXPRESSION_MENU_COPY, error.detail) ? locale : ""}>{menuLabel(error.detail)}</span></>}</>
+            : message && t(message.key, { count: message.count })}
         </div>
       )}
 
@@ -812,21 +970,22 @@ function LevelSwitch({
   value: "core" | "extended";
   onChange: (value: "core" | "extended") => void;
 }) {
+  const { t } = useExpressionMenu();
   return (
-    <div className="expression-level-switch" aria-label="词块范围">
+    <div className="expression-level-switch" aria-label={t("词块范围")}>
       <button
         type="button"
         className={value === "core" ? "active" : ""}
         onClick={() => onChange("core")}
       >
-        核心词块
+        {t("核心词块")}
       </button>
       <button
         type="button"
         className={value === "extended" ? "active" : ""}
         onClick={() => onChange("extended")}
       >
-        扩展词块
+        {t("扩展词块")}
       </button>
     </div>
   );
@@ -836,23 +995,26 @@ function PracticeHeader({
   eyebrow,
   title,
   instruction,
+  instructionIsMaterial = false,
   current,
   total,
 }: {
   eyebrow: string;
   title: string;
   instruction: string;
+  instructionIsMaterial?: boolean;
   current: number;
   total: number;
 }) {
+  const { label, locale, number } = useExpressionMenu();
   return (
     <header className="expression-practice-header">
       <div>
-        <small>{eyebrow}</small>
-        <h3>{title}</h3>
-        <p>{instruction}</p>
+        <small>{label(eyebrow)}</small>
+        <h3>{label(title)}</h3>
+        <p lang={instructionIsMaterial ? "zh-CN" : locale}>{instructionIsMaterial ? instruction : label(instruction)}</p>
       </div>
-      <span>{Math.min(current + 1, total || 1)} / {total}</span>
+      <span>{number(Math.min(current + 1, total || 1))} / {number(total)}</span>
     </header>
   );
 }
@@ -864,17 +1026,18 @@ function QuestionNavigation({
   onPrevious: () => void;
   disabled?: boolean;
 }) {
+  const { t } = useExpressionMenu();
   return (
-    <div className="expression-question-navigation" aria-label="题目导航">
+    <div className="expression-question-navigation" aria-label={t("题目导航")}>
       <button
         type="button"
         disabled={disabled}
         aria-keyshortcuts="ArrowLeft"
-        title="快捷键：←"
+        title={t("快捷键：←")}
         onClick={onPrevious}
       >
         <kbd aria-hidden="true">←</kbd>
-        上一题
+        {t("上一题")}
       </button>
     </div>
   );
@@ -887,12 +1050,13 @@ function RevealButton({
   onClick: () => void;
   children: React.ReactNode;
 }) {
+  const { t } = useExpressionMenu();
   return (
     <button
       type="button"
       className="expression-reveal-button"
       aria-keyshortcuts="Space"
-      title="快捷键：Space"
+      title={t("快捷键：Space")}
       onClick={onClick}
     >
       {children}
@@ -916,6 +1080,7 @@ function NextQuestionButton({
   onSave: SaveProgress;
   onNext: () => void;
 }) {
+  const { t } = useExpressionMenu();
   const key = completionKey(exercise, itemId);
   const done = completed.has(key);
   const busy = busyKey === key;
@@ -935,11 +1100,11 @@ function NextQuestionButton({
         className={`expression-complete expression-complete-next ${done ? "done" : ""}`}
         disabled={Boolean(busyKey)}
         aria-keyshortcuts="ArrowRight"
-        title="进入下一题，并自动把当前题标记为已练"
+        title={t("进入下一题，并自动把当前题标记为已练")}
         onClick={() => void completeAndNext()}
       >
         <span aria-hidden="true">✓</span>
-        {busy ? "正在保存…" : "下一题"}
+        {t(busy ? "正在保存…" : "下一题")}
         {!busy && <span aria-hidden="true">→</span>}
       </button>
       {/* 「已练」を取り消す唯一の導線。押し間違いや練習し直しで戻せないと、
@@ -950,10 +1115,10 @@ function NextQuestionButton({
           type="button"
           className="expression-reopen"
           disabled={Boolean(busyKey)}
-          title="取消「已练」，放回练习队列"
+          title={t("取消「已练」，放回练习队列")}
           onClick={() => void onSave(itemId, exercise, "reopened")}
         >
-          {busy ? "…" : "↩ 取消已练"}
+          {busy ? "…" : t("↩ 取消已练")}
         </button>
       )}
     </span>
@@ -983,6 +1148,7 @@ function RecallPractice({
   onMove: MoveQuestion;
   onSave: SaveProgress;
 }) {
+  const { t, label, locale } = useExpressionMenu();
   const pool = chunks.filter((chunk) => chunk.level === level);
   const index = cursor % Math.max(pool.length, 1);
   const chunk = pool[index];
@@ -1000,34 +1166,34 @@ function RecallPractice({
       />
       <article className="expression-prompt-card">
         <span className="expression-item-badge">
-          {[levelLabel(chunk.level), learningBasisLabel(chunk.learningBasis), chunk.id]
+          {[label(levelLabel(chunk.level)), label(learningBasisLabel(chunk.learningBasis)), chunk.id]
             .filter(Boolean)
             .join(" · ")}
         </span>
-        <small>中文功能</small>
-        <h4>{chunk.meaningZh}</h4>
-        <p className="expression-topic-line">{chunk.topics.join(" · ")}</p>
+        <small>{t("中文功能")}</small>
+        <h4 lang="zh-CN">{chunk.meaningZh}</h4>
+        <p className="expression-topic-line" lang="">{chunk.topics.join(" · ")}</p>
 
         {revealed ? (
           <div className="expression-reveal">
-            <small>日语词块</small>
+            <small>{t("日语词块")}</small>
             <strong lang="ja">{chunk.japanese}</strong>
             {chunk.reading && <p lang="ja">{chunk.reading}</p>}
             {chunk.explanationZh && (
-              <p className="expression-learning-note">
-                <b>基础解释</b>{chunk.explanationZh}
+              <p className="expression-learning-note" lang="zh-CN">
+                <b lang={locale}>{t("基础解释")}</b>{chunk.explanationZh}
               </p>
             )}
             <p className="expression-example" lang="ja">
-              <b>例句</b>{chunk.exampleJa}
+              <b lang={locale}>{t("例句")}</b>{chunk.exampleJa}
             </p>
             <div className="expression-mini-columns">
               <div>
-                <b>常见搭配</b>
+                <b>{t("常见搭配")}</b>
                 <ul>{chunk.collocations.slice(0, 3).map((item) => <li key={item} lang="ja">{item}</li>)}</ul>
               </div>
               <div>
-                <b>可替换表达</b>
+                <b>{t("可替换表达")}</b>
                 <ul>
                   {chunk.alternativesJa.slice(0, 3).map((item) => (
                     <li key={item} lang="ja"><Inlines nodes={parseInline(item)} /></li>
@@ -1036,12 +1202,12 @@ function RecallPractice({
               </div>
             </div>
             {chunk.factBoundary && (
-              <p className="expression-boundary"><b>事实边界</b>{chunk.factBoundary}</p>
+              <p className="expression-boundary" lang="zh-CN"><b lang={locale}>{t("事实边界")}</b>{chunk.factBoundary}</p>
             )}
             <EvidenceRefs references={chunk.evidenceRefs} />
           </div>
         ) : (
-          <RevealButton onClick={onReveal}>我已经说过了，查看词块</RevealButton>
+          <RevealButton onClick={onReveal}>{t("我已经说过了，查看词块")}</RevealButton>
         )}
       </article>
       <footer className="expression-practice-actions">
@@ -1064,7 +1230,7 @@ function RecallPractice({
 
 function clozeCollocation(chunk: ExpressionChunk, collocation: string) {
   const predicate = collocation.match(/^(.*[をにへでとがは])([^をにへでとがは]+)$/u);
-  if (predicate?.[2]?.length >= 2) {
+  if (predicate && predicate[2].length >= 2) {
     return `${predicate[1]}＿＿＿＿`;
   }
   if (collocation.includes(chunk.japanese)) {
@@ -1096,6 +1262,7 @@ function CollocationPractice({
   onMove: MoveQuestion;
   onSave: SaveProgress;
 }) {
+  const { t, label } = useExpressionMenu();
   const pool = chunks.filter(
     (chunk) => chunk.level === level && chunk.collocations.length > 0,
   );
@@ -1116,21 +1283,21 @@ function CollocationPractice({
       />
       <article className="expression-prompt-card expression-cloze-card">
         <span className="expression-item-badge">
-          {[levelLabel(chunk.level), learningBasisLabel(chunk.learningBasis), chunk.id]
+          {[label(levelLabel(chunk.level)), label(learningBasisLabel(chunk.learningBasis)), chunk.id]
             .filter(Boolean)
             .join(" · ")}
         </span>
-        <small>{chunk.meaningZh}</small>
+        <small lang="zh-CN">{chunk.meaningZh}</small>
         <h4 lang="ja">{clozeCollocation(chunk, collocation)}</h4>
         {revealed ? (
           <div className="expression-reveal">
-            <small>搭配确认</small>
+            <small>{t("搭配确认")}</small>
             <strong lang="ja">{collocation}</strong>
             <p className="expression-fragment" lang="ja">{chunk.exampleJa}</p>
-            <p className="expression-hint">再把主题替换成：{chunk.topics.slice(0, 3).join("／")}</p>
+            <p className="expression-hint">{t("再把主题替换成：")}<span lang="">{chunk.topics.slice(0, 3).join("／")}</span></p>
           </div>
         ) : (
-          <RevealButton onClick={onReveal}>查看搭配</RevealButton>
+          <RevealButton onClick={onReveal}>{t("查看搭配")}</RevealButton>
         )}
       </article>
       <footer className="expression-practice-actions">
@@ -1170,6 +1337,7 @@ function SubstitutionPractice({
   onMove: MoveQuestion;
   onSave: SaveProgress;
 }) {
+  const { t, label, locale } = useExpressionMenu();
   const patterns = course.patterns;
   const index = cursor % Math.max(patterns.length, 1);
   const pattern = patterns[index];
@@ -1189,16 +1357,16 @@ function SubstitutionPractice({
       />
       <article className="expression-prompt-card expression-pattern-card">
         <span className="expression-item-badge">
-          {[levelLabel(pattern.level), learningBasisLabel(pattern.learningBasis), pattern.id]
+          {[label(levelLabel(pattern.level)), label(learningBasisLabel(pattern.learningBasis)), pattern.id]
             .filter(Boolean)
             .join(" · ")}
         </span>
-        <small>{pattern.functionZh}</small>
+        <small lang="zh-CN">{pattern.functionZh}</small>
         <h4 lang="ja">{pattern.patternJa}</h4>
-        <p className="expression-slots">{pattern.slotsZh}</p>
+        <p className="expression-slots" lang="zh-CN">{pattern.slotsZh}</p>
         <div className="expression-keyword-pair">
           {[ideaA, ideaB].filter(Boolean).map((idea) => (
-            <div key={idea.id}>
+            <div key={idea.id} lang="">
               <small>{idea.title}</small>
               <strong>{idea.keywords.slice(0, 4).join(" ／ ")}</strong>
             </div>
@@ -1206,15 +1374,15 @@ function SubstitutionPractice({
         </div>
         {revealed ? (
           <div className="expression-reveal expression-short-examples">
-            <small>规则与短例</small>
+            <small>{t("规则与短例")}</small>
             {pattern.explanationZh && (
-              <p className="expression-learning-note">
-                <b>基础解释</b>{pattern.explanationZh}
+              <p className="expression-learning-note" lang="zh-CN">
+                <b lang={locale}>{t("基础解释")}</b>{pattern.explanationZh}
               </p>
             )}
             {pattern.contrastJa && (
               <p className="expression-contrast" lang="ja">
-                <b>易错对比</b>{pattern.contrastJa}
+                <b lang={locale}>{t("易错对比")}</b>{pattern.contrastJa}
               </p>
             )}
             {pattern.examplesJa.slice(0, 2).map((example) => (
@@ -1222,14 +1390,14 @@ function SubstitutionPractice({
             ))}
             {pattern.alternativesJa.length > 0 && (
               <p className="expression-natural-options" lang="ja">
-                <b>更自然</b>{pattern.alternativesJa.slice(0, 2).join(" ／ ")}
+                <b lang={locale}>{t("更自然")}</b>{pattern.alternativesJa.slice(0, 2).join(" ／ ")}
               </p>
             )}
             <EvidenceRefs references={pattern.evidenceRefs} />
-            <p className="expression-hint">不要复述示例；换成上面的关键词再说一遍。</p>
+            <p className="expression-hint">{t("不要复述示例；换成上面的关键词再说一遍。")}</p>
           </div>
         ) : (
-          <RevealButton onClick={onReveal}>查看两个短例</RevealButton>
+          <RevealButton onClick={onReveal}>{t("查看两个短例")}</RevealButton>
         )}
       </article>
       <footer className="expression-practice-actions">
@@ -1269,6 +1437,7 @@ function ImprovisationPractice({
   onRedraw: () => void;
   onComplete: (itemId: string) => void;
 }) {
+  const { t } = useExpressionMenu();
   const recipes = improvRecipes(course);
   const causes = course.ideaCards.filter((card) => card.category === "cause");
   const solutions = course.ideaCards.filter((card) => card.category === "solution");
@@ -1301,71 +1470,72 @@ function ImprovisationPractice({
         eyebrow="IMPROVISED OUTPUT"
         title="用三张卡，自由说二至四句"
         instruction={recipe.promptZh || "先说观点，再连接一个原因和一个对策。"}
+        instructionIsMaterial={Boolean(recipe.promptZh)}
         current={recipeIndex % recipes.length}
         total={recipes.length}
       />
       <article className="expression-prompt-card expression-improv-card">
-        <span className="expression-item-badge">随机组合 · {recipe.id}</span>
+        <span className="expression-item-badge">{t("随机组合")} · {recipe.id}</span>
         <div className="expression-improv-draw">
           <div>
-            <small>原因</small>
-            <strong>{cause.title}</strong>
-            <p>{cause.keywords.slice(0, 5).join(" ／ ")}</p>
+            <small>{t("原因")}</small>
+            <strong lang="">{cause.title}</strong>
+            <p lang="">{cause.keywords.slice(0, 5).join(" ／ ")}</p>
           </div>
           <span aria-hidden="true">＋</span>
           <div>
-            <small>对策</small>
-            <strong>{solution.title}</strong>
-            <p>{solution.keywords.slice(0, 5).join(" ／ ")}</p>
+            <small>{t("对策")}</small>
+            <strong lang="">{solution.title}</strong>
+            <p lang="">{solution.keywords.slice(0, 5).join(" ／ ")}</p>
           </div>
           <span aria-hidden="true">＋</span>
           <div>
-            <small>指定句型</small>
+            <small>{t("指定句型")}</small>
             <strong lang="ja">{pattern.patternJa}</strong>
-            <p>{pattern.functionZh}</p>
+            <p lang="zh-CN">{pattern.functionZh}</p>
           </div>
         </div>
 
         <div className="expression-self-check">
-          <small>说完后自己检查</small>
+          <small>{t("说完后自己检查")}</small>
           <ul>
-            <li>是否先给出观点，再说明原因和对策？</li>
-            <li>是否避免把个人倾向说成所有人的特征？</li>
-            <li>是否把建议和本人已有经历区分开？</li>
+            <li>{t("是否先给出观点，再说明原因和对策？")}</li>
+            <li>{t("是否避免把个人倾向说成所有人的特征？")}</li>
+            <li>{t("是否把建议和本人已有经历区分开？")}</li>
           </ul>
         </div>
 
         <button type="button" className="expression-resource-button" onClick={onResources}>
-          {resourcesOpen ? "收起可用素材" : "卡住时查看可用素材"}
+          {t(resourcesOpen ? "收起可用素材" : "卡住时查看可用素材")}
           <span aria-hidden="true">{resourcesOpen ? "−" : "+"}</span>
         </button>
 
         {resourcesOpen && (
           <div className="expression-resource-drawer">
             <div>
-              <small>可调用词块</small>
+              <small>{t("可调用词块")}</small>
               <ul>
                 {relatedChunks.map((chunk) => (
                   <li key={chunk.id}>
                     <strong lang="ja">{chunk.japanese}</strong>
-                    <span>{chunk.meaningZh}</span>
+                    <span lang="zh-CN">{chunk.meaningZh}</span>
                   </li>
                 ))}
               </ul>
             </div>
             <div>
-              <small>还可换用的句型</small>
+              <small>{t("还可换用的句型")}</small>
               <ul className="expression-alternate-patterns">
                 {alternatePatterns.map((candidate) => (
                   <li key={candidate.id}>
                     <strong lang="ja">{candidate.patternJa}</strong>
-                    <span>{candidate.functionZh}</span>
+                    <span lang="zh-CN">{candidate.functionZh}</span>
                   </li>
                 ))}
               </ul>
-              <small>边界提醒</small>
+              <small>{t("边界提醒")}</small>
               {boundaryCards.slice(0, 3).map((card) => (
-                <p key={card.id}><b>{card.title}</b>{card.descriptionZh}</p>
+                <p key={card.id} lang="zh-CN"><b lang="">{card.title}</b>{card.descriptionZh}</p>
               ))}
             </div>
           </div>
@@ -1379,9 +1549,9 @@ function ImprovisationPractice({
           onClick={() => onComplete(recipe.id)}
         >
           <span aria-hidden="true">✓</span>
-          {busy ? "正在记录…" : "完成一次表达"}
+          {t(busy ? "正在记录…" : "完成一次表达")}
         </button>
-        <button type="button" onClick={onRedraw}>重新抽取 <span>↻</span></button>
+        <button type="button" onClick={onRedraw}>{t("重新抽取")} <span>↻</span></button>
       </footer>
     </section>
   );
@@ -1420,6 +1590,7 @@ function RewritePractice({
   onMove: MoveQuestion;
   onSave: SaveProgress;
 }) {
+  const { t } = useExpressionMenu();
   const items: RewriteItem[] = [
     ...course.corrections.map((item): RewriteItem => ({ kind: "correction", item })),
     ...course.safeRewrites.map((item): RewriteItem => ({ kind: "safe", item })),
@@ -1445,25 +1616,25 @@ function RewritePractice({
       />
       <article className="expression-prompt-card expression-rewrite-card">
         <span className="expression-item-badge">
-          {current.kind === "correction" ? "口误修正" : "危险表达"} · {current.item.id}
+          {t(current.kind === "correction" ? "口误修正" : "危险表达")} · {current.item.id}
         </span>
-        <small>{current.item.title}</small>
+        <small lang="">{current.item.title}</small>
         <blockquote lang="ja">{original}</blockquote>
         {revealed ? (
           <div className="expression-reveal">
-            <small>推荐改写</small>
+            <small>{t("推荐改写")}</small>
             <strong lang="ja">{corrected}</strong>
-            {current.kind === "safe" && <p>{current.item.reasonZh}</p>}
+            {current.kind === "safe" && <p lang="zh-CN">{current.item.reasonZh}</p>}
             <div className="expression-replacement">
-              <b>替换练习</b>
-              <span>{practice}</span>
+              <b>{t("替换练习")}</b>
+              <span lang="zh-CN">{practice}</span>
             </div>
             {current.kind === "correction" && (
               <EvidenceRefs references={current.item.evidenceRefs} />
             )}
           </div>
         ) : (
-          <RevealButton onClick={onReveal}>我已经改写，查看短句</RevealButton>
+          <RevealButton onClick={onReveal}>{t("我已经改写，查看短句")}</RevealButton>
         )}
       </article>
       <footer className="expression-practice-actions">
@@ -1485,10 +1656,14 @@ function RewritePractice({
 }
 
 function PracticeUnavailable({ text }: { text: string }) {
+  const { t, label } = useExpressionMenu();
   return (
     <section className="expression-practice expression-unavailable">
-      <b>待</b>
-      <div><h3>当前练法还没有素材</h3><p>{text}</p></div>
+      <b>{t("待")}</b>
+      <div><h3>{t("当前练法还没有素材")}</h3><p>{label(text)}</p></div>
     </section>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay）变化时不重渲染整个视圖。props 都是稳定引用。
+export default memo(LanguageExpressionCourses);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   companyMotivationAssetTarget,
+  isRoundSpecificAsset,
   parseSharedAssetDocument,
 } from "../lib/interview-shared-assets.ts";
 import { prepBlockText } from "../lib/interview-prep-doc.ts";
@@ -145,6 +146,12 @@ test("本場専属の志望動機は準備ノートの exact path と §6 H4 を
   assert.equal(target.note, prepNote.path);
   assert.equal(target.scope, "round");
   assert.equal(target.section, "Q. 志望動機／なぜ当社ですか（本社版）");
+  // 顶栏とヘッダーが同じ判定を使うことの保証。共通素材は scope を持たない。
+  assert.equal(isRoundSpecificAsset(target), true);
+  assert.equal(
+    isRoundSpecificAsset({ note: "当日フレーズ集", label: "当日フレーズ", hint: "" }),
+    false,
+  );
 
   const parsed = parseSharedAssetDocument(prepNote, target.section);
   assert.ok(parsed);

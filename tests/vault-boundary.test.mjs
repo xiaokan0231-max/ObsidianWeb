@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   includeAiSourceNote,
   includeRuntimeNote,
+  isGeneratedNote,
   isOperationalPath,
 } from "../lib/vault-boundary.mjs";
 
@@ -46,4 +47,14 @@ test("AI boundary accepts current facts and evidence but rejects navigation and 
     )),
     false,
   );
+});
+
+test("快練ログは生成物扱いで、AI の事実源にも混ざらない", () => {
+  const log = note("30_日本語学習/快練ログ/2026-10_快練ログ.md", "language-quick-log", {
+    month: "2026-10",
+    layer: "user-action",
+  });
+  assert.equal(includeRuntimeNote(log), true, "運用ノートとして読める");
+  assert.equal(isGeneratedNote(log), true);
+  assert.equal(includeAiSourceNote(log), false);
 });

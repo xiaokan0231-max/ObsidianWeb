@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { readAppCss } from "./css-source.mjs";
 import {
+  allDeductions,
+  carryOverSections,
+  hasDeductionLedger,
   normalizeInterviewAnswerReview,
   parseInterviewAnswerReview,
   renderInterviewAnswerReview,
 } from "../lib/review-deep.ts";
 
+// deductions が無い schema v2 の既存レポート。再生成前でも読めることを担保する。
 test("answer-quality review round-trips through its durable vault note", () => {
   const review = normalizeInterviewAnswerReview(
     {
@@ -62,7 +67,7 @@ test("answer-quality review round-trips through its durable vault note", () => {
       ],
     },
     { generatedAt: "2026-07-22T00:00:00.000Z", model: "test-model" },
-    new Set(["q10"]),
+    new Map([["q10", new Set(["s091", "s092"])]]),
   );
   assert.equal(review.overallScore, 68);
   const note = renderInterviewAnswerReview(review, {
@@ -77,6 +82,255 @@ test("answer-quality review round-trips through its durable vault note", () => {
   assert.match(note, /採点内訳（各20%）/);
   assert.match(note, /问题理解 72/);
   assert.match(note, /compound-question-miss/);
+  assert.equal(hasDeductionLedger(review.dimensions), false);
+  assert.equal(Object.hasOwn(review, "overviewZh"), false);
+  assert.doesNotMatch(note, /## 综合导读/);
+});
+
+function ledgerReview(deductionsByKey) {
+  const dimension = (deductions) => ({
+    deductions,
+    rationaleZh: "理由。",
+    evidenceBlockIds: ["q10"],
+  });
+  return normalizeInterviewAnswerReview(
+    {
+      dimensions: {
+        questionUnderstanding: dimension(deductionsByKey.questionUnderstanding ?? []),
+        coverage: dimension(deductionsByKey.coverage ?? []),
+        directness: dimension(deductionsByKey.directness ?? []),
+        evidenceCredibility: dimension(deductionsByKey.evidenceCredibility ?? []),
+        riskControl: dimension(deductionsByKey.riskControl ?? []),
+      },
+      summaryZh: "摘要。",
+      strengths: [],
+      weaknesses: [],
+      priorityBlockIds: ["q10"],
+      blocks: [
+        {
+          blockId: "q10",
+          questionTitle: "AI・MCP・DDD",
+          interviewerIntentZh: "确认三个方向的跟进情况",
+          askedPoints: ["AI", "MCP", "DDD"],
+          answeredPoints: ["DDD"],
+          missedPoints: ["AI", "MCP"],
+          comprehension: "likely_missed",
+          relevance: "partial",
+          quality: "weak",
+          strategyTags: ["compound-question-miss"],
+          evidenceSentenceIds: ["s091"],
+          evaluationZh: "只覆盖了三分之一。",
+          improvementZh: "先逐项回答。",
+          improvedAnswerJa: "",
+        },
+      ],
+    },
+    { generatedAt: "2026-08-04T00:00:00.000Z", model: "test-model" },
+    new Map([["q10", new Set(["s091", "s092"])]]),
+  );
+}
+
+test("the holistic introduction survives normalization and replaces only its previous generated version", () => {
+  const original = ledgerReview({});
+  const overview = "这轮主要确认工作方向。对方继续追问了实际分工。\n\n对方约定下一轮，说明愿意继续了解；具体岗位仍未确定。";
+  const review = normalizeInterviewAnswerReview(
+    { ...original, overviewZh: `  ${overview}\n` },
+    { generatedAt: original.generatedAt, model: original.model },
+    new Map([["q10", new Set(["s091", "s092"])]]),
+  );
+  assert.equal(review.overviewZh, overview);
+  assert.equal(review.summaryZh, original.summaryZh);
+  assert.equal(review.overallScore, original.overallScore);
+  assert.deepEqual(review.dimensions, original.dimensions);
+
+  const meta = {
+    company: "テスト社",
+    date: "2026-08-04",
+    round: "一次",
+    sourceName: "整理稿",
+    annotationName: null,
+  };
+  const previous = renderInterviewAnswerReview(
+    { ...original, overviewZh: "旧导读。" },
+    { ...meta, carriedSections: "## 本人补充\n\n下次确认项目分工。" },
+  );
+  const regenerated = renderInterviewAnswerReview(review, {
+    ...meta,
+    carriedSections: carryOverSections(previous),
+  });
+  assert.deepEqual(parseInterviewAnswerReview(regenerated), review);
+  const body = regenerated.split("<!-- interview-answer-review-data -->")[0];
+  assert.ok(body.indexOf(overview) < body.indexOf("## 全体評価"));
+  assert.match(body, /本人补充\n+下次确认项目分工/);
+  assert.doesNotMatch(body, /旧导读/);
+  assert.equal(body.split("## 综合导读").length - 1, 1);
+});
+
+// 這份契約の要：分数は 100 − Σ から導出される。
+// 説明できない減点は「存在できない」ことをここで固定する。
+test("dimension scores are derived from the deduction ledger, never asserted", () => {
+  const review = ledgerReview({
+    questionUnderstanding: [
+      {
+        blockId: "q10",
+        points: 14,
+        severity: "major",
+        labelZh: "複合質問の AI・MCP を聞き落とした",
+        detailZh: "三つ聞かれたのに DDD だけ答えた。",
+        fixZh: "復唱してから一問ずつ答える。",
+        evidenceSentenceIds: ["s091"],
+      },
+      {
+        blockId: "q10",
+        points: 3,
+        severity: "minor",
+        labelZh: "一度聞き返した",
+        detailZh: "確認後は正しく答えている。",
+        fixZh: "要点を復唱して一往復で揃える。",
+        evidenceSentenceIds: ["s092"],
+      },
+    ],
+  });
+
+  assert.equal(hasDeductionLedger(review.dimensions), true);
+  assert.equal(review.dimensions.questionUnderstanding.score, 100 - 14 - 3);
+  // 減点ゼロは満点。「なんとなく 86」はもう作れない。
+  assert.equal(review.dimensions.coverage.score, 100);
+  assert.equal(review.overallScore, Math.round((83 + 100 * 4) / 5));
+
+  const flat = allDeductions(review.dimensions);
+  assert.deepEqual(flat.map((item) => item.points), [14, 3]);
+  assert.equal(flat[0].dimension, "questionUnderstanding");
+
+  const note = renderInterviewAnswerReview(review, {
+    company: "テスト社",
+    date: "2026-08-04",
+    round: "一次",
+    sourceName: "整理稿",
+    annotationName: "批注",
+  });
+  assert.deepEqual(parseInterviewAnswerReview(note), review);
+  assert.match(note, /annotation_note: "\[\[批注\]\]"/);
+  assert.match(note, /100 − 14 − 3 = 83/);
+  assert.match(note, /次はこうする：復唱してから一問ずつ答える。/);
+  assert.match(note, /減点なし（100）/);
+});
+
+// 批注ノートが無い回もある（裁定対象ゼロ、あるいは compact 済み）。
+// リンクを書いてしまうと vault:check が壊れリンクで落ちる。
+test("a missing annotation note leaves out the frontmatter link instead of dangling it", () => {
+  const note = renderInterviewAnswerReview(ledgerReview({}), {
+    company: "テスト社",
+    date: "2026-08-04",
+    round: "カジュアル面談",
+    sourceName: "整理稿",
+    annotationName: null,
+  });
+  assert.doesNotMatch(note, /annotation_note/);
+  assert.match(note, /source_note: "\[\[整理稿\]\]"\ngenerated_at:/);
+});
+
+test("deduction points are clamped to their severity band and unusable rows drop out", () => {
+  const review = ledgerReview({
+    riskControl: [
+      // minor なのに 40 点：帯の上限 4 まで戻す。同じ語が場ごとに別の重さになると比較できない。
+      { blockId: "q10", points: 40, severity: "minor", labelZh: "語気が強い", detailZh: "", fixZh: "", evidenceSentenceIds: [] },
+      // 説明が一つも無い＝追跡不能。点を持って行かせない。
+      { blockId: "q10", points: 20, severity: "major", labelZh: "", detailZh: "", fixZh: "", evidenceSentenceIds: [] },
+      // 存在しない qNN でも点は残す（消すと減点が静かに消えて分数が水増しされる）。
+      { blockId: "q99", points: 6, severity: "moderate", labelZh: "根拠が薄い", detailZh: "", fixZh: "", evidenceSentenceIds: [] },
+    ],
+  });
+
+  const deductions = review.dimensions.riskControl.deductions;
+  assert.equal(deductions.length, 2);
+  assert.deepEqual(deductions.map((item) => item.points), [4, 6]);
+  assert.equal(deductions[1].blockId, "");
+  assert.equal(review.dimensions.riskControl.score, 90);
+});
+
+// 実際に 2 場でこれが起きた（q11 が s111 を、q12 が s046 を引いた）。
+// 落とさないと「証拠句」ボタンが別の設問へ飛び、根拠を確かめに行った人を騙す。
+test("a deduction citing another question's sentence loses the citation, not the points", () => {
+  const review = ledgerReview({
+    directness: [
+      {
+        blockId: "q10",
+        points: 5,
+        severity: "moderate",
+        labelZh: "結論が後ろに回った",
+        detailZh: "背景から入り、結論は段末。",
+        fixZh: "先に結論を一文で置く。",
+        // s091 はこの設問のもの、s999 は別設問のもの。
+        evidenceSentenceIds: ["s091", "s999"],
+      },
+    ],
+  });
+
+  const [deduction] = review.dimensions.directness.deductions;
+  assert.deepEqual(deduction.evidenceSentenceIds, ["s091"]);
+  assert.equal(review.dimensions.directness.score, 95);
+});
+
+// 実害があった：Web からの再生成が、Vault モードのスキルや人が書いた
+// 「次回面接で主に伝えること」を黙って消し、翌日の面接準備ノートのリンクが死んだ。
+// 再生成は派生値を作り直す操作で、作り直せないものを捨てる権利は無い。
+test("regeneration carries over sections the renderer cannot recreate", () => {
+  const previous = [
+    "---",
+    "type: interview-answer-review",
+    "---",
+    "# 2026-07-28 テスト社 回答品質復盤",
+    "",
+    "## 全体評価",
+    "",
+    "**84 / 100** — 古い要約。",
+    "",
+    "### 強み",
+    "- 古い強み",
+    "",
+    "### 弱み",
+    "- 古い弱み",
+    "",
+    "### 次回面接で主に伝えること",
+    "",
+    "責任者候補へ定位を一段上げる。",
+    "",
+    "## 旧復盤から修正すべき点",
+    "",
+    "- 懸念は定着性と日本語の二点（原稿上の事実）。",
+    "",
+    "## q10 AI・MCP・DDD",
+    "",
+    "### 評価",
+    "",
+    "古い評価。",
+    "",
+    "<!-- interview-answer-review-data -->",
+    "```json",
+    "{}",
+    "```",
+  ].join("\n");
+
+  const carried = carryOverSections(previous);
+  assert.match(carried, /### 次回面接で主に伝えること/);
+  assert.match(carried, /責任者候補へ定位を一段上げる。/);
+  assert.match(carried, /## 旧復盤から修正すべき点/);
+  // レンダラが必ず書き直す節と qNN 節は持ち越さない（古い数字が二重に残る）。
+  assert.doesNotMatch(carried, /古い強み|古い弱み|古い要約|古い評価/);
+  assert.doesNotMatch(carried, /q10/);
+
+  const note = renderInterviewAnswerReview(ledgerReview({}), {
+    company: "テスト社",
+    date: "2026-07-28",
+    round: "カジュアル面談",
+    sourceName: "整理稿",
+    annotationName: null,
+    carriedSections: carried,
+  });
+  assert.match(note, /### 次回面接で主に伝えること/);
+  assert.match(note, /## 旧復盤から修正すべき点/);
+  assert.equal(carryOverSections(""), "");
 });
 
 test("deep review stays locked behind completed human decisions and an allowlisted task", async () => {
@@ -89,22 +343,31 @@ test("deep review stays locked behind completed human decisions and an allowlist
   assert.match(route, /unresolved\.length > 0/);
   assert.match(route, /review_interview_answers/);
   assert.match(bridge, /review_interview_answers: \{ model: SOL_MODEL, timeoutMs: 480_000 \}/);
-  assert.match(bridge, /AI、MCP、DDD/);
+  assert.match(bridge, /interviewDiagnosticInstruction\(task\)/);
   assert.match(bridge, /"dimensions"/);
   assert.match(bridge, /"strategyTags"/);
-  assert.match(bridge, /服务器会据此计算总分/);
+  // 分数を返させない・扣分を逐条举证させる、が review_interview_answers の契約の核。
+  // 分析规则由共享模块注入；实际任务组装由 interview-diagnostic-method 测试覆盖。
+  assert.match(bridge, /diagnostic-prompt\.mjs/);
+  assert.doesNotMatch(bridge, /reviewDimension = \{[^}]*score: number/s);
   assert.match(client, /review_interview_answers/);
   assert.match(annotate, /inAnnotationQueue/);
-  assert.match(annotate, /deduplicated: true/);
+  // 去重は共通骨格（upsertAppendNote）の duplicate 分岐＋応答の deduplicated で表現される。
+  assert.match(annotate, /duplicate: \{ id: duplicate\.id \}/);
+  assert.match(annotate, /deduplicated: outcome\.deduplicated/);
+  // 批注ノートが未作成でも初回の裁定が 404 で落ちないこと（面接ごとに一度必ず踏んでいた）。
+  assert.match(annotate, /annotationSkeleton/);
+  assert.match(annotate, /type: study-annotation/);
+  assert.doesNotMatch(annotate, /const note = await readNote/);
 });
 
 test("five-dimension scores stay visible before the full report is expanded", async () => {
   const [client, css] = await Promise.all([
     readFile("app/interview-review.tsx", "utf8"),
-    readFile("app/globals.css", "utf8"),
+    readAppCss(),
   ]);
   const stageStart = client.indexOf("rv-deep-stage");
-  const collapsedReportStart = client.indexOf("doc.deepReview && deepOpen", stageStart);
+  const collapsedReportStart = client.indexOf("doc.deepReview && !findInterviewReassessment(notes, doc.note.path) && deepOpen", stageStart);
   const glanceStart = client.indexOf("rv-score-glance", stageStart);
 
   assert.ok(stageStart >= 0);
@@ -114,4 +377,56 @@ test("five-dimension scores stay visible before the full report is expanded", as
   assert.match(client, /Object\.keys\(REVIEW_DIMENSION_META\)/);
   assert.match(css, /\.rv-score-glance > div \{[^}]*repeat\(5/);
   assert.match(css, /\.rv-dimension-track em\.low/);
+});
+
+test("the report shows where each point went, and says so when it cannot", async () => {
+  const [client, css] = await Promise.all([
+    readFile("app/interview-review.tsx", "utf8"),
+    readAppCss(),
+  ]);
+  // 概览の各维は扣分明细へのボタン、報告側は算式＋逐条依据。
+  assert.match(client, /setDeepFocusDimension\(key\)/);
+  assert.match(client, /rv-glance-deductions/);
+  assert.match(client, /id=\{`rv-dimension-\$\{key\}`\}/);
+  assert.match(client, /rv-ledger-formula/);
+  assert.match(client, /DEDUCTION_SEVERITY_META\[item\.severity\]\.label/);
+  assert.match(client, /onEvidenceClick\(sentenceId\)/);
+  // 旧レポートは黙って空欄にせず、再生成すれば見えると明示する。
+  assert.match(client, /旧格式报告没有扣分明细，重新生成后可见/);
+  assert.match(css, /\.rv-deduction-list > li\.sev-major/);
+  assert.match(css, /\.rv-deduction-fix/);
+});
+
+test("new evidence review persists no numeric evaluation and does not turn absent evidence into full marks", () => {
+  const dimension = { deductions: [], rationaleZh: "未问这一维", evidenceBlockIds: [] };
+  const review = normalizeInterviewAnswerReview({evaluationMode:"evidence",evaluation:{conclusionZh:"核心信息未交付",coverageZh:"完整输入文本",limitsZh:"无原音"},dimensions:Object.fromEntries(["questionUnderstanding","coverage","directness","evidenceCredibility","riskControl"].map(k=>[k,dimension])),blocks:[],summaryZh:"未检验能力不评"},{generatedAt:"2026-01-01",model:"test"},new Map());
+  assert.equal(review.overallScore,null);
+  for(const d of Object.values(review.dimensions)){assert.equal(d.score,null);assert.equal(d.level,"not_assessed");}
+  const output=renderInterviewAnswerReview(review,{company:"株式会社テスト",date:"2026-01-01",round:"一次",sourceName:"测试",annotationName:null});
+  assert.match(output,/不提供新总分/);
+  assert.match(output,/未评估／证据不足/);
+  assert.doesNotMatch(output,/100|各20%|保持满分/);
+  assert.equal(parseInterviewAnswerReview(output).overallScore,null);
+});
+
+test("legacy introduction is identified and collapsed as history without changing its original paragraphs", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { loadAppModule } = await import("./helpers/render-tsx.mjs");
+  const { ReviewIntroduction } = await loadAppModule("app/interview-review.tsx");
+  const original = "原报告第一段。\n\n原报告第二段。";
+  const legacy = { overviewZh: original };
+  const html = renderToStaticMarkup(createElement(ReviewIntroduction, { review: legacy }));
+  assert.match(html, /旧版综合导读（历史）/);
+  assert.match(html, /不作为上方新版证据评价/);
+  assert.match(html, /<details><summary>展开旧版导读<\/summary><p>原报告第一段。<\/p><p>原报告第二段。<\/p><\/details>/);
+  assert.doesNotMatch(html, /<details[^>]*open/);
+  assert.equal(legacy.overviewZh, original);
+  const css = await readAppCss();
+  assert.match(css, /\.rv-review-introduction > details > summary \{[^}]*color: var\(--text-on-inverse\)/);
+  assert.match(css, /\.rv-review-introduction > details > summary::marker,[\s\S]*?summary::-webkit-details-marker \{ color: currentColor; \}/);
+  assert.match(css, /\.rv-review-introduction > details > summary:focus-visible \{[^}]*outline: 2px solid currentColor;[^}]*outline-offset: 4px/);
+  const current = renderToStaticMarkup(createElement(ReviewIntroduction, { review: { ...legacy, evaluationMode: "evidence" } }));
+  assert.match(current, /aria-label="综合导读"/);
+  assert.doesNotMatch(current, /历史|<details/);
 });

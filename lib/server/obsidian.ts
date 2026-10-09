@@ -1,4 +1,25 @@
 import { isOperationalPath } from "@/lib/vault-boundary.mjs";
+import { createVaultCache } from "./vault-cache.ts";
+import { createPublishedVaultReader } from "./published-vault.ts";
+import type { VaultScope } from "../vault-scope.ts";
+
+async function loadPublishedAsset(file: string) {
+  // 发布副本由部署资源提供；不回连本机，也不把个人笔记打进 JavaScript 源码。
+  const { env } = await import("cloudflare:workers");
+  const assets = (env as { ASSETS?: Fetcher }).ASSETS;
+  if (!assets) throw new Error("云端发布资源未配置");
+  const response = await assets.fetch(new Request(`http://localhost/_published-vault/${file}`));
+  if (!response.ok) throw new Error("云端内容尚未发布，请重新发布代码和笔记");
+  return response.json();
+}
+const publishedVault = createPublishedVaultReader(
+  () => loadPublishedAsset("manifest.json"),
+  async (file) => await loadPublishedAsset(file) as ObsidianNote[],
+);
+
+export function usesPublishedVault() {
+  return process.env.OBSIDIAN_DATA_SOURCE === "published";
+}
 
 export type ObsidianNote = {
   path: string;
@@ -32,6 +53,8 @@ async function request(path: string, init: RequestInit = {}) {
   const response = await fetch(`${OBSIDIAN_URL}${path}`, {
     ...init,
     cache: "no-store",
+    // Obsidian 卡住时没有超时就是无限等待：页面停在「正在读取」，什么提示都不给。
+    signal: init.signal ?? AbortSignal.timeout(15_000),
     headers: {
       ...headers(),
       ...(init.headers ?? {}),
@@ -54,6 +77,7 @@ async function requestJson<T>(path: string, accept?: string): Promise<T> {
 }
 
 export async function listMarkdownFiles(prefix = ""): Promise<string[]> {
+  if (usesPublishedVault()) return (await publishedVault.readAll()).map((note) => note.path).filter((path) => path.startsWith(prefix));
   const endpoint = prefix ? `/vault/${encodeURIComponent(prefix)}` : "/vault/";
   const listing = await requestJson<VaultListing>(endpoint);
   const notes: string[] = [];
@@ -90,39 +114,92 @@ async function mapConcurrent<T, R>(
 }
 
 export async function readNote(path: string) {
+  if (usesPublishedVault()) return publishedVault.readNote(path);
   return requestJson<ObsidianNote>(
     `/vault/${encodeURIComponent(path)}`,
     "application/vnd.olrapi.note+json",
   );
 }
 
-export async function readAllNotes() {
-  const paths = await listMarkdownFiles();
-  const notes = await mapConcurrent(paths, 8, readNote);
-  return notes.sort((left, right) => right.stat.mtime - left.stat.mtime);
+/**
+ * 全库 mtime 一次拿齐（POST /search/ + JsonLogic，实测 320 文件 12ms）。
+ * 这是缓存层的变更信号；插件不支持该端点时返回 null，缓存层自己退回全量爬取。
+ */
+async function statAllNotes(): Promise<Map<string, number> | null> {
+  try {
+    const response = await request("/search/", {
+      method: "POST",
+      headers: headers("application/json", "application/vnd.olrapi.jsonlogic+json"),
+      body: JSON.stringify({ var: "stat.mtime" }),
+    });
+    const rows = (await response.json()) as { filename?: string; result?: unknown }[];
+    const stats = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.filename?.toLowerCase().endsWith(".md")) continue;
+      if (!isOperationalPath(row.filename)) continue;
+      if (typeof row.result !== "number") continue;
+      stats.set(row.filename, row.result);
+    }
+    return stats.size > 0 ? stats : null;
+  } catch {
+    return null;
+  }
 }
 
-export async function noteExists(path: string) {
+const vaultCache = createVaultCache({
+  statAllNotes,
+  readNote,
+  crawlAllNotes: async () => {
+    const paths = await listMarkdownFiles();
+    return mapConcurrent(paths, 8, readNote);
+  },
+});
+
+/**
+ * 读全库。默认走缓存（1 次 mtime 扫描 + 只重取变过的文件）；
+ * force 用于「我不信缓存」的场景（页面上的 R 键），行为等于改动前的全量爬取。
+ */
+export async function readAllNotes(options?: { force?: boolean; scope?: VaultScope }) {
+  if (usesPublishedVault()) return publishedVault.readAll(options?.scope);
+  return vaultCache.readAll(options);
+}
+
+// 「笔记还没建」和「Obsidian 挂了」只能靠 request() 抛出的文案区分。
+// 判定收在这里：散在各 route 时它有 9 份，改一处就等于漏改八处。
+export function isMissingNoteError(error: unknown) {
+  return error instanceof Error && error.message.includes("returned 404");
+}
+
+// 可选读取的唯一入口：只把 404 折成 null，认证失效・连不上・500 一律照原样抛出。
+// 判断放在这里而不是各个调用点，是因为「只吞 404」被抄到第五份时，
+// 迟早有一份会把别的失败也吞掉——而那种失败在页面上跟「笔记还没建」长得一模一样。
+export async function readNoteOrNull(path: string) {
   try {
-    await readNote(path);
-    return true;
+    return await readNote(path);
   } catch (error) {
-    if (error instanceof Error && error.message.includes("returned 404")) {
-      return false;
-    }
+    if (isMissingNoteError(error)) return null;
     throw error;
   }
 }
 
+// 存在与否就是「读不读得到」，往返也一样是一次，所以判定不留第二份。
+export async function noteExists(path: string) {
+  return (await readNoteOrNull(path)) !== null;
+}
+
 export async function writeNote(path: string, content: string) {
+  if (usesPublishedVault()) throw new Error("线上版本只供查看；请在本机更新后重新发布");
   await request(`/vault/${encodeURIComponent(path)}`, {
     method: "PUT",
     headers: headers("application/json", "text/markdown; charset=utf-8"),
     body: content,
   });
+  // 写穿失效：同一请求内紧随的 readAllNotes（语言路由的收尾都这么干）要能看到新内容。
+  vaultCache.invalidate(path);
 }
 
 export async function appendNote(path: string, content: string) {
+  if (usesPublishedVault()) throw new Error("线上版本只供查看；请在本机更新后重新发布");
   if (!(await noteExists(path))) {
     await writeNote(path, content.replace(/^\n+/, ""));
     return;
@@ -132,6 +209,7 @@ export async function appendNote(path: string, content: string) {
     headers: headers("application/json", "text/markdown; charset=utf-8"),
     body: content,
   });
+  vaultCache.invalidate(path);
 }
 
 export async function patchHeading(
@@ -139,6 +217,7 @@ export async function patchHeading(
   heading: string,
   content: string,
 ) {
+  if (usesPublishedVault()) throw new Error("线上版本只供查看；请在本机更新后重新发布");
   await request(`/vault/${encodeURIComponent(path)}`, {
     method: "PATCH",
     headers: {
@@ -150,6 +229,7 @@ export async function patchHeading(
     },
     body: content,
   });
+  vaultCache.invalidate(path);
 }
 
 export async function uniquePath(path: string) {

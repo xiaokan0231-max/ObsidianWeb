@@ -238,5 +238,7 @@ test("进度 API 只接受业务 ID，路径和时间均由服务端决定", asy
   assert.match(source, /languageExpressionProgressPath\(course\)/u);
   assert.match(source, /at:\s*new Date\(\)\.toISOString\(\)/u);
   assert.match(source, /event\.eventId === eventId/u);
-  assert.match(source, /let progressQueue = Promise\.resolve\(\)/u);
+  // 同じ進度ノートの追記だけを直列化し、別のコースを相互にブロックしない。
+  assert.match(source, /const inProgressQueue = createKeyedSerialQueue\(\)/u);
+  assert.match(source, /await inProgressQueue\(path, \(\) =>\s*\n?\s*upsertAppendNote\(/u);
 });

@@ -3,12 +3,12 @@
 // 数字・表・列挙を手で書かないための本体。`npm run vault:stats [--check]`
 //
 // 上流は3つ:
-//   1) job_search_rejections.csv（175社・2026-07-20 で凍結した過去分）
+//   1) job_search_rejections.csv（ある時点で凍結した過去分。件数は CSV が持つ）
 //   2) 20_求職 配下の type: job-case frontmatter（凍結後の応募はここが唯一の記録先）
 //   3) vault-lib.mjs の列挙定数（status / channel の正）
 // CSV に既にある会社は 2) 側を無視する（二重計上を避ける）。
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import {
   APPLIED_LEDGER,
   CHANNEL_REQUIRED_FROM,
@@ -21,6 +21,7 @@ import {
   QUEUE,
   REJECTIONS_CSV,
   TRENDS,
+  VAULT,
   baseStatus,
   listMarkdownFiles,
   parseCsv,
@@ -28,14 +29,14 @@ import {
   readJobCases,
   replaceGenerated,
 } from "./vault-lib.mjs";
-import { JOB_CASE_ORIGINS } from "../lib/vault-boundary.mjs";
+import { isGeneratedNote, JOB_CASE_ORIGINS } from "../lib/vault-boundary.mjs";
+import { buildKnowledgeGraph, graphHealth } from "../lib/knowledge-graph.ts";
 import { parseQueue, queueStats } from "../lib/job-queue.mjs";
-import { parseInterviewAnswerReview } from "../lib/review-deep.ts";
 import {
   buildCardCoverage,
   buildInterviewTrends,
-  interviewKeyFromNoteName,
   renderInterviewTrends,
+  reviewTrendEntry,
 } from "../lib/interview-trends.mjs";
 import {
   buildStatsPayload,
@@ -53,8 +54,9 @@ const normalizeChannel = (value) => CHANNEL_ALIAS[value] ?? (value || "その他
 const isDocStage = (stage) => stage.includes("书类") || stage.includes("書類");
 
 // 上流が欠けたまま派生を書き換えない——欠測は 0 件ではなく「計算不能」。
-// CSV は凍結済み 175社＝台帳の数字のほぼ全部を占める。読めないまま続行すると
-// 「CSV 0 件」で集計し、181社を 10社で、2025年の月別推移ごと上書きしてしまう。
+// CSV は凍結済みの過去分＝台帳の数字のほぼ全部を占める。読めないまま続行すると
+// 「CSV 0 件」で集計し、全期間の合計を直近ノート分だけの数で、過去の月別推移ごと
+// 上書きしてしまう。
 // 2026-07-25 実際に踏んだ：iCloud のフルディスクアクセスが外れて読めなくなり、
 // 旧実装は warning だけ出して続行 → --check が「台帳がずれている、vault:stats を実行せよ」と
 // 破壊的な指示を出した（Stop hook 経由で AI に届く）。中止が正しい。
@@ -102,7 +104,8 @@ const companyKey = (value) =>
 
 const seen = new Set(records.map((r) => companyKey(r.company)));
 
-for (const note of await readJobCases()) {
+const jobCases = await readJobCases();
+for (const note of jobCases) {
   const fm = note.frontmatter;
   if (baseStatus(fm.status) !== "不採用") continue;
   const company = String(fm.company ?? "").trim();
@@ -180,13 +183,63 @@ const reasonList = [...byReason.entries()]
 // 走査していない期間は「0件」ではなく「不明」——buildTimeline が null で表現する。
 let appliedRows = [];
 let appliedKnownFrom = null;
+let appliedLedgerText = "";
 try {
-  const appliedNote = await readFile(APPLIED_LEDGER, "utf8");
-  appliedRows = parseAppliedLedger(appliedNote);
-  appliedKnownFrom = parseAppliedKnownFrom(appliedNote);
+  appliedLedgerText = await readFile(APPLIED_LEDGER, "utf8");
+  appliedRows = parseAppliedLedger(appliedLedgerText);
+  appliedKnownFrom = parseAppliedKnownFrom(appliedLedgerText);
 } catch {
   // 台帳がまだ無くてもよい（その場合タイムラインは全月「不明」になる）。
 }
+
+// 応募日台帳の「追記分」：案件ノートの applied_on（Web が応募済にした瞬間に書く／skill も書く）から起こす。
+// 台帳は手書きの歴史行を残したまま、この generated 区块だけを script が持つ——
+// 「台帳不再手写任何行」（AGENTS.md）をこの台帳にも当てる。手書き行と同じ会社・同じ応募日、
+// または証拠列に同じ求人URL／case_id を含む行は既に載っているので出さない。
+const appliedDate = (fm) => {
+  const explicit = String(fm.applied_on ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(explicit)) return explicit;
+  const status = String(fm.status ?? "");
+  return baseStatus(status) === "応募済" ? (status.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1] ?? "") : "";
+};
+const handwrittenText = appliedLedgerText.replace(/<!--\s*generated:applied-from-cases[\s\S]*?<!--\s*\/generated\s*-->/, "");
+const handwrittenRows = parseAppliedLedger(handwrittenText);
+const handwrittenKeys = new Set(handwrittenRows.flatMap((row) => [
+  `${companyKey(row.company)}@${row.appliedOn}`,
+  `${companyKey(row.matchName)}@${row.appliedOn}`,
+]));
+const generatedApplied = jobCases
+  .map((note) => {
+    const fm = note.frontmatter;
+    const appliedOn = appliedDate(fm);
+    const company = String(fm.company ?? "").trim();
+    if (!appliedOn || !company) return null;
+    const url = String(fm.url ?? "").trim();
+    const caseId = String(fm.case_id ?? "").trim();
+    if (handwrittenKeys.has(`${companyKey(company)}@${appliedOn}`)) return null;
+    if ((url && handwrittenText.includes(url)) || (caseId && handwrittenText.includes(caseId))) return null;
+    return {
+      appliedOn,
+      company,
+      matchName: "",
+      position: String(fm.position ?? "").replace(/\|/g, "／").trim() || "（職種名未記入）",
+      channel: normalizeChannel(String(fm.channel ?? "")),
+      evidence: [`job-case ${caseId || note.name}`, url].filter(Boolean).join(" · "),
+    };
+  })
+  .filter(Boolean)
+  .sort((a, b) => a.appliedOn.localeCompare(b.appliedOn) || a.company.localeCompare(b.company, "ja"));
+// このスクリプト内の集計にも今回生成する行を含める（次回起動を待たない）。
+appliedRows = [...handwrittenRows, ...generatedApplied.map((row) => ({ appliedOn: row.appliedOn, company: row.company, matchName: row.company, channel: row.channel }))];
+const appliedFromCasesTable = generatedApplied.length
+  ? [
+      `${generatedApplied.length} 件（案件ノートの applied_on から起こした行。手書き行と重複するものは除外済み）`,
+      "",
+      "| 応募日 | 会社名 | 照合名 | 職種名 | 経路 | 証拠 |",
+      "|---|---|---|---|---|---|",
+      ...generatedApplied.map((row) => `| ${row.appliedOn} | ${row.company} | ${row.matchName} | ${row.position} | ${row.channel} | ${row.evidence} |`),
+    ].join("\n")
+  : "案件ノートの applied_on から起こす行はまだ無い（手書き行に無い応募済案件が出たらここに載る）。";
 const appliedByMonth = new Map();
 for (const row of appliedRows) {
   const month = row.appliedOn.slice(0, 7);
@@ -269,9 +322,26 @@ const enumTable = [
 
 // vault 全体の type 分布。90_归档・99_系统/模板 の除外は listMarkdownFiles 側の責務。
 const typeCounts = new Map();
-for (const path of await listMarkdownFiles()) {
-  const type = parseFrontmatter(await readFile(path, "utf8")).type;
+const operationalFiles = await listMarkdownFiles();
+const graphNotes = [];
+let generatedBytes = 0;
+for (const path of operationalFiles) {
+  const content = await readFile(path, "utf8");
+  const frontmatter = parseFrontmatter(content);
+  const type = frontmatter.type;
   if (typeof type === "string" && type) typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1);
+  // layer: user-action（快練ログ・専門コース進捗）は本人の解答の追記で、1組練習するたびに数 KB 増える。
+  // 体積に入れると 0.1MB 丸めでも数日おきにずれ、「練習した」だけで Stop hook が止まる。
+  if (isGeneratedNote({ frontmatter }) && frontmatter.layer !== "user-action") {
+    generatedBytes += (await stat(path)).size;
+  }
+  graphNotes.push({
+    path: path.slice(VAULT.length + 1),
+    stat: { ctime: 0, mtime: 0, size: content.length },
+    tags: [],
+    frontmatter,
+    content,
+  });
 }
 const censusTable = [
   "| type | 件数 |",
@@ -279,6 +349,17 @@ const censusTable = [
   ...[...typeCounts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([type, count]) => `| \`${type}\` | ${count} |`),
+].join("\n");
+const health = graphHealth(buildKnowledgeGraph(graphNotes));
+const graphHealthTable = [
+  "| 項目 | 値 |",
+  "|---|---|",
+  `| 语义节点 | ${health.semanticNodes} |`,
+  `| 强类型关系 | ${health.semanticEdges} |`,
+  `| 普通双链关系 | ${health.referenceEdges} |`,
+  `| 无法解析的关系 | ${health.unresolved} |`,
+  `| 默认语义图孤点 | ${health.defaultIsolates} |`,
+  `| operational 生成物体积 | ${(generatedBytes / 1024 / 1024).toFixed(1)} MB |`,
 ].join("\n");
 
 // 探索キューの残数。「見つけただけ」と「精読して起票済み」を混ぜないための進捗表示。
@@ -315,14 +396,7 @@ for (const path of await listMarkdownFiles(JOB_CASE_ROOT)) {
   const content = await readFile(path, "utf8");
   const fm = parseFrontmatter(content);
   if (fm.type !== "interview-answer-review") continue;
-  const name = (path.split("/").pop() ?? "").replace(/\.md$/i, "");
-  reviewEntries.push({
-    key: interviewKeyFromNoteName(name),
-    company: String(fm.company ?? ""),
-    date: String(fm.date ?? ""),
-    round: String(fm.round ?? ""),
-    review: parseInterviewAnswerReview(content),
-  });
+  reviewEntries.push(reviewTrendEntry(path, fm, content));
 }
 const trendsBlock = renderInterviewTrends(buildInterviewTrends(reviewEntries, cardCoverage));
 
@@ -353,6 +427,16 @@ const targets = [
     optional: true,
   },
   {
+    path: APPLIED_LEDGER,
+    label: "応募日台帳",
+    blocks: { "applied-from-cases": appliedFromCasesTable },
+    optional: true,
+    // 台帳は元々全部手書きで generated マーカーが無い。初回だけ末尾に区块を作る（手書き行は触らない）。
+    appendIfMissing: {
+      "applied-from-cases": "\n\n## 追記分（案件ノートの applied_on から生成）\n\n<!-- generated:applied-from-cases 勿手改 -->\n<!-- /generated -->\n",
+    },
+  },
+  {
     path: LEDGER,
     label: "台帳",
     blocks: {
@@ -371,6 +455,7 @@ const targets = [
     blocks: {
       "field-enums": enumTable,
       "type-census": censusTable,
+      "graph-health": graphHealthTable,
     },
   },
   {
@@ -399,7 +484,11 @@ for (const target of targets) {
   let after = before;
   const missing = [];
   for (const [id, body] of Object.entries(target.blocks)) {
-    const next = replaceGenerated(after, id, body);
+    let next = replaceGenerated(after, id, body);
+    if (next === null && target.appendIfMissing?.[id]) {
+      // マーカーが無い＝この台帳にまだ generated 区块を置いたことがない。末尾に足してから差し替える。
+      next = replaceGenerated(after.replace(/\s*$/, "") + target.appendIfMissing[id], id, body);
+    }
     if (next === null) missing.push(id);
     else after = next;
   }

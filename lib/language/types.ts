@@ -76,6 +76,8 @@ export type LanguageBank = {
   generatedAt: string;
   model: string;
   sourceFingerprint: string;
+  /** 旧 bank との後方互換のため optional。読み込み時に内容から補完する。 */
+  contentFingerprint?: string;
   sourceCount: number;
   summaryZh: string;
   immediateAdviceZh: string;
@@ -282,6 +284,8 @@ export type LanguageLearningItem = {
   basePriority: number;
   listeningMark?: "×" | "△";
   strategyTags: string[];
+  /** 改错条目在整理稿 型:: 后自带的括注（例「丁寧形は名詞修飾に使わない」），快练的解释优先用它。 */
+  noteJa?: string;
 };
 
 export type LanguageIssueSummary = {
@@ -326,6 +330,13 @@ export type LanguageItemProgress = {
   nextDueAt?: string;
   rejected: boolean;
   postTrainingOccurrences: number;
+  /** 快练首答次数（含翻卡自评与「不知道」）。0 或缺省＝在快练里还是新题。 */
+  attemptCount?: number;
+  /** 翻卡连续「记得」的次数，决定自评条目的 3/7/30 天间隔。 */
+  selfStreak?: number;
+  /** 最近一次自动判分首答的 JST 日。 */
+  lastGradedDay?: string;
+  lastOutcome?: "pass" | "fail" | "self" | "easy";
 };
 
 export type LanguageBatchPhase = "scan" | "compile" | "stress" | "completed";
@@ -369,6 +380,8 @@ export type LanguageBatchHistory = {
   completedCount: number;
   successCount: number;
   completedAt?: string;
+  /** 快练：这一组里自动判分的首答数（翻卡自评不算）。「答对 7 / 9」的分母，和小结屏一致。 */
+  gradedCount?: number;
 };
 
 export type LanguageV2State = {

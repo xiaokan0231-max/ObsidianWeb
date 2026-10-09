@@ -1,0 +1,674 @@
+/*
+ * 设置中心（app/settings-view.tsx 直接 import，随页面按需加载，不进 globals.css 的首屏样式）。
+ * 颜色只用 base.css 的语义 token：换皮肤、切明暗时这一页跟着全站一起变。
+ * 唯一例外是皮肤卡里的小样：--skin-* 由卡片按 UI_SKINS 的色块内联给出，画的是「切过去会是什么样」。
+ * 只做桌面端。
+ */
+
+.settings-view {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+/* ── 左侧分组 ── */
+
+/* 列号写死：页面标题是 sr-only 的 h1，万一样式没加载成绝对定位，也不会把分组挤到第二列。 */
+.settings-nav {
+  grid-column: 1;
+  position: sticky;
+  top: calc(var(--chrome-top) + 16px);
+  display: grid;
+  gap: 14px;
+}
+
+.settings-tabs {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-tab {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-tab strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-tab small {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.settings-tab:hover {
+  background: var(--surface-soft);
+}
+
+.settings-tab[aria-selected="true"] {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  box-shadow: inset 3px 0 0 var(--interactive-fill);
+}
+
+.settings-nav-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* ── 右侧内容 ── */
+
+.settings-panel {
+  grid-column: 2;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.settings-panel-head h2 {
+  margin: 0 0 2px;
+  color: var(--text-primary);
+  font: 600 22px/1.3 var(--font-serif);
+}
+
+.settings-panel-head p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* 内容少的卡片两列并排，避免一张窄卡独占整行留下大片空白。 */
+.settings-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.settings-columns > .is-wide {
+  grid-column: 1 / -1;
+}
+
+.settings-stack {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-width: 0;
+}
+
+.settings-card {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 18px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.settings-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 4px;
+}
+
+.settings-card-head h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.settings-card-head p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+/* 设置行：左「标题＋一句说明」定宽，控件紧跟在右，宽屏下控件不会被推到行尾。 */
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 340px) minmax(0, 1fr);
+  gap: 8px 24px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.settings-card-head + .settings-row {
+  border-top: 0;
+}
+
+.settings-columns .settings-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* 一张卡里都是短控件时两列排：说明在上、控件在下，避免整行左字右控件中间一大片空。 */
+.settings-row-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+}
+
+.settings-row-grid .settings-row {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+}
+
+.settings-row-grid .settings-row:nth-child(-n + 2) {
+  border-top: 0;
+}
+
+.settings-row-copy strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-row-copy p {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-row-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+}
+
+.settings-copy {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.settings-copy-sep {
+  margin: 0 8px;
+  color: var(--text-faint);
+}
+
+.settings-note {
+  margin: 6px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.settings-view code {
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* ── 控件 ── */
+
+.settings-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-sunken);
+}
+
+.settings-seg button {
+  min-width: 56px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-seg button:hover {
+  color: var(--text-primary);
+}
+
+.settings-seg button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.settings-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-switch i {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--line-strong);
+}
+
+.settings-switch i::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  content: "";
+}
+
+.settings-switch[aria-checked="true"] {
+  color: var(--text-primary);
+}
+
+.settings-switch[aria-checked="true"] i {
+  background: var(--success);
+}
+
+.settings-switch[aria-checked="true"] i::after {
+  transform: translateX(14px);
+}
+
+.settings-button {
+  min-height: 32px;
+  padding: 5px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised-solid);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-button:hover:not(:disabled) {
+  border-color: var(--interactive);
+  color: var(--interactive);
+}
+
+.settings-button:disabled,
+.settings-switch:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+/* 待确认态：再点一次才真的恢复。用危险色的边框与底色提示，文字仍是正文色。 */
+.settings-button.is-armed {
+  border-color: var(--danger);
+  background: var(--danger-wash);
+  color: var(--text-primary);
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-top: 8px;
+}
+
+.settings-receipt {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.settings-receipt::before {
+  margin-right: 4px;
+  color: var(--success);
+  content: "✓";
+}
+
+/* ── 只读事实：多列网格，标签在上、值在下 ── */
+
+.settings-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px 18px;
+  margin: 0;
+  padding: 4px 0 6px;
+}
+
+.settings-facts > div {
+  min-width: 0;
+}
+
+.settings-facts dt {
+  margin-bottom: 2px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-facts dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.settings-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.settings-state i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.settings-state[data-tone="ok"] i { background: var(--success); }
+.settings-state[data-tone="pending"] i { background: var(--gold); }
+.settings-state[data-tone="warning"] i { background: var(--warning); }
+.settings-state[data-tone="danger"] i { background: var(--danger); }
+
+.settings-alert {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-control);
+  background: var(--danger-wash);
+  font-size: 13px;
+}
+
+.settings-alert strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.settings-alert span {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* ── 皮肤卡 ── */
+
+.settings-skins {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 2px 0 6px;
+}
+
+.settings-skin {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised-solid);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-skin:hover {
+  border-color: var(--line-strong);
+}
+
+.settings-skin[aria-pressed="true"] {
+  border-color: var(--interactive);
+  box-shadow: 0 0 0 1px var(--interactive);
+}
+
+.settings-skin-preview {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 92px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: calc(var(--radius-card) - 4px);
+  background: var(--skin-paper);
+}
+
+.settings-skin-sheet {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 4px 10px;
+  margin: 10px 12px 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  background: var(--skin-surface);
+}
+
+.settings-skin-sheet b {
+  color: var(--skin-ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.settings-skin-sheet u {
+  grid-row: 2;
+  color: var(--skin-link);
+  font-size: 12px;
+  text-underline-offset: 2px;
+}
+
+.settings-skin-sheet i {
+  grid-row: 1 / 3;
+  grid-column: 2;
+  align-self: center;
+  width: 38px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  background: var(--skin-brand);
+}
+
+.settings-skin-chips {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  height: 8px;
+}
+
+.settings-skin-copy {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+
+.settings-skin-copy strong {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.settings-skin-copy em {
+  color: var(--interactive);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.settings-skin-copy small {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── 日历与求职：状态值 ── */
+
+.settings-status-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-status-list li {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+/* ── 本机存储：两列清单 ── */
+
+.settings-storage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-storage li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.settings-storage-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.settings-storage-name strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-storage-name code {
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.settings-storage-state {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-storage-state[data-state="custom"] {
+  color: var(--interactive);
+}
+
+/* ── 快捷键 ── */
+
+/* 分栏流式排：各组条目数差得多（1～11 条），网格按行对齐会在短卡下面留出大块空白。 */
+.settings-keys-grid {
+  columns: 2 320px;
+  column-gap: 14px;
+}
+
+.settings-keys {
+  margin-bottom: 14px;
+  break-inside: avoid;
+}
+
+.settings-keys dl {
+  display: grid;
+  margin: 0;
+}
+
+.settings-keys dl > div {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.settings-keys dt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.settings-keys dd {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-keys kbd {
+  min-width: 22px;
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-raised-solid);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 过渡只在用户没要求减弱动效、也没在设置里选「总是减弱」时才有。 */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion="reduce"]) .settings-switch i::after { transition: transform var(--dur-fast) var(--ease-out); }
+  :root:not([data-motion="reduce"]) :is(.settings-tab, .settings-seg button, .settings-skin, .settings-button) {
+    transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  }
+}
+
+/* 窄一些的桌面窗口：皮肤卡两列，并排卡片改成单列。 */
+@media (max-width: 1180px) {
+  .settings-skins { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-columns { grid-template-columns: minmax(0, 1fr); }
+}

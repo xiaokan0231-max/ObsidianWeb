@@ -14,9 +14,10 @@ import { deriveLanguageState } from "@/lib/language/state";
 import { stableId, yamlString } from "@/lib/dojo/utils";
 import { buildSourceContext } from "@/lib/server/dojo-store";
 import { readAllNotes, type ObsidianNote } from "@/lib/server/obsidian";
+import { bankContentFingerprint } from "../language-bank-fingerprint.mjs";
 
-const BANK_START = "<!-- language-bank-json:start -->";
-const BANK_END = "<!-- language-bank-json:end -->";
+export const BANK_START = "<!-- language-bank-json:start -->";
+export const BANK_END = "<!-- language-bank-json:end -->";
 const SESSION_START = "<!-- language-session-attempt:start -->";
 const SESSION_END = "<!-- language-session-attempt:end -->";
 const COACH_START = "<!-- language-coach-feedback:start -->";
@@ -81,6 +82,12 @@ function languageSummary(value: unknown, unitCount: number) {
   return `已根据本人确认资料和真实面试记录建立${unitCount}个日语训练单元，覆盖数字、词汇、专业术语、语法、搭配、面试表达、商务表达和现场救场。`;
 }
 
+export function languageBankContentFingerprint(
+  bank: Pick<LanguageBank, "units" | "questionBank">,
+) {
+  return bankContentFingerprint(bank);
+}
+
 function trainingEvents(content: string) {
   const events: LanguageTrainingEvent[] = [];
   for (const line of content.split("\n")) {
@@ -96,26 +103,34 @@ function trainingEvents(content: string) {
   return events;
 }
 
-function latestBank(notes: ObsidianNote[]) {
-  for (const note of notes) {
+export function languageBankEntries(notes: ObsidianNote[]) {
+  return notes.flatMap((note) => {
     if (
-      note.frontmatter.type === "language-bank" ||
-      note.path.startsWith("80_AI分析/日本語訓練/")
-    ) {
-      const bank = markerJson<LanguageBank>(note.content, BANK_START, BANK_END);
-      if (bank) {
-        return {
-          ...bank,
-          summaryZh: languageSummary(bank.summaryZh, bank.units.length),
-          units: bank.units.map((unit) => ({
-            ...unit,
-            priority: languagePriority(unit.priority),
-          })),
-        };
-      }
-    }
-  }
-  return undefined;
+      note.frontmatter.type !== "language-bank" &&
+      !note.path.startsWith("80_AI分析/日本語訓練/")
+    ) return [];
+    const parsed = markerJson<LanguageBank>(note.content, BANK_START, BANK_END);
+    if (!parsed) return [];
+    const bank: LanguageBank = {
+      ...parsed,
+      contentFingerprint: parsed.contentFingerprint || languageBankContentFingerprint(parsed),
+      summaryZh: languageSummary(parsed.summaryZh, parsed.units.length),
+      units: parsed.units.map((unit) => ({
+        ...unit,
+        priority: languagePriority(unit.priority),
+      })),
+    };
+    return [{ note, bank }];
+  });
+}
+
+export function latestLanguageBankEntry(notes: ObsidianNote[]) {
+  return languageBankEntries(notes)
+    .toSorted((left, right) => right.bank.generatedAt.localeCompare(left.bank.generatedAt))[0];
+}
+
+function latestBank(notes: ObsidianNote[]) {
+  return latestLanguageBankEntry(notes)?.bank;
 }
 
 function noteType(note: ObsidianNote) {
@@ -513,18 +528,20 @@ export async function loadLanguageState(notes?: ObsidianNote[]) {
 }
 
 export function renderLanguageBank(bank: LanguageBank) {
+  const contentFingerprint = bank.contentFingerprint || languageBankContentFingerprint(bank);
+  const renderedBank = { ...bank, contentFingerprint };
   const unitList = bank.units
     .map(
       (unit) =>
         `## ${unit.titleZh}\n\n- ID: \`${unit.id}\`\n- 分类: ${unit.category}\n- 目标: ${unit.targetJa}\n- 读音: ${unit.reading || "—"}\n- 含义: ${unit.meaningZh}\n- 优先级: ${unit.priority}\n`,
     )
     .join("\n");
-  return `---\ntype: language-bank\ngenerated_at: ${bank.generatedAt}\nmodel: ${yamlString(
+  return `---\ntype: language-bank\nlifecycle: current\nschema_version: 2\ngenerated_at: ${bank.generatedAt}\nmodel: ${yamlString(
     bank.model,
-  )}\nsource_fingerprint: ${bank.sourceFingerprint}\n---\n\n# 个性化日语训练库\n\n${
+  )}\nsource_fingerprint: ${bank.sourceFingerprint}\ncontent_fingerprint: ${contentFingerprint}\n---\n\n# 个性化日语训练库\n\n${
     bank.summaryZh
   }\n\n> 立即改善：${bank.immediateAdviceZh}\n\n${unitList}\n${BANK_START}\n\`\`\`json\n${JSON.stringify(
-    bank,
+    renderedBank,
     null,
     2,
   )}\n\`\`\`\n${BANK_END}\n`;

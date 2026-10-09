@@ -1,13 +1,23 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState, type CSSProperties } from "react";
+import { CountUp } from "./count-up";
+import ScopeLoading from "./scope-loading";
+import { enumCodec, useUrlState } from "./use-url-state";
 import {
+  jobMatchesRatingBands,
   jobRatingBand,
   JOB_RATING_BANDS,
   JOB_STATUSES,
   toJobCard,
   type JobCard,
+  IN_FLIGHT_STATUSES,
+  IN_PROGRESS_STATUSES,
+  SELECTION_STATUSES,
+  shortDay,
+  statusTone,
 } from "@/lib/jobs";
+import type { JobsInitialFilters } from "./jobs-view";
 import { JOB_CASE_TYPE } from "@/lib/vault-boundary.mjs";
 import {
   buildDailyFlow,
@@ -16,7 +26,59 @@ import {
   SMALL_SAMPLE_THRESHOLD,
 } from "@/lib/job-stats.mjs";
 import { explicitNextEventDate, explicitNextEventTime } from "@/lib/job-progress";
+import { funnelSteps, pipelineSegments, type FunnelStep } from "@/lib/job-funnel";
 import { getString, getType, type Note } from "@/lib/notes";
+import { useUiLocale } from "./ui-locale";
+
+// 统计与证据继续使用原文；这里仅切换导航、筛选和操作界面。
+const ANALYTICS_MENU_COPY = {
+  "选考与分析": ["选考与分析", "選考と分析"],
+  "立即重算": ["立即重算", "再集計"],
+  "当前求职进展摘要": ["当前求职进展摘要", "現在の求職状況の概要"],
+  "进行中": ["进行中", "進行中"],
+  "面试阶段": ["面试阶段", "面接段階"],
+  "结果等待": ["结果等待", "結果待ち"],
+  "可応募": ["可应募", "応募候補"],
+  "{label} {count} 件の内訳を見る": ["查看{label}的 {count} 条明细", "{label} {count} 件の内訳を見る"],
+  "当前推进": ["当前推进", "現在の進行"],
+  "{active} 件进行中 · {priority} 件优先处理 · {watch} 件观察": ["{active} 件进行中 · {priority} 件优先处理 · {watch} 件观察", "進行中 {active} 件 · 優先対応 {priority} 件 · 注目 {watch} 件"],
+  "全部进行中": ["全部进行中", "進行中の全案件"],
+  "观察名单": ["观察名单", "注目案件"],
+  "当前手札分析": ["当前候选分析", "現在の候補を分析"],
+  "打开": ["打开", "開く"],
+  "開く": ["打开", "開く"],
+  "集計対象": ["统计范围", "集計対象"],
+  "評点 7 以上": ["评分 7 分以上", "評点 7 以上"],
+  "全件": ["全部", "全件"],
+  "条件": ["条件", "条件"],
+  "重置": ["重置", "リセット"],
+  "来源": ["来源", "求人の出典"],
+  "勤務地": ["工作地点", "勤務地"],
+  "リモート可": ["可远程", "リモート可"],
+  "参考データ": ["参考数据", "参考データ"],
+  "過去の不採用・経路別到達率・選考ファネル": ["历史拒绝・渠道到达率・选考漏斗", "過去の不採用・経路別到達率・選考ファネル"],
+  "履歴の期間": ["历史期间", "履歴の期間"],
+  "全期間": ["全部期间", "全期間"],
+  "直近6か月": ["最近 6 个月", "直近6か月"],
+  "直近3か月": ["最近 3 个月", "直近3か月"],
+  "数値で見る": ["查看数值", "数値で見る"],
+  "案件を開く": ["打开案件", "案件を開く"],
+  "状態の分布": ["状态分布", "状態の分布"],
+  "応募・結果・待機の推移": ["应募、结果与等待趋势", "応募・結果・待機の推移"],
+  "选考管线": ["选考管线", "選考パイプライン"],
+  "暂无进行中的案件": ["暂无进行中的案件", "進行中の案件はありません"],
+  "{status} {count} 件の案件を見る": ["查看{status}的 {count} 件案件", "{status} {count} 件の案件を見る"],
+  "選考ファネル": ["选考漏斗", "選考ファネル"],
+} as const satisfies Record<string, readonly [string, string]>;
+
+type AnalyticsMenuKey = keyof typeof ANALYTICS_MENU_COPY;
+function useAnalyticsMenu() {
+  const { locale } = useUiLocale();
+  const t = (key: AnalyticsMenuKey, values: Record<string, string | number> = {}) =>
+    ANALYTICS_MENU_COPY[key][locale === "ja" ? 1 : 0].replace(/\{(\w+)\}/g, (match, name: string) => String(values[name] ?? match));
+  const label = (value: string) => Object.hasOwn(ANALYTICS_MENU_COPY, value) ? t(value as AnalyticsMenuKey) : value;
+  return { t, label };
+}
 
 /**
  * 期間フィルタは**1本だけ**、全チャートに効く。
@@ -30,6 +92,9 @@ const RANGES = [
 ] as const;
 
 type RangeId = (typeof RANGES)[number]["id"];
+const RANGE_IDS: readonly RangeId[] = RANGES.map((item) => item.id);
+// URL の手書き値（?range=m12 など）は白名单外なら黙って全期間に戻る。
+const RANGE_CODEC = enumCodec(RANGE_IDS);
 
 /**
  * 「現在の手札」セクションの母集団。既定は 7 点以上。
@@ -55,18 +120,34 @@ function monthFloor(months: number): string | null {
 const pct1 = (value: number) => `${(value * 100).toFixed(1)}%`;
 
 /** 台帳は不採用しか記録していない。「応募済」系はノート側からしか数えられない。 */
-const IN_FLIGHT: string[] = ["応募済", "書類通過", "面接中"];
-const PASSED_SCREENING: string[] = ["書類通過", "面接中", "内定"];
-const ACTIVE_SELECTION: string[] = [...IN_FLIGHT, "内定"];
+// 状態の部分集合は lib/job-status.mjs が正本（首页・看板・切換面板と同じ配列）。
+const IN_FLIGHT = IN_FLIGHT_STATUSES;
+const PASSED_SCREENING = SELECTION_STATUSES;
+const ACTIVE_SELECTION = IN_PROGRESS_STATUSES;
+
+/**
+ * 冒頭の4つの数字カード。**件数の計算とリンク先のフィルタを同じ定義から作る**——
+ * 別々に書くと、カードが「10件」と言っているのに遷移先が9件、が静かに起きる。
+ * 「可応募」は status だけでは表せない（未応募 かつ rating 7以上）ので、
+ * rating band もフィルタに含める。`7plus` は jobs.ts のしきい値ショートカット。
+ */
+const GLANCE_CARDS: readonly {
+  key: "active" | "interview" | "waiting" | "ready";
+  label: string;
+  tone: string;
+  filters: JobsInitialFilters & { statuses: readonly string[] };
+}[] = [
+  { key: "active", label: "进行中", tone: "active", filters: { statuses: IN_FLIGHT } },
+  { key: "interview", label: "面试阶段", tone: "interview", filters: { statuses: ["面接中"] } },
+  { key: "waiting", label: "结果等待", tone: "waiting", filters: { statuses: ["応募済", "書類通過"] } },
+  { key: "ready", label: "可応募", tone: "ready", filters: { statuses: ["未応募"], ratings: ["7plus"] } },
+];
 
 function scheduledDate(job: JobCard) {
   return explicitNextEventDate(job.note);
 }
 
-function shortDate(value: string) {
-  const match = value.match(/\b20\d{2}-(\d{2})-(\d{2})\b/);
-  return match ? `${Number(match[1])}/${Number(match[2])}` : "—";
-}
+const shortDate = (value: string) => shortDay(value, "—");
 
 function scheduledTime(job: JobCard) {
   return explicitNextEventTime(job.note);
@@ -90,6 +171,7 @@ function ProgressPriority({
   job: JobCard;
   onOpen: (note: Note) => void;
 }) {
+  const { t } = useAnalyticsMenu();
   const evidence = job.matches[0] || job.reason || job.stack.slice(0, 3).join("・");
 
   return (
@@ -100,12 +182,12 @@ function ProgressPriority({
     >
       <span className="analytics-priority-topline">
         <b>{job.status === "面接中" ? "面接を最優先" : "現在の最優先案件"}</b>
-        <i data-status={job.status}>{job.status}</i>
+        <i className={`tone-${statusTone(job.status)}`}>{job.status}</i>
       </span>
       <strong>{job.company}</strong>
       <small>{job.position}</small>
       <div className="analytics-priority-action">
-        <span>NEXT ACTION</span>
+        <span>下一步</span>
         <p>{focusAction(job)}</p>
       </div>
       <dl>
@@ -114,12 +196,12 @@ function ProgressPriority({
           <dd>{scheduledDate(job) ? `${shortDate(scheduledDate(job))}${scheduledTime(job) ? ` ${scheduledTime(job)}` : ""}` : "未定"}</dd>
         </div>
         <div>
-          <dt>相性</dt>
+          <dt>応募优先度</dt>
           <dd>{job.rating > 0 ? `${job.rating} / 10` : "未採点"}</dd>
         </div>
       </dl>
       {evidence ? <small className="analytics-priority-evidence">{evidence}</small> : null}
-      <span className="analytics-priority-open">案件を開く <b>→</b></span>
+      <span className="analytics-priority-open">{t("案件を開く")} <b>→</b></span>
     </button>
   );
 }
@@ -142,7 +224,7 @@ function ProgressWatchRow({
         <small>{job.position}</small>
       </span>
       <span>
-        <i data-status={job.status}>{job.status}</i>
+        <i className={`tone-${statusTone(job.status)}`}>{job.status}</i>
         <small>{focusAction(job)}</small>
       </span>
       <b aria-hidden="true">↗</b>
@@ -165,9 +247,10 @@ function Tile({ value, label, note }: { value: string; label: string; note?: str
  * どのチャートにも必ず付ける（既定は畳んでおく）。
  */
 function TableView({ head, rows }: { head: string[]; rows: (string | number)[][] }) {
+  const { t } = useAnalyticsMenu();
   return (
     <details className="chart-table">
-      <summary>数値で見る</summary>
+      <summary>{t("数値で見る")}</summary>
       <table>
         <thead>
           <tr>{head.map((cell) => <th key={cell}>{cell}</th>)}</tr>
@@ -215,6 +298,7 @@ function BarRow({
   step,
   title,
   flag,
+  index = 0,
 }: {
   label: string;
   valueLabel: string;
@@ -222,15 +306,18 @@ function BarRow({
   step?: number;
   title: string;
   flag?: string;
+  /** 第几根：入场按 40ms 递进生长。只是装饰，减弱动效时全局兜底把延迟归零。 */
+  index?: number;
 }) {
   return (
-    <div className="chart-bar-row" tabIndex={0} title={title}>
+    // data-tip 是立刻出现的自绘气泡；title 留着给读屏与不悬停的人（键盘聚焦时气泡同样出现）。
+    <div className="chart-bar-row" tabIndex={0} title={title} data-tip={title}>
       <span className="chart-bar-label">{label}</span>
       <div className="chart-bar-track">
         <i
           className="chart-bar-fill"
           data-step={step ?? ""}
-          style={{ width: `${Math.max(ratio * 100, ratio > 0 ? 1.5 : 0)}%` }}
+          style={{ width: `${Math.max(ratio * 100, ratio > 0 ? 1.5 : 0)}%`, "--i": index } as CSSProperties}
         />
       </div>
       <span className="chart-bar-value">
@@ -238,6 +325,58 @@ function BarRow({
         {flag ? <em>{flag}</em> : null}
       </span>
     </div>
+  );
+}
+
+const pctOrDash = (value: number | null) => (value === null ? "—" : pct1(value));
+
+/**
+ * 真正的漏斗：居中梯形逐级收窄，级间标相邻转化率。原来是四根左对齐横条，
+ * 只能读出「占応募的几成」，看不出卡在哪一级——那恰恰是漏斗要回答的问题。
+ * 宽度按占首段比例画，0 件的段留一条细缝而不是消失（「这一级是 0」本身就是信息）。
+ */
+function FunnelChart({ steps, label }: { steps: FunnelStep[]; label: string }) {
+  const W = 720;
+  const PAD = { left: 8, right: 8, top: 6, bottom: 6 };
+  const LABEL_W = 130;
+  const VALUE_W = 72;
+  const ROW = 40;
+  const GAP = 24;
+  const x0 = PAD.left + LABEL_W;
+  const x1 = W - PAD.right - VALUE_W;
+  const cx = (x0 + x1) / 2;
+  const maxW = x1 - x0;
+  const H = PAD.top + PAD.bottom + steps.length * ROW + Math.max(0, steps.length - 1) * GAP;
+  // 观测口径下后段偶尔会大于首段（funnelSteps 不截断）；画面上封顶到满宽，免得梯形压到左侧的段名上。
+  const widthOf = (step: FunnelStep) => Math.max(6, Math.min(1, step.ofTop) * maxW);
+  return (
+    <svg className="chart-funnel" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label}>
+      {steps.map((step, index) => {
+        const y = PAD.top + index * (ROW + GAP);
+        const top = widthOf(step);
+        // 下底收到下一级的宽度，相邻两级在视觉上连成一个漏斗；最后一级略收一点收尾。
+        const bottom = index < steps.length - 1 ? widthOf(steps[index + 1]) : top * 0.9;
+        const points = [
+          [cx - top / 2, y],
+          [cx + top / 2, y],
+          [cx + bottom / 2, y + ROW],
+          [cx - bottom / 2, y + ROW],
+        ].map((point) => point.join(",")).join(" ");
+        return (
+          <g key={step.stage} className="chart-funnel-stage" tabIndex={0} style={{ "--i": index } as CSSProperties}>
+            <title>{`${step.stage}：${step.value} 件（応募比 ${pct1(step.ofTop)}${index > 0 ? `・前段比 ${pctOrDash(step.ofPrevious)}` : ""}）`}</title>
+            <polygon className="chart-funnel-shape" data-step={index + 1} points={points} />
+            <text className="chart-funnel-label" x={PAD.left} y={y + ROW / 2} dominantBaseline="middle">{step.stage}</text>
+            <text className="chart-funnel-value" x={W - PAD.right} y={y + ROW / 2} textAnchor="end" dominantBaseline="middle">{step.value}</text>
+            {index > 0 && (
+              <text className="chart-funnel-rate" x={cx} y={y - GAP / 2} textAnchor="middle" dominantBaseline="middle">
+                → {pctOrDash(step.ofPrevious)}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 
@@ -264,17 +403,36 @@ function condMatch(job: JobCard, cond: CondFilters, except?: keyof CondFilters) 
   );
 }
 
-export default function JobsAnalytics({
+function JobsAnalytics({
   notes,
   onOpen,
+  onOpenCase,
   onViewJobs,
+  derivedState = "fresh",
+  statsError = "",
+  onRebuildStats,
+  loading = false,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
+  /**
+   * 応募案件の行を開く。殻は案件を「公司画像の案件タブ」で開ける（原笔记より文脈が多い）ので、
+   * 渡されていればそちらを使い、無ければ従来どおり原笔记の drawer に落とす。
+   */
+  onOpenCase?: (note: Note) => void;
   /** statuses を渡すと求人一覧側の状態フィルタに引き継がれる（渡さなければ全件）。 */
-  onViewJobs: (statuses?: string[]) => void;
+  onViewJobs: (filters?: JobsInitialFilters) => void;
+  /** 台帳の generated JSON が手元の事実に追いついているか（殻が管理）。stale の間、下のグラフは古い台帳を描いている。 */
+  derivedState?: "fresh" | "stale" | "rebuilding";
+  statsError?: string;
+  onRebuildStats?: () => void;
+  /** この視図の scope がまだ届いていない：台帳の空状態ではなく読取中を出す。 */
+  loading?: boolean;
 }) {
-  const [range, setRange] = useState<RangeId>("all");
+  const { t, label: menuLabel } = useAnalyticsMenu();
+  // 期間は URL に持つ：刷新・別画面からの戻りで「直近3か月」を毎回選び直さなくて済むように。
+  const [range, setRange] = useUrlState<RangeId>("range", "all", RANGE_CODEC);
+  const openCase = onOpenCase ?? onOpen;
   const [handScope, setHandScope] = useState<HandScopeId>("high");
   const [cond, setCond] = useState<CondFilters>(EMPTY_COND);
 
@@ -319,10 +477,25 @@ export default function JobsAnalytics({
     [stats],
   );
 
-  const inFlight = jobs.filter((job) => IN_FLIGHT.includes(job.status)).length;
-  const interviewCount = jobs.filter((job) => job.status === "面接中").length;
-  const resultWaiting = jobs.filter((job) => ["応募済", "書類通過"].includes(job.status)).length;
-  const readyToApply = jobs.filter((job) => job.status === "未応募" && job.rating >= 7).length;
+  // 🔴 件数はカード定義の filters から数える。**遷移先と同じ条件を使う**のが要点で、
+  // 別々に書くと「10件」と表示して9件のページへ飛ぶ、が静かに起きる。
+  const glanceCounts = useMemo(() => {
+    const counts = {} as Record<(typeof GLANCE_CARDS)[number]["key"], number>;
+    for (const card of GLANCE_CARDS) {
+      const ratings = [...(card.filters.ratings ?? [])];
+      counts[card.key] = jobs.filter(
+        (job) =>
+          card.filters.statuses.includes(job.status) &&
+          jobMatchesRatingBands(job.rating, ratings),
+      ).length;
+    }
+    return counts;
+  }, [jobs]);
+
+  const inFlight = glanceCounts.active;
+  // 选考管线：KPI 下常驻的一条分段条。与「面试阶段」「结果等待」同源（案件 status），段可点进看板。
+  const pipeline = useMemo(() => pipelineSegments(jobs, ACTIVE_SELECTION), [jobs]);
+  const pipelineTotal = pipeline.reduce((sum, segment) => sum + segment.count, 0);
   const focusJobs = useMemo(
     () =>
       jobs
@@ -375,7 +548,7 @@ export default function JobsAnalytics({
    *
    * 🔴 選考が動いている案件（応募済〜内定）は評点に関わらず必ず残す。
    * 評点は「投げるかどうか」の判断軸であって、既に投げた案件を隠す軸ではない。
-   * 実例：面接中の Sharing Innovations は rating 未記入（＝0 点扱い）で、
+   * 実例：面接中の Nova Systems は rating 未記入（＝0 点扱い）で、
    * 素直に `rating >= 7` で絞ると**唯一の面接中案件が状態内訳から消えた**。
    * この例外があるおかげで、状態内訳の進行中の合計は上の KPI「進行中」と必ず一致する。
    */
@@ -428,13 +601,12 @@ export default function JobsAnalytics({
   const passedNow = jobs.filter((job) => PASSED_SCREENING.includes(job.status)).length;
   const interviewNow = jobs.filter((job) => ["面接中", "内定"].includes(job.status)).length;
   const offers = jobs.filter((job) => job.status === "内定").length;
-  const funnel = [
+  const funnel = funnelSteps([
     { stage: "応募（観測済）", value: stats.rejections.total + inFlight },
     { stage: "書類通過", value: stats.rejections.reachedInterview + passedNow },
     { stage: "面接実施", value: stats.rejections.reachedInterview + interviewNow },
     { stage: "内定", value: offers },
-  ];
-  const funnelTop = funnel[0].value || 1;
+  ]);
 
   const bands = JOB_RATING_BANDS.filter((band) => band.id !== "7plus").map((band) => ({
     ...band,
@@ -475,69 +647,106 @@ export default function JobsAnalytics({
 
   return (
     <div className="analytics">
-      <dl className="analytics-head-glance page-stat-strip module-stat-strip" aria-label="当前求职进展摘要">
-        <div>
-          <dt>进行中</dt>
-          <dd>{inFlight}</dd>
-        </div>
-        <div>
-          <dt>面试阶段</dt>
-          <dd>{interviewCount}</dd>
-        </div>
-        <div>
-          <dt>结果等待</dt>
-          <dd>{resultWaiting}</dd>
-        </div>
-        <div>
-          <dt>可応募</dt>
-          <dd>{readyToApply}</dd>
-        </div>
+      <h1 className="sr-only">{t("选考与分析")}</h1>
+      {derivedState !== "fresh" && (
+        <p className={`analytics-stale ${derivedState}`} role="status">
+          {derivedState === "rebuilding"
+            ? "案件状态已写入，正在重算台帳的派生统计…"
+            : `案件状态已写入，下方图表仍是上一次 vault:stats 的结果。${statsError ? ` ${statsError}` : ""}`}
+          {derivedState === "stale" && onRebuildStats && <button type="button" onClick={onRebuildStats}>{t("立即重算")}</button>}
+        </p>
+      )}
+      <dl className="analytics-head-glance module-stat-strip" aria-label={t("当前求职进展摘要")}>
+        {GLANCE_CARDS.map((card) => {
+          const count = glanceCounts[card.key];
+          return (
+            <div key={card.key} data-tone={card.tone} data-zero={count === 0}>
+              <dt>{menuLabel(card.label)}</dt>
+              <dd><CountUp as="strong" value={count} /><small>件</small></dd>
+              {/* カード全体を覆う透明ボタン。dt/dd の入れ子（定義リストの意味）を壊さずに
+                  押せるようにする。0 件は背景情報なので操作対象にしない。 */}
+              <button
+                type="button"
+                className="analytics-glance-hit"
+                disabled={count === 0}
+                onClick={() => onViewJobs(card.filters)}
+                aria-label={t("{label} {count} 件の内訳を見る", { label: menuLabel(card.label), count })}
+              />
+            </div>
+          );
+        })}
       </dl>
 
-      <section className="analytics-command">
+      <div className="analytics-pipeline" role="group" aria-label={t("选考管线")}>
+        <span className="analytics-pipeline-label">{t("选考管线")}</span>
+        <div className="analytics-pipeline-track">
+          {pipelineTotal === 0 ? (
+            <span className="analytics-pipeline-empty">{t("暂无进行中的案件")}</span>
+          ) : (
+            // 0 件的段不画（宽度为 0 的按钮点不到），件数仍在上面的 KPI 里。
+            pipeline.filter((segment) => segment.count > 0).map((segment, index) => (
+              <button
+                key={segment.status}
+                type="button"
+                data-tone={statusTone(segment.status)}
+                data-status={segment.status}
+                style={{ flexGrow: segment.count, "--i": index } as CSSProperties}
+                title={`${segment.status}：${segment.count} 件（${pct1(segment.share)}）`}
+                aria-label={t("{status} {count} 件の案件を見る", { status: segment.status, count: segment.count })}
+                onClick={() => onViewJobs({ statuses: [segment.status] })}
+              >
+                <span>{segment.status}</span>
+                <b>{segment.count}</b>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* 「当前推进」是这一页每天要看的那一段，默认展开；其余两段只在比较时才看，仍然收起。 */}
+      <details className="analytics-command analytics-command-disclosure" open>
+        <summary>
+          <strong>{t("当前推进")}</strong>
+          <span>{t("{active} 件进行中 · {priority} 件优先处理 · {watch} 件观察", { active: inFlight, priority: priorityJob ? 1 : 0, watch: watchJobs.length })}</span>
+          <i aria-hidden="true" />
+        </summary>
         <header>
-          <div>
-            <span>NOW</span>
-            <h2>当前推进</h2>
-            <p>1 件优先处理，{watchJobs.length} 件持续观察</p>
-          </div>
-          <button type="button" onClick={() => onViewJobs(IN_FLIGHT)}>
-            全部进行中 <b>{inFlight}</b> <i aria-hidden="true">→</i>
+          <button type="button" onClick={() => onViewJobs({ statuses: IN_FLIGHT })}>
+            {t("全部进行中")} <b>{inFlight}</b> <i aria-hidden="true">→</i>
           </button>
         </header>
         {priorityJob ? (
           <div className="analytics-command-grid">
-            <ProgressPriority job={priorityJob} onOpen={onOpen} />
+            <ProgressPriority job={priorityJob} onOpen={openCase} />
             <div className="analytics-watch-list">
               <header>
-                <strong>观察名单</strong>
-                <small>高相性・选考中</small>
+                <strong>{t("观察名单")}</strong>
+                <small>高优先・选考中</small>
               </header>
               {watchJobs.length > 0 ? (
-                watchJobs.map((job) => <ProgressWatchRow key={job.path} job={job} onOpen={onOpen} />)
+                watchJobs.map((job) => <ProgressWatchRow key={job.path} job={job} onOpen={openCase} />)
               ) : (
-                <p className="chart-empty">暂时没有其他需要持续观察的高相性案件。</p>
+                <p className="chart-empty">暂时没有其他需要持续观察的高优先案件。</p>
               )}
             </div>
           </div>
         ) : (
           <p className="chart-empty">当前没有处于选考中的案件。</p>
         )}
-      </section>
+      </details>
 
       <details className="analytics-hand">
         <summary>
           <span>
-            <b>DEEPER VIEW</b>
-            <strong>当前手札分析</strong>
+            <strong>{t("当前手札分析")}</strong>
             <small>评分、状态与技术需求；只有需要比较下一批岗位时再看</small>
           </span>
-          <em>打开</em>
+          <em>{t("打开")}</em>
         </summary>
         <div className="analytics-hand-body">
           {/* 母数を変えるスイッチなので、影響する図より必ず**上**に置く。 */}
           <div className="analytics-filter">
-        <span>集計対象</span>
+        <span>{t("集計対象")}</span>
         {HAND_SCOPES.map((item) => (
           <button
             key={item.id}
@@ -546,7 +755,7 @@ export default function JobsAnalytics({
             aria-pressed={handScope === item.id}
             onClick={() => setHandScope(item.id)}
           >
-            {item.label}
+            {menuLabel(item.label)}
           </button>
         ))}
         <small className="analytics-filter-note">
@@ -559,7 +768,7 @@ export default function JobsAnalytics({
           {/* 条件フィルタ。下の3枚（評点・状態・技術）にだけ効く——
               上の KPI・重点案件は行動リストなので絞らない。 */}
           <div className="analytics-filter analytics-cond-filter">
-        <span>条件</span>
+        <span>{t("条件")}</span>
         {condOptions.statuses.map(([status, count]) => (
           <button
             key={status}
@@ -573,7 +782,7 @@ export default function JobsAnalytics({
         ))}
         {condActive > 0 ? (
           <button type="button" className="job-chip" onClick={() => setCond(EMPTY_COND)}>
-            重置（{condActive}）
+            {t("重置")}（{condActive}）
           </button>
         ) : null}
         <small className="analytics-filter-note">
@@ -582,7 +791,7 @@ export default function JobsAnalytics({
         </small>
           </div>
           <div className="analytics-filter analytics-cond-filter">
-        <span>来源</span>
+        <span>{t("来源")}</span>
         {condOptions.sources.map(([source, count]) => (
           <button
             key={source}
@@ -596,7 +805,7 @@ export default function JobsAnalytics({
         ))}
           </div>
           <div className="analytics-filter analytics-cond-filter">
-        <span>勤務地</span>
+        <span>{t("勤務地")}</span>
         {condOptions.regions.slice(0, 8).map(([region, count]) => (
           <button
             key={region}
@@ -614,19 +823,20 @@ export default function JobsAnalytics({
           aria-pressed={cond.remoteOnly}
           onClick={() => setCond((current) => ({ ...current, remoteOnly: !current.remoteOnly }))}
         >
-          リモート可 <small>{condOptions.remote}</small>
+          {t("リモート可")} <small>{condOptions.remote}</small>
         </button>
           </div>
 
           <div className="chart-grid-2">
         <Card
           title="現役案件の評点"
-          caption={`不採用を除いた現在の手札${condActive > 0 ? `・条件通過後の ${condJobs.length} 件` : "・全件"}。7 点以上が「応募すべき」帯。しきい値を決める図なので、上の集計対象（評点）は掛けない。`}
+            caption={`不採用を除いた現在の手札${condActive > 0 ? `・条件通過後の ${condJobs.length} 件` : "・全件"}。评分表示応募价值与时间优先级，不是录用概率；7 点以上为优先判断带。`}
         >
           <div className="chart-bars">
             {bands.map((band, index) => (
               <BarRow
                 key={band.id}
+                index={index}
                 label={band.label}
                 ratio={band.count / bandMax}
                 step={bands.length - 1 - index}
@@ -646,20 +856,23 @@ export default function JobsAnalytics({
               : `現役 ${statusPool.length} 件${condActive === 0 ? "すべて" : "（条件フィルタ適用中）"}。4〜6 点の投げない札も含む。`
           }
         >
-          <div className="chart-stack" role="img" aria-label="状態の分布">
-            {statuses.map((row, index) => (
+          <div className="chart-stack" role="img" aria-label={t("状態の分布")}>
+            {/* 状态是类别不是大小：颜色跟着状态走（与看板的状态色同一色相），不按排序位置取色阶。 */}
+            {statuses.map((row) => (
               <i
                 key={row.status}
-                data-step={index}
+                data-tone={statusTone(row.status)}
+                data-status={row.status}
+                data-tip={`${row.status}：${row.count} 件`}
                 style={{ width: `${(row.count / statusTotal) * 100}%` }}
                 title={`${row.status}：${row.count} 件`}
               />
             ))}
           </div>
           <ul className="chart-legend">
-            {statuses.map((row, index) => (
+            {statuses.map((row) => (
               <li key={row.status}>
-                <b data-step={index} /> {row.status} <small>{row.count}</small>
+                <b data-tone={statusTone(row.status)} data-status={row.status} /> {row.status} <small>{row.count}</small>
               </li>
             ))}
           </ul>
@@ -679,9 +892,10 @@ export default function JobsAnalytics({
         }
       >
         <div className="chart-bars">
-          {stacks.map((row) => (
+          {stacks.map((row, index) => (
             <BarRow
               key={row.name}
+              index={index}
               label={row.name}
               ratio={row.count / stackMax}
               valueLabel={`${row.count}`}
@@ -697,16 +911,16 @@ export default function JobsAnalytics({
       <details className="analytics-history">
         <summary>
           <span>
-            <b>参考データ</b>
-            <strong>過去の不採用・経路別到達率・選考ファネル</strong>
+            <b>{t("参考データ")}</b>
+            <strong>{t("過去の不採用・経路別到達率・選考ファネル")}</strong>
             <small>日々の判断には使わないため、通常は閉じておく</small>
           </span>
-          <em>開く</em>
+          <em>{t("開く")}</em>
         </summary>
         <div className="analytics-history-body">
           {/* 期間フィルタは履歴チャートだけに効く。 */}
           <div className="analytics-filter">
-            <span>履歴の期間</span>
+            <span>{t("履歴の期間")}</span>
             {RANGES.map((item) => (
               <button
                 key={item.id}
@@ -715,13 +929,13 @@ export default function JobsAnalytics({
                 aria-pressed={range === item.id}
                 onClick={() => setRange(item.id)}
               >
-                {item.label}
+                {menuLabel(item.label)}
               </button>
             ))}
           </div>
 
           <div className="stat-row analytics-history-stats">
-            <Tile value={`${stats.rejections.total}`} label="不採用（累計）" note="凍結CSV 175 ＋ ノート" />
+            <Tile value={`${stats.rejections.total}`} label="不採用（累計）" note="凍結CSV ＋ ノート" />
             <Tile
               value={pct1(reachRate(stats.rejections.reachedInterview, stats.rejections.total))}
               label="面接到達率"
@@ -740,9 +954,10 @@ export default function JobsAnalytics({
             {hasHistory ? (
               <>
                 <div className="chart-bars">
-                  {channels.map((row) => (
+                  {channels.map((row, index) => (
                     <BarRow
                       key={row.channel}
+                      index={index}
                       label={row.channel}
                       ratio={row.rate}
                       valueLabel={pct1(row.rate)}
@@ -755,11 +970,23 @@ export default function JobsAnalytics({
                     />
                   ))}
                 </div>
-                <p className="chart-note">
-                  <strong>n が小さい経路の率を単独で読まない。</strong>
-                  企業直投の {channels.find((c) => c.channel.includes("直投"))?.reached ?? 0} / {channels.find((c) => c.channel.includes("直投"))?.total ?? 0} 社は、
-                  1 社増減するだけで率が十数ポイント動く。
-                </p>
+                {/* 例に挙げる経路は固定しない：直投が台帳に無い月に「0 / 0 社」と書くと文が嘘になる。
+                    実際に n が小さい経路だけを並べ、無ければこの注意書き自体を出さない。 */}
+                {(() => {
+                  // 例は n の小さい順に 2 つまで。全部並べると注意書きが表より長くなる。
+                  const small = channels
+                    .filter((row) => row.total > 0 && row.total < SMALL_SAMPLE_THRESHOLD)
+                    .sort((left, right) => left.total - right.total)
+                    .slice(0, 2);
+                  if (small.length === 0) return null;
+                  return (
+                    <p className="chart-note">
+                      <strong>n が小さい経路の率を単独で読まない。</strong>
+                      {small.map((row) => `${row.channel}の ${row.reached} / ${row.total} 社`).join("、")}は、
+                      1 社増減するだけで率が十数ポイント動く。
+                    </p>
+                  );
+                })()}
                 <TableView
                   head={["経路", "不採用", "書類終了", "面接到達", "到達率"]}
                   rows={channels.map((row) => [
@@ -772,7 +999,7 @@ export default function JobsAnalytics({
                 />
               </>
             ) : (
-              <p className="chart-empty">台帳の集計がまだ生成されていない。</p>
+              loading ? <ScopeLoading label="台帳" /> : <p className="chart-empty">台帳の集計がまだ生成されていない。</p>
             )}
           </Card>
 
@@ -780,22 +1007,10 @@ export default function JobsAnalytics({
             title="選考ファネル（観測できている範囲）"
             caption="台帳は不採用しか記録していないため、総応募数は直接には分からない。"
           >
-            <div className="chart-bars">
-              {funnel.map((row, index) => (
-                <BarRow
-                  key={row.stage}
-                  label={row.stage}
-                  ratio={row.value / funnelTop}
-                  step={index}
-                  valueLabel={`${row.value}`}
-                  title={`${row.stage}：${row.value} 件（応募比 ${pct1(row.value / funnelTop)}）`}
-                  flag={index === 0 ? undefined : pct1(row.value / funnelTop)}
-                />
-              ))}
-            </div>
+            <FunnelChart steps={funnel} label={t("選考ファネル")} />
             <TableView
-              head={["段階", "件数", "応募比"]}
-              rows={funnel.map((row) => [row.stage, row.value, pct1(row.value / funnelTop)])}
+              head={["段階", "件数", "応募比", "前段比"]}
+              rows={funnel.map((row, index) => [row.stage, row.value, pct1(row.ofTop), index === 0 ? "—" : pctOrDash(row.ofPrevious)])}
             />
           </Card>
 
@@ -804,7 +1019,10 @@ export default function JobsAnalytics({
             caption={
               stats.timeline.appliedKnownFrom
                 ? `応募数が分かるのは ${stats.timeline.appliedKnownFrom} 以降。それ以前は未走査。`
-                : "応募日台帳がまだ無いので応募数は全月不明。"
+                : loading
+                  // 台帳がまだ届いていないだけの時に「無い」と言い切らない（经路別カードと同じ理由）。
+                  ? "応募日台帳を読込中…"
+                  : "応募日台帳がまだ無いので応募数は全月不明。"
             }
           >
             {timeline.length > 0 ? (
@@ -814,8 +1032,8 @@ export default function JobsAnalytics({
                   <li><b data-step="4" /> 落ちた <small>不採用</small></li>
                 </ul>
                 <div className="chart-months">
-                  {timeline.map((row) => (
-                    <div className="chart-month" key={row.month}>
+                  {timeline.map((row, index) => (
+                    <div className="chart-month" key={row.month} style={{ "--i": index } as CSSProperties}>
                       <div className="chart-month-bars">
                         {row.applied === null ? (
                           <i className="chart-month-unknown" title={`${row.month}：応募数は不明（未走査）`} />
@@ -841,6 +1059,8 @@ export default function JobsAnalytics({
                   rows={timeline.map((row) => [row.month, row.applied === null ? "不明" : row.applied, row.rejected])}
                 />
               </>
+            ) : loading ? (
+              <ScopeLoading label="月別推移" />
             ) : (
               <p className="chart-empty">この期間に該当するデータがない。</p>
             )}
@@ -857,7 +1077,7 @@ export default function JobsAnalytics({
                   <li><b data-step="4" /> 累計で結果が出た <small>{flow[flow.length - 1].resolvedCum}</small></li>
                   <li><b data-step="2" /> 待っている <small>{flow[flow.length - 1].pending}</small></li>
                 </ul>
-                <svg className="chart-line" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="応募・結果・待機の推移">
+                <svg className="chart-line" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t("応募・結果・待機の推移")}>
                   {[0, 0.5, 1].map((tick) => {
                     const y = PAD.top + plotH - tick * plotH;
                     return (
@@ -877,6 +1097,7 @@ export default function JobsAnalytics({
                     <polyline
                       key={key}
                       className="chart-line-path"
+                      pathLength={1}
                       data-step={step}
                       points={flow
                         .map((d, i) => {
@@ -893,6 +1114,8 @@ export default function JobsAnalytics({
                     return (
                       <g key={d.date} tabIndex={0}>
                         <title>{`${d.date}：投げた計 ${d.appliedCum}・結果 ${d.resolvedCum}・待ち ${d.pending}`}</title>
+                        {/* 悬停时的竖向参考线：三条线在同一天的读数靠它对齐。 */}
+                        <line className="chart-guide" x1={x} x2={x} y1={PAD.top} y2={PAD.top + plotH} />
                         <circle className="chart-hit" cx={x} cy={y} r={12} />
                         {(d.applied > 0 || d.resolved > 0) && <circle className="chart-dot" data-step="2" cx={x} cy={y} r={4} />}
                       </g>
@@ -910,6 +1133,8 @@ export default function JobsAnalytics({
                     .map((d) => [d.date, d.applied, d.resolved, d.appliedCum, d.resolvedCum, d.pending])}
                 />
               </>
+            ) : loading ? (
+              <ScopeLoading label="応募日台帳" />
             ) : (
               <p className="chart-empty">応募日台帳がまだ無い。</p>
             )}
@@ -919,3 +1144,6 @@ export default function JobsAnalytics({
     </div>
   );
 }
+
+// 外壳的 UI state（⌘K・overlay）变化时不重渲染整个视圖。props 都是稳定引用。
+export default memo(JobsAnalytics);

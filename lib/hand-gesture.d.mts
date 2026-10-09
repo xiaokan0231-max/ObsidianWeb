@@ -1,0 +1,234 @@
+export type HandLandmarkPoint = {
+  x: number;
+  y: number;
+  z?: number;
+  visibility?: number;
+};
+
+export type HandPose = {
+  x: number;
+  y: number;
+  scale: number;
+  pinchRatio: number;
+};
+
+export type RecognizedHandGesture =
+  | "None"
+  | "Closed_Fist"
+  | "Open_Palm"
+  | "Pointing_Up"
+  | "Thumb_Down"
+  | "Thumb_Up"
+  | "Victory"
+  | "ILoveYou";
+
+export type GestureHold = {
+  gesture: string;
+  since: number;
+  lastSeen: number;
+  evidenceFrames: number;
+};
+
+export type PinchInteraction = {
+  pinching: boolean;
+  grabbed: boolean;
+  startedAt: number;
+  openSince: number;
+  releasePending: boolean;
+  pressX: number;
+  pressY: number;
+  travel: number;
+  progress: number;
+  event: "none" | "press" | "select" | "grab-start" | "release" | "cancel";
+};
+
+export type PinchThresholds = {
+  closeThreshold: number;
+  releaseThreshold: number;
+  calibrated?: boolean;
+};
+
+export type HandMatchPoint = {
+  id?: string;
+  x: number;
+  y: number;
+  handedness?: string;
+};
+
+export type TwoHandMetrics = {
+  centerX: number;
+  centerY: number;
+  distance: number;
+  angle: number;
+};
+
+export type PrimaryHandCandidate = {
+  id: string;
+  lastSeen: number;
+  visible: boolean;
+  event?: string;
+};
+
+export const HAND_CONNECTIONS: readonly (readonly [number, number])[];
+
+export function handPoseFromLandmarks(
+  landmarks: readonly HandLandmarkPoint[],
+  options?: { aspect?: number },
+): HandPose | null;
+
+export function nextGrabState(
+  previous: boolean,
+  gestureName: string,
+  gestureScore: number,
+  pinchRatio: number,
+): boolean;
+
+export function gestureScoreThreshold(gestureName: string): number;
+
+export function inferCommandGestureFromLandmarks(
+  landmarks: readonly HandLandmarkPoint[],
+): RecognizedHandGesture;
+
+export function isPinchPose(
+  landmarks: readonly HandLandmarkPoint[],
+  options?: { aspect?: number },
+): boolean;
+
+export function fistDragEngagement(
+  gestureHold: GestureHold | null,
+  observedGesture: string,
+): boolean;
+
+export function updateGestureHold(
+  previous: GestureHold | null,
+  observedGesture: string,
+  now: number,
+  graceMs?: number,
+): GestureHold;
+
+export function updatePinchInteraction(
+  previous: PinchInteraction | null,
+  pinchRatio: number,
+  now: number,
+  options?: number | (PinchThresholds & {
+    holdMs?: number;
+    selectFloorMs?: number;
+    releaseGraceMs?: number;
+    moveThreshold?: number;
+    scale?: number;
+    x?: number;
+    y?: number;
+  }),
+): PinchInteraction;
+
+export type PinchEnvelope = {
+  min: number | null;
+  max: number | null;
+  updatedAt: number | null;
+  closeThreshold: number | null;
+  releaseThreshold: number | null;
+  confident: boolean;
+};
+
+export const PINCH_ENVELOPE_DEFAULTS: Readonly<{
+  closeAt: number;
+  releaseAt: number;
+  minSpan: number;
+  relaxPerSecond: number;
+  minCloseAt: number;
+  maxCloseAt: number;
+}>;
+
+export function updatePinchEnvelope(
+  previous: PinchEnvelope | null,
+  pinchRatio: number,
+  now: number,
+  options?: Partial<{
+    closeAt: number;
+    releaseAt: number;
+    minSpan: number;
+    relaxPerSecond: number;
+    minCloseAt: number;
+    maxCloseAt: number;
+  }>,
+): PinchEnvelope;
+
+export function derivePinchThresholds(
+  openSamples: readonly number[],
+  closedSamples: readonly number[],
+): PinchThresholds & { calibrated: boolean };
+
+export function matchHandDetections(
+  previousHands: readonly HandMatchPoint[],
+  detections: readonly HandMatchPoint[],
+  maxDistance?: number,
+): {
+  matches: Array<{
+    previousIndex: number;
+    detectionIndex: number;
+    cost: number;
+    positionCost: number;
+  }>;
+  unmatchedPrevious: number[];
+  unmatchedDetections: number[];
+};
+
+export function resolvePrimaryHandId(
+  currentId: string | null,
+  hands: readonly PrimaryHandCandidate[],
+  now: number,
+  graceMs?: number,
+): string | null;
+
+export function twoHandMetrics(
+  first: HandMatchPoint,
+  second: HandMatchPoint,
+): TwoHandMetrics | null;
+
+export function twoHandTransformDelta(
+  previous: TwoHandMetrics,
+  next: TwoHandMetrics,
+): {
+  centerX: number;
+  centerY: number;
+  separation: number;
+  dx: number;
+  dy: number;
+  scaleRatio: number;
+  rotationDelta: number;
+} | null;
+
+export function smoothHandPose(
+  previous: HandPose | null,
+  next: HandPose,
+  alpha?: number,
+): HandPose;
+
+export function handUiFrameKey(
+  frame: {
+    mode: string;
+    primaryHandId: string | null;
+    transform: unknown;
+    hands: Array<{
+      id: string;
+      role: string;
+      visible: boolean;
+      grabbed: boolean;
+      pinching: boolean;
+      pinchConfident: boolean;
+      gesture: string;
+      x: number;
+      y: number;
+    }>;
+    diagnostics?: {
+      pinchRatio: number;
+      closeThreshold: number;
+      pinchPose: boolean;
+      gesture: string;
+      suppressed: boolean;
+      targetKind: string;
+      lastEvent: string;
+    };
+  } | null,
+  minDualSeparation?: number,
+): string;

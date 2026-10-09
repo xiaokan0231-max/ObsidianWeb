@@ -1,3 +1,4 @@
+import { PREP_V2_SECTIONS, interviewPrepVersion } from "./interview-prep-validation.mjs";
 import { getString, getType, noteBasename, stripFrontmatter, type Note } from "./notes.ts";
 import {
   EMBED_RE,
@@ -27,8 +28,13 @@ export type PrepInline =
 
 export type PrepNoteTone = "zh" | "follow" | "tip";
 
-export type PrepBlock =
-  | { kind: "heading"; level: 3 | 4; inline: PrepInline[] }
+/** 展開元の共通資産（準備稿の本文に直接書かれた ![[…]]）。入れ子の埋め込みは最外の資産に帰属させる。 */
+export type PrepEmbedOrigin = { target: string; section: string };
+
+type PrepBlockBody =
+  // level は表示用（3=青見出し・4=紫見出し）、depth は Markdown の実際の階層。
+  // 両方要る：#### と ##### は同じ紫で描くが、範囲を切るには区別が要る。
+  | { kind: "heading"; level: 3 | 4; depth: number; inline: PrepInline[] }
   | { kind: "say"; speaker: "you" | "interviewer"; inline: PrepInline[] }
   | { kind: "note"; tone: PrepNoteTone; inline: PrepInline[] }
   | { kind: "paragraph"; inline: PrepInline[] }
@@ -36,12 +42,26 @@ export type PrepBlock =
   | { kind: "table"; head: PrepInline[][]; rows: PrepInline[][][] }
   | { kind: "code"; text: string };
 
+// embed＝このブロックが共通資産の展開由来である印。コンテナ型にせず平らなまま印だけ付けるのは、
+// 節の切り出し（殺傷7題の答案参照・小節スライス）や検索が埋め込みの有無を知らずに済むようにするため。
+// 畳んで見せるかどうかは表示層だけの判断で、データ層の消費者は embed を無視してよい。
+export type PrepBlock = PrepBlockBody & { embed?: PrepEmbedOrigin };
+
 export type PrepSection = {
   id: string;
   title: string;
   navLabel: string;
   blocks: PrepBlock[];
 };
+
+export { PREP_V2_SECTIONS };
+export type PrepVersion = 1 | 2;
+export type PrepV2SectionId = "overview" | "motivation" | "questions" | "resources" | "backup";
+
+export function getPrepV2Section(sections: PrepSection[], id: PrepV2SectionId): PrepSection | null {
+  const spec = PREP_V2_SECTIONS.find((item) => item.id === id);
+  return sections.find((section) => section.title === spec?.title) ?? null;
+}
 
 export type PrepSectionGroup = {
   id: string;
@@ -58,7 +78,13 @@ const PREP_SECTION_GROUPS = [
   { id: "tools", label: "当日工具", numbers: [9, 10, 12] },
 ] as const;
 
-function prepSectionNumber(title: string) {
+/**
+ * 節タイトル「３．職位拆解」から節番号を取る。番号の書式（全角数字・区切りの
+ * 「.」「、」「．」）をどこまで許すかはこの1関数だけが知っている——
+ * 以前は本場面試側に同じ関数と第三のインライン正規表現があり、字符類が既に
+ * 「．」の有無で割れていた（NFKC が先に走るせいで挙動差が隠れていただけ）。
+ */
+export function prepSectionNumber(title: string) {
   const normalized = title.normalize("NFKC");
   return Number(normalized.match(/^(\d+)[.、．]/)?.[1] ?? 0);
 }
@@ -73,7 +99,7 @@ export function groupPrepSections(sections: PrepSection[]): PrepSectionGroup[] {
     number: prepSectionNumber(section.title),
   }));
   const assigned = new Set<number>();
-  const groups = PREP_SECTION_GROUPS.map((spec) => {
+  const groups: PrepSectionGroup[] = PREP_SECTION_GROUPS.map((spec) => {
     const sectionIndexes = numbered
       .filter((item) => spec.numbers.some((number) => number === item.number))
       .map((item) => item.index);
@@ -82,14 +108,210 @@ export function groupPrepSections(sections: PrepSection[]): PrepSectionGroup[] {
   }).filter((group) => group.sectionIndexes.length > 0);
 
   const remaining = sections.map((_, index) => index).filter((index) => !assigned.has(index));
+  // どの番号にも当たらない節は必ず「其他」が拾う＝節が1つでもあれば群も1つ以上できる。
+  // なので「群が空なら節をそのまま1節1群で並べる」という代替経路は要らない
+  // （sections が空の時しか到達せず、その時は代替経路の結果も空で同じ）。
   if (remaining.length > 0) groups.push({ id: "other", label: "其他", sectionIndexes: remaining });
-  return groups.length > 0
-    ? groups
-    : sections.map((section, index) => ({
-        id: section.id,
-        label: section.navLabel,
-        sectionIndexes: [index],
-      }));
+  return groups;
+}
+
+const PREP_KILL_MAP_HEADING = "殺傷質問7題";
+export const PREP_KILL_MAP_LABEL = "杀伤7题";
+const PREP_TALENT_HEADING = "人材育成";
+export const PREP_TALENT_LABEL = "人才育成";
+const PREP_BRIEFING_HEADING = "本轮导读";
+
+/**
+ * 節の小節を、独立した主模块／モード用の仮想節として切り出す共通処理。
+ *
+ * 正本はあくまで親節の中の一小節（vault は12節契約のまま・13個目の ## は作らない）。
+ * ただ当日その一枚だけを開きたい需要があるので、Web の表示層だけで独立させる。
+ * 小節が無い回（他社の準備稿）では null ＝チップ自体が出ない。
+ */
+function extractPrepSubModule(
+  sections: PrepSection[],
+  headingPrefix: string,
+  id: string,
+  label: string,
+  parentNumber = 6,
+): PrepSection | null {
+  const parent = sections.find((section) => prepSectionNumber(section.title) === parentNumber);
+  if (!parent) return null;
+  const start = parent.blocks.findIndex(
+    (block) =>
+      block.kind === "heading" &&
+      block.level === 3 &&
+      prepInlineText(block.inline).startsWith(headingPrefix),
+  );
+  if (start < 0) return null;
+  const end = parent.blocks.findIndex(
+    (block, index) => index > start && block.kind === "heading" && block.level === 3,
+  );
+  const heading = parent.blocks[start];
+  return {
+    id,
+    title: heading.kind === "heading" ? prepInlineText(heading.inline) : headingPrefix,
+    navLabel: label,
+    blocks: parent.blocks.slice(start + 1, end < 0 ? undefined : end),
+  };
+}
+
+/** §6 の小節「殺傷質問7題・当日の型」→ 第7主模块。 */
+export function extractPrepKillMap(sections: PrepSection[]): PrepSection | null {
+  return extractPrepSubModule(sections, PREP_KILL_MAP_HEADING, "prep-sec-kill7", PREP_KILL_MAP_LABEL);
+}
+
+/** §6 の小節「人材育成」→ 第8主模块。責任者面接の中心題なので当日ワンタップで開く。 */
+export function extractPrepTalentMap(sections: PrepSection[]): PrepSection | null {
+  return extractPrepSubModule(sections, PREP_TALENT_HEADING, "prep-sec-talent", PREP_TALENT_LABEL);
+}
+
+/**
+ * §2 の小節「本轮导读」→ 準備モード「导读」の本文。
+ *
+ * 速査・想定問答は当日その場で引く道具であって、「この面接がどういう局面なのか」を
+ * 通して理解する読み物はどこにも無かった。箇条書きに崩さず散文のまま持ち、
+ * 面談の数日前に一度通読する前提でこのモードに出す。
+ */
+export function extractPrepBriefing(sections: PrepSection[]): PrepSection | null {
+  return extractPrepSubModule(sections, PREP_BRIEFING_HEADING, "prep-sec-brief", "导读", 2);
+}
+
+export type PrepKillQuestion = {
+  id: string;
+  /** 面接官が実際に投げてくる形の問い。 */
+  ask: string;
+  /** 出題頻度・題型（T1〜T7）などの短いメタ。 */
+  meta: string;
+  /** 主答案。`答案::` が指す先から取り込む（コピーではなく参照）。 */
+  answer: PrepBlock[];
+  /** 追問層。見つからなければ空。 */
+  followUp: PrepBlock[];
+  /** 中文の解読（▷ 行）。なぜその答え方なのか。 */
+  why: PrepInline[][];
+  /** 踏んではいけない一行。 */
+  mine: PrepInline[] | null;
+  /** 答案の在り処（解決できなかった時に「どこを見ればいいか」を出す）。 */
+  source: string;
+  resolved: boolean;
+};
+
+const KILL_FIELD_RE = /^(問|答案|追問|地雷|出題)::\s*(.*)$/;
+
+function headingDepth(block: PrepBlock) {
+  return block.kind === "heading" ? block.depth : 0;
+}
+
+/**
+ * 「次の答案の見出し代わり」になる太字リード行か。
+ * 台詞（【あなた】…）は本文なので除く——台詞は太字で始まることが多く、
+ * これを境界に含めると答案が見出しだけになって当日読むものが消える。
+ */
+function isLeadLine(block: PrepBlock) {
+  if (block.kind !== "note" && block.kind !== "paragraph") return false;
+  return block.inline[0]?.kind === "strong";
+}
+
+/**
+ * ロケータ（見出しか太字リードの先頭一致）から、その答案ブロック群を切り出す。
+ *
+ * 見出しなら「同階層以上の見出しが来るまで」、太字リードなら「次の見出しか
+ * 次の太字リードまで」。答案の正本は各所に一つだけ置き、ここは参照で組み立てる——
+ * コピーすると口径が二重管理になり、必ず片方だけ直されて食い違う。
+ */
+function sliceByLocator(sections: PrepSection[], locator: string): PrepBlock[] {
+  // 見出しの頭に付く 🔴 ⭐ などの装飾は、ロケータ側に書かせない（書き分けが事故のもと）
+  const strip = (text: string) => text.replace(/^[🔴🟠⭐★●■◆▼\s　]+/, "").trim();
+  const needle = strip(locator);
+  if (!needle) return [];
+  for (const section of sections) {
+    const start = section.blocks.findIndex((block) =>
+      strip(
+        prepInlineText(
+          block.kind === "heading" || block.kind === "say" || block.kind === "note" || block.kind === "paragraph"
+            ? block.inline
+            : [],
+        ),
+      ).startsWith(needle),
+    );
+    if (start < 0) continue;
+    const head = section.blocks[start];
+    const depth = headingDepth(head);
+    const end = section.blocks.findIndex((block, index) => {
+      if (index <= start) return false;
+      if (depth > 0) return block.kind === "heading" && block.depth <= depth;
+      return block.kind === "heading" || isLeadLine(block);
+    });
+    // 先頭のリード行（見出し・太字リード）は落とす。カードの見出しが既に問いを出しており、
+    // ここで繰り返すと「読み上げる文」がどれか一目で分からなくなる。
+    return section.blocks.slice(start + 1, end < 0 ? undefined : end);
+  }
+  return [];
+}
+
+/** 見出しつきの答案は「追問されたら」以降を追問層として分ける。 */
+function splitFollowUp(blocks: PrepBlock[]) {
+  const at = blocks.findIndex(
+    (block) =>
+      block.kind === "heading" &&
+      /^(追問|さらに|「)/.test(prepInlineText(block.inline).trim()),
+  );
+  if (at < 0) return { answer: blocks, followUp: [] as PrepBlock[] };
+  return { answer: blocks.slice(0, at), followUp: blocks.slice(at) };
+}
+
+/**
+ * 「殺傷質問7題」を、問い・答案・解読が1画面に揃ったカード列として組み立てる。
+ * 索引だけでは当日使えない（7回ジャンプすることになる）ので、答案を参照で引き込む。
+ */
+export function buildPrepKillQuestions(sections: PrepSection[]): PrepKillQuestion[] {
+  const map = extractPrepKillMap(sections);
+  if (!map) return [];
+  const questions: PrepKillQuestion[] = [];
+  let current: (Partial<PrepKillQuestion> & { why: PrepInline[][]; fields: Map<string, string> }) | null = null;
+
+  const flush = () => {
+    if (!current?.ask) return;
+    const fields = current.fields;
+    const answerBlocks = sliceByLocator(sections, fields.get("答案") ?? "");
+    const split = splitFollowUp(answerBlocks);
+    const extra = (fields.get("追問") ?? "")
+      .split("｜")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .flatMap((item) => sliceByLocator(sections, item));
+    questions.push({
+      id: `kill-${questions.length + 1}`,
+      ask: current.ask,
+      meta: fields.get("出題") ?? "",
+      answer: split.answer,
+      followUp: [...split.followUp, ...extra],
+      why: current.why,
+      mine: fields.has("地雷") ? parseInline(fields.get("地雷") ?? "") : null,
+      source: fields.get("答案") ?? "",
+      resolved: answerBlocks.length > 0,
+    });
+    current = null;
+  };
+
+  for (const block of map.blocks) {
+    if (block.kind === "heading" && block.depth === 4) {
+      flush();
+      current = { ask: prepInlineText(block.inline).trim(), why: [], fields: new Map() };
+      continue;
+    }
+    if (!current) continue;
+    if (block.kind === "list") {
+      for (const item of block.items) {
+        const matched = prepInlineText(item).match(KILL_FIELD_RE);
+        if (matched) current.fields.set(matched[1], matched[2].trim());
+      }
+      continue;
+    }
+    if (block.kind === "note" && block.tone === "zh") current.why.push(block.inline);
+  }
+  flush();
+  return questions;
 }
 
 export type PrepEmbed = {
@@ -108,22 +330,23 @@ export type PrepExternalLink = {
 
 export type InterviewPrepDoc = {
   note: Note;
+  prepVersion: PrepVersion;
   title: string;
   company: string;
   date: string;
   round: string;
-  sessionId: string;
   sessionOrder: number | null;
   sessionStatus: InterviewPrepSessionStatus | "";
   format: string;
   interviewers: string;
   caseLink: string;
+  meetingLink: string;
   sections: PrepSection[];
   embeds: PrepEmbed[];
   externalLinks: PrepExternalLink[];
 };
 
-export const INTERVIEW_PREP_TYPE = "interview-prep";
+const INTERVIEW_PREP_TYPE = "interview-prep";
 export type InterviewPrepSessionStatus =
   | "preparing"
   | "scheduled"
@@ -264,6 +487,13 @@ export function prepBlockText(block: PrepBlock): string {
   }
 }
 
+// 展開した共通資産の範囲を parseBlocks へ運ぶ行印。NUL(U+0000) は Markdown 本文に現れ得ないので
+// 「本文にたまたま同じ文字列があった」事故が起きない。展開＝文字列結合の設計を保ったまま、
+// どの行が資産由来かだけを後段へ伝える。
+const EMBED_MARK = "\u0000";
+const EMBED_OPEN = `${EMBED_MARK}embed${EMBED_MARK}`;
+const EMBED_CLOSE = `${EMBED_MARK}/embed`;
+
 function expandEmbeds(
   markdown: string,
   byName: Map<string, Note>,
@@ -308,7 +538,14 @@ function expandEmbeds(
     }
     record.resolved = true;
     body = shiftHeadings(body, Math.max(0, contextLevel - sourceLevel));
-    out.push(expandEmbeds(body, byName, embeds, depth + 1, new Set([...seen, key])));
+    const inner = expandEmbeds(body, byName, embeds, depth + 1, new Set([...seen, key]));
+    // 印は準備稿の本文に直接書かれた埋め込み（depth 0）にだけ付ける。資産の中の埋め込みまで
+    // 個別に印を付けると「資産の一部だけ別の畳みになる」表示になり、正本の一体性が壊れる。
+    if (depth === 0) {
+      out.push(`${EMBED_OPEN}${target}${EMBED_MARK}${section}`, inner, EMBED_CLOSE);
+    } else {
+      out.push(inner);
+    }
   }
   return out.join("\n");
 }
@@ -352,9 +589,15 @@ export function parseBlocks(markdown: string): PrepBlock[] {
   const lines = markdown.split("\n");
   let list: { ordered: boolean; start?: number; items: PrepInline[][] } | null = null;
   let table: { head: PrepInline[][]; rows: PrepInline[][][] } | null = null;
+  // expandEmbeds が付けた行印の内側にいる間だけ値を持つ。リスト・表は行印で必ず閉じるので、
+  // 「閉じた時の origin」と「開いた時の origin」が食い違うことはない。
+  let origin: PrepEmbedOrigin | null = null;
+  const push = (block: PrepBlock) => {
+    blocks.push(origin ? { ...block, embed: origin } : block);
+  };
 
   const closeList = () => {
-    if (list) blocks.push({
+    if (list) push({
       kind: "list",
       ordered: list.ordered,
       ...(list.start ? { start: list.start } : {}),
@@ -363,7 +606,7 @@ export function parseBlocks(markdown: string): PrepBlock[] {
     list = null;
   };
   const closeTable = () => {
-    if (table) blocks.push({ kind: "table", head: table.head, rows: table.rows });
+    if (table) push({ kind: "table", head: table.head, rows: table.rows });
     table = null;
   };
   const closeAll = () => {
@@ -375,15 +618,29 @@ export function parseBlocks(markdown: string): PrepBlock[] {
     const line = lines[i].replace(/\s+$/, "");
     const trimmed = line.trim();
 
+    if (line.startsWith(EMBED_MARK)) {
+      closeAll();
+      if (line.startsWith(EMBED_OPEN)) {
+        const [target, section = ""] = line.slice(EMBED_OPEN.length).split(EMBED_MARK);
+        origin = { target, section };
+      } else {
+        origin = null;
+      }
+      continue;
+    }
+
     if (trimmed.startsWith("```")) {
       closeAll();
       const buffer: string[] = [];
       i += 1;
-      while (i < lines.length && !lines[i].trim().startsWith("```")) {
+      // 行印はフェンスの中でも必ず境界として扱う。閉じ忘れのフェンスが行印を飲み込むと
+      // origin が復位せず、以降の本文が丸ごと「資産由来」扱いになってしまう。
+      while (i < lines.length && !lines[i].trim().startsWith("```") && !lines[i].startsWith(EMBED_MARK)) {
         buffer.push(lines[i]);
         i += 1;
       }
-      blocks.push({ kind: "code", text: buffer.join("\n") });
+      if (lines[i]?.startsWith(EMBED_MARK)) i -= 1;
+      push({ kind: "code", text: buffer.join("\n") });
       continue;
     }
 
@@ -410,9 +667,10 @@ export function parseBlocks(markdown: string): PrepBlock[] {
     if (heading) {
       closeList();
       const level = heading[1].length;
-      blocks.push({
+      push({
         kind: "heading",
         level: level <= 3 ? 3 : 4,
+        depth: level,
         inline: parseInline(heading[2].trim()),
       });
       continue;
@@ -424,27 +682,27 @@ export function parseBlocks(markdown: string): PrepBlock[] {
 
     if (body.startsWith("【あなた】")) {
       closeList();
-      blocks.push({ kind: "say", speaker: "you", inline: parseInline(body.slice(5)) });
+      push({ kind: "say", speaker: "you", inline: parseInline(body.slice(5)) });
       continue;
     }
     if (body.startsWith("【面接官】")) {
       closeList();
-      blocks.push({ kind: "say", speaker: "interviewer", inline: parseInline(body.slice(5)) });
+      push({ kind: "say", speaker: "interviewer", inline: parseInline(body.slice(5)) });
       continue;
     }
     if (body.startsWith("▷")) {
       closeList();
-      blocks.push({ kind: "note", tone: "zh", inline: parseInline(body.slice(1).trim()) });
+      push({ kind: "note", tone: "zh", inline: parseInline(body.slice(1).trim()) });
       continue;
     }
     if (body.startsWith("▶")) {
       closeList();
-      blocks.push({ kind: "note", tone: "follow", inline: parseInline(body.slice(1).trim()) });
+      push({ kind: "note", tone: "follow", inline: parseInline(body.slice(1).trim()) });
       continue;
     }
     if (quoted) {
       closeList();
-      blocks.push({ kind: "note", tone: "tip", inline: parseInline(body) });
+      push({ kind: "note", tone: "tip", inline: parseInline(body) });
       continue;
     }
     if (/^[-*]\s+/.test(trimmed)) {
@@ -461,7 +719,7 @@ export function parseBlocks(markdown: string): PrepBlock[] {
       continue;
     }
     closeList();
-    blocks.push({ kind: "paragraph", inline: parseInline(trimmed) });
+    push({ kind: "paragraph", inline: parseInline(trimmed) });
   }
   closeAll();
   return blocks;
@@ -484,17 +742,25 @@ function linksInInline(nodes: PrepInline[]) {
  * 本文中の Teams URL や補助リンクまで混ぜると「外部調査資料」の意味が薄れるため、
  * skill が正本としている会社研究リンク集を唯一の抽出元にする。
  */
-export function collectPrepExternalLinks(sections: PrepSection[]): PrepExternalLink[] {
-  const source = sections.find((section) => section.title.includes("会社研究リンク集"));
+export function collectPrepExternalLinks(
+  sections: PrepSection[],
+  prepVersion: PrepVersion = 1,
+): PrepExternalLink[] {
+  const source = prepVersion === 2
+    ? getPrepV2Section(sections, "resources")
+    : sections.find((section) => section.title.includes("会社研究リンク集"));
   if (!source) return [];
 
   const links: PrepExternalLink[] = [];
   const seen = new Set<string>();
   let group = "その他";
+  let groupStarred = false;
   for (const block of source.blocks) {
     if (block.kind === "heading") {
       group = prepInlineText(block.inline).replace(/^[①-⑳0-9０-９.\s]+/, "").trim() || "その他";
-      continue;
+      if (prepVersion === 1) continue;
+      // 新版资料可用链接标题作小节；星号在标题时也属于这条资料。
+      groupStarred = /[⭐★]/.test(group);
     }
     const inlineGroups =
       block.kind === "table"
@@ -507,7 +773,7 @@ export function collectPrepExternalLinks(sections: PrepSection[]): PrepExternalL
     for (const inline of inlineGroups) {
       // リストは複数項目が1ブロックになるため、★はブロック単位ではなくリンクのある行単位で判定する。
       const inlineText = prepInlineText(inline);
-      const starred = inlineText.includes("⭐") || inlineText.includes("★");
+      const starred = groupStarred || inlineText.includes("⭐") || inlineText.includes("★");
       for (const link of linksInInline(inline)) {
         if (!/^https?:\/\//.test(link.href) || seen.has(link.href)) continue;
         seen.add(link.href);
@@ -520,6 +786,9 @@ export function collectPrepExternalLinks(sections: PrepSection[]): PrepExternalL
 
 export function parseInterviewPrepDoc(note: Note, notes: Note[]): InterviewPrepDoc | null {
   if (getType(note) !== INTERVIEW_PREP_TYPE) return null;
+  const prepVersion = interviewPrepVersion(note.frontmatter.prep_version);
+  // 未知版本不能静默渲染成历史稿；vault:check 会给出明确错误。
+  if (prepVersion === null) return null;
 
   const byName = new Map<string, Note>();
   for (const candidate of notes) {
@@ -541,21 +810,22 @@ export function parseInterviewPrepDoc(note: Note, notes: Note[]): InterviewPrepD
     const start = (match.index ?? 0) + match[0].length;
     const end = matches[index + 1]?.index ?? expanded.length;
     const heading = match[1].trim();
+    const spec = prepVersion === 2 ? PREP_V2_SECTIONS.find((item) => item.title === heading) : null;
     sections.push({
-      id: `prep-sec-${index}`,
+      id: spec ? `prep-v2-${spec.id}` : `prep-sec-${index}`,
       title: heading,
-      navLabel: navLabel(heading),
+      navLabel: spec?.navLabel ?? navLabel(heading),
       blocks: parseBlocks(expanded.slice(start, end)),
     });
   });
 
   return {
     note,
+    prepVersion,
     title,
     company: getString(note.frontmatter.company),
     date: getString(note.frontmatter.date),
     round: getString(note.frontmatter.round),
-    sessionId: getString(note.frontmatter.session_id),
     sessionOrder: (() => {
       const source = note.frontmatter.session_order ?? note.frontmatter.round_order;
       const value = Number(source);
@@ -576,13 +846,14 @@ export function parseInterviewPrepDoc(note: Note, notes: Note[]): InterviewPrepD
     format: getString(note.frontmatter.format),
     interviewers: getString(note.frontmatter.interviewers),
     caseLink: prepWikiTarget(getString(note.frontmatter.case)),
+    meetingLink: prepWikiTarget(getString(note.frontmatter.meeting)),
     sections,
     embeds,
-    externalLinks: collectPrepExternalLinks(sections),
+    externalLinks: collectPrepExternalLinks(sections, prepVersion),
   };
 }
 
-export const PREP_LIBRARY_NOTE = "面接標準回答集";
+const PREP_LIBRARY_NOTE = "面接標準回答集";
 
 /**
  * `[[面接標準回答集#p27 …]]` のような参照から カードID を取り出す。
@@ -599,11 +870,4 @@ export function findInterviewPrepDocs(notes: Note[]): InterviewPrepDoc[] {
     .map((note) => parseInterviewPrepDoc(note, notes))
     .filter((doc): doc is InterviewPrepDoc => Boolean(doc))
     .sort((left, right) => (right.date || "").localeCompare(left.date || ""));
-}
-
-/** 面接当日を「まだ来ていない」と判定する境界。today は YYYY-MM-DD。 */
-export function splitPrepDocsByDate(docs: InterviewPrepDoc[], today: string) {
-  const upcoming = docs.filter((doc) => doc.date && doc.date >= today);
-  const past = docs.filter((doc) => !doc.date || doc.date < today);
-  return { upcoming: [...upcoming].reverse(), past };
 }

@@ -4,8 +4,6 @@ import {
   Fragment,
   lazy,
   Suspense,
-  type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -14,240 +12,185 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import InterviewReview from "./interview-review";
-import InterviewPrep from "./interview-prep";
-import InterviewSession from "./interview-session";
+import { flushSync } from "react-dom";
+import type { AdvisoryEvidenceRef } from "@/lib/interview-advisory";
 import InterviewSharedAsset from "./interview-shared-asset";
-import JapaneseTraining from "./japanese-training";
-import LanguageExpressionCourses from "./language-expression-courses";
-import JobsAnalytics from "./jobs-analytics";
-import JobsView from "./jobs-view";
-import type {
-  KnowledgeGraphSceneLink,
-  KnowledgeGraphSceneNode,
-} from "./knowledge-graph-three";
-import { buildFocusBrief, focusDateLabel } from "@/lib/focus-action";
-import { compareJobs, jobSection, toJobCard } from "@/lib/jobs";
+import { isTypingTarget } from "@/lib/keyboard";
+import type { JobsInitialFilters } from "./jobs-view";
+import CalendarView from "./calendar-view";
+import "./styles/user-actions.css";
+import { buildUserActions } from "@/lib/user-actions";
+import CalendarInterviewState from "./calendar-interview-state";
+import NoteDrawer from "./note-drawer";
+import SceneNoteReader from "./scene-note-reader";
+import SearchPalette, { type PaletteAction } from "./search-palette";
 import {
-  parseAnnotations,
-  parseSeirikou,
-  reviewDecisionTasks,
-  uniqueAnnotations,
-} from "@/lib/review";
+  appViewFromPathname,
+  appViewHref,
+  calendarInterviewFromSearch,
+  calendarInterviewSearch,
+  companyOverviewSearch,
+  reviewEvidenceSearch,
+  type AppView,
+} from "./app-route";
 import {
-  parseInterviewAnswerReview,
-  REVIEW_DIMENSION_META,
-  type InterviewAnswerReview,
-  type ReviewDimensionKey,
-} from "@/lib/review-deep";
-import { JOB_CASE_TYPE } from "@/lib/vault-boundary.mjs";
-import type { SharedAssetTarget } from "@/lib/interview-shared-assets";
+  MOBILE_PRIMARY_NAV_IDS,
+  getNavigation,
+  getSecondaryNavigation,
+  TOP_BAR_SECTION_IDS,
+  type NavIconName,
+} from "./navigation";
+import { useUndoFlash, UndoFlashBar } from "./undo-flash";
+import { notifyUrlChange, SHELL_URL_KEYS } from "./use-url-state";
+import { describeConnectionError } from "@/lib/connection-error";
+import { postJson } from "@/lib/client-api";
+import { createVaultReader, type VaultReadOptions } from "@/lib/vault-reader";
+import { createWikiNavigator, type WikiNavigationNotice } from "@/lib/wiki-navigation";
+import ViewErrorBoundary from "./view-error-boundary";
 import {
-  formatDate,
-  getString,
-  getTitle,
+  isRoundSpecificAsset,
+  type SharedAssetTarget,
+} from "@/lib/interview-shared-assets";
+import {
   getType,
   noteBasename,
-  stripFrontmatter,
-  stripMarkdown,
   type Note,
 } from "@/lib/notes";
+import {
+  buildCalendarEvents,
+  buildDerivedData,
+  calendarEventTime,
+  countdownLabel,
+  GROUPS,
+  localDateKey,
+  type Commitment,
+  type GroupKey,
+} from "@/lib/memory-atlas-data";
+import { scopesToReloadAfterStats, vaultScopeForView } from "@/lib/vault-scope";
+import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
+import { calendarProgress } from "@/lib/calendar-progress";
+import { buildCalendarSummary } from "@/lib/calendar-summary";
+import { tokyoParts } from "@/lib/dojo/utils";
+import { APP_BRANDING } from "@/lib/ui-locale";
+import { LanguageSwitch, useUiLocale } from "./ui-locale";
+import { ThemeSwitch, useUiTheme } from "./ui-theme";
+import { rememberRecentPath } from "@/lib/recent-notes";
+import { SHELL_MESSAGES } from "./shell-messages";
+import { buildNavBadges, quickDueBadgeCount, type NavBadge, type NavBadges } from "@/lib/nav-badges";
+import type { QuickSummary } from "@/lib/language/quick-types";
+import { useExitTransition } from "./use-exit-transition";
+import SidebarFooter from "./sidebar-footer";
+import { prefersReducedMotion as reducedMotionPreferred } from "@/lib/motion";
+import {
+  canStartViewTransition,
+  createPreloadable,
+  createViewTransitionNavigator,
+  startViewTransition,
+  type ViewTransitionCommitMode,
+} from "@/lib/view-transition";
 
-const ThreeKnowledgeGraph = lazy(() => import("./knowledge-graph-three"));
+// 业务页首次进入时再加载；组件身份固定，笔记刷新和 URL 更新不能重建页面状态。
+// 加载器与预取共用一份：侧栏悬停／聚焦时先拉 chunk，切换时 lazy 当场读到模块，转场的新快照里不是骨架。
+const VIEW_MODULES = {
+  activity: createPreloadable(() => import("./recent-progress-view")),
+  actions: createPreloadable(() => import("./user-actions-view")),
+  review: createPreloadable(() => import("./interview-review")),
+  insights: createPreloadable(() => import("./interview-insights")),
+  practice: createPreloadable(() => import("./interview-practice")),
+  prep: createPreloadable(() => import("./interview-prep")),
+  session: createPreloadable(() => import("./interview-session")),
+  language: createPreloadable(() => import("./japanese-training")),
+  topics: createPreloadable(() => import("./language-expression-courses")),
+  analytics: createPreloadable(() => import("./jobs-analytics")),
+  jobs: createPreloadable(() => import("./jobs-view")),
+  graph: createPreloadable(() => import("./graph-view")),
+  library: createPreloadable(() => import("./library-view")),
+  settings: createPreloadable(() => import("./settings-view")),
+  timeline: createPreloadable(() => import("./timeline-view")),
+};
+const InterviewReview = lazy(VIEW_MODULES.review.load);
+const InterviewInsights = lazy(VIEW_MODULES.insights.load);
+const InterviewPractice = lazy(VIEW_MODULES.practice.load);
+const InterviewPrep = lazy(VIEW_MODULES.prep.load);
+const InterviewSession = lazy(VIEW_MODULES.session.load);
+const JapaneseTraining = lazy(VIEW_MODULES.language.load);
+const LanguageExpressionCourses = lazy(VIEW_MODULES.topics.load);
+const JobsAnalytics = lazy(VIEW_MODULES.analytics.load);
+const JobsView = lazy(VIEW_MODULES.jobs.load);
+const GraphView = lazy(VIEW_MODULES.graph.load);
+const LibraryView = lazy(VIEW_MODULES.library.load);
+const SettingsView = lazy(VIEW_MODULES.settings.load);
+const TimelineView = lazy(VIEW_MODULES.timeline.load);
+const UserActionsView = lazy(VIEW_MODULES.actions.load);
+const RecentProgressView = lazy(VIEW_MODULES.activity.load);
+
+/** 日历是外壳的静态依赖，不在表里；其余页面按需预取，失败留给页面自己的错误边界。 */
+function viewModule(view: AppView) {
+  return view === "calendar" ? null : VIEW_MODULES[view];
+}
+
+function preloadView(view: AppView) {
+  void viewModule(view)?.preload();
+}
+
+/** 目标页已加载（或本来就是静态的）返回 null，否则返回预取的 Promise 供转场限时等待。 */
+function viewReady(view: AppView) {
+  const entry = viewModule(view);
+  return !entry || entry.isLoaded() ? null : entry.preload();
+}
+
+// 设置中心的「总是减弱动效」写在 <html data-motion>，转场闸要和全站同一个判定。
+function prefersReducedMotion() {
+  return reducedMotionPreferred();
+}
 
 export type { Note };
 
-type VaultResponse = {
-  connected: boolean;
-  fetchedAt?: number;
-  error?: string;
-  notes: Note[];
-};
+type View = AppView;
 
-type View = "overview" | "session" | "prep" | "review" | "language" | "topics" | "jobs" | "analytics" | "todo" | "graph" | "calendar" | "timeline" | "library";
-type PrimaryNavId =
-  | "overview"
-  | "progress"
-  | "opportunities"
-  | "calendar"
-  | "interview"
-  | "training"
-  | "resources";
+function NavigationIcon({ name }: { name: NavIconName }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" focusable="false">
+      {name === "actions" && <><rect x="4" y="5.5" width="16" height="15" rx="2" /><path d="M8 3.5v4M16 3.5v4M4 10.5h16M8 14h2M14 14h2M8 17h2" /></>}
+      {name === "career" && <><path d="M4 8.5h16v10.8H4z" /><path d="M8.5 8.5V5.7h7v2.8M4 12.5c4.8 2 11.2 2 16 0M10.5 13.3h3" /></>}
+      {name === "interview" && <><path d="M4 5.5h16v11H9l-5 3.2z" /><path d="M8 9.5h8M8 12.5h5" /></>}
+      {name === "training" && <><path d="m3.5 7 8.5-3 8.5 3-8.5 3z" /><path d="M6.2 8.2v5.6c3.6 2.8 8 2.8 11.6 0V8.2M20.5 7v7" /></>}
+      {name === "resources" && <><path d="M5 4.5h12a2 2 0 0 1 2 2V20H7a2 2 0 0 1-2-2z" /><path d="M7 4.5v15.5M10 8h6M10 11.5h6M10 15h4" /></>}
+      {name === "settings" && <><path d="M4 7h9M18 7h2M4 12h3M11 12h9M4 17h11M19 17h1" /><circle cx="15.5" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="17" cy="17" r="2" /></>}
+    </svg>
+  );
+}
 
-type PrimaryNavigationItem = {
-  id: PrimaryNavId;
-  label: string;
-  mobileLabel: string;
-  glyph: string;
-  target: View;
-  views: View[];
-};
 
-type SecondaryNavigationItem = {
-  id: View;
-  label: string;
-};
+/** 写回后是否自动重算派生统计（vault:stats）。本机偏好，存在 localStorage。 */
+const AUTO_STATS_KEY = "echo:auto-stats";
+const AUTO_STATS_EVENT = "echo:autostatschange";
+// 私密窗口等拿不到 localStorage 时，只在本次会话里记住。
+let autoStatsFallback = true;
 
-type CalendarEvent = {
-  id: string;
-  note: Note;
-  date: string;
-  time: string;
-  company: string;
-  label: string;
-  phase: "upcoming" | "past";
-};
+function readAutoStats() {
+  try {
+    const stored = window.localStorage.getItem(AUTO_STATS_KEY);
+    return stored === null ? autoStatsFallback : stored !== "off";
+  } catch {
+    return autoStatsFallback;
+  }
+}
 
-type ReviewPreviewDoc = {
-  key: string;
-  company: string;
-  date: string;
-  round: string;
-  decisionTotal: number;
-  pendingDecisions: number;
-  deepReview?: InterviewAnswerReview;
-};
+function writeAutoStats(next: boolean) {
+  autoStatsFallback = next;
+  try { window.localStorage.setItem(AUTO_STATS_KEY, next ? "on" : "off"); } catch { /* 见 autoStatsFallback */ }
+  window.dispatchEvent(new Event(AUTO_STATS_EVENT));
+}
 
-type ReviewPreview = {
-  docs: ReviewPreviewDoc[];
-  reviewedCount: number;
-  pendingDecisions: number;
-  readyCount: number;
-  scoreDoc: ReviewPreviewDoc | null;
-  actionDoc: ReviewPreviewDoc | null;
-};
-
-const GROUPS = {
-  self: {
-    label: "关于我",
-    short: "我",
-    color: "#e66d45",
-    tint: "#f9ddd0",
-  },
-  career: {
-    label: "求职",
-    short: "职",
-    color: "#2f6b59",
-    tint: "#d8e9df",
-  },
-  study: {
-    label: "日语学习",
-    short: "学",
-    color: "#7466a9",
-    tint: "#e3def2",
-  },
-  analysis: {
-    label: "AI 分析",
-    short: "析",
-    color: "#b5842f",
-    tint: "#f3e6c8",
-  },
-  system: {
-    label: "系统",
-    short: "规",
-    color: "#66706c",
-    tint: "#e5e7e4",
-  },
-} as const;
-
-type GroupKey = keyof typeof GROUPS;
-type LibraryScope = "all" | "evidence" | "action" | "interview" | "language" | "analysis";
-type LibrarySort = "recent" | "connections" | "title";
-
-const LIBRARY_SCOPES: { id: LibraryScope; label: string }[] = [
-  { id: "all", label: "全部内容" },
-  { id: "evidence", label: "权威与证据" },
-  { id: "action", label: "案件与行动" },
-  { id: "interview", label: "面试资料" },
-  { id: "language", label: "训练资料" },
-  { id: "analysis", label: "AI 分析" },
-];
-
-const LIBRARY_PAGE_SIZE = 24;
-
-// 一级菜单表达用户目标，不再逐页暴露实现视图。顺序先处理已在进行的案件，再寻找新机会。
-const NAVIGATION: PrimaryNavigationItem[] = [
-  {
-    id: "overview",
-    label: "总览",
-    mobileLabel: "总览",
-    glyph: "⌂",
-    target: "overview",
-    views: ["overview", "todo"],
-  },
-  {
-    id: "progress",
-    label: "求职进展",
-    mobileLabel: "进展",
-    glyph: "◑",
-    target: "analytics",
-    views: ["analytics"],
-  },
-  {
-    id: "opportunities",
-    label: "岗位机会",
-    mobileLabel: "岗位",
-    glyph: "★",
-    target: "jobs",
-    views: ["jobs"],
-  },
-  {
-    id: "calendar",
-    label: "日历",
-    mobileLabel: "日历",
-    glyph: "▦",
-    target: "calendar",
-    views: ["calendar"],
-  },
-  {
-    id: "interview",
-    label: "面试作战",
-    mobileLabel: "面试",
-    glyph: "戦",
-    target: "session",
-    views: ["session", "prep", "review"],
-  },
-  {
-    id: "training",
-    label: "训练中心",
-    mobileLabel: "训练",
-    glyph: "語",
-    target: "language",
-    views: ["language", "topics"],
-  },
-  {
-    id: "resources",
-    label: "资料库",
-    mobileLabel: "资料",
-    glyph: "▤",
-    target: "library",
-    views: ["library", "timeline", "graph"],
-  },
-];
-
-const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigationItem[]>> = {
-  interview: [
-    { id: "session", label: "当前面试" },
-    { id: "prep", label: "通用准备" },
-    { id: "review", label: "面试复盘" },
-  ],
-  training: [
-    { id: "language", label: "日语训练" },
-    { id: "topics", label: "专项训练" },
-  ],
-  resources: [
-    { id: "library", label: "全部资料" },
-    { id: "timeline", label: "时间线" },
-    { id: "graph", label: "关系图" },
-  ],
-};
-
-const MOBILE_PRIMARY_NAV_IDS = new Set<PrimaryNavId>([
-  "overview",
-  "progress",
-  "opportunities",
-  "interview",
-]);
+function subscribeAutoStats(onChange: () => void) {
+  window.addEventListener(AUTO_STATS_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(AUTO_STATS_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
 
 /**
  * 侧栏折叠态存在 `<html data-rail>` 上而不是 React state：
@@ -271,6 +214,8 @@ function isRailCollapsed() {
 }
 
 function RailToggle() {
+  const { locale } = useUiLocale();
+  const ui = SHELL_MESSAGES[locale];
   // 服务端与首帧一律按展开渲染，内联脚本已经把视觉切好了。
   const collapsed = useSyncExternalStore(subscribeRail, isRailCollapsed, () => false);
 
@@ -291,27 +236,43 @@ function RailToggle() {
       className="rail-toggle"
       onClick={toggle}
       aria-expanded={!collapsed}
-      aria-label={collapsed ? "展开侧边导航" : "收起侧边导航"}
+      aria-label={collapsed ? ui.expandRail : ui.collapseRail}
     >
       <i aria-hidden="true">‹</i>
-      <span>收起</span>
+      <span>{ui.collapse}</span>
     </button>
   );
 }
 
-function PrepCardOverlay({
-  notes,
-  cardId,
+/**
+ * 本场面试の上に重ねる全画面ビューの外殻。
+ *
+ * 中身（回答库カード／共通素材）は違っても、閉じた時に元いた場所へ戻す挙動は
+ * 同じでなければならない。以前は2つの overlay が同じ useEffect を各自持っていて、
+ * 復元のコツを書いた注釈は片方にしか残っていなかった——読む側からは
+ * 「注釈の無い方は単純な処理」に見えるので、次に触る人がそちらを削る。
+ */
+function InterviewOverlay({
+  className,
+  contentClassName,
+  titleId,
+  eyebrow,
+  title,
   origin,
-  onOpen,
   onClose,
+  children,
 }: {
-  notes: Note[];
-  cardId: string;
+  className: string;
+  contentClassName: string;
+  titleId: string;
+  eyebrow: ReactNode;
+  title: ReactNode;
   origin: { x: number; y: number };
-  onOpen: (note: Note) => void;
   onClose: () => void;
+  children: ReactNode;
 }) {
+  const { locale } = useUiLocale();
+  const ui = SHELL_MESSAGES[locale];
   const backRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -344,32 +305,53 @@ function PrepCardOverlay({
   }, [origin.x, origin.y]);
 
   return (
-    <section
-      className="prep-card-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="prep-card-overlay-title"
-    >
+    <section className={className} role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <header className="prep-card-overlay-bar">
         <button ref={backRef} type="button" onClick={onClose}>
           <span aria-hidden="true">←</span>
-          返回本场面试
+          {ui.sessionBack}
         </button>
         <div>
-          <small>STANDARD ANSWER LIBRARY</small>
-          <strong id="prep-card-overlay-title">回答库 · {cardId}</strong>
+          <small>{eyebrow}</small>
+          <strong id={titleId}>{title}</strong>
         </div>
-        <span><kbd>Esc</kbd> 也可返回</span>
+        <span><kbd>Esc</kbd> {ui.escapeBack}</span>
       </header>
-      <div className="prep-card-overlay-content">
-        <InterviewPrep
-          key={cardId}
-          notes={notes}
-          onOpen={onOpen}
-          initialCardId={cardId}
-        />
-      </div>
+      <div className={contentClassName}>{children}</div>
     </section>
+  );
+}
+
+function PrepCardOverlay({
+  notes,
+  cardId,
+  origin,
+  onOpen,
+  onClose,
+}: {
+  notes: Note[];
+  cardId: string;
+  origin: { x: number; y: number };
+  onOpen: (note: Note) => void;
+  onClose: () => void;
+}) {
+  const { locale } = useUiLocale();
+  return (
+    <InterviewOverlay
+      className="prep-card-overlay"
+      contentClassName="prep-card-overlay-content"
+      titleId="prep-card-overlay-title"
+      eyebrow="STANDARD ANSWER LIBRARY"
+      title={`${SHELL_MESSAGES[locale].answerLibrary} · ${cardId}`}
+      origin={origin}
+      onClose={onClose}
+    >
+      <ViewErrorBoundary label="prep-card">
+        <Suspense fallback={<LoadingState view="prep" />}>
+          <InterviewPrep key={cardId} notes={notes} onOpen={onOpen} initialCardId={cardId} />
+        </Suspense>
+      </ViewErrorBoundary>
+    </InterviewOverlay>
   );
 }
 
@@ -388,443 +370,341 @@ function SharedAssetOverlay({
   onOpenWiki: (target: string, section?: string) => void;
   onClose: () => void;
 }) {
-  const backRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    const previousFocus =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const bodyOverflow = document.body.style.overflow;
-    const rootOverflow = document.documentElement.style.overflow;
-    const scrollRestoration = window.history.scrollRestoration;
-    window.history.scrollRestoration = "manual";
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
-    backRef.current?.focus();
-    return () => {
-      document.body.style.overflow = bodyOverflow;
-      document.documentElement.style.overflow = rootOverflow;
-      previousFocus?.focus({ preventScroll: true });
-      const restore = () => window.scrollTo({ left: origin.x, top: origin.y });
-      restore();
-      window.setTimeout(restore, 0);
-      window.setTimeout(() => {
-        restore();
-        window.history.scrollRestoration = scrollRestoration;
-      }, 80);
-    };
-  }, [origin.x, origin.y]);
-
   return (
-    <section
+    <InterviewOverlay
       className="prep-card-overlay shared-asset-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="shared-asset-overlay-title"
+      contentClassName="prep-card-overlay-content shared-asset-overlay-content"
+      titleId="shared-asset-overlay-title"
+      eyebrow={isRoundSpecificAsset(target) ? "THIS ROUND · MOTIVATION" : "COMMON INTERVIEW ASSET"}
+      title={target.label}
+      origin={origin}
+      onClose={onClose}
     >
-      <header className="prep-card-overlay-bar">
-        <button ref={backRef} type="button" onClick={onClose}>
-          <span aria-hidden="true">←</span>
-          返回本场面试
-        </button>
-        <div>
-          <small>
-            {target.scope === "company"
-              ? "THIS INTERVIEW · COMPANY MOTIVATION"
-              : "COMMON INTERVIEW ASSET"}
-          </small>
-          <strong id="shared-asset-overlay-title">{target.label}</strong>
-        </div>
-        <span><kbd>Esc</kbd> 也可返回</span>
-      </header>
-      <div className="prep-card-overlay-content shared-asset-overlay-content">
-        <InterviewSharedAsset
-          key={`${target.note}#${target.section ?? ""}#${target.defaultSection ?? ""}`}
-          note={note}
-          target={target}
-          onOpenCard={onOpenCard}
-          onOpenWiki={onOpenWiki}
-        />
-      </div>
-    </section>
+      <InterviewSharedAsset
+        key={`${target.note}#${target.section ?? ""}#${target.defaultSection ?? ""}`}
+        note={note}
+        target={target}
+        onOpenCard={onOpenCard}
+        onOpenWiki={onOpenWiki}
+      />
+    </InterviewOverlay>
   );
 }
 
-function getGroup(path: string): GroupKey {
-  if (path.startsWith("10_")) return "self";
-  if (path.startsWith("20_")) return "career";
-  if (path.startsWith("30_")) return "study";
-  if (path.startsWith("80_")) return "analysis";
-  return "system";
-}
+/*
+ * 只认外壳的键（哪一场、哪份稿）。视图自己放进 URL 的筛选・模式（filter / pattern / prepMode …）
+ * 走 replaceState，不经过这里；把它们算进来的话，关掉原笔记 drawer 回退时键就对不上，
+ * 整页重挂，正在写的批注草稿随之丢失。
+ */
+const INTERVIEW_ENTRY_KEYS: ReadonlySet<string> = new Set(
+  SHELL_URL_KEYS.filter((key) => key !== "note" && key !== "section"),
+);
 
-function typeLabel(type: string) {
-  const labels: Record<string, string> = {
-    self: "人工确认",
-    company: "公司卷宗",
-    review: "复盘证据",
-    transcript: "逐字稿",
-    "transcript-study": "逐字稿研究",
-    "study-annotation": "逐字稿批注",
-    study: "学习资料",
-    "ai-report": "AI 观点",
-    "ai_review_request": "AI 审查请求",
-    "ai_review_result": "AI 审查结果",
-    analysis: "综合分析",
-    "deep-thought-evidence": "深度思考证据",
-    "deep-thought-opinion": "独立分析观点",
-    "interview-answer-review": "回答质量复盘",
-    "interview-answer-practice": "回答重练队列",
-    "interview-answer-feedback": "回答质量批注",
-    "interview-prep-library": "面试标准回答库",
-    "interview-prep": "面试轮次准备",
-    policy: "规则",
-    "policy-change": "规则变更",
-    material: "素材",
-    "training-profile": "训练画像",
-    "training-lesson": "训练教材",
-    "training-log": "训练记录",
-    "language-curriculum": "训练课程",
-    "language-bank": "语言素材库",
-    "language-session-log": "训练会话",
-    "language-coach-log": "教练记录",
-    "language-batch-log": "训练批次",
-    "language-expression-course-progress": "专项训练进度",
-    "practice-log": "教练练习",
-    "exam-log": "考试记录",
-    [JOB_CASE_TYPE]: "应募案件",
-    "excluded-job": "已排除岗位",
-    "job-audit": "案件审计",
-    "job-queue": "岗位队列",
-    job_platform_sync: "平台同步",
-    application_log: "应募记录",
-    "outbound-draft": "联络草稿",
-    application_documents: "应募材料",
-    application_documents_review: "材料审查",
-    application_documents_changelog: "材料变更记录",
-    application_document_strategy: "材料策略",
-    mail: "邮件证据",
-    "review-request": "复盘请求",
-    ledger: "台账",
-    todo: "待办",
-    moc: "索引",
-    note: "笔记",
-  };
-  return labels[type] ?? type.replace(/[-_]+/g, " ");
-}
-
-function trustLayer(note: Note) {
-  const type = getType(note);
-  if (type === "self") {
-    return { label: "权威事实", className: "trust-authority" };
+function interviewNavigationKey(view: AppView, search: string) {
+  const params = new URLSearchParams();
+  for (const [key, value] of new URLSearchParams(search)) {
+    if (INTERVIEW_ENTRY_KEYS.has(key)) params.append(key, value);
   }
-  if (["review", "transcript", "company", JOB_CASE_TYPE, "policy"].includes(type)) {
-    return { label: "证据层", className: "trust-evidence" };
-  }
-  if (["ai-report", "interview-answer-review"].includes(type)) {
-    return { label: "分析 / 假设", className: "trust-analysis" };
-  }
-  return { label: "导航 / 素材", className: "trust-reference" };
+  return appViewHref(view, params);
 }
 
-function libraryScopeMatches(note: Note, scope: LibraryScope) {
-  const type = getType(note);
-  if (scope === "all") return true;
-  if (scope === "evidence") {
-    return ["trust-authority", "trust-evidence"].includes(trustLayer(note).className);
-  }
-  if (scope === "action") {
-    return [
-      JOB_CASE_TYPE,
-      "todo",
-      "job-queue",
-      "job-audit",
-      "application_log",
-      "outbound-draft",
-    ].includes(type);
-  }
-  if (scope === "interview") {
-    return [
-      "review",
-      "transcript",
-      "transcript-study",
-      "study-annotation",
-      "interview-prep",
-      "interview-prep-library",
-      "interview-answer-review",
-      "interview-answer-practice",
-      "interview-answer-feedback",
-    ].includes(type);
-  }
-  if (scope === "language") {
-    return getGroup(note.path) === "study" || type.startsWith("language-") || type.startsWith("training-");
-  }
-  return getGroup(note.path) === "analysis" || [
-    "ai-report",
-    "analysis",
-    "deep-thought-evidence",
-    "deep-thought-opinion",
-    "ai_review_request",
-    "ai_review_result",
-  ].includes(type);
+
+type DerivedState = "fresh" | "stale" | "rebuilding";
+/** これらを書き換えると台帳・数据字典・面接傾向の generated 区块が古くなる（vault:stats の入力）。 */
+const DERIVED_SOURCE_TYPES = new Set(["job-case", "job-queue", "interview-answer-review", "transcript-study", "study-annotation"]);
+
+function historyEntryId(state: unknown): string | null {
+  const id = state && typeof state === "object" ? (state as { __echoEntry?: unknown }).__echoEntry : undefined;
+  return typeof id === "string" ? id : null;
 }
 
-function notePreview(note: Note) {
-  const text = stripMarkdown(note.content).replace(/\s+/g, " ").trim();
-  const title = stripMarkdown(getTitle(note)).replace(/\s+/g, " ").trim();
-  const withoutRepeatedTitle = text.startsWith(title) ? text.slice(title.length).trim() : text;
-  return withoutRepeatedTitle || "这篇记忆暂时没有可预览的正文。";
+let historyEntrySequence = 0;
+/** 历史条目 id。只要在本标签页内唯一：时间戳防刷新后重号，序号防同一毫秒内连点。 */
+function newHistoryEntryId() {
+  historyEntrySequence += 1;
+  return `${Date.now().toString(36)}-${historyEntrySequence}`;
 }
 
-function noteFolder(path: string) {
-  const folders = path.split("/").slice(0, -1);
-  return folders.length ? folders.join(" / ") : "Vault 根目录";
+/**
+ * 训练中心角标「待复习 n」：首次载入完成后取一次快练汇总（失败静默）；在训练页时由训练页交来最新汇总，不重复请求。
+ * 单独成 hook：写在外壳组件体里会让 React Compiler 放弃整个外壳的记忆化。
+ */
+function useQuickDueBadge(loaded: boolean, viewRef: { readonly current: string }) {
+  const [quickDue, setQuickDue] = useState<number | null>(null);
+  const requested = useRef(false);
+  const onQuickSummary = useCallback((summary: QuickSummary) => setQuickDue(quickDueBadgeCount(summary)), []);
+  useEffect(() => {
+    if (!loaded || requested.current || viewRef.current === "language") return;
+    // 标记放进计时器里：开发模式下 effect 会先清理再重跑，先标记会让这一次请求永远发不出去。
+    const timer = window.setTimeout(() => {
+      requested.current = true;
+      fetch("/api/language/v2/quick/summary", { cache: "no-store", signal: AbortSignal.timeout(20_000) })
+        .then((response) => response.ok ? response.json() as Promise<QuickSummary | { summary?: QuickSummary }> : null)
+        .then((body) => {
+          const summary = body && "summary" in body && body.summary ? body.summary : body as QuickSummary | null;
+          setQuickDue((current) => current ?? quickDueBadgeCount(summary));
+        })
+        .catch(() => undefined);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loaded, viewRef]);
+  return { quickDue, onQuickSummary };
 }
 
-function extractLinks(content: string) {
-  return Array.from(content.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g))
-    .map((match) => match[1].trim())
-    .filter(Boolean);
-}
-
-function getNoteDate(note: Note) {
-  const frontmatterDate = getString(note.frontmatter.date);
-  const filenameDate = note.path.match(/(20\d{2}-\d{2}-\d{2})/)?.[1];
-  return frontmatterDate || filenameDate || "";
-}
-
-function getLatestNoteDate(note: Note) {
-  const contentDates = Array.from(
-    note.content.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g),
-    (match) => match[1],
+function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
+  const { locale, setLocale } = useUiLocale();
+  const { theme, setTheme } = useUiTheme();
+  const ui = SHELL_MESSAGES[locale];
+  const branding = APP_BRANDING[locale];
+  const navigation = getNavigation(locale);
+  const secondaryMenus = getSecondaryNavigation(locale);
+  const [vaultReader] = useState(() => createVaultReader());
+  const vaultState = useSyncExternalStore(vaultReader.subscribe, vaultReader.getState, vaultReader.getState);
+  const notes = vaultState.notes;
+  const [view, setView] = useState<View>(initialView);
+  // 这一页是不是由页面转场带进来的。转场的新快照已经有淡入上移，容器自己的 view-enter 再播一遍就是双重入场；
+  // 挂在随 view 重挂的 .view-container 上，转场结束后也不会因为属性被移除而重播。
+  const [viewEnter, setViewEnter] = useState<ViewTransitionCommitMode>("instant");
+  const [viewNavigator] = useState(() => createViewTransitionNavigator({
+    canTransition: () => canStartViewTransition(document, prefersReducedMotion),
+    start: (update) => startViewTransition(document, update, document.documentElement),
+    scheduler: { wait: (ms) => new Promise<void>((resolve) => window.setTimeout(resolve, ms)) },
+  }));
+  const [interviewRouteSearch, setInterviewRouteSearch] = useState(() =>
+    typeof window === "undefined" ? "" : window.location.search,
   );
-  const candidates = [
-    getString(note.frontmatter.updated),
-    getString(note.frontmatter.date),
-    ...contentDates,
-  ].filter((value) => /^20\d{2}-\d{2}-\d{2}$/.test(value));
-
-  if (candidates.length > 0) {
-    return candidates.sort((left, right) => right.localeCompare(left))[0];
-  }
-
-  return new Date(note.stat.mtime).toISOString().slice(0, 10);
-}
-
-function careerStatus(status: string) {
-  if (["応募済", "書類通過", "面接中"].includes(status)) {
-    return { label: status, tone: "active" };
-  }
-  if (status.includes("不採用")) return { label: "不採用", tone: "rejected" };
-  if (status.includes("未応募")) return { label: "未応募", tone: "idle" };
-  if (status.includes("辞退")) return { label: "辞退", tone: "idle" };
-  return { label: status || "未分類", tone: "idle" };
-}
-
-function localDateKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-const ACTIVE_JOB_STATUSES = new Set(["応募済", "書類通過", "面接中"]);
-
-function buildReviewPreview(notes: Note[]): ReviewPreview {
-  const studies = notes.filter((note) => getType(note) === "transcript-study");
-  const annotationNotes = notes.filter((note) => getType(note) === "study-annotation");
-  const deepReviewNotes = notes.filter((note) => getType(note) === "interview-answer-review");
-  const docs = studies
-    .map((note): ReviewPreviewDoc => {
-      const company = getString(note.frontmatter.company);
-      const date = getString(note.frontmatter.date);
-      const round = getString(note.frontmatter.round);
-      const annotationNote = annotationNotes.find(
-        (candidate) =>
-          getString(candidate.frontmatter.company) === company &&
-          getString(candidate.frontmatter.date) === date,
-      );
-      const deepReviewNote = deepReviewNotes.find(
-        (candidate) =>
-          getString(candidate.frontmatter.company) === company &&
-          getString(candidate.frontmatter.date) === date &&
-          getString(candidate.frontmatter.round) === round,
-      );
-      const parsed = parseSeirikou(note.content);
-      const annotations = annotationNote
-        ? uniqueAnnotations(parseAnnotations(annotationNote.content))
-        : [];
-      const decisions = reviewDecisionTasks(parsed.sentences, annotations);
-      return {
-        key: note.path,
-        company,
-        date,
-        round,
-        decisionTotal: decisions.length,
-        pendingDecisions: decisions.filter((item) => !item.resolvedBy).length,
-        deepReview: deepReviewNote
-          ? parseInterviewAnswerReview(deepReviewNote.content) ?? undefined
-          : undefined,
-      };
-    })
-    .sort((left, right) => right.date.localeCompare(left.date));
-  const reviewedCount = docs.filter((doc) => doc.deepReview).length;
-  const pendingDecisions = docs.reduce((total, doc) => total + doc.pendingDecisions, 0);
-  const readyCount = docs.filter((doc) => doc.pendingDecisions === 0 && !doc.deepReview).length;
-  const scoreDoc = docs.find((doc) => doc.deepReview) ?? null;
-  const actionDoc =
-    docs.find((doc) => doc.pendingDecisions > 0) ??
-    docs.find((doc) => !doc.deepReview) ??
-    scoreDoc ??
-    docs[0] ??
-    null;
-  return { docs, reviewedCount, pendingDecisions, readyCount, scoreDoc, actionDoc };
-}
-
-function calendarEventLabel(text: string) {
-  if (/エージェント面談|猎头面谈/.test(text)) return "猎头面谈";
-  if (/カジュアル面談|轻松面谈/.test(text)) return "轻松面谈";
-  if (/最終面接|最终面试/.test(text)) return "最终面试";
-  if (/一次面接|一面/.test(text)) return "第一次面试";
-  if (/二次面接|二面/.test(text)) return "第二次面试";
-  if (/セミナー|说明会/.test(text)) return "招聘说明会";
-  if (/面接|面试/.test(text)) return "面试";
-  return "面谈";
-}
-
-function buildCalendarEvents(notes: Note[]): CalendarEvent[] {
-  const today = localDateKey();
-  const events = new Map<string, CalendarEvent>();
-
-  const addEvent = (note: Note, date: string, source: string, priority: number) => {
-    const company = getString(note.frontmatter.company) || getTitle(note);
-    const label = calendarEventLabel(source || getTitle(note));
-    const time = source.match(/(?:^|\D)((?:[01]?\d|2[0-3]):[0-5]\d)(?:\D|$)/)?.[1] ?? "";
-    const key = `${company.toLowerCase()}|${date}`;
-    const candidate: CalendarEvent & { priority: number } = {
-      id: `${key}|${note.path}`,
-      note,
-      date,
-      time,
-      company,
-      label,
-      phase: date >= today ? "upcoming" : "past",
-      priority,
-    };
-    const current = events.get(key) as (CalendarEvent & { priority?: number }) | undefined;
-    if (!current || (current.priority ?? 0) < priority) events.set(key, candidate);
-  };
-
-  notes.forEach((note) => {
-    const type = getType(note);
-    const frontmatterDate = getString(note.frontmatter.date);
-    if (["review", "transcript"].includes(type) && /^20\d{2}-\d{2}-\d{2}$/.test(frontmatterDate)) {
-      addEvent(note, frontmatterDate, getTitle(note), type === "review" ? 4 : 3);
-    }
-
-    // エージェント面談・説明会など単一案件に紐づかない予定は todo の next_event_at が正本。
-    // 旧 next_action は移行中の互換入力としてだけ残す。
-    //（2026-07-24 ワークポート面談が job-case 側に存在せず日历から漏れた実証）。
-    // todo 本文は経緯メモが多く誤検出するので frontmatter しか読まない。完了済みは予定ではない。
-    if (type === "todo" && todoStatus(note) !== "完了") {
-      const line =
-        getString(note.frontmatter.next_event_at) ||
-        getString(note.frontmatter.next_action);
-      const date = line.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
-      if (date) addEvent(note, date, line, 3);
-      return;
-    }
-
-    // 確定日程は next_event_at を正本にする。自由文 next_action の日付を正本扱いすると、
-    // 「7/29 に返信済み」のような履歴日を未来の締切・面接日に誤認するため。
-    // company 本文を再走査すると、同じ面接が証拠記述と案件で二重表示される。
-    if (type !== JOB_CASE_TYPE) return;
-    const sources = [
-      { line: getString(note.frontmatter.next_event_at), priority: 4, trusted: true },
-      { line: getString(note.frontmatter.next_action), priority: 3, trusted: true },
-      ...stripFrontmatter(note.content)
-        .split("\n")
-        .map((line) => ({ line, priority: 2, trusted: false })),
-    ];
-    sources.forEach(({ line, priority, trusted }) => {
-      if (!/(?:面接|面談|面试|面谈|カジュアル|セミナー|说明会)/.test(line)) return;
-      if (!trusted && /(?:通知|リマインド|案内|お礼|準備|証拠|応募|スカウト|不採用|結果)/.test(line)) return;
-      const date = line.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
-      if (date) addEvent(note, date, line, priority);
-    });
-  });
-
-  return Array.from(events.values()).sort((left, right) => {
-    const byDate = left.date.localeCompare(right.date);
-    if (byDate) return byDate;
-    return left.time.localeCompare(right.time);
-  });
-}
-
-function noteMatches(note: Note, rawQuery: string) {
-  const query = rawQuery.trim().toLowerCase();
-  if (!query) return true;
-  const haystack = `${note.path}\n${note.content}\n${JSON.stringify(note.frontmatter)}`.toLowerCase();
-  return query.split(/\s+/).every((token) => {
-    const [prefix, ...rest] = token.split(":");
-    const value = rest.join(":");
-    if (!value) return haystack.includes(token);
-    if (prefix === "type") return getType(note).toLowerCase().includes(value);
-    if (prefix === "status") {
-      return getString(note.frontmatter.status).toLowerCase().includes(value);
-    }
-    if (prefix === "folder") return note.path.toLowerCase().includes(value);
-    return haystack.includes(token);
-  });
-}
-
-function countMatches(content: string, expression: RegExp) {
-  return Array.from(content.matchAll(expression)).length;
-}
-
-function MemoryAtlas() {
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [view, setView] = useState<View>("overview");
-  const [reviewInitialKey, setReviewInitialKey] = useState<string | null>(null);
+  const [interviewRouteVersion, setInterviewRouteVersion] = useState(0);
+  const interviewNavigation = useRef("");
   // 本场面试を残したまま、その上に全幅で開く回答库カード
   const [prepOverlayCard, setPrepOverlayCard] = useState<string | null>(null);
   const [prepOverlayOrigin, setPrepOverlayOrigin] = useState({ x: 0, y: 0 });
   const [sharedAssetOverlay, setSharedAssetOverlay] = useState<SharedAssetTarget | null>(null);
   const [sharedAssetOrigin, setSharedAssetOrigin] = useState({ x: 0, y: 0 });
   // 求職分析から「進行中 N 件をすべて見る」で飛んできた時だけ、求人一覧に状態フィルタを引き継ぐ。
-  const [jobsInitialStatuses, setJobsInitialStatuses] = useState<string[] | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [selectedSection, setSelectedSection] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  const [jobsInitialFilters, setJobsInitialFilters] = useState<JobsInitialFilters | null>(null);
+  // 派生統計（台帳・数据字典・面接傾向の generated 区块）が手元の事実に追いついているか。
+  // 書込ルートは stale を返すだけで再計算できない（workerd）ので、殻が本機 bridge に頼む。
+  const [derivedState, setDerivedState] = useState<DerivedState>("fresh");
+  const [statsError, setStatsError] = useState("");
+  // 服务端与首帧一律按「自动」渲染，挂载后再读本机偏好——在 useState 初始化里直接读 localStorage，
+  // 本机设成手动时首帧文字与服务端不一致，React 会丢掉整棵服务端 HTML 重画。
+  const autoStats = useSyncExternalStore(subscribeAutoStats, readAutoStats, () => true);
+  const statsTimer = useRef<number | null>(null);
+  // 写回后的「已改为 X · 撤销」全壳只有一条；各页拿到的是稳定的 show。
+  const [selectedPath, setSelectedPath] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("note"),
+  );
+  const [selectedSection, setSelectedSection] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("section"),
+  );
+  // 详情・场景阅读层先播退场再走原来的关闭逻辑；退场途中换了篇就取消（见 lib/exit-transition.ts）。
+  const { exiting: noteExiting, exit: exitNote } = useExitTransition(selectedPath);
+  /*
+   * 资料库那一页的筛选词。以前它和顶栏那个全局搜索框共用同一个 state，
+   * 于是「页面状态住在全局 chrome 里」：在顶栏打字，底下的卡片列表跟着变，
+   * 同时还弹出一个跳转面板盖在上面。现在搜索面板自己持有局部关键词，
+   * 这个 state 只服务资料库自己的搜索框。
+   */
+  const [libraryQuery, setLibraryQuery] = useState(() =>
+    typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("q") ?? "",
+  );
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
-  const [groupFilter, setGroupFilter] = useState<GroupKey | "all">("all");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
+  const [groupFilter, setGroupFilter] = useState<GroupKey | "all">(() => {
+    if (typeof window === "undefined") return "all";
+    const group = new URLSearchParams(window.location.search).get("group");
+    return group === "all" || (group !== null && group in GROUPS)
+      ? group as GroupKey | "all"
+      : "all";
+  });
+  // ダッシュボードは開きっぱなしで使う。「今日」は殻が state で持ち、視圖へは props で渡す
+  // ——視圖は memo で包んであるので、中で new Date() を呼ぶだけだと日付を跨いでも
+  // props が変わらず再レンダーされず、昨日の日付が凍りつく（総覧の見出し・日历の「今天」）。
+  const [today, setToday] = useState(() => localDateKey());
+  const [calendarToday, setCalendarToday] = useState(() => tokyoParts().date);
+  const loading = vaultState.loading || vaultState.readyScopes.size === 0 && vaultState.errors.size === 0;
+  const activeScope = vaultScopeForView(view);
+  const error = vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
+  const [writeError, setWriteError] = useState("");
+  // 撤销失败而它的提示已被新的一次写入顶掉时，理由落到全局的写入错误横幅上（见 useUndoFlash）。
+  const reportStaleUndoFailure = useCallback((message: string) => setWriteError(`撤销没有完成：${message}`), []);
+  const undoFlash = useUndoFlash({ onStaleFailure: reportStaleUndoFailure });
+  const { show: showFlash } = undoFlash;
+  const fetchedAt = vaultState.checkedAt.get(activeScope) ?? vaultState.checkedAt.get("all") ?? null;
+  // どの scope が手元に揃ったか。視図はこれで「まだ来ていない」と「本当に無い」を分ける（假空态の根）。
+  const readyScopes = vaultState.readyScopes;
+  const interviewScopeReady = readyScopes.has("all") || readyScopes.has("interview");
+  const scopeReady = readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
+  const actionsReady = readyScopes.has("all") || readyScopes.has("actions");
+  const activityReady = readyScopes.has("all") || readyScopes.has("activity");
+  const activityError = vaultState.errors.get("activity") ?? vaultState.errors.get("all") ?? "";
+  const activityFetchedAt = vaultState.checkedAt.get("activity") ?? vaultState.checkedAt.get("all") ?? null;
+  const userActions = useMemo(() => buildUserActions(notes, calendarToday), [notes, calendarToday]);
 
-  // 模块间切换不继承上一页的滚动位置，否则新页面会从标题或工具栏中段开始。
+  // 浏览器后退／前进回到某一页时要回到的纵向位置。
+  const pendingScrollRestore = useRef<number | null>(null);
+  const currentView = useRef<View>(initialView);
+  // 每条历史条目一个 id（history.state.__echoEntry），滚动时持续记下「这一条目当前滚到哪」。
+  // 只在点导航离开时盖章是不够的：用后退／前进离开的那一页从没盖过章，回来时要么回到顶部，要么回到更早的旧位置。
+  const scrollByEntry = useRef(new Map<string, number>());
+  // 正在显示的那一条目。popstate 触发时 history.state 已经换成目的地，要靠它知道「刚离开的是谁」。
+  const currentEntry = useRef<string | null>(null);
+
   useEffect(() => {
-    window.scrollTo({ left: 0, top: 0 });
+    if (!historyEntryId(window.history.state)) {
+      window.history.replaceState({ ...(window.history.state ?? {}), __echoEntry: newHistoryEntryId() }, "");
+    }
+    currentEntry.current = historyEntryId(window.history.state);
+    const record = () => {
+      const id = historyEntryId(window.history.state);
+      if (id) scrollByEntry.current.set(id, window.scrollY);
+    };
+    window.addEventListener("scroll", record, { passive: true });
+    return () => window.removeEventListener("scroll", record);
+  }, []);
+
+  // 往前走（点导航）时新页面从顶部开始，否则会从标题或工具栏中段开始；
+  // 用后退回到刚才那页时则回到离开时的位置——看完一条案件想回列表接着往下看，不该每次从头翻。
+  useEffect(() => {
+    currentView.current = view;
+    const restoreY = pendingScrollRestore.current;
+    pendingScrollRestore.current = null;
+    if (restoreY === null) {
+      window.scrollTo({ left: 0, top: 0 });
+      return;
+    }
+    const restore = () => window.scrollTo({ left: 0, top: restoreY });
+    // rAF 在后台／隐藏的面板里不跑。先立刻定一次，等列表按新 view 排完版（数据已在手）再补一次。
+    restore();
+    const early = window.setTimeout(restore, 0);
+    const late = window.setTimeout(restore, 150);
+    return () => {
+      window.clearTimeout(early);
+      window.clearTimeout(late);
+    };
   }, [view]);
 
-  const loadVault = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await fetch("/api/vault", { cache: "no-store" });
-      const payload = (await response.json()) as VaultResponse;
-      if (!response.ok || !payload.connected) {
-        throw new Error(payload.error || "无法连接 Obsidian");
-      }
-      setNotes(payload.notes);
-      setFetchedAt(payload.fetchedAt ?? Date.now());
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "无法连接 Obsidian");
-    } finally {
-      setLoading(false);
-    }
+  // 次の深夜0時ちょうどに一度だけ起こす（常駐タイマーを置かないため）。
+  // タブが背面にいる間に日付が変わっていることもあるので、復帰時にも合わせる。
+  useEffect(() => {
+    let timer = 0;
+    const sync = () => {
+      setCalendarToday(tokyoParts().date);
+      setToday((current: string) => {
+        const now = localDateKey();
+        return now === current ? current : now;
+      });
+      schedule();
+    };
+    const schedule = () => {
+      window.clearTimeout(timer);
+      const now = new Date();
+      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      const jstMidnight = Date.parse(`${tokyoParts(now).date}T00:00:00+09:00`) + 86400000;
+      timer = window.setTimeout(sync, Math.max(1000, Math.min(midnight.getTime(), jstMidnight) - now.getTime()));
+    };
+    schedule();
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("focus", sync);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("focus", sync);
+    };
   }, []);
+
+  // 请求次序、scope 快照和写回保护由独立协调器管理，页面只订阅接受后的状态。
+  const loadVault = useCallback(async (options?: VaultReadOptions): Promise<void> => {
+    await vaultReader.request(options);
+  }, [vaultReader]);
+
+  const [wikiNotice, setWikiNotice] = useState<WikiNavigationNotice>(null);
+  const [wikiNavigator] = useState(() => createWikiNavigator({
+    getNotes: () => vaultReader.getState().notes,
+    isComplete: () => vaultReader.getState().readyScopes.has("all"),
+    ensureAll: async () => {
+      // R 可替代在途请求；等它的最新结果，不能拿点击前闭包里的旧 notes 解析。
+      let result = await vaultReader.request({ scope: "all" });
+      while (result.status === "superseded" && vaultReader.getState().loadingScopes.has("all")) {
+        result = await vaultReader.request({ scope: "all" });
+      }
+      return result.status === "accepted" ? vaultReader.getState().notes : null;
+    },
+    onNotice: setWikiNotice,
+    onOpen: ({ path, section }) => {
+      const params = new URLSearchParams(window.location.search);
+      params.set("note", path);
+      if (section) params.set("section", section);
+      else params.delete("section");
+      window.history.pushState(
+        { ...(window.history.state ?? {}), __echoNote: path }, "",
+        `${window.location.pathname}?${params.toString()}`,
+      );
+      setSelectedPath(path);
+      setSelectedSection(section);
+      setSearchOpen(false);
+    },
+  }));
+
+  useEffect(() => {
+    return () => {
+      wikiNavigator.cancel();
+      vaultReader.dispose();
+    };
+  }, [vaultReader, wikiNavigator]);
+
+  // Obsidian で編集して戻ってきた時だけ軽量キャッシュ照合を行う。常時 poll はせず、
+  // 直前の取得から60秒未満なら何もしないので、Cmd+Tab のたびに画面を揺らさない。
+  useEffect(() => {
+    const refreshOnFocus = () => {
+      if (document.visibilityState !== "visible" || loading) return;
+      if (fetchedAt && Date.now() - fetchedAt < 60_000) return;
+      void loadVault({ scope: vaultScopeForView(view) });
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+    return () => {
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+    };
+  }, [fetchedAt, loadVault, loading, view]);
+
+  /**
+   * 写路由已经把更新后的那条 note 放在响应里，这里只做单条替换。
+   * 以前每次写入都 loadVault() 整库重拉（服务端 300 个 GET + 6MB JSON），
+   * spinner 还要按住整条链路——为了换一条已经在手里的数据。
+   */
+  const rebuildStats = useCallback(async () => {
+    if (statsTimer.current) { window.clearTimeout(statsTimer.current); statsTimer.current = null; }
+    setDerivedState("rebuilding");
+    setStatsError("");
+    try {
+      // vault:stats は数秒かかる（bridge 側の上限 90 秒）。
+      await postJson("/api/vault/stats", {}, { timeoutMs: 100_000 });
+      setDerivedState("fresh");
+      // generated 区块は複数の scope に散っている（台帳・応募日台帳は jobs、面接傾向は interview、数据字典は all だけ）。
+      // 手元に載っている scope を全部取り直す——変わっていない scope は ETag で 304 になるので安い。
+      await Promise.all(scopesToReloadAfterStats(vaultReader.getState().readyScopes).map((scope) => loadVault({ scope })));
+    } catch (rebuildError) {
+      setDerivedState("stale");
+      setStatsError(rebuildError instanceof Error ? rebuildError.message : "重算派生统计失败");
+    }
+  }, [loadVault, vaultReader]);
+
+  // 事実を書いた直後に呼ぶ。自動なら 3 秒待って（連打をまとめて）再計算、手動なら「待重算」の印だけ出す。
+  const markDerivedStale = useCallback(() => {
+    setDerivedState((current) => (current === "rebuilding" ? current : "stale"));
+    if (!autoStats) return;
+    if (statsTimer.current) window.clearTimeout(statsTimer.current);
+    statsTimer.current = window.setTimeout(() => void rebuildStats(), 3_000);
+  }, [autoStats, rebuildStats]);
+
+  const toggleAutoStats = useCallback(() => writeAutoStats(!readAutoStats()), []);
+
+  const patchNote = useCallback((note: Note) => {
+    vaultReader.patchNote(note);
+    if (DERIVED_SOURCE_TYPES.has(getType(note))) markDerivedStale();
+  }, [markDerivedStale, vaultReader]);
 
   const openPrepCard = useCallback((cardId: string) => {
     // setState→overlay の effect を待つと、focus と overflow の変更後の座標を
@@ -942,7 +822,9 @@ function MemoryAtlas() {
           ...("defaultSection" in asset && typeof asset.defaultSection === "string"
             ? { defaultSection: asset.defaultSection }
             : {}),
-          ...("scope" in asset && (asset.scope === "shared" || asset.scope === "company")
+          // 履歴から復元する時も scope を落とさない。落とすと「戻る」の後だけ
+          // 本轮专属の志望動機が共通素材として表示されていた。
+          ...("scope" in asset && asset.scope === "round"
             ? { scope: asset.scope }
             : {}),
         });
@@ -950,30 +832,151 @@ function MemoryAtlas() {
         setSharedAssetOverlay(null);
       }
     };
-    const onPopState = (event: PopStateEvent) => syncOverlays(event.state);
+    const syncRoute = () => {
+      const routedView = appViewFromPathname(window.location.pathname);
+      if (!routedView) return;
+      setView(routedView);
+      if (routedView === "library") {
+        const params = new URLSearchParams(window.location.search);
+        setLibraryQuery(params.get("q") ?? "");
+        const group = params.get("group");
+        setGroupFilter(
+          group === "all" || (group !== null && group in GROUPS)
+            ? group as GroupKey | "all"
+            : "all",
+        );
+      }
+      if (routedView === "graph") {
+        const group = new URLSearchParams(window.location.search).get("group");
+        setGroupFilter(
+          group === "all" || (group !== null && group in GROUPS)
+            ? group as GroupKey | "all"
+            : "all",
+        );
+      }
+      const params = new URLSearchParams(window.location.search);
+      setInterviewRouteSearch(window.location.search);
+      const interviewKey = interviewNavigationKey(routedView, window.location.search);
+      // 只在场次入口改变时重置阅读状态；关闭原始笔记不能丢掉当前的批注草稿。
+      if (interviewNavigation.current !== interviewKey) setInterviewRouteVersion((version) => version + 1);
+      interviewNavigation.current = interviewKey;
+      setSelectedPath(params.get("note"));
+      setSelectedSection(params.get("section"));
+    };
+    const onPopState = (event: PopStateEvent) => {
+      wikiNavigator.cancel();
+      // 只认浏览器真正的后退／前进（isTrusted）：日历补齐场次时自己派发的 popstate 不是「回来」。
+      // 同一页内的回退（关 drawer・关回答库浮层）由各自的逻辑复位，这里不插手。
+      const routedView = appViewFromPathname(window.location.pathname);
+      // 先取「这一条目最后滚到的位置」；刷新过页面（内存里的表空了）才退回离开时盖的章。
+      const entryId = historyEntryId(event.state);
+      const stamped = event.state && typeof event.state === "object"
+        ? (event.state as { __echoScrollY?: unknown }).__echoScrollY
+        : undefined;
+      // 滚动事件按帧派发：刚滚完就后退时，最后那次滚动可能还没记进表里。离开的这一刻再补记一次。
+      if (currentEntry.current) scrollByEntry.current.set(currentEntry.current, window.scrollY);
+      currentEntry.current = entryId;
+      const scrollY = (entryId ? scrollByEntry.current.get(entryId) : undefined) ?? stamped;
+      const changesView = event.isTrusted && routedView !== null && routedView !== currentView.current;
+      const commit = (mode: ViewTransitionCommitMode) => {
+        // 只在真的换页（容器随 key 重挂）时改 data-enter：同一页内的回退（关抽屉）若把它从 transition 摘掉，
+        // 容器的 animation 从 none 变回 view-enter，整页会再播一遍入场。合成的 popstate 也可能换页，单独判断。
+        const entersNewView = routedView !== null && routedView !== currentView.current;
+        syncOverlays(event.state);
+        // 滚动目标在提交时才交给 [view] effect：等转场期间若被新的点击导航顶掉，不能让它把新页面滚到旧位置。
+        if (changesView && typeof scrollY === "number") pendingScrollRestore.current = scrollY;
+        // 看板的「带筛选跳转」种子只属于那一次点击；从历史回到 /jobs 时以地址栏为准，不再套旧种子。
+        setJobsInitialFilters(null);
+        syncRoute();
+        if (entersNewView) setViewEnter(mode);
+      };
+      if (!event.isTrusted) {
+        commit("instant");
+        return;
+      }
+      // 浏览器已经换了地址：还在等 chunk 或等转场回调的点击导航必须作废，否则它会迟到地 pushState。
+      // 换页的后退／前进也走转场；目标页 chunk 没到（刷新后第一次后退）不值得等，直接切。
+      const transition = changesView && viewReady(routedView) === null;
+      if (transition) {
+        // 同文档的后退／前进会在派发 popstate 的同一任务里按 auto 恢复滚动，而这时 DOM 还是旧页面：
+        // 旧快照会先跳到目标条目的位置再淡出。截快照前的那一帧把旧页面放回离开时的位置。
+        // 不改全局 scrollRestoration：章节、岗位抽屉等同页条目的后退还靠浏览器自动恢复。
+        const leaveY = window.scrollY;
+        window.requestAnimationFrame(() => window.scrollTo({ left: 0, top: leaveY, behavior: "instant" }));
+      }
+      viewNavigator.navigate({
+        transition,
+        commit: (mode) => mode === "transition" ? flushSync(() => commit(mode)) : commit(mode),
+      });
+    };
     syncOverlays(window.history.state);
+    syncRoute();
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [viewNavigator, wikiNavigator]);
 
   useEffect(() => {
     // rAF は非アクティブなタブでは発火しないため timer で初回ロードする。
-    const timer = window.setTimeout(() => void loadVault(), 0);
+    const timer = window.setTimeout(() => void loadVault({ scope: vaultScopeForView(initialView) }), 0);
     return () => window.clearTimeout(timer);
-  }, [loadVault]);
+  }, [initialView, loadVault]);
+
+  const { quickDue, onQuickSummary } = useQuickDueBadge(Boolean(fetchedAt), currentView);
+
+  useEffect(() => {
+    const scope = vaultScopeForView(view);
+    if (vaultReader.getState().readyScopes.has("all") || vaultReader.getState().readyScopes.has(scope)) return;
+    void loadVault({ scope });
+  }, [loadVault, view, vaultReader]);
+
+  // 固定本人行动入口不能借别的页面已加载来宣称“0件”；按需取同一份行动数据。
+  useEffect(() => {
+    if (vaultReader.getState().readyScopes.has("all") || vaultReader.getState().readyScopes.has("actions")) return;
+    void loadVault({ scope: "actions" });
+  }, [loadVault, vaultReader]);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setSearchOpen(true);
-        searchRef.current?.focus();
+        // 面板挂载后自己聚焦输入框，这里不需要再持有 ref。再按一次就关，和其它命令面板的习惯一致。
+        setSearchOpen((open) => !open);
+      }
+      // R = 重读 vault。顶栏不再有按钮，所以这条必须挡住输入场景，否则打字就会触发。
+      if (
+        event.key.toLowerCase() === "r" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        // 3D 舞台の R（視点リセット）が先に preventDefault している時は全庫再読込を重ねない。
+        !event.defaultPrevented &&
+        !isTypingTarget(event.target)
+      ) {
+        event.preventDefault();
+        void loadVault({ fresh: true });
       }
       if (event.key === "Escape") {
+        // ⌘K 面板永远在最上层：先关它，不连带关掉它底下的抽屉或浮层。
+        if (searchOpen) {
+          setSearchOpen(false);
+          return;
+        }
         // 回答库の上に原笔记 drawer を開いている時は、一段ずつ閉じる。
         if (selectedPath) {
-          setSelectedPath(null);
-          setSelectedSection(null);
+          wikiNavigator.cancel();
+          // 与 × 同一条退场：退场中再按 Esc 由 exitNote 吞掉，不会连退两层。
+          exitNote(() => {
+            if (window.history.state?.__echoNote) window.history.back();
+            else {
+              const params = new URLSearchParams(window.location.search);
+              params.delete("note");
+              params.delete("section");
+              const query = params.toString();
+              window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+              setSelectedPath(null);
+              setSelectedSection(null);
+            }
+          });
           return;
         }
         if (prepOverlayCard) {
@@ -986,6 +989,7 @@ function MemoryAtlas() {
           closeSharedAsset();
           return;
         }
+        wikiNavigator.cancel();
         setSearchOpen(false);
         setSelectedPath(null);
       }
@@ -995,9 +999,13 @@ function MemoryAtlas() {
   }, [
     closePrepCard,
     closeSharedAsset,
+    exitNote,
+    loadVault,
     prepOverlayCard,
+    searchOpen,
     selectedPath,
     sharedAssetOverlay,
+    wikiNavigator,
   ]);
 
   const notesByBasename = useMemo(() => {
@@ -1016,124 +1024,379 @@ function MemoryAtlas() {
     : null;
 
   const openNote = useCallback((note: Note) => {
+    wikiNavigator.cancel();
+    const params = new URLSearchParams(window.location.search);
+    params.set("note", note.path);
+    params.delete("section");
+    window.history.pushState(
+      { ...(window.history.state ?? {}), __echoNote: note.path },
+      "",
+      `${window.location.pathname}?${params.toString()}`,
+    );
     setSelectedPath(note.path);
     setSelectedSection(null);
     setSearchOpen(false);
+  }, [setSearchOpen, wikiNavigator]);
+
+  // 先播退场（lib/exit-transition.ts），播完再走下面原来的关闭逻辑。
+  const closeNote = useCallback(() => {
+    wikiNavigator.cancel();
+    exitNote(() => {
+      if (window.history.state?.__echoNote) {
+        window.history.back();
+        return;
+      }
+      const params = new URLSearchParams(window.location.search);
+      params.delete("note");
+      params.delete("section");
+      const query = params.toString();
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+      setSelectedPath(null);
+      setSelectedSection(null);
+    });
+  }, [exitNote, wikiNavigator]);
+
+  const openWikiLink = useCallback((target: string, section?: string) => {
+    void wikiNavigator.open(target, section);
+  }, [wikiNavigator]);
+
+  const closeSceneNote = useCallback(() => {
+    wikiNavigator.cancel();
+    exitNote(() => {
+      // 关联笔记可能已经翻了多篇，关闭全文必须直接回到场景，而不是逐篇退出。
+      const params = new URLSearchParams(window.location.search);
+      params.delete("note");
+      params.delete("section");
+      const query = params.toString();
+      window.history.replaceState(
+        { ...(window.history.state ?? {}), __echoNote: null }, "",
+        `${window.location.pathname}${query ? `?${query}` : ""}`,
+      );
+      setSelectedPath(null);
+      setSelectedSection(null);
+    });
+  }, [exitNote, wikiNavigator]);
+
+  // today を依存に入れるのは、日历事件の upcoming/past が「今日」で決まるため。
+  // 入れないと、日付を跨いだ時に見出しの日付だけ進んで、昨日の面接が「未来の予定」の
+  // まま残る——頂栏は実時間で「1 日前」と出すので、同じ画面の中で矛盾する。
+  const derived = useMemo(
+    () => buildDerivedData(notes, new Date(`${today}T00:00:00`)),
+    [notes, today],
+  );
+  // 日历统一使用 JST 日界；其它视图仍保留各自的本机日期口径。
+  const calendarEvents = useMemo(
+    () => buildCalendarEvents(notes, new Date(`${calendarToday}T00:00:00`)),
+    [notes, calendarToday],
+  );
+  const calendarInterviewTargets = useMemo(() => {
+    const targets = new Map<string, CalendarInterviewTarget>();
+    for (const event of calendarEvents) {
+      const target = resolveCalendarInterview(event, notes);
+      if (target) targets.set(event.id, target);
+    }
+    return targets;
+  }, [calendarEvents, notes]);
+  // 侧栏角标与日历同一份场次表、同一个 JST「今天」；scope 未到手时不出数（lib/nav-badges.ts）。
+  const navBadges: NavBadges = useMemo(() => buildNavBadges({
+    events: calendarEvents, notes, today: calendarToday, readyScopes,
+    interviewTargets: calendarInterviewTargets, locale, quickDue,
+  }), [calendarEvents, notes, calendarToday, readyScopes, calendarInterviewTargets, locale, quickDue]);
+
+  const calendarInterview = useMemo(() => {
+    const requested = calendarInterviewFromSearch(view, interviewRouteSearch);
+    if (!requested) return null;
+    const source = notes.find((note) => note.path === requested.sourcePath);
+    if (!source) return { ...requested, path: null };
+    const event = calendarEvents.find((item) =>
+      item.date === requested.date && item.note.path === requested.sourcePath,
+    );
+    // 日历只加载行动资料；到面试页加载完整资料后重新匹配，不能把先前的空结果冻结。
+    const resolved = resolveCalendarInterview({
+      id: event?.id ?? requested.sourcePath,
+      note: source,
+      kind: "event",
+      company: requested.company,
+      date: requested.date,
+      time: requested.time || event?.time || "",
+      label: requested.label,
+      phase: requested.date < calendarToday ? "past" : "upcoming",
+      caseId: requested.caseId,
+      prepPath: "",
+    }, notes);
+    return resolved ?? { ...requested, path: null };
+  }, [view, interviewRouteSearch, notes, calendarEvents, calendarToday]);
+  const interviewParams = new URLSearchParams(interviewRouteSearch);
+  const reviewInitialKey = calendarInterview?.path ?? interviewParams.get("review");
+  const prepInitialPath = calendarInterview ? calendarInterview.path ?? "" : interviewParams.get("prep") ?? "";
+  const companyContextPath = calendarInterview?.sourcePath ?? interviewParams.get("context") ?? "";
+  const calendarCompanyContext = calendarInterview?.view === "session" && notes.some((note) =>
+    note.path === calendarInterview.sourcePath &&
+    ["job-case", "todo"].includes(String(note.frontmatter.type)) && Boolean(note.frontmatter.company),
+  );
+
+  // 最近安排只表示实际约定；行动期限和外部跟进留在待办与等待区。
+  // 与日历「下一场」同一口径（buildCalendarSummary）：已不採用的旧预约、当天已面完的场次都不算。
+  // 只给 upcoming 的场次算进展，calendarProgress 要回查案件，没必要对全部历史跑一遍。
+  const nextEvent = useMemo(() => {
+    const upcoming = calendarEvents.filter((event) => event.phase === "upcoming");
+    const progressByEvent = new Map(upcoming.map((event) => [
+      event.id, calendarProgress(event, notes, calendarInterviewTargets.get(event.id)),
+    ]));
+    return buildCalendarSummary({ events: upcoming, progressByEvent, applicationDays: [], today: calendarToday }).next?.event ?? null;
+  }, [calendarEvents, notes, calendarInterviewTargets, calendarToday]);
+
+  // ?note= が指すノートが今の scope に無い（他ページのリンクや共有 URL）：黙って開かないのではなく、全量を一度取りに行く。
+  useEffect(() => {
+    if (!selectedPath || selectedNote || vaultReader.getState().readyScopes.has("all") || vaultReader.getState().loadingScopes.has("all")) return;
+    void loadVault({ scope: "all" });
+  }, [selectedPath, selectedNote, loadVault, vaultReader]);
+
+  // ⌘K 搜的是「全库」：没去过资料库时只载了当前视图的 scope，打开面板时把 all 补齐，
+  // 面板在补齐前会说明「正在载入全部资料」，不把部分结果当成全库。
+  useEffect(() => {
+    if (!searchOpen || vaultReader.getState().readyScopes.has("all") || vaultReader.getState().loadingScopes.has("all")) return;
+    void loadVault({ scope: "all" });
+  }, [searchOpen, loadVault, vaultReader]);
+
+  // 「最近打开」记在本机：不论从哪一页、哪种方式打开笔记，都在这里统一记一笔。
+  useEffect(() => {
+    if (selectedPath) rememberRecentPath(selectedPath);
+  }, [selectedPath]);
+
+  const sourceLabel = error ? (locale === "ja" ? "接続中断" : "连接中断") : loading ? ui.loading : ui.connected;
+  const syncedAt = fetchedAt
+    ? `${new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(fetchedAt)} ${locale === "ja" ? "同期" : "同步"}`
+    : locale === "ja" ? "ローカルデータ" : "本地数据源";
+  // 相对时间只在这里算：每分钟、以及回到页面时刷新一次时钟，不常驻秒级计时器。
+  const [clock, setClock] = useState(0);
+  useEffect(() => {
+    const tick = () => setClock(Date.now());
+    const first = window.setTimeout(tick, 0);
+    const timer = window.setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [fetchedAt]);
+  const syncedMinutes = fetchedAt && clock ? Math.max(0, Math.floor((clock - fetchedAt) / 60_000)) : null;
+  // 一小时以内说「N 分钟前」更好判断新不新；再久就回到具体时刻。超过 10 分钟状态点转警示色。
+  const syncedLabel = syncedMinutes === null || syncedMinutes >= 60
+    ? syncedAt
+    : syncedMinutes < 1 ? ui.syncedJustNow : ui.syncedMinutesAgo.replace("{n}", String(syncedMinutes));
+  const syncAged = syncedMinutes !== null && syncedMinutes >= 10 && !error;
+  const sourceDetail = derivedState === "rebuilding" ? ui.rebuilding : derivedState === "stale" ? (locale === "ja" ? "集計の更新待ち" : "统计待重算") : syncedLabel;
+
+  /**
+   * 切到另一页。alongside 里放「跟着这次导航一起生效」的 state（保存的查询词、看板筛选种子）：
+   * 走转场时整段提交要等旧快照截完，提前 set 的 state 会先落在旧页面上（旧条目被改写、旧页被重挂）。
+   */
+  const navigateToView = useCallback((
+    nextView: View,
+    search?: URLSearchParams | string,
+    preserveJobsInitialFilters = false,
+    alongside?: () => void,
+  ) => {
+    wikiNavigator.cancel();
+    // 整段原子提交：只把 setView 放进转场回调的话，其余 state 会先提交，旧页面带着新参数重挂一次才被截图。
+    const commit = (mode: ViewTransitionCommitMode) => {
+      // 同 popstate：同一页上再点一次导航不重挂容器，data-enter 不能动，否则整页重播入场。
+      const entersNewView = nextView !== currentView.current;
+      alongside?.();
+      setInterviewRouteSearch(typeof search === "string" ? search : search?.toString() ?? "");
+      interviewNavigation.current = interviewNavigationKey(nextView, search?.toString() ?? "");
+      setInterviewRouteVersion((version) => version + 1);
+      // ナビから直接来た時は分析画面由来のフィルタを持ち越さない。
+      if (nextView === "jobs" && !preserveJobsInitialFilters) setJobsInitialFilters(null);
+      setSelectedPath(null);
+      setSelectedSection(null);
+      setMobileMoreOpen(false);
+      // 离开前把当前位置也盖在这一条历史上：刷新后内存里的表没了，还能靠它回到大致位置。
+      window.history.replaceState({ ...(window.history.state ?? {}), __echoScrollY: window.scrollY }, "");
+      if (currentEntry.current) scrollByEntry.current.set(currentEntry.current, window.scrollY);
+      const entry = newHistoryEntryId();
+      window.history.pushState({ __echoAppView: nextView, __echoEntry: entry }, "", appViewHref(nextView, search));
+      currentEntry.current = entry;
+      setView(nextView);
+      if (entersNewView) setViewEnter(mode);
+      // 同一页上再点一次导航时，页内放进 URL 的状态要跟着新地址回到默认（pushState 不触发 popstate）。
+      notifyUrlChange();
+    };
+    // 转场回调里用 flushSync 同步提交：新快照要截到已经换好、已滚回顶部的新页。
+    // 同一页上再点（重置页内筛选、资料库换查询词）不是「换页」：照原来同步提交，不截快照、不整页上移。
+    viewNavigator.navigate({
+      transition: nextView !== currentView.current,
+      ready: () => viewReady(nextView),
+      commit: (mode) => mode === "transition" ? flushSync(() => commit(mode)) : commit(mode),
+    });
+  }, [viewNavigator, wikiNavigator]);
+
+  // 以下の遷移系コールバックは全部 useCallback：視圖側は React.memo で包んであり、
+  // ここが毎レンダー新しい関数だと memo が一度も命中しない。
+  const runSavedQuery = useCallback((savedQuery: string) => {
+    const params = new URLSearchParams();
+    params.set("q", savedQuery);
+    // 查询词跟导航同一次提交：先 set 的话，正停在资料库时会被写进旧的历史条目。
+    navigateToView("library", params, false, () => setLibraryQuery(savedQuery));
+    setSearchOpen(false);
+  }, [navigateToView, setSearchOpen]);
+
+  const openReview = useCallback((key?: string) => {
+    const params = new URLSearchParams();
+    if (key) params.set("review", key);
+    navigateToView("review", params);
+  }, [navigateToView]);
+
+  const openReviewEvidence = useCallback((ref: AdvisoryEvidenceRef) => {
+    navigateToView("review", reviewEvidenceSearch(ref));
+  }, [navigateToView]);
+
+  const openInterviewInsights = useCallback(() => navigateToView("insights"), [navigateToView]);
+
+  // 分析页直接打开看板案件抽屉，跟进操作仍使用案件本身的表单。
+  const openCase = useCallback((note: Note) => {
+    navigateToView("jobs", new URLSearchParams({ status: "all", case: note.path }), true, () => setJobsInitialFilters(null));
+  }, [navigateToView]);
+
+  const openApplicationCompany = useCallback((company: string, note: Note) => {
+    navigateToView("session", companyOverviewSearch(company, note.path));
+  }, [navigateToView]);
+
+  // 筛选种子跟导航同一次提交（见 navigateToView 的 alongside），不先落在还没离开的页面上。
+  const viewJobsWithFilters = useCallback((filters?: JobsInitialFilters) => {
+    const params = new URLSearchParams();
+    if (filters?.statuses?.length) params.set("status", filters.statuses.join(","));
+    if (filters?.ratings?.length) params.set("rating", filters.ratings.join(","));
+    if (filters?.touch?.length) params.set("touch", filters.touch.join(","));
+    if (filters?.waiting) params.set("waiting", "1");
+    navigateToView("jobs", params, true, () => setJobsInitialFilters(filters ?? null));
+  }, [navigateToView]);
+
+  const openCalendarInterview = useCallback((commitment: Commitment) => {
+    const target = calendarInterviewTargets.get(commitment.id);
+    if (target) navigateToView(target.view, calendarInterviewSearch(target));
+    else openNote(commitment.note);
+  }, [calendarInterviewTargets, navigateToView, openNote]);
+
+  // 顶栏「最近安排」直达那场面试的准备页；认不出对应面试的日程才退回日历。
+  const openNextEvent = useCallback(() => {
+    const target = nextEvent ? calendarInterviewTargets.get(nextEvent.id) : undefined;
+    if (target) navigateToView(target.view, calendarInterviewSearch(target));
+    else navigateToView("calendar");
+  }, [calendarInterviewTargets, navigateToView, nextEvent]);
+
+  const openAnswerLibrary = useCallback(() => navigateToView("prep"), [navigateToView]);
+
+  // 复盘页「准备稿 ↗」：按这场面试的公司・日期・轮次去本场面试页，由那边按同一套规则找到对应准备稿。
+  const openReviewSession = useCallback((target: { company: string; date: string; round: string; notePath: string }) => {
+    navigateToView("session", calendarInterviewSearch({
+      view: "session",
+      path: null,
+      company: target.company,
+      date: target.date,
+      label: target.round,
+      sourcePath: target.notePath,
+      caseId: "",
+    }));
+  }, [navigateToView]);
+
+  // ⌘K 里的动作：和页面命令同列，但单独一张表（页面命令每个视图恰好一条，由导航表派生）。
+  const paletteActions = useMemo<PaletteAction[]>(() => {
+    const ja = locale === "ja";
+    return [
+      { id: "reload", label: ja ? "資料を再読み込み" : "重读资料", description: ja ? "Obsidian から最新の状態を取り直す（R）" : "从 Obsidian 重新读取最新内容（R）", keywords: "重读 刷新 reload refresh 再読み込み 更新", run: () => void loadVault({ fresh: true }) },
+      { id: "stats", label: ja ? "統計を再計算" : "重算统计", description: ja ? "台帳と集計の generated 区画を作り直す" : "重新生成台帐与汇总的生成区块", keywords: "统计 重算 汇总 stats rebuild 統計 集計", run: () => void rebuildStats() },
+      { id: "theme", label: theme === "dark" ? (ja ? "ライトテーマに切替" : "切换到浅色主题") : (ja ? "ダークテーマに切替" : "切换到暗色主题"), description: ja ? "表示テーマを切り替える" : "切换界面主题", keywords: "主题 暗色 浅色 夜间 dark light theme テーマ ダーク ライト", run: () => setTheme(theme === "dark" ? "light" : "dark") },
+      { id: "locale", label: ja ? "中文に切替" : "切换到日本語", description: ja ? "表示言語を切り替える" : "切换界面语言", keywords: "语言 中文 日本語 日语 language 言語", run: () => setLocale(ja ? "zh-CN" : "ja") },
+      ...(nextEvent ? [{ id: "next", label: ja ? "次の予定を開く" : "打开下一场", description: `${nextEvent.date} ${nextEvent.company}`, keywords: "下一场 面试 安排 next 次 予定 面接", run: () => openNextEvent() }] : []),
+    ];
+  }, [locale, theme, setTheme, setLocale, loadVault, rebuildStats, nextEvent, openNextEvent]);
+
+  const syncInterviewSelection = useCallback((company: string, prepPath: string) => {
+    const params = new URLSearchParams();
+    if (company) params.set("company", company);
+    if (prepPath) params.set("prep", prepPath);
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoAppView: "session" },
+      "",
+      appViewHref("session", params),
+    );
+    setInterviewRouteSearch(params.toString());
+    interviewNavigation.current = interviewNavigationKey("session", params.toString());
   }, []);
 
-  const openWikiLink = useCallback(
-    (target: string, section?: string) => {
-      const note = notesByBasename.get(target) ?? notes.find((item) => item.path.endsWith(`/${target}.md`));
-      if (note) {
-        setSelectedPath(note.path);
-        setSelectedSection(section || null);
-        setSearchOpen(false);
-      }
-    },
-    [notes, notesByBasename],
-  );
-
-  const searchResults = useMemo(
-    () => notes.filter((note) => noteMatches(note, query)).slice(0, 8),
-    [notes, query],
-  );
-
-  const derived = useMemo(() => {
-    const links = notes.flatMap((note) => extractLinks(note.content));
-    const linkedNames = new Set(links);
-    const orphanCount = notes.filter(
-      (note) =>
-        extractLinks(note.content).length === 0 &&
-        !linkedNames.has(noteBasename(note.path)) &&
-        getType(note) !== "moc",
-    ).length;
-    const cases = notes
-      .filter((note) => getType(note) === JOB_CASE_TYPE)
-      .sort((left, right) => {
-        const byDate = getString(right.frontmatter.status_updated).localeCompare(
-          getString(left.frontmatter.status_updated),
-        );
-        return byDate || right.stat.mtime - left.stat.mtime;
-      });
-    const reviews = notes.filter((note) => getType(note) === "review" && !note.path.includes("/模板/"));
-    const timeline = notes
-      .map((note) => ({ note, date: getNoteDate(note) }))
-      .filter((item) => item.date)
-      .sort((left, right) => right.date.localeCompare(left.date));
-    const calendarEvents = buildCalendarEvents(notes);
-    const errorDictionary = notes.find((note) => noteBasename(note.path) === "誤用辞典");
-    const promotedCorrections = notes.find(
-      (note) => noteBasename(note.path) === "日本語矯正_精選",
+  const syncCompanyContext = useCallback((company: string, contextPath: string, prepPath: string) => {
+    const params = companyOverviewSearch(company, contextPath, prepPath);
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoAppView: "session" }, "", appViewHref("session", params),
     );
-    const highPriorityErrors = errorDictionary
-      ? countMatches(errorDictionary.content, /重要度:高/g)
-      : 0;
-    const totalErrors = errorDictionary
-      ? countMatches(errorDictionary.content, /^###\s+❌/gm)
-      : 0;
-    const promoted = promotedCorrections
-      ? countMatches(promotedCorrections.content, /^###\s+/gm)
-      : 0;
-    const selfNotes = notes.filter((note) => getType(note) === "self");
-    const incompleteSelf = selfNotes.filter((note) =>
-      /迁移时|ここに|人工晋升|^-[^\n:]+:\s*$/m.test(note.content),
-    ).length;
-    const evidenceNotes = notes.filter(
-      (note) =>
-        ["review", "transcript", "company"].includes(getType(note)) &&
-        !note.path.includes("/模板/"),
+    setInterviewRouteSearch(params.toString());
+    interviewNavigation.current = interviewNavigationKey("session", params.toString());
+  }, []);
+
+  const syncReviewSelection = useCallback((key: string | null) => {
+    // 复盘页自己的筛选（filter / pattern）原样留着，外壳只重写自己的键。
+    // 换了一场（或回到一览）时，panel / block / sentence 指的是上一场里的位置；
+    // 日历带来的 event / date / round 也不再成立，留着会让「回到一览」被当成那场的入口而显示等待页。
+    const params = new URLSearchParams(window.location.search);
+    for (const owned of SHELL_URL_KEYS) params.delete(owned);
+    if (key) params.set("review", key);
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoAppView: "review" }, "", appViewHref("review", params),
     );
-    const completeEvidence = evidenceNotes.filter((note) => {
-      const type = getType(note);
-      if (type === "company") {
-        return Boolean(getString(note.frontmatter.company));
-      }
-      if (type === "review") {
-        return Boolean(getString(note.frontmatter.company) && getString(note.frontmatter.date) && getString(note.frontmatter.result));
-      }
-      return Boolean(getString(note.frontmatter.company) && getString(note.frontmatter.date) && typeof note.frontmatter.reviewed === "boolean");
-    }).length;
+    setInterviewRouteSearch(params.toString());
+    interviewNavigation.current = interviewNavigationKey("review", params.toString());
+  }, []);
 
-    return {
-      links: links.length,
-      orphanCount,
-      cases,
-      reviews,
-      timeline,
-      calendarEvents,
-      totalErrors,
-      highPriorityErrors,
-      promoted,
-      incompleteSelf,
-      selfNotes: selfNotes.length,
-      analysisCount: notes.filter((note) => getType(note) === "ai-report").length,
-      evidenceCount: evidenceNotes.length,
-      evidenceCompleteness: evidenceNotes.length ? (completeEvidence / evidenceNotes.length) * 100 : 0,
-    };
-  }, [notes]);
+  useEffect(() => {
+    if (!calendarInterview || !interviewScopeReady || calendarInterview.view === view) return;
+    // 当天的新整理稿可能只在进入面试页后才加载；补齐完成证据后更新同一个历史入口。
+    const params = calendarInterviewSearch(calendarInterview);
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoAppView: calendarInterview.view }, "",
+      appViewHref(calendarInterview.view, params),
+    );
+    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+  }, [calendarInterview, interviewScopeReady, view]);
 
-  const runSavedQuery = (savedQuery: string) => {
-    setQuery(savedQuery);
-    setView("library");
-    setSearchOpen(false);
-  };
-
-  const navigateToView = (nextView: View) => {
-    if (nextView === "review") setReviewInitialKey(null);
-    // ナビから直接来た時は分析画面由来のフィルタを持ち越さない。
-    if (nextView === "jobs") setJobsInitialStatuses(null);
-    setMobileMoreOpen(false);
-    setView(nextView);
-  };
+  useEffect(() => {
+    if (view !== "library" && view !== "graph") return;
+    const params = new URLSearchParams(window.location.search);
+    if (view === "library") {
+      if (libraryQuery.trim()) params.set("q", libraryQuery.trim());
+      else params.delete("q");
+    } else {
+      params.delete("q");
+    }
+    if (groupFilter === "all") params.delete("group");
+    else params.set("group", groupFilter);
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), __echoAppView: view },
+      "",
+      appViewHref(view, params),
+    );
+  }, [groupFilter, libraryQuery, view]);
 
   const activeNavigation =
-    NAVIGATION.find((item) => item.views.includes(view)) ?? NAVIGATION[0];
+    navigation.find((item) => item.views.includes(view)) ?? navigation[0];
   const secondaryNavigation =
-    SECONDARY_NAVIGATION[activeNavigation.id] ?? [];
-  const mobilePrimaryNavigation = NAVIGATION.filter((item) =>
+    secondaryMenus[activeNavigation.id] ?? [];
+  const secondaryPlacement = TOP_BAR_SECTION_IDS.has(activeNavigation.id)
+    ? "bar"
+    : "rail";
+  const activeSecondaryLabel =
+    secondaryNavigation.find((item) => item.id === view)?.label ?? "";
+  useEffect(() => {
+    document.title = `${activeSecondaryLabel || activeNavigation.label} · ${branding.name}`;
+  }, [activeNavigation.label, activeSecondaryLabel, branding.name]);
+  // 左栏只展开当前分区的子项，顶层始终只有 7 个目标。
+  const railSecondary = secondaryPlacement === "rail" ? secondaryNavigation : [];
+  const mobilePrimaryNavigation = navigation.filter((item) =>
     MOBILE_PRIMARY_NAV_IDS.has(item.id),
   );
-  const mobileMoreNavigation = NAVIGATION.filter(
+  const mobileMoreNavigation = navigation.filter(
     (item) => !MOBILE_PRIMARY_NAV_IDS.has(item.id),
   );
   const mobileMoreActive = mobileMoreNavigation.some((item) =>
@@ -1142,174 +1405,324 @@ function MemoryAtlas() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="主导航">
-        <button className="brand" onClick={() => setView("overview")} aria-label="返回总览">
-          <span className="brand-mark">回</span>
+      <aside className="sidebar" aria-label={ui.primaryNav}>
+        <a
+          className="brand"
+          href={appViewHref("calendar")}
+          onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView("calendar"); } }}
+          aria-label={ui.calendarBack}
+        >
+          <span className="brand-mark" aria-hidden="true">職</span>
           <span className="brand-copy">
-            <strong>回声</strong>
+            <strong>{branding.name}</strong>
             <small>CAREER WAR ROOM</small>
           </span>
-        </button>
+        </a>
 
         <nav className="side-nav">
-          {NAVIGATION.map((item) => (
-            <button
-              key={item.id}
-              className={item.views.includes(view) ? "active" : ""}
-              onClick={() => navigateToView(item.target)}
-              aria-current={item.views.includes(view) ? "page" : undefined}
-              // 折叠态把文字视觉隐藏，靠这个属性画出 hover 提示气泡。
-              data-label={item.label}
-            >
-              <span className="nav-glyph" aria-hidden="true">{item.glyph}</span>
-              <span>{item.label}</span>
-            </button>
-          ))}
+          {navigation.filter((item) => item.placement !== "footer").map((item) => {
+            const isActiveSection = item.views.includes(view);
+            const subItems = isActiveSection ? railSecondary : [];
+            const badge: NavBadge | undefined = navBadges[item.id as keyof NavBadges];
+            const badgedLabel = badge ? `${item.label} · ${badge.label}` : undefined;
+            return (
+              <Fragment key={item.id}>
+                <a
+                  className={isActiveSection ? "active" : ""}
+                  href={appViewHref(item.target)}
+                  onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(item.target); } }}
+                  // 指针移上来或 Tab 聚焦时先拉目标页的 chunk：点下去时多半已就绪，转场不必等。
+                  onPointerEnter={() => preloadView(item.target)}
+                  onFocus={() => preloadView(item.target)}
+                  // 有二级项时当前页是子项（左栏或顶部带子里那个），父项不该也自称 page。
+                  aria-current={
+                    isActiveSection && secondaryNavigation.length === 0 ? "page" : undefined
+                  }
+                  // 角标本身对读屏隐藏，完整说法并进链接名；折叠态的提示气泡同样带上数字。
+                  aria-label={badgedLabel}
+                  // 折叠态把文字视觉隐藏，靠这个属性画出 hover 提示气泡。
+                  data-label={badgedLabel ?? item.label}
+                >
+                  <span className="nav-glyph" aria-hidden="true"><NavigationIcon name={item.glyph} /></span>
+                  {/* 放在文字前：base.css 的 `span:last-child` 指的是文字。视觉上由 CSS order 排到最右；
+                      key 跟着数字走，数字一变就重挂、重播 pop-in。 */}
+                  {badge && (
+                    <b key={badge.count} className="nav-badge" data-kind={badge.kind} title={badge.label} aria-hidden="true">
+                      {badge.count}
+                    </b>
+                  )}
+                  <span>{item.label}</span>
+                </a>
+                {subItems.length > 0 && (
+                  <div
+                    className="side-subnav"
+                    role="group"
+                    aria-label={`${item.label} · ${ui.subNav}`}
+                  >
+                    {subItems.map((sub) => (
+                      <a
+                        key={sub.id}
+                        className={view === sub.id ? "active" : ""}
+                        href={appViewHref(sub.id)}
+                        onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(sub.id); } }}
+                        onPointerEnter={() => preloadView(sub.id)}
+                        onFocus={() => preloadView(sub.id)}
+                        aria-current={view === sub.id ? "page" : undefined}
+                        data-label={sub.label}
+                      >
+                        <span className="nav-glyph" aria-hidden="true">{sub.glyph}</span>
+                        <span>{sub.label}</span>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </Fragment>
+            );
+          })}
+          {/* 面谈页有独立的隐私投影与阅读外壳，整页进入以卸载个人看板数据。 */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 独立面谈入口需要完整导航清除看板状态 */}
+          <a href="/consultation" data-label={locale === "ja" ? "キャリア相談" : "面谈咨询"}>
+            <span className="nav-glyph" aria-hidden="true">談</span>
+            <span>{locale === "ja" ? "キャリア相談" : "面谈咨询"}</span>
+          </a>
         </nav>
 
-        <div
-          className="source-status"
-          title={`${error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接"} · ${fetchedAt ? `${formatDate(fetchedAt)} 同步` : "本地数据源"}`}
-        >
-          <span className={`status-dot ${error ? "error" : loading ? "loading" : ""}`} />
-          <div>
-            <strong>{error ? "连接中断" : loading ? "正在读取" : "Obsidian 已连接"}</strong>
-            <small>{fetchedAt ? `${formatDate(fetchedAt)} 同步` : "本地数据源"}</small>
-          </div>
-        </div>
+        <SidebarFooter
+          items={navigation.filter((item) => item.placement === "footer")}
+          view={view}
+          onNavigate={navigateToView}
+          onPreload={preloadView}
+          renderIcon={(name) => <NavigationIcon name={name} />}
+        />
 
         <RailToggle />
       </aside>
 
       <main className="main-stage">
+        {/*
+          这一行原来是「全局搜索框 + 刷新按钮」，两个都是工具而不是信息，去掉后就空了。
+          现在放三样每一页都成立的东西：我在哪、下一件有时限的事、数据源是不是新的。
+          两个动作降级为快捷键（⌘K 搜索 / R 重读），提示就写在右侧状态旁边。
+        */}
         <header className="topbar">
           <div className="mobile-brand">
-            <span className="brand-mark">回</span>
-            <strong>回声</strong>
+            <span className="brand-mark" aria-hidden="true">職</span>
+            <strong>{branding.name}</strong>
           </div>
-          <div className="search-wrap">
-            <span className="search-icon" aria-hidden="true">⌕</span>
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setSearchOpen(true);
-              }}
-              onFocus={() => setSearchOpen(true)}
-              onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
-                if (event.key === "Enter" && searchResults[0]) {
-                  openNote(searchResults[0]);
-                }
-              }}
-              placeholder="搜索记忆、公司、日语错误…"
-              aria-label="搜索记忆库"
-            />
-            <kbd>⌘ K</kbd>
-            {searchOpen && (
-              <SearchPanel
-                query={query}
-                notes={searchResults}
-                onOpen={openNote}
-                onQuery={runSavedQuery}
-                onClose={() => setSearchOpen(false)}
-              />
-            )}
+
+          <div className="topbar-where">
+            <span aria-hidden="true"><NavigationIcon name={activeNavigation.glyph} /></span>
+            <strong>{activeNavigation.label}</strong>
+            {activeSecondaryLabel && <small>{activeSecondaryLabel}</small>}
           </div>
-          <button className="sync-button" onClick={() => void loadVault()} disabled={loading}>
-            <span aria-hidden="true">↻</span>
-            {loading ? "读取中" : "刷新记忆"}
+
+          <a
+            className="user-actions-entry"
+            href={appViewHref("actions")}
+            aria-current={view === "actions" ? "page" : undefined}
+            onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView("actions"); } }}
+            onPointerEnter={() => preloadView("actions")}
+            onFocus={() => preloadView("actions")}
+          >
+            <strong>{locale === "ja" ? "あなたの対応が必要" : "需要你处理"}</strong>
+            <span>{actionsReady ? userActions.current.length : "…"}</span>
+          </a>
+
+          {/* 当前面试页已经有“本场”倒计时；再放全局下一场会让两家公司同时争夺上下文。 */}
+          {/* 日历首页自己有下一场的大卡，顶栏不再重复一条。 */}
+          {nextEvent && view !== "session" && view !== "calendar" && (
+            <button
+              className="topbar-next"
+              onClick={openNextEvent}
+              title={`${nextEvent.date}${nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST ${nextEvent.label}`}
+            >
+              <small>{ui.nextEvent}</small>
+              <em>{countdownLabel(nextEvent.date, new Date(`${calendarToday}T00:00:00`))}{nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST</em>
+              <strong>{nextEvent.company}</strong>
+              <i aria-hidden="true">→</i>
+            </button>
+          )}
+
+          <button
+            className={`topbar-source${syncAged ? " aged" : ""}`}
+            onClick={() => void loadVault({ fresh: true })}
+            disabled={loading}
+            title={`${sourceLabel} · ${sourceDetail}（${ui.reloadHint}）`}
+          >
+            <span className={`status-dot ${error ? "error" : loading ? "loading" : ""}`} />
+            <span className="topbar-source-copy">
+              <strong>{sourceLabel}</strong>
+              <small>{sourceDetail}</small>
+            </span>
           </button>
+          {/* 派生統計の再計算：自動（既定）／手動。手動で待重算のときは押せば今すぐ再計算。 */}
+          <button
+            className={`topbar-stats state-${derivedState}`}
+            onClick={derivedState === "stale" ? () => void rebuildStats() : toggleAutoStats}
+            disabled={derivedState === "rebuilding"}
+            title={statsError || (derivedState === "stale" ? ui.rebuildHint : autoStats ? ui.autoStatsHint : ui.manualStatsHint)}
+          >
+            {derivedState === "stale" ? ui.rebuild : derivedState === "rebuilding" ? ui.rebuilding : autoStats ? ui.statsAuto : ui.statsManual}
+          </button>
+
+          <div className="topbar-keys">
+            <button onClick={() => setSearchOpen(true)} aria-label={ui.searchCommands}><kbd>⌘K</kbd>{ui.search}</button>
+            <button onClick={() => void loadVault({ fresh: true })} disabled={loading} title={ui.reloadHint}><kbd>R</kbd>{ui.reload}</button>
+          </div>
+          <ThemeSwitch />
+          <LanguageSwitch />
         </header>
 
-        {error ? (
+        {error && notes.length === 0 && view !== "settings" ? (
           <ConnectionError error={error} onRetry={() => void loadVault()} />
-        ) : loading && notes.length === 0 ? (
-          <LoadingState />
+        ) : loading && notes.length === 0 && view !== "settings" ? (
+          <LoadingState view={view} />
         ) : (
-          <>
+          <ViewErrorBoundary key={view} label={view}>
+            {error && notes.length > 0 && (
+              <div className="stale-data-banner" role="status">
+                <span>{ui.stalePrefix} {sourceDetail} {ui.staleSuffix}</span>
+                <button onClick={() => void loadVault()}>{ui.retry}</button>
+              </div>
+            )}
+            {writeError && (
+              <div className="global-write-banner" role="alert">
+                <span>{writeError}</span>
+                <button onClick={() => setWriteError("")} aria-label={ui.closeNotice}>×</button>
+              </div>
+            )}
             {secondaryNavigation.length > 0 && (
-              <nav className="section-nav" aria-label={`${activeNavigation.label}二级导航`}>
-                <span>{activeNavigation.label}</span>
-                <div>
+              <nav
+                className="section-nav"
+                data-placement={secondaryPlacement}
+                aria-label={`${activeNavigation.label} · ${ui.subNav}`}
+              >
+                {/* 分区名现在由顶栏的位置指示器说，这条带子只负责章节标签本身。 */}
+                <div className="section-nav-tabs">
                   {secondaryNavigation.map((item) => (
-                    <button
+                    <a
                       key={item.id}
                       className={view === item.id ? "active" : ""}
-                      onClick={() => navigateToView(item.id)}
+                      href={appViewHref(item.id)}
+                      onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(item.id); } }}
+                      onPointerEnter={() => preloadView(item.id)}
+                      onFocus={() => preloadView(item.id)}
                       aria-current={view === item.id ? "page" : undefined}
                     >
-                      {item.label}
-                    </button>
+                      <i aria-hidden="true">{item.glyph}</i>
+                      <span>
+                        <strong>{item.label}</strong>
+                        <small>{item.caption}</small>
+                      </span>
+                    </a>
                   ))}
                 </div>
               </nav>
             )}
-            <div className="view-container">
-              {view === "overview" && (
-                <Overview
-                  notes={notes}
-                  derived={derived}
-                  onOpen={openNote}
-                  onView={setView}
-                  onQuery={runSavedQuery}
-                  onOpenReview={(key) => {
-                    setReviewInitialKey(key ?? null);
-                    setView("review");
-                  }}
+            <div className="view-container" data-enter={viewEnter === "transition" ? "transition" : undefined}>
+              <Suspense fallback={<LoadingState view={view} />}>
+              {calendarInterview && (!interviewScopeReady || calendarInterview.view !== view || (!calendarInterview.path && !calendarCompanyContext)) && (
+                <CalendarInterviewState
+                  target={calendarInterview}
+                  loading={(!interviewScopeReady && !error) || calendarInterview.view !== view}
+                  onOpenSource={notes.some((note) => note.path === calendarInterview.sourcePath)
+                    ? () => openNote(notes.find((note) => note.path === calendarInterview.sourcePath)!)
+                    : undefined}
+                  onShowAll={() => navigateToView(calendarInterview.view)}
                 />
               )}
-              {view === "review" && (
+              {view === "review" && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && calendarInterview.path)) && (
                 <InterviewReview
+                  loading={!scopeReady}
+                  key={interviewRouteVersion}
                   notes={notes}
                   onVaultChanged={loadVault}
+                  onNoteWritten={patchNote}
                   initialSelectedKey={reviewInitialKey}
+                  initialPanel={interviewParams.get("panel") === "advisory" ? "advisory" : interviewParams.get("panel") === "quality" ? "quality" : "source"}
+                  initialBlockId={interviewParams.get("block")}
+                  initialSentenceId={interviewParams.get("sentence")}
+                  onOpenEvidence={openReviewEvidence}
+                  onOpenInsights={openInterviewInsights}
+                  onSelectionChange={syncReviewSelection}
+                  onOpenNote={openNote}
+                  onOpenSession={openReviewSession}
                 />
               )}
-              {view === "session" && (
-                <InterviewSession
+              {view === "insights" && <InterviewInsights notes={notes} onOpenEvidence={openReviewEvidence} onOpenReview={openReview}
+                onVaultChanged={loadVault} onNoteWritten={patchNote} />}
+              {view === "practice" && (
+                <InterviewPractice
+                  loading={!scopeReady && !error}
                   notes={notes}
+                  today={today}
+                  onNoteWritten={patchNote}
+                  onOpenEvidence={openReviewEvidence}
+                />
+              )}
+              {view === "session" && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && (calendarInterview.path || calendarCompanyContext))) && (
+                <InterviewSession
+                  key={`${interviewRouteVersion}:${interviewScopeReady}`}
+                  notes={notes}
+                  today={today}
                   onOpen={openNote}
                   onOpenWiki={openWikiLink}
                   onOpenCard={openPrepCard}
                   onOpenAsset={openSharedAsset}
+                  onOpenLibrary={openAnswerLibrary}
+                  initialCompany={interviewParams.get("company") ?? ""}
+                  initialPath={prepInitialPath}
+                  initialContextPath={companyContextPath}
+                  forceOverviewOnly={Boolean(calendarInterview && !calendarInterview.path && calendarCompanyContext)}
+                  onSelectionChange={syncInterviewSelection}
+                  onContextChange={syncCompanyContext}
+                  onOpenInsights={openInterviewInsights}
                 />
               )}
               {view === "prep" && (
                 <InterviewPrep
+                  loading={!scopeReady}
                   notes={notes}
                   onOpen={openNote}
+                  syncUrl
                 />
               )}
               {view === "language" && (
-                <JapaneseTraining onVaultChanged={loadVault} />
+                <JapaneseTraining onVaultChanged={loadVault} onQuickSummary={onQuickSummary} />
               )}
               {view === "topics" && (
                 <LanguageExpressionCourses
+                  loading={!scopeReady}
                   notes={notes}
+                  onOpen={openNote}
+                  onOpenWiki={openWikiLink}
                   onVaultChanged={loadVault}
+                  onNoteWritten={patchNote}
                 />
               )}
               {view === "jobs" && (
                 <JobsView
+                  loading={!scopeReady && !error}
                   notes={notes}
+                  today={today}
                   onOpen={openNote}
                   onVaultChanged={loadVault}
-                  initialStatuses={jobsInitialStatuses}
+                  onNoteWritten={patchNote}
+                  initialFilters={jobsInitialFilters}
+                  onFlash={showFlash}
                 />
               )}
               {view === "analytics" && (
                 <JobsAnalytics
+                  loading={!scopeReady}
                   notes={notes}
                   onOpen={openNote}
-                  onViewJobs={(statuses) => {
-                    setJobsInitialStatuses(statuses ?? null);
-                    setView("jobs");
-                  }}
+                  onOpenCase={openCase}
+                  onViewJobs={viewJobsWithFilters}
+                  derivedState={derivedState}
+                  statsError={statsError}
+                  onRebuildStats={rebuildStats}
                 />
-              )}
-              {view === "todo" && (
-                <TodoView notes={notes} onOpen={openNote} />
               )}
               {view === "graph" && (
                 <GraphView
@@ -1320,27 +1733,75 @@ function MemoryAtlas() {
                 />
               )}
               {view === "calendar" && (
-                <CalendarView events={derived.calendarEvents} onOpen={openNote} />
+                <CalendarView
+                  events={calendarEvents}
+                  notes={notes}
+                  today={calendarToday}
+                  loading={!scopeReady}
+                  fetchedAt={fetchedAt}
+                  onOpenCompany={openApplicationCompany}
+                  onOpen={openNote}
+                  interviewTargets={calendarInterviewTargets}
+                  onInterview={openCalendarInterview}
+                />
+              )}
+              {view === "actions" && (
+                <UserActionsView
+                  notes={notes}
+                  today={calendarToday}
+                  loading={!scopeReady}
+                  fetchedAt={fetchedAt}
+                  onOpen={openNote}
+                  onNoteWritten={patchNote}
+                />
+              )}
+              {view === "activity" && (
+                <RecentProgressView
+                  notes={notes}
+                  today={calendarToday}
+                  loading={!activityReady && !activityError}
+                  error={activityError}
+                  fetchedAt={activityFetchedAt}
+                  onOpenSource={(path) => { const note = notes.find((item) => item.path === path); if (note) openNote(note); }}
+                />
               )}
               {view === "timeline" && (
-                <TimelineView items={derived.timeline} onOpen={openNote} />
-              )}
-              {view === "library" && (
-                <LibraryView
-                  notes={notes}
-                  filter={groupFilter}
-                  query={query}
-                  onFilter={setGroupFilter}
-                  onQuery={setQuery}
+                <TimelineView
+                  today={today}
+                  items={derived.timeline}
+                  events={derived.calendarEvents}
                   onOpen={openNote}
                 />
               )}
+              {view === "library" && (
+                <LibraryView
+                  loading={!scopeReady}
+                  notes={notes}
+                  filter={groupFilter}
+                  query={libraryQuery}
+                  onFilter={setGroupFilter}
+                  onQuery={setLibraryQuery}
+                  onOpen={openNote}
+                />
+              )}
+              {view === "settings" && (
+                <SettingsView
+                  connection={{ ok: !error, loading, fetchedAt, error }}
+                  autoStats={autoStats}
+                  onToggleAutoStats={toggleAutoStats}
+                  derivedState={derivedState}
+                  statsError={statsError}
+                  onRebuildStats={() => void rebuildStats()}
+                  onReload={() => void loadVault({ fresh: true })}
+                />
+              )}
+              </Suspense>
             </div>
-          </>
+          </ViewErrorBoundary>
         )}
       </main>
 
-      <nav className="mobile-nav" aria-label="移动端主导航">
+      <nav className="mobile-nav" aria-label={ui.mobileNav}>
         {mobilePrimaryNavigation.map((item) => (
           <button
             key={item.id}
@@ -1348,7 +1809,7 @@ function MemoryAtlas() {
             onClick={() => navigateToView(item.target)}
             aria-current={item.views.includes(view) ? "page" : undefined}
           >
-            <span aria-hidden="true">{item.glyph}</span>
+            <span aria-hidden="true"><NavigationIcon name={item.glyph} /></span>
             {item.mobileLabel}
           </button>
         ))}
@@ -1359,24 +1820,46 @@ function MemoryAtlas() {
           aria-controls="mobile-more-menu"
         >
           <span aria-hidden="true">•••</span>
-          更多
+          {ui.more}
         </button>
       </nav>
 
       {mobileMoreOpen && (
-        <nav id="mobile-more-menu" className="mobile-more-menu" aria-label="移动端更多导航">
-          <small>更多功能</small>
+        <nav id="mobile-more-menu" className="mobile-more-menu" aria-label={ui.mobileMore}>
+          <small>{ui.moreFeatures}</small>
           {mobileMoreNavigation.map((item) => (
             <button
               key={item.id}
               className={item.views.includes(view) ? "active" : ""}
               onClick={() => navigateToView(item.target)}
             >
-              <span aria-hidden="true">{item.glyph}</span>
+              <span aria-hidden="true"><NavigationIcon name={item.glyph} /></span>
               {item.label}
             </button>
           ))}
         </nav>
+      )}
+
+      <UndoFlashBar state={undoFlash} />
+      {wikiNotice && (
+        <div className="wiki-navigation-notice" role="status" aria-live="polite">
+          <span>{locale === "ja"
+            ? wikiNotice.kind === "loading" ? "ノートを探しています…" : wikiNotice.kind === "ambiguous" ? "同名のノートが複数あります。完全なパスで指定してください。" : "該当するノートが見つかりません。"
+            : wikiNotice.kind === "loading" ? "正在查找笔记…" : wikiNotice.kind === "ambiguous" ? "同名笔记有多篇，请使用完整路径。" : "找不到这篇笔记。"}</span>
+          <button type="button" onClick={() => wikiNavigator.cancel()} aria-label={ui.closeNotice}>×</button>
+        </div>
+      )}
+
+      {searchOpen && (
+        <SearchPalette
+          notes={notes}
+          onOpen={openNote}
+          onQuery={runSavedQuery}
+          onClose={() => setSearchOpen(false)}
+          onNavigate={(target) => navigateToView(target)}
+          allReady={readyScopes.has("all")}
+          actions={paletteActions}
+        />
       )}
 
       {sharedAssetOverlay && sharedAssetNote && (
@@ -1400,1538 +1883,106 @@ function MemoryAtlas() {
         />
       )}
 
-      {selectedNote && (
+      {selectedNote && (view === "graph" || view === "timeline" ? (
+        <SceneNoteReader
+          note={selectedNote}
+          section={selectedSection}
+          allNotes={notes}
+          wikiIndexComplete={readyScopes.has("all")}
+          scene={view}
+          closing={noteExiting}
+          onClose={closeSceneNote}
+          onOpenWiki={openWikiLink}
+          onOpen={openNote}
+        />
+      ) : (
         <NoteDrawer
           note={selectedNote}
           section={selectedSection}
           allNotes={notes}
-          onClose={() => {
-            setSelectedPath(null);
-            setSelectedSection(null);
-          }}
+          wikiIndexComplete={readyScopes.has("all")}
+          closing={noteExiting}
+          onClose={closeNote}
           onOpenWiki={openWikiLink}
           onOpen={openNote}
         />
-      )}
-    </div>
-  );
-}
-
-function SearchPanel({
-  query,
-  notes,
-  onOpen,
-  onQuery,
-  onClose,
-}: {
-  query: string;
-  notes: Note[];
-  onOpen: (note: Note) => void;
-  onQuery: (query: string) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="search-panel">
-      <div className="search-panel-head">
-        <span>{query ? `“${query}” 的结果` : "快捷查询"}</span>
-        <button onClick={onClose} aria-label="关闭搜索">×</button>
-      </div>
-      {!query && (
-        <div className="saved-queries">
-          <button onClick={() => onQuery("status:選考中")}>进行中的选考</button>
-          <button onClick={() => onQuery("重要度:高")}>高优先日语错误</button>
-          <button onClick={() => onQuery("type:ai-report")}>AI 分析</button>
-          <button onClick={() => onQuery("待ち")}>等待结果</button>
-        </div>
-      )}
-      <div className="search-results">
-        {notes.map((note) => (
-          <button key={note.path} onClick={() => onOpen(note)}>
-            <span
-              className="result-group"
-              style={{ background: GROUPS[getGroup(note.path)].tint, color: GROUPS[getGroup(note.path)].color }}
-            >
-              {GROUPS[getGroup(note.path)].short}
-            </span>
-            <span className="result-copy">
-              <strong>{getTitle(note)}</strong>
-              <small>{stripMarkdown(note.content).slice(0, 92)}</small>
-            </span>
-            <span className="result-arrow">↗</span>
-          </button>
-        ))}
-        {query && notes.length === 0 && (
-          <div className="empty-search">没有匹配的记忆，试试更短的关键词。</div>
-        )}
-      </div>
-      <div className="search-help">支持 <code>type:</code>、<code>status:</code>、<code>folder:</code> 组合查询</div>
-    </div>
-  );
-}
-
-type DerivedData = {
-  links: number;
-  orphanCount: number;
-  cases: Note[];
-  reviews: Note[];
-  timeline: { note: Note; date: string }[];
-  calendarEvents: CalendarEvent[];
-  totalErrors: number;
-  highPriorityErrors: number;
-  promoted: number;
-  incompleteSelf: number;
-  selfNotes: number;
-  analysisCount: number;
-  evidenceCount: number;
-  evidenceCompleteness: number;
-};
-
-function Overview({
-  notes,
-  derived,
-  onOpen,
-  onView,
-  onQuery,
-  onOpenReview,
-}: {
-  notes: Note[];
-  derived: DerivedData;
-  onOpen: (note: Note) => void;
-  onView: (view: View) => void;
-  onQuery: (query: string) => void;
-  onOpenReview: (key?: string) => void;
-}) {
-  const jobs = useMemo(() => derived.cases.map(toJobCard), [derived.cases]);
-  const reviewPreview = useMemo(() => buildReviewPreview(notes), [notes]);
-  const currentStageRank: Record<string, number> = { 面接中: 0, 書類通過: 1, 応募済: 2 };
-  const currentCases = jobs
-    .filter((job) => ACTIVE_JOB_STATUSES.has(job.status))
-    .sort(
-      (left, right) =>
-        (currentStageRank[left.status] ?? 9) - (currentStageRank[right.status] ?? 9) ||
-        right.statusUpdated.localeCompare(left.statusUpdated),
-    );
-  const recentChanges = jobs
-    .filter((job) => !ACTIVE_JOB_STATUSES.has(job.status) && job.status !== "未応募")
-    .slice(0, 3);
-  const focusBrief = useMemo(() => buildFocusBrief(notes), [notes]);
-  const primaryFocus = focusBrief.primary;
-  const waitingFocus = focusBrief.waiting[0] ?? null;
-
-  const openJobs = jobs
-    .filter((job) => job.status === "未応募")
-    .sort((left, right) => compareJobs(left, right, "rating"));
-  const topSalary = openJobs
-    .map((job) => job.salary.max ?? 0)
-    .filter((value) => value > 0)
-    .sort((left, right) => right - left)[0];
-  const openTodos = notes
-    .filter(
-      (note) =>
-        getType(note) === "todo" &&
-        todoAudience(note) === "user" &&
-        todoStatus(note) !== "完了",
-    )
-    .sort(
-      (left, right) =>
-        (TODO_PRIORITY[todoPriority(left)]?.rank ?? 9) - (TODO_PRIORITY[todoPriority(right)]?.rank ?? 9) ||
-        getLatestNoteDate(right).localeCompare(getLatestNoteDate(left)),
-    );
-  const upcoming = derived.calendarEvents.filter((event) => event.phase === "upcoming");
-  const scoreDoc = reviewPreview.scoreDoc;
-  const actionReviewDoc = reviewPreview.actionDoc;
-  const score = scoreDoc?.deepReview ? Math.round(scoreDoc.deepReview.overallScore) : null;
-  const dimensionKeys = Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[];
-
-  return (
-    <div className="overview-view">
-      <section className="memory-hero feature-shell">
-        <div className="eyebrow"><span /> TODAY&apos;S BRIEF · {formatDate(localDateKey())}</div>
-        <div className="hero-layout">
-          <div className="hero-primary">
-            <div className="hero-primary-topline">
-              <span>现在先完成这一件事</span>
-              {primaryFocus && <small>{primaryFocus.context}</small>}
-            </div>
-            <h1>{primaryFocus?.action ?? "当前没有可执行的重点行动"}</h1>
-            {primaryFocus ? (
-              <>
-                <div className="hero-primary-reason">
-                  <span>{primaryFocus.reason}</span>
-                  <i>{primaryFocus.status}</i>
-                </div>
-                <p>
-                  {primaryFocus.detail ||
-                    "这项行动来自未完成待办；完整背景和执行清单保留在 Vault 原文中。"}
-                </p>
-              </>
-            ) : (
-              <p>外部等待不会冒充成你的行动。可以检查行动清单，或继续观察正在推进的案件。</p>
-            )}
-            <div className="hero-primary-actions">
-              <button
-                className="primary-action"
-                onClick={() => primaryFocus && onOpen(primaryFocus.note)}
-                disabled={!primaryFocus}
-              >
-                {primaryFocus?.cta ?? "查看待办"} <span>→</span>
-              </button>
-              <button className="hero-secondary-action" onClick={() => onView("todo")}>
-                查看全部行动
-              </button>
-            </div>
-          </div>
-
-          <aside className="hero-watch">
-            <div className="hero-watch-head">
-              <span>等待对方</span>
-              <small>{focusBrief.waiting.length} 件观察中</small>
-            </div>
-            {waitingFocus ? (
-              <button type="button" onClick={() => onOpen(waitingFocus.note)}>
-                <small>{waitingFocus.company || waitingFocus.waitingFor}</small>
-                <strong>{waitingFocus.label}</strong>
-                <span>
-                  {waitingFocus.followUpAt
-                    ? `${focusDateLabel(waitingFocus.followUpAt)}后未回复则跟进`
-                    : `${waitingFocus.waitingFor}行动中`}
-                </span>
-              </button>
-            ) : (
-              <div className="hero-watch-empty">
-                <strong>没有外部回复需要盯住</strong>
-                <span>等待事项会与本人可执行行动分开展示。</span>
-              </div>
-            )}
-            <footer>
-              <span>{currentCases.length} 个应募案件进行中</span>
-              {focusBrief.waiting.length > 1 && <span>另有 {focusBrief.waiting.length - 1} 件等待</span>}
-            </footer>
-          </aside>
-        </div>
-        <div className="hero-stats">
-          <Stat value={openJobs.length} label="条待应募岗位" />
-          <Stat value={currentCases.length} label="个案件进行中" />
-          <Stat value={openTodos.length} label="件待办未完成" />
-          <Stat value={reviewPreview.pendingDecisions} label="个复盘点待裁定" />
-        </div>
-      </section>
-
-      <section className="overview-grid">
-        <article className="panel review-preview-panel">
-          <PanelHeading
-            kicker="ANSWER QUALITY"
-            title="面试复盘进度"
-            action="全部复盘"
-            onAction={() => onOpenReview()}
-          />
-          {reviewPreview.docs.length === 0 ? (
-            <p className="panel-empty">还没有可以复盘的整理稿。</p>
-          ) : (
-            <>
-              <div className="review-preview-summary">
-                <div className={`review-preview-score ${score === null ? "empty" : score >= 80 ? "high" : score >= 65 ? "mid" : "low"}`}>
-                  <strong>{score ?? "—"}</strong>
-                  <span>{score === null ? "暂无评分" : "/ 100"}</span>
-                </div>
-                <div className="review-preview-copy">
-                  <small>最近一场已评分</small>
-                  <strong>{scoreDoc?.company ?? "等待首份深度复盘"}</strong>
-                  <span>{scoreDoc ? `${formatDate(scoreDoc.date)} · ${scoreDoc.round}` : "完成证据裁定后即可生成"}</span>
-                  <p>{scoreDoc?.deepReview?.weaknesses[0] ?? "先完成待裁定点，再进入回答质量分析。"}</p>
-                </div>
-              </div>
-              {scoreDoc?.deepReview?.dimensions && (
-                <div className="review-preview-dimensions" aria-label="最近一场面试五维评分">
-                  {dimensionKeys.map((key) => {
-                    const value = Math.round(scoreDoc.deepReview?.dimensions?.[key].score ?? 0);
-                    return (
-                      <div key={key}>
-                        <span>{REVIEW_DIMENSION_META[key].label}</span>
-                        <strong>{value}</strong>
-                        <i><b style={{ width: `${value}%` }} /></i>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              <dl className="review-preview-stats">
-                <div><dt>已深度复盘</dt><dd>{reviewPreview.reviewedCount} / {reviewPreview.docs.length}</dd></div>
-                <div><dt>待裁定</dt><dd>{reviewPreview.pendingDecisions}</dd></div>
-                <div><dt>可以生成</dt><dd>{reviewPreview.readyCount}</dd></div>
-              </dl>
-              <button
-                className="review-preview-action"
-                type="button"
-                onClick={() => onOpenReview(actionReviewDoc?.key)}
-                disabled={!actionReviewDoc}
-              >
-                <span>
-                  <small>下一步</small>
-                  <strong>
-                    {actionReviewDoc?.pendingDecisions
-                      ? `继续裁定 · ${actionReviewDoc.company}`
-                      : actionReviewDoc && !actionReviewDoc.deepReview
-                        ? `生成深度复盘 · ${actionReviewDoc.company}`
-                        : `查看最近复盘 · ${actionReviewDoc?.company ?? ""}`}
-                  </strong>
-                </span>
-                <b>→</b>
-              </button>
-            </>
-          )}
-        </article>
-
-        <article className="panel todo-preview-panel">
-          <PanelHeading
-            kicker="NEXT ACTIONS"
-            title="行动清单"
-            action="全部行动"
-            onAction={() => onView("todo")}
-          />
-          <div className="todo-preview-list">
-            {openTodos.length === 0 ? (
-              <p className="panel-empty">当前没有需要推进的行动。</p>
-            ) : (
-              openTodos.slice(0, 5).map((note) => (
-                <button key={note.path} onClick={() => onOpen(note)}>
-                  <span className={`todo-pri pri-${todoPriority(note)}`}>
-                    {TODO_PRIORITY[todoPriority(note)]?.label ?? todoPriority(note)}
-                  </span>
-                  <span className="todo-preview-body">
-                    <strong>{todoAction(note)}</strong>
-                    <small>{getString(note.frontmatter.category)}</small>
-                  </span>
-                  <span className={`todo-status st-${todoStatus(note)}`}>{todoStatus(note)}</span>
-                </button>
-              ))
-            )}
-          </div>
-        </article>
-
-        <article className="panel pipeline-panel wide">
-          <PanelHeading
-            kicker="CAREER PIPELINE"
-            title="求职进行时"
-            action="全部案件"
-            onAction={() => onView("jobs")}
-          />
-          <div className="pipeline-split">
-            <div className="pipeline-list" aria-label="当前进行中的求职记录">
-              {currentCases.slice(0, 6).map((job) => {
-                const statusDisplay = careerStatus(job.status);
-                const latestDate = job.statusUpdated || job.date || getLatestNoteDate(job.note);
-                const nextAction = job.nextAction || job.position || "案件详情";
-                return (
-                  <button key={job.path} onClick={() => onOpen(job.note)}>
-                    <span
-                      className={`pipeline-status status-${statusDisplay.tone}`}
-                      title={job.status}
-                    >
-                      {statusDisplay.label}
-                    </span>
-                    <span className="pipeline-company">
-                      <span className="pipeline-company-head">
-                        <strong>{job.company}</strong>
-                        <time dateTime={latestDate}>{formatDate(latestDate)}</time>
-                      </span>
-                      <small title={nextAction}>{nextAction}</small>
-                    </span>
-                    <span className="pipeline-arrow">↗</span>
-                  </button>
-                );
-              })}
-              {currentCases.length === 0 && <p className="panel-empty">目前没有进行中的案件。</p>}
-            </div>
-            <aside className="pipeline-schedule">
-              <div className="pipeline-aside-heading">
-                <span className="panel-kicker">接下来的面试</span>
-                <button onClick={() => onView("calendar")}>打开日历 ↗</button>
-              </div>
-              <div className="pipeline-upcoming">
-                {upcoming.length === 0 ? (
-                  <p className="panel-empty">暂无已排期的面试。日历里出现新日程后会自动出现在这里。</p>
-                ) : (
-                  upcoming.slice(0, 2).map((event) => (
-                    <button key={event.id} onClick={() => onOpen(event.note)}>
-                      <time dateTime={event.date}>
-                        {formatDate(event.date)}{event.time && ` ${event.time}`}
-                      </time>
-                      <strong>{event.company}</strong>
-                      <small>{event.label}</small>
-                    </button>
-                  ))
-                )}
-              </div>
-              <div className="pipeline-recent">
-                <span className="panel-kicker">最近变化</span>
-                {recentChanges.map((job) => {
-                  const statusDisplay = careerStatus(job.status);
-                  const latestDate = job.statusUpdated || job.date || getLatestNoteDate(job.note);
-                  return (
-                    <button key={job.path} onClick={() => onOpen(job.note)}>
-                      <span className={`pipeline-status status-${statusDisplay.tone}`}>{statusDisplay.label}</span>
-                      <strong>{job.company}</strong>
-                      <time dateTime={latestDate}>{formatDate(latestDate)}</time>
-                    </button>
-                  );
-                })}
-              </div>
-            </aside>
-          </div>
-        </article>
-
-        <article className="panel jobs-preview-panel">
-          <PanelHeading
-            kicker="AI JOB MATCH"
-            title="下一个投哪家"
-            action="打开筛选台"
-            onAction={() => onView("jobs")}
-          />
-          <div className="jobs-preview-stats">
-            <div><strong>{openJobs.length}</strong><span>条未应募</span></div>
-            <div><strong>{openJobs.filter((job) => job.rating >= 8).length}</strong><span>8 点以上</span></div>
-            <div><strong>{topSalary ? `${topSalary}万` : "—"}</strong><span>未应募最高</span></div>
-          </div>
-          <div className="jobs-preview-list">
-            {openJobs.length === 0 ? (
-              <p className="panel-empty">没有未应募的推荐岗位。</p>
-            ) : (
-              openJobs.slice(0, 4).map((job) => (
-                <button key={job.path} onClick={() => onOpen(job.note)}>
-                  <span className={`jobs-preview-rating rating-${job.rating}`}>{job.rating}</span>
-                  <span className="jobs-preview-body">
-                    <strong>{job.company}</strong>
-                    <small>{job.position || job.location}</small>
-                  </span>
-                  <span className="jobs-preview-salary">{job.salary.max ? `${job.salary.max}万` : ""}</span>
-                </button>
-              ))
-            )}
-          </div>
-        </article>
-
-        <article className="panel learning-panel">
-          <PanelHeading
-            kicker="LEARNING LOOP"
-            title="日语纠错闭环"
-            action="打开词典"
-            onAction={() => onQuery("folder:30_日本語学習")}
-          />
-          <div className="learning-visual">
-            <div className="learning-ring" style={{ "--progress": `${Math.min(100, (derived.promoted / Math.max(1, derived.totalErrors)) * 100)}%` } as CSSProperties}>
-              <div><strong>{derived.promoted}</strong><span>已晋升</span></div>
-            </div>
-            <div className="learning-copy">
-              <p><strong>{derived.totalErrors}</strong> 条逐字稿错误等待复习</p>
-              <p><strong>{derived.highPriorityErrors}</strong> 条被标为高优先级</p>
-              <button onClick={() => onQuery("重要度:高")}>只看高优先 <span>→</span></button>
-            </div>
-          </div>
-          <div className="learning-flow" aria-label="日语知识晋升流程">
-            <span>逐字稿</span><b>→</b><span>误用辞典</span><b>→</b><span>人工确认</span><b>→</b><span>矫正定稿</span>
-          </div>
-        </article>
-
-        <article className="panel memory-health">
-          <PanelHeading
-            kicker="MEMORY HEALTH"
-            title="记忆健康度"
-            action="查看全部"
-            onAction={() => onView("library")}
-          />
-          <div className="health-score-row">
-            <div className="health-score">
-              <strong>{Math.max(0, derived.selfNotes - derived.incompleteSelf)}</strong>
-              <span>/ {derived.selfNotes}</span>
-            </div>
-            <p>“关于我”权威文档已完成</p>
-          </div>
-          <div className="health-bars">
-            <HealthBar label="证据字段完整度" value={derived.evidenceCompleteness} tone="green" />
-            <HealthBar
-              label="个人事实完整度"
-              value={derived.selfNotes ? ((derived.selfNotes - derived.incompleteSelf) / derived.selfNotes) * 100 : 0}
-              tone="orange"
-            />
-            <HealthBar
-              label="关系连接度"
-              value={notes.length ? ((notes.length - derived.orphanCount) / notes.length) * 100 : 0}
-              tone="violet"
-            />
-          </div>
-          <button className="health-alert" onClick={() => onQuery("folder:10_关于我 迁移时") }>
-            <span>!</span>
-            <div>
-              <strong>{derived.incompleteSelf} 份权威文档仍有待补字段</strong>
-              <small>技术栈、STAR、硬性约束与日语定稿应优先人工确认</small>
-            </div>
-            <b>→</b>
-          </button>
-        </article>
-
-        <article className="panel graph-preview-panel wide">
-          <div className="graph-preview-copy">
-            <span className="panel-kicker">KNOWLEDGE GRAPH</span>
-            <h2>关系比文件夹<br />更接近思考本身。</h2>
-            <p>从公司、复盘、语言错误到 AI 结论，沿着双链找回一段判断是如何形成的。</p>
-            <button onClick={() => onView("graph")}>进入关系图 <span>↗</span></button>
-          </div>
-          <MiniGraph notes={notes} />
-        </article>
-      </section>
-    </div>
-  );
-}
-
-function Stat({ value, label }: { value: number; label: string }) {
-  return <div className="stat"><strong>{value.toString().padStart(2, "0")}</strong><span>{label}</span></div>;
-}
-
-function PanelHeading({
-  kicker,
-  title,
-  action,
-  onAction,
-}: {
-  kicker: string;
-  title: string;
-  action: string;
-  onAction: () => void;
-}) {
-  return (
-    <div className="panel-heading">
-      <div><span className="panel-kicker">{kicker}</span><h2>{title}</h2></div>
-      <button onClick={onAction}>{action} <span>↗</span></button>
-    </div>
-  );
-}
-
-function HealthBar({ label, value, tone }: { label: string; value: number; tone: string }) {
-  const safeValue = Math.max(0, Math.min(100, Math.round(value)));
-  return (
-    <div className="health-bar-row">
-      <div><span>{label}</span><strong>{safeValue}%</strong></div>
-      <div className="health-bar"><i className={tone} style={{ width: `${safeValue}%` }} /></div>
-    </div>
-  );
-}
-
-function MiniGraph({ notes }: { notes: Note[] }) {
-  const points = useMemo(() => {
-    return notes.slice(0, 24).map((note, index) => {
-      const angle = index * 2.399;
-      const radius = 12 + (index % 6) * 7;
-      return {
-        x: 50 + Math.cos(angle) * radius,
-        y: 50 + Math.sin(angle) * radius * 0.72,
-        color: GROUPS[getGroup(note.path)].color,
-      };
-    });
-  }, [notes]);
-  return (
-    <div className="mini-graph" aria-hidden="true">
-      {points.map((point, index) => (
-        <Fragment key={index}>
-          <i className="mini-edge" style={{ left: "50%", top: "50%", width: `${Math.hypot(point.x - 50, point.y - 50)}%`, transform: `rotate(${Math.atan2(point.y - 50, point.x - 50)}rad)` }} />
-          <b style={{ left: `${point.x}%`, top: `${point.y}%`, background: point.color }} />
-        </Fragment>
-      ))}
-      <strong>{notes.length}</strong>
-    </div>
-  );
-}
-
-function buildKnowledgeGraphScene(
-  notes: Note[],
-  filter: GroupKey | "all",
-): {
-  nodes: KnowledgeGraphSceneNode[];
-  links: KnowledgeGraphSceneLink[];
-} {
-  const visibleNotes = notes.filter(
-    (note) => filter === "all" || getGroup(note.path) === filter,
-  );
-  const visiblePaths = new Set(visibleNotes.map((note) => note.path));
-  const titleIndex = new Map<string, Note>();
-  notes.forEach((note) => {
-    const basename = noteBasename(note.path);
-    titleIndex.set(basename, note);
-    titleIndex.set(note.path.replace(/\.md$/i, ""), note);
-  });
-
-  const links: KnowledgeGraphSceneLink[] = [];
-  const linkKeys = new Set<string>();
-  const degree = new Map<string, number>();
-  visibleNotes.forEach((source) => {
-    extractLinks(source.content).forEach((rawTarget) => {
-      const target = titleIndex.get(rawTarget) ?? titleIndex.get(noteBasename(rawTarget));
-      if (!target || target.path === source.path || !visiblePaths.has(target.path)) return;
-      // 双链的往返引用在视觉上是一条边。去重后，节点大小也不会被同一事实重复放大。
-      const key = [source.path, target.path].sort().join("\u0000");
-      if (linkKeys.has(key)) return;
-      linkKeys.add(key);
-      links.push({ source: source.path, target: target.path });
-      degree.set(source.path, (degree.get(source.path) ?? 0) + 1);
-      degree.set(target.path, (degree.get(target.path) ?? 0) + 1);
-    });
-  });
-
-  return {
-    nodes: visibleNotes.map((note) => {
-      const group = getGroup(note.path);
-      return {
-        id: note.path,
-        title: getTitle(note),
-        group,
-        groupLabel: GROUPS[group].label,
-        color: GROUPS[group].color,
-        degree: degree.get(note.path) ?? 0,
-      };
-    }),
-    links,
-  };
-}
-
-function GraphView({
-  notes,
-  filter,
-  onFilter,
-  onOpen,
-}: {
-  notes: Note[];
-  filter: GroupKey | "all";
-  onFilter: (filter: GroupKey | "all") => void;
-  onOpen: (note: Note) => void;
-}) {
-  const [renderer, setRenderer] = useState<"space" | "map">("space");
-  const scene = useMemo(
-    () => buildKnowledgeGraphScene(notes, filter),
-    [notes, filter],
-  );
-  const noteByPath = useMemo(
-    () => new Map(notes.map((note) => [note.path, note])),
-    [notes],
-  );
-  const openSceneNode = useCallback((id: string) => {
-    const note = noteByPath.get(id);
-    if (note) onOpen(note);
-  }, [noteByPath, onOpen]);
-  const fallBackToMap = useCallback(() => setRenderer("map"), []);
-
-  return (
-    <section className="graph-view">
-      <div className="module-control-row">
-        <GroupFilters value={filter} onChange={onFilter} />
-        <div className="graph-renderer-toggle" aria-label="关系图显示方式">
-          <button
-            type="button"
-            className={renderer === "space" ? "active" : ""}
-            aria-pressed={renderer === "space"}
-            onClick={() => setRenderer("space")}
-          >
-            3D 星图
-          </button>
-          <button
-            type="button"
-            className={renderer === "map" ? "active" : ""}
-            aria-pressed={renderer === "map"}
-            onClick={() => setRenderer("map")}
-          >
-            简洁模式
-          </button>
-        </div>
-      </div>
-      <div className="graph-layout" data-renderer={renderer}>
-        {renderer === "space" ? (
-          <Suspense
-            fallback={(
-              <div className="space-graph-loading space-graph-loading-shell" role="status">
-                <i />
-                <span>正在载入星图引擎</span>
-              </div>
-            )}
-          >
-            <ThreeKnowledgeGraph
-              nodes={scene.nodes}
-              links={scene.links}
-              onOpen={openSceneNode}
-              onFallback={fallBackToMap}
-            />
-          </Suspense>
-        ) : (
-          <CanvasKnowledgeGraph notes={notes} filter={filter} onOpen={onOpen} />
-        )}
-        <aside className="graph-legend">
-          <span>{renderer === "space" ? "星系图例" : "图例"}</span>
-          {(Object.keys(GROUPS) as GroupKey[]).map((group) => (
-            <button key={group} onClick={() => onFilter(group)}>
-              <i style={{ background: GROUPS[group].color }} />
-              <span>{GROUPS[group].label}</span>
-              <strong>{notes.filter((note) => getGroup(note.path) === group).length}</strong>
-            </button>
-          ))}
-          <div className="legend-rule"><span>小</span><i /><i /><i /><span>被引用多</span></div>
-        </aside>
-      </div>
-    </section>
-  );
-}
-
-function GroupFilters({ value, onChange }: { value: GroupKey | "all"; onChange: (value: GroupKey | "all") => void }) {
-  return (
-    <div className="group-filters" aria-label="按分区筛选">
-      <button className={value === "all" ? "active" : ""} onClick={() => onChange("all")}>全部</button>
-      {(Object.keys(GROUPS) as GroupKey[]).map((group) => (
-        <button key={group} className={value === group ? "active" : ""} onClick={() => onChange(group)}>
-          <i style={{ background: GROUPS[group].color }} />{GROUPS[group].label}
-        </button>
       ))}
     </div>
   );
 }
 
-type GraphPoint = {
-  note: Note;
-  x: number;
-  y: number;
-  radius: number;
-  group: GroupKey;
-  degree: number;
-};
 
-function seeded(path: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < path.length; index += 1) {
-    hash ^= path.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return ((hash >>> 0) % 10000) / 10000;
+/** 首屏骨架按将要打开的页面画：日历是月格，岗位・分析是卡片，其余是阅读两栏。 */
+function loadingShape(view: View) {
+  if (view === "calendar") return "calendar";
+  if (view === "jobs" || view === "analytics" || view === "library") return "cards";
+  return "columns";
 }
 
-function CanvasKnowledgeGraph({ notes, filter, onOpen }: { notes: Note[]; filter: GroupKey | "all"; onOpen: (note: Note) => void }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const pointsRef = useRef<GraphPoint[]>([]);
-  const [hovered, setHovered] = useState<GraphPoint | null>(null);
-  const [size, setSize] = useState({ width: 900, height: 620 });
-
-  const visibleNotes = useMemo(
-    () => notes.filter((note) => filter === "all" || getGroup(note.path) === filter),
-    [notes, filter],
-  );
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) setSize({ width: entry.contentRect.width, height: entry.contentRect.height });
-    });
-    observer.observe(canvas);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || visibleNotes.length === 0) return;
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.round(size.width * ratio);
-    canvas.height = Math.round(size.height * ratio);
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-
-    const centers: Record<GroupKey, [number, number]> = {
-      self: [0.26, 0.28], career: [0.7, 0.3], study: [0.28, 0.72], analysis: [0.7, 0.72], system: [0.5, 0.5],
-    };
-    const titleIndex = new Map<string, Note>();
-    notes.forEach((note) => titleIndex.set(noteBasename(note.path), note));
-    const incoming = new Map<string, number>();
-    notes.forEach((note) => extractLinks(note.content).forEach((link) => incoming.set(link, (incoming.get(link) ?? 0) + 1)));
-
-    const points: GraphPoint[] = visibleNotes.map((note, index) => {
-      const group = getGroup(note.path);
-      const [centerX, centerY] = centers[group];
-      const angle = seeded(note.path) * Math.PI * 2;
-      const ring = 38 + (index % 5) * 21 + seeded(`${note.path}-r`) * 18;
-      const degree = (incoming.get(noteBasename(note.path)) ?? 0) + extractLinks(note.content).length;
-      return {
-        note,
-        group,
-        x: centerX * size.width + Math.cos(angle) * ring,
-        y: centerY * size.height + Math.sin(angle) * ring * 0.72,
-        radius: 4.5 + Math.min(8, degree * 1.25),
-        degree,
-      };
-    });
-    pointsRef.current = points;
-    const pointByPath = new Map(points.map((point) => [point.note.path, point]));
-    const labelLimit = filter === "all" ? 3 : 12;
-    const labelPaths = new Set(
-      (filter === "all" ? (Object.keys(GROUPS) as GroupKey[]) : [filter])
-        .flatMap((group) =>
-          points
-            .filter((point) => point.group === group)
-            .toSorted((left, right) => right.degree - left.degree)
-            .slice(0, labelLimit)
-            .map((point) => point.note.path),
-        ),
-    );
-
-    context.clearRect(0, 0, size.width, size.height);
-    context.fillStyle = "#18231e";
-    context.fillRect(0, 0, size.width, size.height);
-    context.fillStyle = "rgba(255,255,255,.055)";
-    for (let x = 18; x < size.width; x += 24) {
-      for (let y = 18; y < size.height; y += 24) {
-        context.beginPath(); context.arc(x, y, 1, 0, Math.PI * 2); context.fill();
-      }
-    }
-
-    context.lineWidth = 1;
-    points.forEach((source) => {
-      extractLinks(source.note.content).forEach((link) => {
-        const targetNote = titleIndex.get(link);
-        const target = targetNote ? pointByPath.get(targetNote.path) : undefined;
-        if (!target) return;
-        context.beginPath();
-        context.moveTo(source.x, source.y);
-        context.lineTo(target.x, target.y);
-        context.strokeStyle = "rgba(208, 223, 213, .17)";
-        context.stroke();
-      });
-    });
-
-    points.forEach((point) => {
-      const active = hovered?.note.path === point.note.path;
-      if (active) {
-        context.beginPath(); context.arc(point.x, point.y, point.radius + 8, 0, Math.PI * 2);
-        context.fillStyle = "rgba(255,255,255,.12)"; context.fill();
-      }
-      context.beginPath(); context.arc(point.x, point.y, point.radius, 0, Math.PI * 2);
-      context.fillStyle = GROUPS[point.group].color; context.fill();
-      context.strokeStyle = active ? "#fff" : "rgba(255,255,255,.45)";
-      context.lineWidth = active ? 2 : 1; context.stroke();
-      if (labelPaths.has(point.note.path) || active) {
-        context.font = `${active ? 600 : 500} ${active ? 13 : 11}px system-ui, sans-serif`;
-        context.fillStyle = active ? "#ffffff" : "rgba(244,245,238,.78)";
-        context.textAlign = "center";
-        context.fillText(getTitle(point.note).slice(0, 18), point.x, point.y + point.radius + 17);
-      }
-    });
-  }, [visibleNotes, notes, size, hovered, filter]);
-
-  const findPoint = (event: {
-    currentTarget: HTMLCanvasElement;
-    clientX: number;
-    clientY: number;
-  }) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    return pointsRef.current.find((point) => Math.hypot(point.x - x, point.y - y) <= point.radius + 8) ?? null;
-  };
-
-  return (
-    <div className="graph-canvas-wrap">
-      <canvas
-        ref={canvasRef}
-        role="img"
-        aria-label={`Obsidian 记忆关系图，共 ${visibleNotes.length} 个节点`}
-        onPointerMove={(event) => setHovered(findPoint(event))}
-        onPointerLeave={() => setHovered(null)}
-        onClick={(event) => {
-          const point = findPoint(event);
-          if (point) onOpen(point.note);
-        }}
-      />
-      <div className="graph-caption"><span>移动鼠标探索节点</span><strong>{visibleNotes.length} 个节点</strong></div>
-      {hovered && (
-        <div className="graph-tooltip">
-          <span style={{ color: GROUPS[hovered.group].color }}>{GROUPS[hovered.group].label}</span>
-          <strong>{getTitle(hovered.note)}</strong>
-          <small>{hovered.degree} 条关系 · 点击查看</small>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CalendarView({ events, onOpen }: { events: CalendarEvent[]; onOpen: (note: Note) => void }) {
-  const [month, setMonth] = useState(() => {
-    const today = new Date();
-    return new Date(today.getFullYear(), today.getMonth(), 1);
-  });
-  const today = localDateKey();
-  const monthLabel = new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "long",
-  }).format(month);
-  const firstDayOffset = (month.getDay() + 6) % 7;
-  const days = Array.from({ length: 42 }, (_, index) => {
-    const date = new Date(month.getFullYear(), month.getMonth(), index - firstDayOffset + 1);
-    return {
-      date,
-      key: localDateKey(date),
-      inMonth: date.getMonth() === month.getMonth(),
-    };
-  });
-  const eventsByDate = useMemo(() => {
-    const map = new Map<string, CalendarEvent[]>();
-    events.forEach((event) => map.set(event.date, [...(map.get(event.date) ?? []), event]));
-    return map;
-  }, [events]);
-  const upcomingAll = events.filter((event) => event.phase === "upcoming");
-  const upcoming = upcomingAll.slice(0, 6);
-  const recent = events
-    .filter((event) => event.phase === "past")
-    .sort((left, right) => right.date.localeCompare(left.date) || right.time.localeCompare(left.time))
-    .slice(0, 6);
-
-  const moveMonth = (offset: number) => {
-    setMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
-  };
-
-  return (
-    <section className="calendar-view">
-      <div className="calendar-layout">
-        <div className="calendar-board">
-          <div className="calendar-toolbar">
-            <div>
-              <span>MONTH VIEW</span>
-              <h2>{monthLabel}</h2>
-            </div>
-            <div className="calendar-actions">
-              <button onClick={() => moveMonth(-1)} aria-label="上一个月">←</button>
-              <button
-                onClick={() => {
-                  const now = new Date();
-                  setMonth(new Date(now.getFullYear(), now.getMonth(), 1));
-                }}
-              >
-                今天
-              </button>
-              <button onClick={() => moveMonth(1)} aria-label="下一个月">→</button>
-            </div>
-          </div>
-          <div className="calendar-grid-scroll">
-            <div className="calendar-grid">
-              {["周一", "周二", "周三", "周四", "周五", "周六", "周日"].map((weekday) => (
-                <div className="calendar-weekday" key={weekday}>{weekday}</div>
-              ))}
-              {days.map((day) => {
-                const dayEvents = eventsByDate.get(day.key) ?? [];
-                return (
-                  <div
-                    className={`calendar-day ${day.inMonth ? "" : "outside"} ${day.key === today ? "today" : ""}`}
-                    key={day.key}
-                  >
-                    <div className="calendar-day-number">
-                      <time dateTime={day.key}>{day.date.getDate()}</time>
-                      {day.key === today && <span>今天</span>}
-                    </div>
-                    <div className="calendar-day-events">
-                      {dayEvents.slice(0, 3).map((event) => (
-                        <button
-                          className={`calendar-event ${event.phase}`}
-                          key={event.id}
-                          onClick={() => onOpen(event.note)}
-                          title={`${event.company} · ${event.label}`}
-                        >
-                          <span>{event.time || event.label}</span>
-                          <strong>{event.company}</strong>
-                        </button>
-                      ))}
-                      {dayEvents.length > 3 && <small>另有 {dayEvents.length - 3} 项</small>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        <aside className="calendar-agenda">
-          <AgendaGroup title="接下来的安排" empty="目前没有已记录的未来面谈。" events={upcoming} onOpen={onOpen} />
-          <AgendaGroup title="最近的面试记录" empty="还没有可识别的历史面试记录。" events={recent} onOpen={onOpen} />
-        </aside>
-      </div>
-    </section>
-  );
-}
-
-function AgendaGroup({
-  title,
-  empty,
-  events,
-  onOpen,
-}: {
-  title: string;
-  empty: string;
-  events: CalendarEvent[];
-  onOpen: (note: Note) => void;
-}) {
-  return (
-    <section className="agenda-group">
-      <div className="agenda-heading"><h2>{title}</h2><span>{events.length}</span></div>
-      <div className="agenda-list">
-        {events.map((event) => (
-          <button key={event.id} onClick={() => onOpen(event.note)}>
-            <time dateTime={event.date}>
-              <strong>{event.date.slice(8)}</strong>
-              <span>{formatDate(event.date)}</span>
-            </time>
-            <span className="agenda-copy">
-              <small>{event.time ? `${event.time} · ${event.label}` : event.label}</small>
-              <strong>{event.company}</strong>
-            </span>
-            <span className={`agenda-dot ${event.phase}`} />
-          </button>
-        ))}
-        {events.length === 0 && <p className="agenda-empty">{empty}</p>}
-      </div>
-    </section>
-  );
-}
-
-function TimelineView({ items, onOpen }: { items: { note: Note; date: string }[]; onOpen: (note: Note) => void }) {
-  const groups = useMemo(() => {
-    const map = new Map<string, { note: Note; date: string }[]>();
-    items.forEach((item) => map.set(item.date, [...(map.get(item.date) ?? []), item]));
-    return Array.from(map.entries());
-  }, [items]);
-  return (
-    <section className="timeline-view">
-      <div className="timeline">
-        {groups.map(([date, dateItems]) => (
-          <div className="timeline-day" key={date}>
-            <div className="timeline-date"><strong>{formatDate(date)}</strong><span>{date}</span></div>
-            <div className="timeline-line"><i /></div>
-            <div className="timeline-items">
-              {dateItems.map(({ note }) => (
-                <button key={note.path} onClick={() => onOpen(note)}>
-                  <span className="timeline-type" style={{ color: GROUPS[getGroup(note.path)].color }}>{typeLabel(getType(note))}</span>
-                  <strong>{getTitle(note)}</strong>
-                  <p>{stripMarkdown(note.content).slice(0, 150)}</p>
-                  <span className="timeline-link">阅读原文 ↗</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-
-const TODO_STATUS = ["未着手", "進行中", "保留", "完了"];
-const TODO_PRIORITY: Record<string, { label: string; rank: number }> = {
-  high: { label: "高", rank: 0 },
-  medium: { label: "中", rank: 1 },
-  low: { label: "低", rank: 2 },
-};
-
-function todoPriority(note: Note) {
-  return getString(note.frontmatter.priority).toLowerCase() || "medium";
-}
-function todoStatus(note: Note) {
-  return getString(note.frontmatter.status) || "未着手";
-}
-function todoAudience(note: Note) {
-  return getString(note.frontmatter.audience) === "system" ? "system" : "user";
-}
-function todoAction(note: Note) {
-  return getString(note.frontmatter.action) || getTitle(note);
-}
-
-function TodoView({ notes, onOpen }: { notes: Note[]; onOpen: (note: Note) => void }) {
-  const [tab, setTab] = useState<string>("all");
-  const [audience, setAudience] = useState<"user" | "system">("user");
-  const todos = notes
-    .filter((note) => getType(note) === "todo")
-    .sort((a, b) => {
-      const pa = TODO_PRIORITY[todoPriority(a)]?.rank ?? 9;
-      const pb = TODO_PRIORITY[todoPriority(b)]?.rank ?? 9;
-      if (pa !== pb) return pa - pb;
-      return TODO_STATUS.indexOf(todoStatus(a)) - TODO_STATUS.indexOf(todoStatus(b));
-    });
-
-  const scopedTodos = todos.filter((note) => todoAudience(note) === audience);
-  const open = scopedTodos.filter((n) => todoStatus(n) !== "完了");
-  const visible =
-    tab === "all" ? scopedTodos : scopedTodos.filter((n) => todoStatus(n) === tab);
-  const statuses = TODO_STATUS.filter((st) => scopedTodos.some((n) => todoStatus(n) === st));
-  const systemCount = todos.filter((note) => todoAudience(note) === "system" && todoStatus(note) !== "完了").length;
-  const highPriorityOpen = open.filter((note) => todoPriority(note) === "high").length;
-
-  return (
-    <section className="todo-view">
-      <div className="section-intro page-head page-head-simple">
-        <div>
-          <span className="eyebrow"><i /> {audience === "user" ? "ACTION LIST" : "INTERNAL MAINTENANCE"}</span>
-          <h1>{audience === "user" ? "行动清单" : "系统维护"}</h1>
-          <p>
-            {audience === "user"
-              ? "这里保留全部可执行行动，日常决策仍从总览的“现在先完成这一件事”开始。"
-              : "数据补账、同步修复等内部工作只供维护和追溯，不参与首页重点排序。"}
-          </p>
-        </div>
-        <div className="jobs-stat">
-          <div><strong>{open.length}</strong><span>未完了</span></div>
-          <div><strong>{audience === "user" ? highPriorityOpen : scopedTodos.length}</strong><span>{audience === "user" ? "高优先" : "内部记录"}</span></div>
-        </div>
-      </div>
-
-      {audience === "system" && (
-        <button
-          className="todo-back-to-actions"
-          onClick={() => {
-            setAudience("user");
-            setTab("all");
-          }}
-        >
-          ← 返回行动清单
-        </button>
-      )}
-
-      <div className="jobs-controls">
-        <button className={tab === "all" ? "active" : ""} onClick={() => setTab("all")}>全部 <small>{scopedTodos.length}</small></button>
-        {statuses.map((st) => (
-          <button key={st} className={tab === st ? "active" : ""} onClick={() => setTab(st)}>
-            {st} <small>{scopedTodos.filter((n) => todoStatus(n) === st).length}</small>
-          </button>
-        ))}
-      </div>
-
-      <div className="todo-list">
-        {visible.map((note) => {
-          const pri = todoPriority(note);
-          const st = todoStatus(note);
-          const why = jobSection(note, "なぜ必要か") || jobSection(note, "課題");
-          const what = jobSection(note, "やること");
-          return (
-            <article className={`todo-card pri-${pri} ${st === "完了" ? "is-done" : ""}`} key={note.path}>
-              <header className="todo-head">
-                <div className="todo-titles">
-                  <span className={`todo-pri pri-${pri}`}>{TODO_PRIORITY[pri]?.label ?? pri}</span>
-                  <h2>{todoAction(note)}</h2>
-                </div>
-                <span className={`todo-status st-${st}`}>{st}</span>
-              </header>
-              {getString(note.frontmatter.category) && (
-                <div className="todo-cat">{getString(note.frontmatter.category)}</div>
-              )}
-              {why && (
-                <div className="job-block">
-                  <span className="job-block-label">背景</span>
-                  <p>{why.slice(0, 210)}{why.length > 210 ? "…" : ""}</p>
-                </div>
-              )}
-              {what && (
-                <div className="job-block">
-                  <span className="job-block-label">やること</span>
-                  <p>{what.slice(0, 180)}{what.length > 180 ? "…" : ""}</p>
-                </div>
-              )}
-              <footer className="job-card-foot">
-                <button className="job-detail" onClick={() => onOpen(note)}>詳細を開く</button>
-              </footer>
-            </article>
-          );
-        })}
-      </div>
-
-      {audience === "user" && systemCount > 0 && (
-        <details className="todo-maintenance-entry">
-          <summary>管理工具</summary>
-          <div>
-            <span>数据补账、同步修复等内部事项</span>
-            <button
-              onClick={() => {
-                setAudience("system");
-                setTab("all");
-              }}
-            >
-              查看系统维护 <small>{systemCount}</small> →
-            </button>
-          </div>
-        </details>
-      )}
-
-      {scopedTodos.length === 0 && (
-        <div className="jobs-empty">
-          <p>{audience === "user" ? "当前没有行动。" : "当前没有系统维护事项。"}</p>
-          <small>在 Vault 的 <code>20_求職/_TODO/</code> 下新建 <code>type: todo</code> 的笔记即可显示。</small>
-        </div>
-      )}
-      {scopedTodos.length > 0 && visible.length === 0 && <div className="jobs-empty"><p>该状态下没有事项。</p></div>}
-    </section>
-  );
-}
-
-function LibraryView({
-  notes,
-  filter,
-  query,
-  onFilter,
-  onQuery,
-  onOpen,
-}: {
-  notes: Note[];
-  filter: GroupKey | "all";
-  query: string;
-  onFilter: (filter: GroupKey | "all") => void;
-  onQuery: (query: string) => void;
-  onOpen: (note: Note) => void;
-}) {
-  const [scope, setScope] = useState<LibraryScope>("all");
-  const [sort, setSort] = useState<LibrarySort>("recent");
-  const [visibleLimit, setVisibleLimit] = useState(LIBRARY_PAGE_SIZE);
-
-  const queryMatched = useMemo(
-    () => notes.filter((note) => noteMatches(note, query)),
-    [notes, query],
-  );
-  const groupMatched = useMemo(
-    () => queryMatched.filter((note) => filter === "all" || getGroup(note.path) === filter),
-    [queryMatched, filter],
-  );
-  const scopeCounts = useMemo(
-    () => Object.fromEntries(
-      LIBRARY_SCOPES.map((item) => [
-        item.id,
-        groupMatched.filter((note) => libraryScopeMatches(note, item.id)).length,
-      ]),
-    ) as Record<LibraryScope, number>,
-    [groupMatched],
-  );
-  const scopeMatched = useMemo(
-    () => queryMatched.filter((note) => libraryScopeMatches(note, scope)),
-    [queryMatched, scope],
-  );
-  const groupCounts = useMemo(() => {
-    const counts = Object.fromEntries(
-      (Object.keys(GROUPS) as GroupKey[]).map((group) => [
-        group,
-        scopeMatched.filter((note) => getGroup(note.path) === group).length,
-      ]),
-    ) as Record<GroupKey, number>;
-    return { ...counts, all: scopeMatched.length };
-  }, [scopeMatched]);
-  const orderedNotes = useMemo(() => {
-    const result = groupMatched.filter((note) => libraryScopeMatches(note, scope));
-    return result.toSorted((left, right) => {
-      if (sort === "connections") {
-        return extractLinks(right.content).length - extractLinks(left.content).length ||
-          right.stat.mtime - left.stat.mtime;
-      }
-      if (sort === "title") {
-        return getTitle(left).localeCompare(getTitle(right), "zh-CN");
-      }
-      return right.stat.mtime - left.stat.mtime;
-    });
-  }, [groupMatched, scope, sort]);
-  const visibleNotes = orderedNotes.slice(0, visibleLimit);
-  const activeScopeLabel = LIBRARY_SCOPES.find((item) => item.id === scope)?.label ?? "全部内容";
-  const hasFilters = Boolean(query) || filter !== "all" || scope !== "all";
-
-  const resetFilters = () => {
-    onQuery("");
-    onFilter("all");
-    setScope("all");
-    setVisibleLimit(LIBRARY_PAGE_SIZE);
-  };
-
-  return (
-    <section className="library-view">
-      <div className="library-workspace">
-        <aside className="library-facets" aria-label="记忆筛选">
-          <div className="library-facet-block">
-            <div className="library-facet-title"><span>内容分区</span><small>按来源目录</small></div>
-            <div className="library-group-list">
-              <button
-                className={filter === "all" ? "active" : ""}
-                onClick={() => { onFilter("all"); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
-              >
-                <span><i className="all" />全部分区</span><strong>{groupCounts.all}</strong>
-              </button>
-              {(Object.keys(GROUPS) as GroupKey[]).map((group) => (
-                <button
-                  key={group}
-                  className={filter === group ? "active" : ""}
-                  onClick={() => { onFilter(group); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
-                >
-                  <span><i style={{ background: GROUPS[group].color }} />{GROUPS[group].label}</span>
-                  <strong>{groupCounts[group]}</strong>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="library-facet-block">
-            <div className="library-facet-title"><span>使用场景</span><small>可交叉筛选</small></div>
-            <div className="library-scope-list">
-              {LIBRARY_SCOPES.map((item) => (
-                <button
-                  key={item.id}
-                  className={scope === item.id ? "active" : ""}
-                  onClick={() => { setScope(item.id); setVisibleLimit(LIBRARY_PAGE_SIZE); }}
-                >
-                  <span>{item.label}</span><strong>{scopeCounts[item.id]}</strong>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="library-query-help">
-            <span>精确搜索</span>
-            <p>顶部搜索框支持 <code>type:</code>、<code>status:</code> 和 <code>folder:</code>。</p>
-          </div>
-        </aside>
-
-        <div className="library-results">
-          <div className="library-result-head">
-            <div>
-              <small>{query ? `搜索 “${query}”` : `${filter === "all" ? "全部分区" : GROUPS[filter].label} · ${activeScopeLabel}`}</small>
-              <h2>{orderedNotes.length} 篇记忆</h2>
-            </div>
-            <div className="library-result-actions">
-              <label>
-                <span>排序</span>
-                <select value={sort} onChange={(event) => setSort(event.target.value as LibrarySort)}>
-                  <option value="recent">最近更新</option>
-                  <option value="connections">关联最多</option>
-                  <option value="title">标题顺序</option>
-                </select>
-              </label>
-              {hasFilters && <button className="clear-filter" onClick={resetFilters}>重置筛选</button>}
-            </div>
-          </div>
-
-          <div className="note-grid">
-            {visibleNotes.map((note) => {
-              const group = getGroup(note.path);
-              const trust = trustLayer(note);
-              const links = extractLinks(note.content).length;
-              return (
-                <button
-                  className="note-card"
-                  key={note.path}
-                  onClick={() => onOpen(note)}
-                  style={{ "--note-accent": GROUPS[group].color } as CSSProperties}
-                >
-                  <div className="note-card-top">
-                    <span className="note-group"><i />{GROUPS[group].label}</span>
-                    <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
-                  </div>
-                  <h2>{getTitle(note)}</h2>
-                  <p>{notePreview(note).slice(0, 190)}</p>
-                  <div className="note-card-source">{noteFolder(note.path)}</div>
-                  <div className="note-card-foot">
-                    <span>{typeLabel(getType(note))}</span>
-                    <span>{links ? `${links} 条关联` : "暂无关联"}</span>
-                    <time dateTime={new Date(note.stat.mtime).toISOString()}>{formatDate(note.stat.mtime)}</time>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {visibleNotes.length < orderedNotes.length && (
-            <button
-              className="library-load-more"
-              onClick={() => setVisibleLimit((current) => current + LIBRARY_PAGE_SIZE)}
-            >
-              再显示 {Math.min(LIBRARY_PAGE_SIZE, orderedNotes.length - visibleNotes.length)} 篇
-              <span>还有 {orderedNotes.length - visibleNotes.length} 篇</span>
-            </button>
-          )}
-
-          {orderedNotes.length === 0 && (
-            <div className="library-empty">
-              <strong>没有符合当前条件的记忆</strong>
-              <p>尝试减少关键词，或重置分区与使用场景。</p>
-              {hasFilters && <button onClick={resetFilters}>重置筛选</button>}
-            </div>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function NoteDrawer({
-  note,
-  section,
-  allNotes,
-  onClose,
-  onOpenWiki,
-  onOpen,
-}: {
-  note: Note;
-  section: string | null;
-  allNotes: Note[];
-  onClose: () => void;
-  onOpenWiki: (target: string, section?: string) => void;
-  onOpen: (note: Note) => void;
-}) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const group = getGroup(note.path);
-  const trust = trustLayer(note);
-  const basename = noteBasename(note.path);
-  const backlinks = allNotes.filter((candidate) => extractLinks(candidate.content).includes(basename));
-
-  useEffect(() => {
-    if (!section) return;
-    const timer = window.setTimeout(() => {
-      const wanted = normalizeHeading(section);
-      const target = [...(scrollRef.current?.querySelectorAll<HTMLElement>("[data-md-heading]") ?? [])]
-        .find((heading) => {
-          const actual = heading.dataset.mdHeading ?? "";
-          return actual === wanted || actual.startsWith(wanted) || wanted.startsWith(actual);
-        });
-      target?.scrollIntoView({ block: "start" });
-    }, 60);
-    return () => window.clearTimeout(timer);
-  }, [note.path, section]);
-
-  return (
-    <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <aside className="note-drawer" aria-label="记忆详情" aria-modal="true" role="dialog">
-        <header className="drawer-header">
-          <div><span style={{ color: GROUPS[group].color }}>{GROUPS[group].label}</span><small>{note.path}</small></div>
-          <button onClick={onClose} aria-label="关闭详情">×</button>
-        </header>
-        <div className="drawer-scroll" ref={scrollRef}>
-          <div className="drawer-title-row">
-            <span className={`trust-badge ${trust.className}`}>{trust.label}</span>
-            <span>{typeLabel(getType(note))}</span>
-          </div>
-          <h1>{getTitle(note)}</h1>
-          <div className="drawer-meta">
-            <span>更新于 {formatDate(note.stat.mtime, true)}</span>
-            <span>{Math.round(note.stat.size / 1024 * 10) / 10} KB</span>
-            <span>{extractLinks(note.content).length} 条外链</span>
-            <span>{backlinks.length} 条反链</span>
-          </div>
-          {Object.keys(note.frontmatter).length > 0 && (
-            <div className="frontmatter-grid">
-              {Object.entries(note.frontmatter).map(([key, value]) => (
-                <div key={key}><span>{key}</span><strong>{Array.isArray(value) ? value.join(" · ") : getString(value) || "—"}</strong></div>
-              ))}
-            </div>
-          )}
-          <MarkdownDocument content={note.content} onWikiLink={onOpenWiki} />
-          {backlinks.length > 0 && (
-            <section className="backlinks">
-              <span>BACKLINKS · 反向链接</span>
-              {backlinks.map((backlink) => (
-                <button key={backlink.path} onClick={() => onOpen(backlink)}><strong>{getTitle(backlink)}</strong><small>{GROUPS[getGroup(backlink.path)].label} ↗</small></button>
-              ))}
-            </section>
-          )}
-        </div>
-      </aside>
-    </div>
-  );
-}
-
-function normalizeHeading(text: string) {
-  return text
-    .normalize("NFKC")
-    .replace(/\*\*/g, "")
-    .replace(/\[\[([^#|\]]+)(?:#[^|\]]+)?(?:\|([^\]]+))?\]\]/g, "$2$1")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function renderInline(text: string, onWikiLink: (target: string, section?: string) => void): ReactNode[] {
-  const pieces = text.split(/(\[\[[^\]]+\]\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
-  return pieces.map((piece, index) => {
-    if (piece.startsWith("[[") && piece.endsWith("]]")) {
-      const body = piece.slice(2, -2);
-      const [targetWithHeading, alias] = body.split("|");
-      const [target, section] = targetWithHeading.split("#");
-      return (
-        <button className="wiki-link" key={index} onClick={() => onWikiLink(target, section)}>
-          {alias || section || target} ↗
-        </button>
-      );
-    }
-    if (piece.startsWith("**") && piece.endsWith("**")) return <strong key={index}>{piece.slice(2, -2)}</strong>;
-    if (piece.startsWith("`") && piece.endsWith("`")) return <code key={index}>{piece.slice(1, -1)}</code>;
-    return piece;
-  });
-}
-
-function MarkdownDocument({
-  content,
-  onWikiLink,
-}: {
-  content: string;
-  onWikiLink: (target: string, section?: string) => void;
-}) {
-  const lines = stripFrontmatter(content).split("\n");
-  const blocks: ReactNode[] = [];
-  let codeLines: string[] = [];
-  let inCode = false;
-  lines.forEach((line, index) => {
-    if (line.startsWith("```")) {
-      if (inCode) {
-        blocks.push(<pre key={`code-${index}`}><code>{codeLines.join("\n")}</code></pre>);
-        codeLines = [];
-      }
-      inCode = !inCode;
-      return;
-    }
-    if (inCode) { codeLines.push(line); return; }
-    if (!line.trim()) return;
-    const heading = line.match(/^(#{2,4})\s+(.+)/);
-    if (heading) {
-      const level = heading[1].length;
-      const data = { "data-md-heading": normalizeHeading(heading[2]) };
-      if (level === 2) blocks.push(<h2 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h2>);
-      else if (level === 3) blocks.push(<h3 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h3>);
-      else blocks.push(<h4 key={index} {...data}>{renderInline(heading[2], onWikiLink)}</h4>);
-      return;
-    }
-    if (line.startsWith(">")) {
-      blocks.push(<blockquote key={index}>{renderInline(line.replace(/^>\s?/, ""), onWikiLink)}</blockquote>);
-      return;
-    }
-    const listItem = line.match(/^\s*(?:[-*]|\d+\.)\s+(.+)/);
-    if (listItem) {
-      blocks.push(<div className="md-list-item" key={index}><i /> <span>{renderInline(listItem[1], onWikiLink)}</span></div>);
-      return;
-    }
-    if (line.startsWith("|")) {
-      if (/^\|?\s*:?-+/.test(line)) return;
-      blocks.push(<div className="md-table-row" key={index}>{line.split("|").filter(Boolean).map((cell, cellIndex) => <span key={cellIndex}>{renderInline(cell.trim(), onWikiLink)}</span>)}</div>);
-      return;
-    }
-    blocks.push(<p key={index}>{renderInline(line, onWikiLink)}</p>);
-  });
-  return <article className="markdown-document">{blocks}</article>;
-}
-
-function LoadingState() {
+function LoadingState({ view }: { view: View }) {
+  const { locale } = useUiLocale();
+  const ui = SHELL_MESSAGES[locale];
+  const shape = loadingShape(view);
+  const count = shape === "calendar" ? 35 : shape === "cards" ? 6 : 8;
   return (
     <div className="loading-state">
-      <div className="loading-orbit"><i /><i /><i /><strong>回</strong></div>
-      <h1>正在重建你的记忆关系…</h1>
-      <p>读取笔记、双链、时间和事实层级</p>
+      <div className="loading-orbit"><i /><i /><i /><strong>職</strong></div>
+      <h1>{ui.loadingTitle}</h1>
+      <p>{ui.loadingDetail}</p>
+      <div className="loading-skeleton" data-shape={shape} aria-hidden="true">
+        {Array.from({ length: count }, (_, index) => <i key={index} className="skeleton" />)}
+      </div>
     </div>
   );
 }
 
+/** 连不上时按 3→6→12→24→30 秒退避自动重连；凭证错误重试也没用，只给手动按钮。 */
+const RECONNECT_DELAYS = [3, 6, 12, 24, 30];
+
 function ConnectionError({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const { locale } = useUiLocale();
+  const ui = SHELL_MESSAGES[locale];
+  const detail = describeConnectionError(error);
+  const autoRetry = detail.kind === "unreachable";
+  const [attempt, setAttempt] = useState(0);
+  const [remaining, setRemaining] = useState(RECONNECT_DELAYS[0]);
+  // 外壳每次重渲染都会传一个新的 onRetry；倒计时只认最新的那个，不因此重新开始。
+  const retryRef = useRef(onRetry);
+  useEffect(() => {
+    retryRef.current = onRetry;
+  });
+  useEffect(() => {
+    if (!autoRetry) return;
+    const delay = RECONNECT_DELAYS[Math.min(attempt, RECONNECT_DELAYS.length - 1)];
+    let left = delay;
+    const reset = window.setTimeout(() => setRemaining(delay), 0);
+    const timer = window.setInterval(() => {
+      left -= 1;
+      setRemaining(left);
+      if (left <= 0) {
+        window.clearInterval(timer);
+        setAttempt((current) => current + 1);
+        retryRef.current();
+      }
+    }, 1000);
+    return () => {
+      window.clearTimeout(reset);
+      window.clearInterval(timer);
+    };
+  }, [attempt, autoRetry]);
   return (
-    <div className="connection-error">
+    <div className="connection-error" data-kind={detail.kind}>
       <span className="error-code">LOCAL / OFFLINE</span>
-      <h1>还差一步，才能读到记忆库。</h1>
-      <p>网页本身已经就绪，但本地服务没有拿到 Obsidian 的访问凭证。确认 Obsidian 正在运行后，使用项目提供的本地启动脚本即可。</p>
+      <h1>{detail.title}</h1>
+      <p>{detail.hint}</p>
+      <ol className="connection-steps">
+        {ui.connectionSteps.map((step) => <li key={step}>{step}</li>)}
+      </ol>
       <code>{error}</code>
-      <button onClick={onRetry}>重新连接 <span>↻</span></button>
+      <button onClick={onRetry}>
+        {ui.reconnect} <span>↻</span>
+        {autoRetry && <small>{ui.retryIn.replace("{n}", String(Math.max(0, remaining)))}</small>}
+      </button>
     </div>
   );
 }

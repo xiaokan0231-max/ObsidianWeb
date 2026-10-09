@@ -1,0 +1,681 @@
+/* デザイントークン・:root・全局リセット（globals.css から分割） */
+
+:root {
+  /*
+   * ===== 颜色 token：浅色（data-theme="light"） =====
+   * 浅色块必须排在暗色块前面：tests/desktop-ux-contracts 用正则取「第一个」
+   * --paper / --text-secondary / --interactive 校验浅色对比度。
+   * 新写的样式只用这里的语义名，不再直接写 #hex——两套主题靠同名 token 切换。
+   */
+  --paper: #f3f0e8;
+  --paper-deep: #e9e5da;
+  --surface-sunken: #ede9df;
+  --surface: #fbfaf6;
+  --surface-raised: rgba(251, 250, 246, 0.88);
+  --surface-raised-solid: #fffefa;
+  --surface-overlay: #ffffff;
+  --surface-soft: rgba(255, 255, 255, 0.46);
+  /* 原来散落的「半透明白块」（hover/选中底）。暗色下不能还是白，所以统一走浮层色。 */
+  --surface-lift: color-mix(in oklab, var(--surface-overlay) 58%, transparent);
+  /* 只经 color-mix 使用的基色：白高光描边、黑影。 */
+  --highlight: #ffffff;
+  --shade: #000000;
+
+  /* 反相面：浅色里本来就是深底的面板（复盘报告、代码块、撤销条…）。 */
+  --surface-inverse: #18231e;
+  --surface-inverse-soft: #202c27;
+  --surface-inverse-violet: #2a2438;
+  --inverse-ring: 0 0 0 0 transparent;
+  --text-on-inverse: #f7f4ea;
+  --text-on-inverse-muted: #b9c9bf;
+  --line-on-inverse: color-mix(in oklab, var(--highlight) 14%, transparent);
+  /* 只出现在深底上的亮色点缀，两套主题同值。 */
+  --brand-on-inverse: #e8a48d;
+  --gold-on-inverse: #e6ce95;
+  --violet-on-inverse: #d8cdec;
+  --green-on-inverse: #78b594;
+  --info-on-inverse: #7f9fb5;
+  --danger-on-inverse: #df7d61;
+  --gold-on-inverse-strong: #d6b35c;
+
+  --ink: #18231e;
+  --text-primary: #18231e;
+  --text-secondary: #46524c;
+  --muted: #56615b;
+  --text-tertiary: #5f6a64;
+  /* 装饰灰（注音、角标、占位）：对底不足 4.5，不许用于正文。 */
+  --text-faint: #80877f;
+  --text-disabled: #9aa39d;
+  --text-display: #18231e;
+
+  --line: #d8d5ca;
+  --line-strong: #c8c4b8;
+  --line-soft: #e6e3da;
+  --line-cool: #d7ded5;
+
+  --orange: #e66d45;
+  --brand: #e66d45;
+  --brand-wash: #fff1ec;
+  --brand-line: #f3c2af;
+  /*
+   * 可点击色原来一名两用：文字链接和实心按钮底都用 --interactive。暗色下文字要提亮、
+   * 填充要保持饱和，所以拆成三个：文字 / 填充 / 填充上的字。焦点环单独一个。
+   */
+  --interactive: #a84325;
+  --interactive-fill: #a84325;
+  --on-interactive: #ffffff;
+  --focus-ring: #a84325;
+  /* 墨・绿・紫・危险等实心填充上的字。 */
+  --on-fill: #ffffff;
+
+  --success: #23624f;
+  --success-wash: #edf4ef;
+  --success-line: #a5bdb3;
+  --warning: #8a5b10;
+  --warning-strong: #725311;
+  --warning-wash: #f5e8c9;
+  --warning-wash-soft: #fdf6e4;
+  --warning-line: #ceba9a;
+  --danger: #a33d32;
+  --danger-strong: #8d382b;
+  --danger-wash: #f8dfd7;
+  --danger-line: #d8aea8;
+  --info: #3f5f8f;
+  --info-wash: #e8edf4;
+  --info-line: #b0bccd;
+
+  --green: #2f6b59;
+  --green-deep: #203a33;
+  /* #7466a9 对凹陷面只有 4.11:1，压暗一点到 4.75。 */
+  --violet: #6a5c9f;
+  --violet-deep: #574b85;
+  --violet-wash: #ece7f5;
+  --gold: #b5842f;
+  /* --gold 作文字只有 2.9:1；金色文字走这个。原值 #8a6320 对凹陷面只有 4.46:1，压暗一点到 4.61。 */
+  --gold-text: #87611d;
+  /* 面谈（非选考）的青绿：公司卷宗与本场面试 v2 的强调色。 */
+  --teal: #12646a;
+
+  --shadow-color: #1c2520;
+  --shadow: 0 18px 55px color-mix(in oklab, var(--shadow-color) 12%, transparent);
+  --shadow-soft: 0 12px 34px color-mix(in oklab, var(--shadow-color) 7%, transparent);
+  --selection-bg: color-mix(in oklab, var(--brand) 28%, transparent);
+
+  /*
+   * チャート専用トークン。UI の --orange/--green とは別に持つ理由：
+   * 既存の --green (#2f6b59) は chroma 0.069 で塗りつぶすと灰色に見え、
+   * バーの塗りとしては検証に落ちる（validate_palette.js の chroma floor）。
+   * UI 側の色は変えずに、チャートだけ検証済みの値を使う。
+   *
+   * 名義カテゴリ（経路・技術スタック）は --chart-bar 一色。
+   * 長さが既に大きさを表しているので、濃淡で二重符号化しない。
+   */
+  --chart-bar: #c06542;
+  /* 順序カテゴリ用の 6 段（ファネル・評点・状態）。--ordinal 検証済み：
+     単一色相・L 単調・隣接 ΔL>=0.06・薄い端も surface に対して 2:1 以上 */
+  --chart-step-0: #dfa184;
+  --chart-step-1: #cf7f5a;
+  --chart-step-2: #bd633f;
+  --chart-step-3: #a64a29;
+  --chart-step-4: #88371c;
+  --chart-step-5: #622813;
+
+  /*
+   * 分区色（关于我・求职・日语学习・AI 分析・系统）。lib/memory-atlas-data.ts 的 GROUPS 写死了 hex，
+   * 3D 舞台继续用那份；主题化页面改传这里的 token，换皮肤时分区标签才会跟着变。
+   * 默认皮肤下必须与 GROUPS 现值逐位一致：study / system 若写 var(--violet) / var(--muted)
+   * 会差 ΔE 0.034 / 0.054，所以直接写现值；皮肤里再改成跟随皮肤的写法（skins.css 公共派生）。
+   */
+  --group-self: var(--brand);
+  --group-career: var(--green);
+  --group-study: #7466a9;
+  --group-analysis: var(--gold);
+  --group-system: #66706c;
+
+  /* ===== 与主题无关的 token ===== */
+  --radius-xs: 4px;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-feature: 16px;
+  --radius-pill: 999px;
+
+  --page-title-size: clamp(38px, 3.4vw, 50px);
+  --page-copy-size: 13px;
+  --font-body: 14px;
+  --font-compact: 12.5px;
+  --font-support: 11.5px;
+  --control-height: 40px;
+  /* 字号阶梯。11px 是全大写等宽小标签的下限，正文不低于 13px。 */
+  --fs-micro: 11px;
+  --fs-support: 12px;
+  --fs-compact: 13px;
+  --fs-body: 14px;
+  --fs-lead: 16px;
+  --fs-title: 22px;
+  --fs-display: clamp(34px, 3.4vw, 50px);
+  --font-serif: "Songti SC", "Noto Serif CJK SC", serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --ruby-size: max(10px, 0.56em);
+
+  /* 动效：时长三档、缓动两条（取自 3D 舞台已在用的曲线）。减弱动效的全局兜底见文件末尾。 */
+  --dur-fast: 140ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.18, 0.86, 0.18, 1);
+
+  /* 层级：按现有取值命名，不改数值。 */
+  --z-sticky: 20;
+  --z-rail: 30;
+  --z-drawer: 60;
+  --z-toast: 80;
+  --z-overlay: 90;
+  --z-top: 200;
+
+  /*
+   * 3D 舞台的底色。舞台永远是深色，与明暗无关，所以暗色块不覆盖它；皮肤只给它带一点色相（skins.css）。
+   * --stage-void：最深的虚空，舞台 CSS 底色、three.js 的 clearColor 与雾都取它；--stage-bg：全屏与 ::backdrop 的底，比虚空亮一级。
+   * three.js 读不了 CSS 变量：场景初始化时用 getComputedStyle 读一次，切皮肤后要随 echo:themechange 重读。
+   */
+  --stage-void: #030807;
+  --stage-bg: #07110d;
+}
+
+/*
+ * ===== 颜色 token：暗色（墨夜作战室） =====
+ * 不带 data-theme 或 data-theme="dark" 时生效；特异性 (0,2,0) 压过上面的 :root。
+ * 取色依据：public/og.jpg 实测（底 #0b1611、纸色字 #f0e4d2）与 3D 舞台（#030807 / #07110d）——
+ * 页面底比舞台亮一级，进出 3D 时是「更深的洞」而不是换了一个产品。
+ * 正文 / 次要 / 弱文字对五种面全部 ≥4.5:1；--text-tertiary 是下限，不能再暗。
+ */
+:root:not([data-theme="light"]) {
+  color-scheme: dark;
+
+  --paper: #0d1612;
+  --paper-deep: #090f0c;
+  --surface-sunken: #090f0c;
+  --surface: #131f19;
+  --surface-raised: rgba(26, 40, 33, 0.92);
+  --surface-raised-solid: #1a2821;
+  --surface-overlay: #20302a;
+  --surface-soft: color-mix(in oklab, var(--surface-overlay) 46%, transparent);
+  --surface-lift: color-mix(in oklab, var(--surface-overlay) 58%, transparent);
+  --highlight: #dff7ec;
+  --shade: #000000;
+
+  /* 反相面在暗色下比浮层再亮一级，加一圈高光描边与微光保持「这里是重点」。 */
+  --surface-inverse: #26392f;
+  --surface-inverse-soft: #30463b;
+  --surface-inverse-violet: #2e2a44;
+  --inverse-ring:
+    0 0 0 1px color-mix(in oklab, var(--highlight) 12%, transparent),
+    0 0 28px color-mix(in oklab, var(--highlight) 6%, transparent);
+  --text-on-inverse: #eee9dd;
+  --text-on-inverse-muted: #a9bbb1;
+
+  --ink: #ebe6d9;
+  --text-primary: #ebe6d9;
+  --text-secondary: #b5bfb8;
+  --muted: #a2aca5;
+  --text-tertiary: #8f9a93;
+  /* 浅色里大量小标签（10–12px 的计数、表头）用的是这两档灰；暗色下若照浅色的比例压暗，
+     在卡面上只剩 3:1。所以暗色把它们抬到对凸起面 ≥4.5（faint）/ ≥3.8（disabled）。 */
+  --text-faint: #8a958f;
+  --text-disabled: #76827b;
+  --text-display: #f0e4d2;
+
+  --line: #253630;
+  --line-strong: #36493f;
+  --line-soft: #1d2b25;
+  --line-cool: #2a3b33;
+
+  --brand-wash: color-mix(in oklab, var(--brand) 16%, var(--surface));
+  --brand-line: #673e2b;
+  --interactive: #f29a76;
+  --interactive-fill: #e66d45;
+  --on-interactive: #17110e;
+  --focus-ring: #f29a76;
+  --on-fill: #0d1612;
+
+  --success: #7cc9a2;
+  --success-wash: color-mix(in oklab, var(--success) 16%, var(--surface));
+  --success-line: #3d6350;
+  --warning: #e3b55d;
+  --warning-strong: #f0c87a;
+  --warning-wash: color-mix(in oklab, var(--warning) 16%, var(--surface));
+  --warning-wash-soft: color-mix(in oklab, var(--warning) 9%, var(--surface));
+  --warning-line: #665b34;
+  --danger: #f0907f;
+  --danger-strong: #f7a899;
+  --danger-wash: color-mix(in oklab, var(--danger) 16%, var(--surface));
+  --danger-line: #6b4c42;
+  --info: #93b6e8;
+  --info-wash: color-mix(in oklab, var(--info) 16%, var(--surface));
+  --info-line: #465b6c;
+
+  --green: #6fb994;
+  --green-deep: #cfe3d8;
+  --violet: #ab9ddc;
+  --violet-deep: #cfc5ea;
+  --violet-wash: color-mix(in oklab, var(--violet) 16%, var(--surface));
+  --gold: #d9ac52;
+  --gold-text: #e0b96a;
+  --teal: #5fb7bd;
+  /* 分区色在默认暗色下也保持 GROUPS 现值（原来就是同一组 hex，再由 .accent-ink 往正文色提亮）；
+     不钉住的话 var(--green) / var(--gold) 会取到上面暗色的值，标签颜色整体变浅。 */
+  --group-career: #2f6b59;
+  --group-analysis: #b5842f;
+
+  --shadow-color: #000000;
+  --shadow: 0 18px 55px color-mix(in oklab, var(--shadow-color) 55%, transparent);
+  --shadow-soft: 0 12px 34px color-mix(in oklab, var(--shadow-color) 40%, transparent);
+  --selection-bg: color-mix(in oklab, var(--brand) 34%, transparent);
+
+  /* 暗色图表色阶：同色相 41°，序号越大越亮（弱→强的语义与浅色一致），相邻 ΔL 0.07，
+     最暗一段对 --surface 2.45:1。 */
+  --chart-bar: #db7b56;
+  --chart-step-0: #983e18;
+  --chart-step-1: #af532f;
+  --chart-step-2: #c66844;
+  --chart-step-3: #de7e59;
+  --chart-step-4: #f6936e;
+  --chart-step-5: #fdb397;
+}
+
+html[lang="ja"] {
+  --font-serif: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif CJK JP", serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--paper);
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-size: var(--font-body);
+  line-height: 1.55;
+}
+
+html[lang="ja"] body,
+[lang="ja"] {
+  font-family: var(--font-geist-sans), "Hiragino Sans", "Yu Gothic", "Noto Sans CJK JP", sans-serif;
+}
+
+a { color: inherit; }
+
+::selection {
+  background: var(--selection-bg);
+}
+
+/*
+ * 分区色（lib/memory-atlas-data.ts 的 GROUPS，3D 也在用，所以 JS 里的值不改）直接当文字色时，
+ * 墨绿・灰在暗色底上读不清：经 --accent 传进来，暗色下往正文色方向提亮。
+ */
+.accent-ink { color: var(--accent); }
+.accent-chip { background: color-mix(in oklab, var(--accent) 16%, var(--surface-overlay)); color: var(--accent); }
+:root:not([data-theme="light"]) :is(.accent-ink, .accent-chip) {
+  color: color-mix(in oklab, var(--accent) 58%, var(--ink));
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+:where(a, button, input, textarea, select, canvas, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.app-shell {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 218px minmax(0, 1fr);
+  transition: grid-template-columns 200ms ease;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 30px 22px 24px;
+  background: var(--surface-sunken);
+  border-right: 1px solid var(--line);
+  z-index: 30;
+  transition: padding 200ms ease;
+}
+
+.brand,
+.mobile-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+}
+
+.brand {
+  cursor: pointer;
+}
+
+.brand-mark {
+  flex: 0 0 auto;
+  width: 39px;
+  height: 39px;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: var(--on-fill);
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 20px;
+  border-radius: 50% 50% 50% 12%;
+}
+
+.brand-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.05;
+}
+
+.brand-copy strong {
+  font-family: "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 18px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.brand-copy small {
+  margin-top: 6px;
+  font-family: var(--font-geist-mono), monospace;
+  color: var(--text-faint);
+  font-size: 8px;
+  letter-spacing: 0.16em;
+}
+
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  /* 展开二级项后矮屏会顶出去：先让这段留白跟着屏高收，880px 以上仍是原来的 70px。 */
+  margin-top: clamp(26px, 8vh, 70px);
+  /* 兜底——真装不下时让导航自己滚，别把「收起」和连接状态挤出视口。 */
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+/*
+ * 折叠态不能滚：overflow-y:auto 会把 overflow-x 一并变成 auto（规范如此），
+ * 那条从 66px 图标条向右弹出的 hover 标签就会被裁掉，折叠态又只剩图标，等于没名字。
+ * 折叠态本来就比展开态矮 70px 左右，让它按老样子溢出即可。
+ */
+:root[data-rail="collapsed"] .side-nav {
+  overflow: visible;
+}
+
+.side-nav::-webkit-scrollbar {
+  display: none;
+}
+
+/* 导航项是 <a>（可以中键开新标签页），这里的规则以前写给 <button>，换标签后整组失效过一次。 */
+.side-nav a {
+  position: relative;
+  min-height: 45px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 13px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.side-nav a:hover {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--surface-overlay) 58%, transparent);
+  transform: translateX(2px);
+}
+
+.side-nav a.active {
+  color: var(--on-fill);
+  background: var(--ink);
+}
+
+.nav-glyph {
+  width: 20px;
+  font-size: 20px;
+  line-height: 1;
+  text-align: center;
+}
+
+.side-nav a > span:last-child {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+/* 当前分区的子项，只在该分区被选中时出现，所以顶层永远只有 7 个目标。 */
+.side-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 8px 21px;
+  padding-left: 11px;
+  border-left: 1px solid var(--line);
+}
+
+.side-subnav a {
+  min-height: 34px;
+  gap: 9px;
+  padding: 0 9px;
+  color: var(--text-faint);
+}
+
+.side-subnav .nav-glyph {
+  width: 17px;
+  font-family: "Songti SC", serif;
+  font-size: 15px;
+}
+
+.side-subnav a > span:last-child {
+  font-size: 12px;
+  font-weight: 560;
+}
+
+/*
+ * 父项已经是整块墨底，子项再来一块就成了两个黑砖；这里只用纸色和朱记做标记。
+ * 必须排在 .side-nav a.active 之后：两者特异性相同，靠顺序取胜。
+ */
+.side-subnav a.active {
+  background: color-mix(in oklab, var(--surface-overlay) 66%, transparent);
+  color: var(--ink);
+}
+
+.side-subnav a.active > span:last-child {
+  font-weight: 680;
+}
+
+.side-subnav a.active::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 2px;
+  height: 17px;
+  transform: translateY(-50%);
+  background: var(--orange);
+}
+
+/* ===== 动效 =====
+ * 全站共用的 keyframes 都在这里（名字被各视图直接引用，改名要全局搜）。
+ * 入场类只写 from、不加 forwards/both：结束后元素回到自己的样式，带 transform 的祖先
+ * 只存在约 200ms，不会长期成为 position: fixed 子元素（对比托盘、失败提示层）的包含块。
+ */
+@keyframes pulse { to { opacity: 0.35; } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes slide-in { from { transform: translateX(100%); } }
+@keyframes rotate { to { transform: rotate(360deg); } }
+@keyframes rotate-reverse { to { transform: rotate(-360deg); } }
+@keyframes view-enter { from { opacity: 0; transform: translateY(6px); } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(10px); } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(-8px) scale(0.98); } }
+@keyframes drop-in { from { opacity: 0; transform: translateY(-100%); } }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes grow-x { from { transform: scaleX(0); } }
+@keyframes grow-y { from { transform: scaleY(0); } }
+@keyframes draw-line { from { stroke-dashoffset: 1; } }
+@keyframes countdown { to { transform: scaleX(0); } }
+@keyframes land {
+  0% { box-shadow: 0 0 0 10px color-mix(in oklab, var(--gold) 42%, transparent); }
+}
+@keyframes stamp {
+  0% { opacity: 0; transform: scale(1.6) rotate(-8deg); }
+  60% { opacity: 1; }
+}
+
+/* 顶部横幅（数据过期、写入失败）从顶栏下沿滑出，而不是突然把正文顶下去。 */
+.stale-data-banner,
+.global-write-banner {
+  animation: pop-in var(--dur-base) var(--ease-out);
+}
+
+/* ===== 暗色外壳质感 =====
+ * 取 og.jpg 的构图：右上一团朱橙、左下一团墨绿的环境光，固定在视口上，滚动时不动。
+ * 只在暗色下加：浅色纸面上这层光会显得脏。
+ */
+:root:not([data-theme="light"]) body {
+  background:
+    radial-gradient(1100px 640px at 96% -10%, color-mix(in oklab, var(--brand) 9%, transparent), transparent 64%),
+    radial-gradient(900px 620px at 4% 110%, color-mix(in oklab, var(--green) 10%, transparent), transparent 62%),
+    var(--paper);
+  background-attachment: fixed;
+}
+:root:not([data-theme="light"]) .sidebar {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--surface) 70%, var(--surface-sunken)), var(--surface-sunken) 46%);
+  border-right-color: color-mix(in oklab, var(--highlight) 7%, transparent);
+}
+/* 品牌印章：暗色下是一枚纸色的「職」，加一圈朱橙微光呼应封面图。 */
+:root:not([data-theme="light"]) .brand-mark {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--brand) 35%, transparent),
+    0 0 22px color-mix(in oklab, var(--brand) 28%, transparent);
+}
+.brand-mark { transition: transform var(--dur-slow) var(--ease-spring), box-shadow var(--dur-slow) var(--ease-out); }
+.brand:hover .brand-mark { transform: rotate(-8deg) scale(1.04); }
+/*
+ * 暗色下当前分区不用整块反白（浅色里的墨块反过来就是一块刺眼的纸），
+ * 改成凸起面 + 左侧朱线 + 一点朱橙渐变，和 3D 舞台的选中光一个语气。
+ */
+:root:not([data-theme="light"]) .side-nav > a.active {
+  background: linear-gradient(90deg, color-mix(in oklab, var(--brand) 20%, var(--surface-raised-solid)), var(--surface-raised-solid) 70%);
+  color: var(--ink);
+  box-shadow:
+    inset 3px 0 0 var(--brand),
+    0 10px 26px color-mix(in oklab, var(--shade) 35%, transparent);
+}
+:root:not([data-theme="light"]) .side-nav > a.active .nav-glyph { color: var(--brand); }
+:root:not([data-theme="light"]) .topbar {
+  backdrop-filter: blur(18px) saturate(1.4);
+}
+
+/* 视图切换：挂在容器本身。子节点会因 key 变化在页内重挂（换场次、scope 到达），挂在子节点上会误播。 */
+.view-container {
+  animation: view-enter var(--dur-base) var(--ease-out);
+}
+/* 3D 舞台只淡入：位移会让 canvas 首帧错位，并临时撑出滚动条。 */
+.view-container:has(.stage-immersive) {
+  animation-name: fade-in;
+}
+
+/*
+ * 页面切换（View Transitions）。只有支持 document.startViewTransition、文档可见且未要求减弱动效时，
+ * navigateToView 才把提交放进转场（lib/view-transition.ts）；不支持的浏览器不生成这些伪元素，规则零影响。
+ * 根快照只剩正文区：侧栏、顶栏、撤销条等各有名字（shell.css），不跟着上移，选中项与页标题单独过渡。
+ * 旧快照比新快照先播完，必须 both 停在终点：不然它会在最后几十毫秒回到不透明、闪一下旧页面。
+ * 伪元素在转场结束后整体移除，填充模式不会遗留到页面上（与上面「入场只写 from」的约定不冲突）。
+ */
+@keyframes vt-page-out { to { opacity: 0; } }
+@keyframes vt-page-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes vt-page-fade-in { from { opacity: 0; } }
+::view-transition-group(*) {
+  animation-duration: var(--dur-base);
+  animation-timing-function: var(--ease-out);
+}
+::view-transition-old(root) {
+  animation: vt-page-out var(--dur-fast) var(--ease-out) both;
+}
+::view-transition-new(root) {
+  animation: vt-page-in var(--dur-base) var(--ease-out) both;
+}
+/* 与 .view-container 的约定一致：进 3D 舞台只淡入不位移。 */
+:root:has(.view-container .stage-immersive)::view-transition-new(root) {
+  animation-name: vt-page-fade-in;
+}
+
+/* 伪元素挂在 :root 上，下面全局兜底的 *, ::before, ::after 选不中它们，只能单独关。 */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/*
+ * 按压回弹。用独立的 scale 属性而不是 transform：它和元素自己的 transform（居中、hover 位移）
+ * 叠加而不是覆盖，按下时不会跳位。:where 让任何视图自己的写法都能覆盖它。
+ */
+:where(button, [role="button"], .side-nav a, .section-nav-tabs > a):not(:disabled):active {
+  scale: 0.97;
+}
+:where(button, [role="button"]) {
+  transition-property: scale, color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+/* 骨架：.skeleton 自己画一条会扫光的占位条，宽高由调用处给。 */
+.skeleton {
+  display: block;
+  border-radius: var(--radius-control);
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--ink) 6%, transparent) 25%,
+    color-mix(in oklab, var(--ink) 12%, transparent) 50%,
+    color-mix(in oklab, var(--ink) 6%, transparent) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/*
+ * 减弱动效的全局兜底：压时长而不是取消动画（取消会让 animationend 永远不来），
+ * 所以必须的状态不能依赖动画结束事件；装饰性的交错也一并取消延迟。
+ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

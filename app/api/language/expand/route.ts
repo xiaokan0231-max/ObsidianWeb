@@ -5,10 +5,13 @@ import { invokeCodex } from "@/lib/server/codex-bridge";
 import { loadDojoState } from "@/lib/server/dojo-store";
 import {
   buildLanguageSourceContext,
+  languageBankContentFingerprint,
+  latestLanguageBankEntry,
   loadLanguageState,
   normalizeLanguageBank,
   renderLanguageBank,
 } from "@/lib/server/language-store";
+import { supersedeCurrentArtifacts } from "@/lib/server/generated-artifact";
 import { readAllNotes, uniquePath, writeNote } from "@/lib/server/obsidian";
 
 const CATEGORY_GOALS: Record<LanguageCategory, number> = {
@@ -102,7 +105,7 @@ export async function POST(request: Request) {
     }
 
     const addedIds = new Set(additions.map((unit) => unit.id));
-    const bank: LanguageBank = {
+    const nextBank: LanguageBank = {
       ...state.bank,
       generatedAt: new Date().toISOString(),
       model: result.model,
@@ -116,11 +119,26 @@ export async function POST(request: Request) {
         ...generated.questionBank.filter((question) => addedIds.has(question.unitId)),
       ],
     };
+    const bank: LanguageBank = {
+      ...nextBank,
+      contentFingerprint: languageBankContentFingerprint(nextBank),
+    };
+    const latest = latestLanguageBankEntry(notes);
+    if (latest?.bank.contentFingerprint === bank.contentFingerprint) {
+      return Response.json({
+        ok: true,
+        unchanged: true,
+        path: latest.note.path,
+        added: 0,
+        state,
+      });
+    }
     const parts = tokyoParts();
     const path = await uniquePath(
       `80_AI分析/日本語訓練/${parts.date}_${parts.fileTime}_${body.category}_拡充.md`,
     );
     await writeNote(path, renderLanguageBank(bank));
+    await supersedeCurrentArtifacts(notes, "language-bank");
     return Response.json({
       ok: true,
       path,

@@ -1,0 +1,59 @@
+/* 事项与进展共用语义色，沿用全站双主题 token，状态含义不依赖配色传达。 */
+:root {
+  --progress-action: var(--info);
+  --progress-action-wash: var(--info-wash);
+  --progress-action-line: var(--info-line);
+  --progress-action-fill: var(--info);
+  --progress-on-action: var(--on-fill);
+  --progress-positive: var(--success);
+  --progress-positive-wash: var(--success-wash);
+  --progress-positive-line: var(--success-line);
+  --progress-info: var(--violet);
+  --progress-info-wash: var(--violet-wash);
+  --progress-info-line: color-mix(in oklab, var(--violet) 38%, var(--line));
+  --progress-neutral: var(--text-secondary);
+  --progress-neutral-wash: color-mix(in oklab, var(--text-secondary) 6%, var(--surface));
+  --progress-neutral-line: var(--line-strong);
+  --progress-muted: var(--text-tertiary);
+  --progress-muted-wash: color-mix(in oklab, var(--text-tertiary) 4%, var(--surface));
+  --progress-muted-line: var(--line);
+  --progress-urgent: var(--danger-strong);
+  --progress-urgent-wash: var(--danger-wash);
+  --progress-urgent-line: var(--danger-line);
+}
+
+[data-tone="action"] {
+  --progress-tone: var(--progress-action);
+  --progress-wash: var(--progress-action-wash);
+  --progress-line: var(--progress-action-line);
+}
+
+[data-tone="urgent"] {
+  --progress-tone: var(--progress-urgent);
+  --progress-wash: var(--progress-urgent-wash);
+  --progress-line: var(--progress-urgent-line);
+}
+
+[data-tone="positive"] {
+  --progress-tone: var(--progress-positive);
+  --progress-wash: var(--progress-positive-wash);
+  --progress-line: var(--progress-positive-line);
+}
+
+[data-tone="info"] {
+  --progress-tone: var(--progress-info);
+  --progress-wash: var(--progress-info-wash);
+  --progress-line: var(--progress-info-line);
+}
+
+[data-tone="neutral"] {
+  --progress-tone: var(--progress-neutral);
+  --progress-wash: var(--progress-neutral-wash);
+  --progress-line: var(--progress-neutral-line);
+}
+
+[data-tone="muted"] {
+  --progress-tone: var(--progress-muted);
+  --progress-wash: var(--progress-muted-wash);
+  --progress-line: var(--progress-muted-line);
+}

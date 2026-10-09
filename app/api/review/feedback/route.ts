@@ -1,129 +1,172 @@
 import {
+  isReviewFeedbackTarget,
   parseReviewFeedback,
+  renderReviewFeedbackEntry,
+  resolveReviewFeedbackTarget,
+  reviewFeedbackIdentity,
+  type ReviewFeedbackTarget,
   type ReviewFeedbackKind,
 } from "@/lib/review-feedback";
+import { getString as text, noteBasename as basename } from "@/lib/notes";
+import { assertSameOrigin, errorResponse } from "@/lib/server/api";
+import { parseInterviewInsights } from "@/lib/interview-advisory";
 import { parseInterviewAnswerReview } from "@/lib/review-deep";
-import { appendNote, noteExists, readNote, writeNote } from "@/lib/server/obsidian";
+import { isReviewNotePath, reviewSiblingPath } from "@/lib/review-paths";
+import { badRequest, obsidianErrorResponse } from "@/lib/server/api";
+import { upsertAppendNote } from "@/lib/server/note-append";
+import { readNote, readNoteOrNull } from "@/lib/server/obsidian";
+import { createKeyedSerialQueue } from "@/lib/server/serial-queue";
+import { tokyoParts, yamlScalar } from "@/lib/dojo/utils";
 
 type Body = {
   notePath?: string;
   blockId?: string;
   kind?: ReviewFeedbackKind;
   text?: string;
+  target?: ReviewFeedbackTarget;
 };
 
+const INSIGHTS_PATH = "20_求職/_素材/面接横断_顧問分析.md";
+const INSIGHTS_FEEDBACK_PATH = "20_求職/_素材/面接横断_顧問批注.md";
+
 const KINDS = new Set<ReviewFeedbackKind>(["agree", "disagree", "context"]);
-let feedbackQueue = Promise.resolve();
-
-async function inFeedbackQueue<T>(operation: () => Promise<T>) {
-  const previous = feedbackQueue;
-  let release = () => {};
-  feedbackQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    return await operation();
-  } finally {
-    release();
-  }
-}
-
-function text(value: unknown) {
-  return typeof value === "string" || typeof value === "number" ? String(value) : "";
-}
-
-function basename(path: string) {
-  return path.split("/").pop()?.replace(/\.md$/i, "") ?? path;
-}
-
-function yamlString(value: string) {
-  return JSON.stringify(value);
-}
+const inFeedbackQueue = createKeyedSerialQueue();
 
 function todayInTokyo() {
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
+  return tokyoParts().date;
 }
 
 export async function POST(request: Request) {
+  // 同源でない呼び出しは 403。
+  try { assertSameOrigin(request); } catch (error) { return errorResponse(error, "拒绝请求"); }
   let body: Body;
   try {
     body = (await request.json()) as Body;
   } catch {
-    return Response.json({ error: "请求体不是合法 JSON" }, { status: 400 });
+    return badRequest("请求体不是合法 JSON");
   }
 
+  if (!body || typeof body !== "object" || (body.notePath !== undefined && typeof body.notePath !== "string")
+    || (body.blockId !== undefined && typeof body.blockId !== "string")
+    || (body.text !== undefined && typeof body.text !== "string")) {
+    return badRequest("反馈字段格式不对");
+  }
+  if (body.target !== undefined && !isReviewFeedbackTarget(body.target)) {
+    return badRequest("target 必须包含观点类型、ID、版本和快照");
+  }
+  const requestedTarget = body.target;
+  const isInsights = requestedTarget?.type === "insight";
   const notePath = body.notePath ?? "";
   const blockId = body.blockId ?? "";
   const kind = body.kind ?? "agree";
-  const feedbackText = (body.text ?? "").replace(/\s*\n\s*/g, "；").trim();
+  // trim が先。逆にすると改行だけの入力が「；」になって非空判定を素通りし、
+  // 「理由を書け」の門檻が空文字だけしか止められなくなる（批注 route と同じ穴）。
+  const feedbackText = (body.text ?? "").trim().replace(/\s*\n\s*/g, "；");
   const storedText = feedbackText || "同意该项 AI 评价";
-  if (
-    !notePath.startsWith("20_求職/") ||
-    !notePath.endsWith("_整理稿.md") ||
-    notePath.includes("..")
-  ) {
-    return Response.json({ error: "notePath 不是面试整理稿" }, { status: 400 });
+  if (isInsights ? notePath !== INSIGHTS_PATH : !isReviewNotePath(notePath, "seirikou")) {
+    return badRequest(isInsights ? "notePath 不是横向分析报告" : "notePath 不是面试整理稿");
   }
-  if (!/^q\d+$/.test(blockId)) {
-    return Response.json({ error: "blockId 格式不对" }, { status: 400 });
+  if (!requestedTarget && !/^q\d+$/.test(blockId)) {
+    return badRequest("blockId 格式不对");
   }
   if (!KINDS.has(kind)) {
-    return Response.json({ error: "kind 必须是 agree/disagree/context" }, { status: 400 });
+    return badRequest("kind 必须是 agree/disagree/context");
   }
   if ((kind === "disagree" || kind === "context") && !feedbackText) {
-    return Response.json({ error: "请说明不同意的理由或要补充的事实" }, { status: 400 });
+    return badRequest("请说明不同意的理由或要补充的事实");
   }
   if (feedbackText.length > 2000) {
-    return Response.json({ error: "反馈内容过长" }, { status: 400 });
+    return badRequest("反馈内容过长");
   }
 
-  const reviewPath = notePath.replace(/_整理稿\.md$/, "_回答品質復盤.md");
-  const feedbackPath = notePath.replace(/_整理稿\.md$/, "_回答品質批注.md");
+  const reviewPath = isInsights ? INSIGHTS_PATH : reviewSiblingPath(notePath, "answerReview");
+  const feedbackPath = isInsights ? INSIGHTS_FEEDBACK_PATH : reviewSiblingPath(notePath, "answerFeedback");
 
   try {
-    const [source, reviewNote] = await Promise.all([readNote(notePath), readNote(reviewPath)]);
-    const review = parseInterviewAnswerReview(reviewNote.content);
-    if (text(source.frontmatter.type) !== "transcript-study" || !review) {
-      throw new Error("回答质量复盘尚未生成。");
+    // 復盤は「まだ無い」が正常な状態（面接直後は整理稿だけが在る）。readNote で読むと
+    // Obsidian の英語 404 が本文ごと画面に出てしまうので、無い場合は自前の文言に寄せる。
+    const [source, reviewNote] = await Promise.all([
+      readNote(notePath),
+      readNoteOrNull(reviewPath),
+    ]);
+    let target: ReviewFeedbackTarget | undefined;
+    if (requestedTarget) {
+      const insights = isInsights && reviewNote ? parseInterviewInsights(reviewNote.content) : null;
+      const advisory = !isInsights && reviewNote ? parseInterviewAnswerReview(reviewNote.content)?.advisory : null;
+      const analysis = insights ?? advisory;
+      if (!analysis || text(source.frontmatter.type) !== (isInsights ? "interview-insights" : "transcript-study")) {
+        return badRequest("顾问分析尚未生成。");
+      }
+      try {
+        target = resolveReviewFeedbackTarget(requestedTarget, {
+          generatedAt: analysis.generatedAt,
+          opinions: insights
+            ? insights.modules.flatMap((module) => module.findings)
+            : [...advisory!.observations, ...advisory!.answerOptions, ...advisory!.nextSteps],
+        });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "观点版本不匹配" }, { status: 409 });
+      }
+    } else {
+      const review = reviewNote ? parseInterviewAnswerReview(reviewNote.content) : null;
+      if (text(source.frontmatter.type) !== "transcript-study" || !review) {
+        throw new Error("回答质量复盘尚未生成。");
+      }
+      if (!review.blocks.some((block) => block.blockId === blockId)) {
+        throw new Error("深度复盘中找不到这个问题。");
+      }
     }
-    if (!review.blocks.some((block) => block.blockId === blockId)) {
-      throw new Error("深度复盘中找不到这个问题。");
-    }
+    const feedbackIdentity = reviewFeedbackIdentity({ blockId: target ? "" : blockId, kind, text: storedText, target });
 
-    const result = await inFeedbackQueue(async () => {
-      const exists = await noteExists(feedbackPath);
-      let current = "";
-      if (exists) {
-        current = (await readNote(feedbackPath)).content;
-        const duplicate = parseReviewFeedback(current).find(
-          (entry) => entry.blockId === blockId && entry.kind === kind && entry.text === storedText,
-        );
-        if (duplicate) return { id: duplicate.id, deduplicated: true };
-      }
-      let maxId = 0;
-      for (const match of current.matchAll(/\*\*f(\d+)｜/g)) {
-        maxId = Math.max(maxId, Number(match[1]));
-      }
-      const id = `f${String(maxId + 1).padStart(3, "0")}`;
-      const entry = `\n- **${id}｜${blockId}｜${kind}｜${todayInTokyo()}**\n    - 我:: ${storedText}\n`;
-      if (exists) {
-        await appendNote(feedbackPath, entry);
-      } else {
-        const company = text(source.frontmatter.company);
-        const date = text(source.frontmatter.date);
-        const round = text(source.frontmatter.round);
-        await writeNote(
-          feedbackPath,
-          `---\ntype: interview-answer-feedback\ncompany: ${yamlString(company)}\ndate: ${yamlString(date)}\nround: ${yamlString(round)}\nsource_note: ${yamlString(`[[${basename(notePath)}]]`)}\nreview_note: ${yamlString(`[[${basename(reviewPath)}]]`)}\nlayer: human-feedback\n---\n# ${date} ${company} 回答品質批注\n\n> 本人对 AI 回答质量复盘的同意、反对与事实补充。追记のみ。再生成时作为约束输入。\n\n## フィードバック\n${entry}`,
-        );
-      }
-      return { id, deduplicated: false };
+    const outcome = await inFeedbackQueue(feedbackPath, () =>
+      upsertAppendNote({
+        path: feedbackPath,
+        plan: (existing) => {
+          const current = existing?.content ?? "";
+          if (existing) {
+            const duplicate = parseReviewFeedback(current).find(
+              (entry) => reviewFeedbackIdentity(entry) === feedbackIdentity,
+            );
+            if (duplicate) return { duplicate: { id: duplicate.id } };
+          }
+          let maxId = 0;
+          for (const match of current.matchAll(/\*\*f(\d+)｜/g)) {
+            maxId = Math.max(maxId, Number(match[1]));
+          }
+          const id = `f${String(maxId + 1).padStart(3, "0")}`;
+          const entry = renderReviewFeedbackEntry({ id, blockId: target ? "" : blockId, kind, date: todayInTokyo(), text: storedText, ...(target ? { target } : {}) });
+          if (existing) {
+            return { nextContent: `${current}${entry}`, value: { id } };
+          }
+          const company = text(source.frontmatter.company);
+          const date = text(source.frontmatter.date);
+          const round = text(source.frontmatter.round);
+          const feedbackType = isInsights ? "interview-insights-feedback" : "interview-answer-feedback";
+          const title = isInsights ? "面接横断 顧問批注" : `${date} ${company} 回答品質批注`;
+          return {
+            nextContent: `---\ntype: ${feedbackType}\ncompany: ${yamlScalar(company)}\ndate: ${yamlScalar(date)}\nround: ${yamlScalar(round)}\nsource_note: ${yamlScalar(`[[${basename(notePath)}]]`)}\nreview_note: ${yamlScalar(`[[${basename(reviewPath)}]]`)}\nlayer: human-feedback\n---\n# ${title}\n\n> 本人对 AI 回答质量与顾问分析的同意、反对与事实补充。追记のみ。対象记录原观点版本和快照，再生成时重新核对。\n\n## フィードバック\n${entry}`,
+            value: { id },
+            frontmatterForNew: {
+              type: feedbackType,
+              company,
+              date,
+              round,
+              source_note: `[[${basename(notePath)}]]`,
+              review_note: `[[${basename(reviewPath)}]]`,
+              layer: "human-feedback",
+            },
+          };
+        },
+      }),
+    );
+    return Response.json({
+      ok: true,
+      path: feedbackPath,
+      ...outcome.value,
+      deduplicated: outcome.deduplicated,
+      note: outcome.note,
     });
-    return Response.json({ ok: true, path: feedbackPath, ...result });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "AI 评价反馈写入失败";
-    const status = message.includes("returned 404") ? 404 : 502;
-    return Response.json({ error: message }, { status });
+    return obsidianErrorResponse(error, "AI 评价反馈写入失败");
   }
 }

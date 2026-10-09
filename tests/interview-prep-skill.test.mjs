@@ -15,7 +15,7 @@ test("Claude Code と Codex は同じ面接準備 skill を使う", async () => 
   assert.match(skill, /SHA-256/);
 });
 
-test("新しい準備テンプレートは安定 session と前輪 evidence を契約にする", async () => {
+test("旧版テンプレートの安定 session と 12 節を保持する", async () => {
   const template = await readFile(
     `${SKILL}/assets/面談準備_テンプレート.md`,
     "utf8",
@@ -40,11 +40,30 @@ test("新しい準備テンプレートは安定 session と前輪 evidence を�
   assert.equal(h2.length, 12, "Web／埋め込み契約の12節を増減しない");
 });
 
-test("skill は company→session→6模块の Web 回読まで要求する", async () => {
-  const skill = await readFile(`${SKILL}/SKILL.md`, "utf8");
+test("旧版契約は company→session→6模块の Web 回読を保持する", async () => {
+  const skill = await readFile(`${SKILL}/references/legacy-prep.md`, "utf8");
   assert.match(skill, /公司／job-case → session 轮次/);
   assert.match(skill, /最近的 scheduled → 最新 preparing → 最近 completed/);
   assert.match(skill, /本轮专属/);
   assert.match(skill, /案件共用（截至本轮）/);
   assert.match(skill, /全局共用/);
+});
+
+
+test("默认模板改为五个语义章节的 v2，旧版通过独立文档保留", async () => {
+  const [skill, template] = await Promise.all([
+    readFile(`${SKILL}/SKILL.md`, "utf8"),
+    readFile(`${SKILL}/assets/面談準備_v2_テンプレート.md`, "utf8"),
+  ]);
+  assert.match(skill, /默认创建 `prep_version: 2`/);
+  assert.match(skill, /assets\/面談準備_v2_テンプレート.md/);
+  assert.match(skill, /references\/legacy-prep.md/);
+  assert.match(template, /^prep_version: 2$/m);
+  assert.deepEqual([...template.matchAll(/^## (.+)$/gm)].map((match) => match[1]), ["纵览与建议", "志望動機", "逆質問", "研究资料", "临场备用"]);
+  assert.match(template, /^### 20秒版（既定）$/m);
+  assert.match(template, /^▷ 根拠:/m);
+  assert.equal([...template.matchAll(/^### [1-5]\./gm)].length, 5);
+  assert.equal([...template.matchAll(/^### ★ /gm)].length, 3);
+  assert.match(skill, /不设字数或全文阅读时长上限/);
+  assert.match(skill, /不做移动适配或验收/);
 });

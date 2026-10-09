@@ -1,0 +1,485 @@
+/*
+ * 皮肤：<html data-skin="x">，与明暗 data-theme 正交，每套都有浅色、暗色两块，顶栏明暗开关在任何皮肤下照常有效。
+ * 选择器一律带明暗条件，特异性 (0,3,0)：
+ *   浅色 :root[data-skin="x"][data-theme="light"]　暗色 :root[data-skin="x"]:not([data-theme="light"])
+ * 只写 :root[data-skin="x"] 是 (0,2,0)，与 base.css 的默认暗色块同级、谁在后谁赢，浅色值会漏进暗色模式；
+ * 统一 (0,3,0) 也让这份文件不依赖打包后排在 base.css 前还是后。默认皮肤不写 data-skin，这里一条都不生效。
+ *
+ * 只用 base.css 已有的 token 名。取值由脚本按默认主题的层级比值反解，tests/skin-tokens.test.mjs 逐套逐明暗验算：
+ * 4 档文字 × 5 种面 ≥4.5、链接／按钮字／反相面 ≥4.5、语义文字色 ≥4.5、图表色阶有序、品牌与分类色防撞不差于默认。
+ * 不换的部分：--green 只在绿色族里调（日历「进行中」、事实标注等语义在用，换成蓝紫会和等待／未确认混淆）；
+ * success / warning / danger / info 沿用默认，只在新底面上不达标或撞色时补一条（--gold-text、海的 --teal、古书浅色的 --violet）。
+ * 3D 舞台只换虚空底色（--stage-void / --stage-bg），星点、节点与光效保持原样。
+ */
+
+/*
+ * 公共派生：每套皮肤都不必再写。默认主题里这些要么是写死的橙色／白，要么写死了 GROUPS 的现值，
+ * 换了品牌色和底面就得改成跟着 token 走。必须排在下面各皮肤块之前（同为 (0,3,0)，后写的赢）。
+ */
+:root[data-skin][data-theme="light"],
+:root[data-skin]:not([data-theme="light"]) {
+  --orange: var(--brand);
+  --focus-ring: var(--interactive);
+  --surface-soft: color-mix(in oklab, var(--surface-overlay) 46%, transparent);
+  --group-self: var(--brand);
+  --group-career: var(--green);
+  --group-study: var(--violet);
+  --group-analysis: var(--gold);
+  --group-system: var(--muted);
+}
+:root[data-skin][data-theme="light"] {
+  --surface-raised: color-mix(in oklab, var(--surface) 88%, transparent);
+  --brand-wash: color-mix(in oklab, var(--brand) 10%, var(--surface));
+}
+:root[data-skin]:not([data-theme="light"]) {
+  --surface-raised: color-mix(in oklab, var(--surface-raised-solid) 92%, transparent);
+  --brand-wash: color-mix(in oklab, var(--brand) 16%, var(--surface));
+}
+
+/* ===== 墨・墨（すみ）：宣纸白与松烟墨的无彩灰阶，只在按钮和高亮处落一点朱印。去掉了默认主题里的绿调，最安静。 ===== */
+:root[data-skin="sumi"][data-theme="light"] {
+  --paper: #eef0f2;
+  --paper-deep: #e2e5e7;
+  --surface-sunken: #e6eaec;
+  --surface: #f9fafb;
+  --surface-raised-solid: #fdfeff;
+  --surface-overlay: #ffffff;
+  --ink: #1f2125;
+  --text-primary: #1f2125;
+  --text-secondary: #4c4f53;
+  --muted: #5c5e62;
+  --text-tertiary: #65676b;
+  --text-faint: #838589;
+  --text-disabled: #9b9c9f;
+  --text-display: #1f2125;
+  --line: #d2d5d8;
+  --line-strong: #c1c5c7;
+  --line-soft: #e1e4e6;
+  --line-cool: #d6dbe0;
+  --brand: #d8482c;
+  --brand-line: #f8beb1;
+  --interactive: #aa4013;
+  --interactive-fill: #aa4013;
+  --on-interactive: #ffffff;
+  --on-fill: #ffffff;
+  --green: #43694b;
+  --green-deep: #253839;
+  --surface-inverse: #1e2124;
+  --surface-inverse-soft: #282a2e;
+  --text-on-inverse: #eff4fc;
+  --text-on-inverse-muted: #b9bcc0;
+  --highlight: #ffffff;
+  --shadow-color: #182127;
+  --chart-bar: #cc5940;
+  --chart-step-0: #f58d75;
+  --chart-step-1: #ea6e52;
+  --chart-step-2: #ce5439;
+  --chart-step-3: #b33b21;
+  --chart-step-4: #982000;
+  --chart-step-5: #721500;
+  --gold-text: #87611d;
+  --stage-void: #060708;
+  --stage-bg: #0e0f12;
+}
+
+:root[data-skin="sumi"]:not([data-theme="light"]) {
+  --paper: #131416;
+  --paper-deep: #0b0c0e;
+  --surface-sunken: #0d0d0f;
+  --surface: #1b1c1e;
+  --surface-raised-solid: #232427;
+  --surface-overlay: #2b2c2e;
+  --ink: #eae6df;
+  --text-primary: #eae6df;
+  --text-secondary: #bfbcb6;
+  --muted: #aca9a3;
+  --text-tertiary: #9a9792;
+  --text-faint: #8d8b86;
+  --text-disabled: #817f7b;
+  --text-display: #f0e5d4;
+  --line: #303235;
+  --line-strong: #424448;
+  --line-soft: #26272a;
+  --line-cool: #32373b;
+  --brand: #ea6347; /* 当文字用时（如「本人行动」标签）在凸起面上也要 ≥4.5 */
+  --brand-line: #68392f;
+  --interactive: #f99360;
+  --interactive-fill: #e65a3e;
+  --on-interactive: #0e0706;
+  --on-fill: #131416;
+  --green: #86b58f;
+  --green-deep: #cee1e1;
+  --surface-inverse: #323438;
+  --surface-inverse-soft: #3e4045;
+  --text-on-inverse: #f0eae1;
+  --text-on-inverse-muted: #c6c9cd;
+  --highlight: #f4f0e9;
+  --chart-bar: #e2745b;
+  --chart-step-0: #99412e;
+  --chart-step-1: #bc4c33;
+  --chart-step-2: #d46248;
+  --chart-step-3: #ec775d;
+  --chart-step-4: #ff9278;
+  --chart-step-5: #ffb6a4;
+  --stage-void: #060708;
+  --stage-bg: #0e0f12;
+}
+
+/* ===== 海・縹（はなだ）：雾蓝纸面配深海藏青文字，浅葱色做按钮和强调；暗色是夜里的深海。冷静、适合看数据。 ===== */
+:root[data-skin="kaiyo"][data-theme="light"] {
+  --paper: #e6f2fa;
+  --paper-deep: #d9e7f0;
+  --surface-sunken: #ddecf5;
+  --surface: #f5fbff;
+  --surface-raised-solid: #fcfeff;
+  --surface-overlay: #ffffff;
+  --ink: #17222f;
+  --text-primary: #17222f;
+  --text-secondary: #454f5d;
+  --muted: #555f6d;
+  --text-tertiary: #5e6876;
+  --text-faint: #7d8692;
+  --text-disabled: #959da8;
+  --text-display: #17222f;
+  --line: #cdd7dd;
+  --line-strong: #bbc6cd;
+  --line-soft: #dce5eb;
+  --line-cool: #cfdee1;
+  --brand: #1988aa;
+  --brand-line: #b0d5e4;
+  --interactive: #006a8e;
+  --interactive-fill: #006a8e;
+  --on-interactive: #ffffff;
+  --on-fill: #ffffff;
+  --green: #316b57;
+  --green-deep: #1e384a;
+  --surface-inverse: #152131;
+  --surface-inverse-soft: #1e2b3b;
+  --text-on-inverse: #eef4fc;
+  --text-on-inverse-muted: #b0bdcd;
+  --highlight: #ffffff;
+  --shadow-color: #072230;
+  --chart-bar: #2a8eb3;
+  --chart-step-0: #6cb9db;
+  --chart-step-1: #3fa5cd;
+  --chart-step-2: #1c8cb4;
+  --chart-step-3: #007497;
+  --chart-step-4: #005c79;
+  --chart-step-5: #00445a;
+  --teal: #055959;
+  --gold-text: #88611e;
+  --stage-void: #02070f;
+  --stage-bg: #06101c;
+}
+
+:root[data-skin="kaiyo"]:not([data-theme="light"]) {
+  --paper: #061424;
+  --paper-deep: #000c1f;
+  --surface-sunken: #040e1a;
+  --surface: #0c1d2f;
+  --surface-raised-solid: #142539;
+  --surface-overlay: #1b2d42;
+  --ink: #dee8ec;
+  --text-primary: #dee8ec;
+  --text-secondary: #b5bec2;
+  --muted: #a3abae;
+  --text-tertiary: #92999c;
+  --text-faint: #868c8f;
+  --text-disabled: #7a8082;
+  --text-display: #d5eaf4;
+  --line: #263342;
+  --line-strong: #364557;
+  --line-soft: #1d2835;
+  --line-cool: #253a42;
+  --brand: #3eb5d0;
+  --brand-line: #254e59;
+  --interactive: #5cb9d2;
+  --interactive-fill: #3eb5d0;
+  --on-interactive: #273032;
+  --on-fill: #061424;
+  --green: #71b899;
+  --green-deep: #c2e3e9;
+  --surface-inverse: #243648;
+  --surface-inverse-soft: #304255;
+  --text-on-inverse: #e2edf3;
+  --text-on-inverse-muted: #b9cbdd;
+  --highlight: #ddf5ff;
+  --chart-bar: #4fa5c5;
+  --chart-step-0: #1d6a83;
+  --chart-step-1: #1880a0;
+  --chart-step-2: #3696b7;
+  --chart-step-3: #4fabcd;
+  --chart-step-4: #66c2e4;
+  --chart-step-5: #8ed6f3;
+  --teal: #91d6d3;
+  --stage-void: #02070f;
+  --stage-bg: #06101c;
+}
+
+/* ===== 樱・桜（さくら）：极淡的樱色纸面、梅紫墨色字，樱粉做主色；进行中状态用叶樱的嫩绿。柔和不甜腻。 ===== */
+:root[data-skin="sakura"][data-theme="light"] {
+  --paper: #f9ecf0;
+  --paper-deep: #efe0e5;
+  --surface-sunken: #f4e4ea;
+  --surface: #fff8fa;
+  --surface-raised-solid: #fffdfe;
+  --surface-overlay: #ffffff;
+  --ink: #291c22;
+  --text-primary: #291c22;
+  --text-secondary: #584a50;
+  --muted: #665a5f;
+  --text-tertiary: #706369;
+  --text-faint: #8d8186;
+  --text-disabled: #a3999e;
+  --text-display: #291c22;
+  --line: #dcd2d5;
+  --line-strong: #ccc1c4;
+  --line-soft: #eae0e3;
+  --line-cool: #e0d8df;
+  --brand: #cc6783;
+  --brand-line: #eec0c9;
+  --interactive: #9f3e72;
+  --interactive-fill: #9f3e72;
+  --on-interactive: #ffffff;
+  --on-fill: #ffffff;
+  --green: #396a41;
+  --green-deep: #472b3e;
+  --surface-inverse: #2b1b24;
+  --surface-inverse-soft: #35242d;
+  --text-on-inverse: #faf0f4;
+  --text-on-inverse-muted: #c7b6bf;
+  --highlight: #ffffff;
+  --shadow-color: #2e1720;
+  --chart-bar: #bb6082;
+  --chart-step-0: #e591ae;
+  --chart-step-1: #d77498;
+  --chart-step-2: #bc5c80;
+  --chart-step-3: #a24469;
+  --chart-step-4: #892d53;
+  --chart-step-5: #661f3d;
+  --gold-text: #87601d;
+  --stage-void: #0b0507;
+  --stage-bg: #170b11;
+}
+
+:root[data-skin="sakura"]:not([data-theme="light"]) {
+  --paper: #1d0f15;
+  --paper-deep: #16070e;
+  --surface-sunken: #140a0f;
+  --surface: #26161e;
+  --surface-raised-solid: #2f1e26;
+  --surface-overlay: #38262e;
+  --ink: #ede3e2;
+  --text-primary: #ede3e2;
+  --text-secondary: #c2b9b8;
+  --muted: #afa7a6;
+  --text-tertiary: #9d9594;
+  --text-faint: #8f8988;
+  --text-disabled: #827d7c;
+  --text-display: #f7dfde;
+  --line: #3b2d33;
+  --line-strong: #4f3f46;
+  --line-soft: #2f2429;
+  --line-cool: #3d333c;
+  --brand: #db7fac;
+  --brand-line: #5f3b4c;
+  --interactive: #e194c2;
+  --interactive-fill: #db7fac;
+  --on-interactive: #2a2226;
+  --on-fill: #1d0f15;
+  --green: #7cb784;
+  --green-deep: #efd5e5;
+  --surface-inverse: #412d38;
+  --surface-inverse-soft: #4e3944;
+  --text-on-inverse: #f5e8e7;
+  --text-on-inverse-muted: #d6c1cc;
+  --highlight: #fcebf1;
+  --chart-bar: #d17998;
+  --chart-step-0: #8c4760;
+  --chart-step-1: #ab5374;
+  --chart-step-2: #c26889;
+  --chart-step-3: #da7d9e;
+  --chart-step-4: #f293b4;
+  --chart-step-5: #ffb0ca;
+  --stage-void: #0b0507;
+  --stage-bg: #170b11;
+}
+
+/* ===== 抹茶・抹茶（まっちゃ）：抹茶奶霜色纸面，抹茶黄绿做主色，深千岁绿做进行中；暗色是浓茶。整体暖绿、护眼。 ===== */
+:root[data-skin="matcha"][data-theme="light"] {
+  --paper: #f0f2dd;
+  --paper-deep: #e5e7ce;
+  --surface-sunken: #e9ecd2;
+  --surface: #fafbf1;
+  --surface-raised-solid: #fefff5;
+  --surface-overlay: #ffffff;
+  --ink: #242119;
+  --text-primary: #242119;
+  --text-secondary: #514f46;
+  --muted: #615e56;
+  --text-tertiary: #6a675f;
+  --text-faint: #87857e;
+  --text-disabled: #9e9d96;
+  --text-display: #242119;
+  --line: #d5d6c9;
+  --line-strong: #c4c6b7;
+  --line-soft: #e3e5d8;
+  --line-cool: #d2dfd4;
+  --brand: #708d28;
+  --brand-line: #c6d4ae;
+  --interactive: #486d15;
+  --interactive-fill: #486d15;
+  --on-interactive: #ffffff;
+  --on-fill: #ffffff;
+  --green: #356b45;
+  --green-deep: #253a2a;
+  --surface-inverse: #1a2318;
+  --surface-inverse-soft: #242d21;
+  --text-on-inverse: #f6f4eb;
+  --text-on-inverse-muted: #b5bfb2;
+  --highlight: #ffffff;
+  --shadow-color: #202100;
+  --chart-bar: #708f34;
+  --chart-step-0: #9dba6e;
+  --chart-step-1: #84a646;
+  --chart-step-2: #6d8d2b;
+  --chart-step-3: #577607;
+  --chart-step-4: #445e00;
+  --chart-step-5: #314500;
+  --gold-text: #88611e;
+  --stage-void: #060703;
+  --stage-bg: #0d1107;
+}
+
+:root[data-skin="matcha"]:not([data-theme="light"]) {
+  --paper: #111609;
+  --paper-deep: #090e02;
+  --surface-sunken: #0b0f06;
+  --surface: #191e0f;
+  --surface-raised-solid: #212717;
+  --surface-overlay: #282f1e;
+  --ink: #e9e8dd;
+  --text-primary: #e9e8dd;
+  --text-secondary: #bfbdb4;
+  --muted: #acaaa2;
+  --text-tertiary: #9a9991;
+  --text-faint: #8d8c85;
+  --text-disabled: #80807a;
+  --text-display: #ebe8d5;
+  --line: #2e3427;
+  --line-strong: #404737;
+  --line-soft: #242a1e;
+  --line-cool: #2e3a30;
+  --brand: #93b24c;
+  --brand-line: #414d27;
+  --interactive: #98b962;
+  --interactive-fill: #93b24c;
+  --on-interactive: #2d2f29;
+  --on-fill: #111609;
+  --green: #7cb98c;
+  --green-deep: #d0e4d3;
+  --surface-inverse: #2e3828;
+  --surface-inverse-soft: #394434;
+  --text-on-inverse: #edece1;
+  --text-on-inverse-muted: #c2cdbd;
+  --highlight: #eff3dc;
+  --chart-bar: #88a553;
+  --chart-step-0: #546a25;
+  --chart-step-1: #648026;
+  --chart-step-2: #79953e;
+  --chart-step-3: #8dab54;
+  --chart-step-4: #a3c26a;
+  --chart-step-5: #bcd68f;
+  --stage-void: #060703;
+  --stage-bg: #0d1107;
+}
+
+/* ===== 古书・古書（こしょ）：旧书页的生成色纸面、焦茶墨色字，琥珀色做图表；暗色像台灯下读书。低刺激，适合长时间精读。 ===== */
+:root[data-skin="kosho"][data-theme="light"] {
+  --paper: #f5ebd7;
+  --paper-deep: #eadec7;
+  --surface-sunken: #efe3ca;
+  --surface: #faf5eb;
+  --surface-raised-solid: #fefaf1;
+  --surface-overlay: #fffdf9;
+  --ink: #261a11;
+  --text-primary: #261a11;
+  --text-secondary: #564940;
+  --muted: #64594f;
+  --text-tertiary: #6d6259;
+  --text-faint: #8a7f77;
+  --text-disabled: #a09790;
+  --text-display: #261a11;
+  --line: #d8d0bf;
+  --line-strong: #c8bfac;
+  --line-soft: #e6decf;
+  --line-cool: #d9d7c8;
+  --brand: #69472f;
+  --brand-line: #dbcabf;
+  --interactive: #853922;
+  --interactive-fill: #853922;
+  --on-interactive: #ffffff;
+  --on-fill: #ffffff;
+  --green: #41654b;
+  --green-deep: #1c372c;
+  --surface-inverse: #2a1d15;
+  --surface-inverse-soft: #34271e;
+  --text-on-inverse: #faf2ec;
+  --text-on-inverse-muted: #c6b9b0;
+  --highlight: #ffffff;
+  --shadow-color: #2a1d00;
+  --chart-bar: #b07236;
+  --chart-step-0: #d9a06e;
+  --chart-step-1: #cb8747;
+  --chart-step-2: #b06f2d;
+  --chart-step-3: #97580e;
+  --chart-step-4: #7b4400;
+  --chart-step-5: #5b3100;
+  --violet: #695b9d;
+  --gold-text: #845d19;
+  --stage-void: #0a0603;
+  --stage-bg: #150e07;
+}
+
+:root[data-skin="kosho"]:not([data-theme="light"]) {
+  --paper: #1c1108;
+  --paper-deep: #150902;
+  --surface-sunken: #130c06;
+  --surface: #25190f;
+  --surface-raised-solid: #2e2116;
+  --surface-overlay: #37291d;
+  --ink: #eee5d6;
+  --text-primary: #eee5d6;
+  --text-secondary: #c3bbae;
+  --muted: #b0a89c;
+  --text-tertiary: #9e968c;
+  --text-faint: #908a80;
+  --text-disabled: #837e76;
+  --text-display: #f1e4d2;
+  --line: #393028;
+  --line-strong: #4d4138;
+  --line-soft: #2e261e;
+  --line-cool: #39372b;
+  --brand: #c4804a;
+  --brand-line: #5c412c;
+  --interactive: #cfa38f;
+  --interactive-fill: #c4804a;
+  --on-interactive: #1b1511;
+  --on-fill: #1c1108;
+  --green: #80b68e;
+  --green-deep: #cae3d7;
+  --surface-inverse: #403125;
+  --surface-inverse-soft: #4c3d30;
+  --text-on-inverse: #f0eae1;
+  --text-on-inverse-muted: #d5c5b9;
+  --highlight: #feedd7;
+  --chart-bar: #c78951;
+  --chart-step-0: #855424;
+  --chart-step-1: #a26425;
+  --chart-step-2: #b8793c;
+  --chart-step-3: #cf8e52;
+  --chart-step-4: #e7a468;
+  --chart-step-5: #f6be8d;
+  --stage-void: #0a0603;
+  --stage-bg: #150e07;
+}
