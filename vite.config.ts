@@ -13,7 +13,8 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const localBindingConfig = {
   main: "./worker/index.ts",
-  assets: { binding: "ASSETS", run_worker_first: true },
+  // 静态资源先由 Vite／Cloudflare 处理；强制先走业务路由会把开发模块和 CSS 当页面，返回 404。
+  assets: { binding: "ASSETS" },
   compatibility_flags: [
     "nodejs_compat",
     "nodejs_compat_populate_process_env",
