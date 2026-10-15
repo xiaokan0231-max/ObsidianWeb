@@ -8,7 +8,7 @@ const COMMITMENT_TYPES = new Set(["job-case", "todo", "interview-prep", "review"
 // 首页の「复盘提醒」は整理稿を起点に数える（lib/review-join.ts）。整理稿を落とすと冷启动で「待裁定 0」が出続けた。
 const OVERVIEW_REVIEW_TYPES = new Set(["interview-answer-practice", "transcript-study", "study-annotation", "interview-answer-review"]);
 const INTERVIEW_TYPES = new Set([
-  "interview-prep", "interview-prep-library", "transcript", "transcript-study", "study-annotation",
+  "interview-prep", "interview-prep-replay", "interview-prep-library", "transcript", "transcript-study", "study-annotation",
   "review", "interview-answer-review", "interview-answer-practice", "interview-answer-feedback",
   "interview-insights", "interview-insights-feedback", "interview-advisory-state",
   // material＝自己紹介台本・転職理由台本・当日フレーズ集・単語文法帳・NG集・横断傾向。

@@ -1,4 +1,4 @@
-import { PREP_V2_SECTIONS, interviewPrepVersion } from "./interview-prep-validation.mjs";
+import { PREP_V2_REPLAY_COMPARISON_TITLE, PREP_V2_SECTIONS, interviewPrepVersion } from "./interview-prep-validation.mjs";
 import { getString, getType, noteBasename, stripFrontmatter, type Note } from "./notes.ts";
 import {
   EMBED_RE,
@@ -54,7 +54,7 @@ export type PrepSection = {
   blocks: PrepBlock[];
 };
 
-export { PREP_V2_SECTIONS };
+export { PREP_V2_REPLAY_COMPARISON_TITLE, PREP_V2_SECTIONS };
 export type PrepVersion = 1 | 2;
 export type PrepV2SectionId = "overview" | "motivation" | "questions" | "resources" | "backup";
 
@@ -344,9 +344,18 @@ export type InterviewPrepDoc = {
   sections: PrepSection[];
   embeds: PrepEmbed[];
   externalLinks: PrepExternalLink[];
+  /** 对照样稿指向的原准备稿（`replay_of` 的笔记名）；普通准备稿为空。 */
+  replayOf: string;
+  /** 对照样稿依据的信息截至日（`replay_as_of`，原面试前一天）；普通准备稿为空。 */
+  replayAsOf: string;
 };
 
 const INTERVIEW_PREP_TYPE = "interview-prep";
+/**
+ * 对照样稿：按面试前可得的信息重写的某一轮准备，只供和原稿对照。用独立 type，
+ * 日历投影、公司总览、面试结果等按 `interview-prep` 工作的地方自然不会把它当成一场面试。
+ */
+export const INTERVIEW_PREP_REPLAY_TYPE = "interview-prep-replay";
 export type InterviewPrepSessionStatus =
   | "preparing"
   | "scheduled"
@@ -785,7 +794,8 @@ export function collectPrepExternalLinks(
 }
 
 export function parseInterviewPrepDoc(note: Note, notes: Note[]): InterviewPrepDoc | null {
-  if (getType(note) !== INTERVIEW_PREP_TYPE) return null;
+  const type = getType(note);
+  if (type !== INTERVIEW_PREP_TYPE && type !== INTERVIEW_PREP_REPLAY_TYPE) return null;
   const prepVersion = interviewPrepVersion(note.frontmatter.prep_version);
   // 未知版本不能静默渲染成历史稿；vault:check 会给出明确错误。
   if (prepVersion === null) return null;
@@ -850,6 +860,8 @@ export function parseInterviewPrepDoc(note: Note, notes: Note[]): InterviewPrepD
     sections,
     embeds,
     externalLinks: collectPrepExternalLinks(sections, prepVersion),
+    replayOf: type === INTERVIEW_PREP_REPLAY_TYPE ? prepWikiTarget(getString(note.frontmatter.replay_of)) : "",
+    replayAsOf: type === INTERVIEW_PREP_REPLAY_TYPE ? getString(note.frontmatter.replay_as_of).trim().replace(/^["']|["']$/g, "") : "",
   };
 }
 
@@ -864,10 +876,23 @@ export function cardIdFromRef(ref: { target: string; section: string }) {
   return ref.section.match(/^(p\d+)\b/)?.[1] ?? null;
 }
 
-/** 準備ドキュメントを日付の新しい順に並べる。日付が無いものは後ろへ。 */
+/** 準備ドキュメントを日付の新しい順に並べる。日付が無いものは後ろへ。对照样稿不是一轮面试，不在其中。 */
 export function findInterviewPrepDocs(notes: Note[]): InterviewPrepDoc[] {
   return notes
+    .filter((note) => getType(note) === INTERVIEW_PREP_TYPE)
     .map((note) => parseInterviewPrepDoc(note, notes))
     .filter((doc): doc is InterviewPrepDoc => Boolean(doc))
     .sort((left, right) => (right.date || "").localeCompare(left.date || ""));
+}
+
+/** 指向这份原稿的对照样稿（按笔记名或路径对上 `replay_of`）。 */
+export function findInterviewPrepReplay(notes: Note[], original: InterviewPrepDoc): InterviewPrepDoc | null {
+  const names = new Set([noteBasename(original.note.path), original.note.path.replace(/\.md$/, "")]);
+  for (const note of notes) {
+    if (getType(note) !== INTERVIEW_PREP_REPLAY_TYPE) continue;
+    if (!names.has(prepWikiTarget(getString(note.frontmatter.replay_of)))) continue;
+    const doc = parseInterviewPrepDoc(note, notes);
+    if (doc) return doc;
+  }
+  return null;
 }

@@ -54,11 +54,20 @@ export default function PrepMaterialReader({ documentKey, title, sections, intro
       <header data-reading-anchor={headings[index].id}><span className="nr-chapter-number">{String(index + 1).padStart(2, "0")}</span><h2>{headings[index].text}</h2></header>
       {stage
         // 每句台词各包一层锚点：阅读层按 data-stage-line 在台词之间跳，位置记忆按 data-reading-anchor 复原。
-        ? section.blocks.map((block, blockIndex) => block.kind === "say"
-          ? <div key={blockIndex} className="reader-stage-line" data-stage-line data-reading-anchor={`${headings[index].id}-line-${blockIndex}`}>
-            <Blocks blocks={[block]} refs={refs} idPrefix={`${headings[index].id}-line-${blockIndex}`} />
-          </div>
-          : <Blocks key={blockIndex} blocks={[block]} refs={refs} idPrefix={`${headings[index].id}-h-${blockIndex}`} />)
+        // 【面接官】是逆質問的预想回答，只作提示、不进 ←/→；紧跟其后的【あなた】是接话，缩进与它成组，
+        // 免得问法、预想回答、接话连成一长串同样大小的台词。
+        ? section.blocks.map((block, blockIndex) => {
+          const anchor = `${headings[index].id}-line-${blockIndex}`;
+          if (block.kind !== "say") return <Blocks key={blockIndex} blocks={[block]} refs={refs} idPrefix={`${headings[index].id}-h-${blockIndex}`} />;
+          if (block.speaker === "interviewer") return <div key={blockIndex} className="reader-stage-cue" data-reading-anchor={anchor}>
+            <Blocks blocks={[block]} refs={refs} idPrefix={anchor} />
+          </div>;
+          const previous = section.blocks[blockIndex - 1];
+          const reply = previous?.kind === "say" && previous.speaker === "interviewer";
+          return <div key={blockIndex} className={`reader-stage-line${reply ? " reader-stage-reply" : ""}`} data-stage-line data-reading-anchor={anchor}>
+            <Blocks blocks={[block]} refs={refs} idPrefix={anchor} />
+          </div>;
+        })
         : <Blocks blocks={section.blocks} refs={refs} idPrefix={`reader-prep-${index}`} />}
     </section>)}
   </ReadingMode>;

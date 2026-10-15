@@ -168,6 +168,36 @@ test("面试当天和前一天默认打开临场卡，底下停在纵览；URL �
   assert.match(bare.html, /id="v2-tab-overview"[^>]*aria-selected="true"/);
 });
 
+test("临场卡里逆質問的预想回答是提示行、不进 ←/→，接话缩进成组；问法与收住仍是主行", async () => {
+  const { default: Reader } = await loadAppModule("app/prep-material-reader.tsx", {
+    stubs: {
+      "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN", setLocale() {} }) },
+      "@/lib/reading-document": { headingPlainText: (value) => value },
+      "./reading-mode": { default: ({ children }) => createElement("div", null, children) },
+    },
+  });
+  const say = (speaker, value) => ({ kind: "say", speaker, inline: text(value) });
+  const blocks = [
+    { kind: "heading", level: 3, depth: 3, inline: text("1. 〔面接官本人型〕主题") },
+    say("you", "どんな共通点がありましたか。"),
+    say("interviewer", "関係づくりを大事にする方です。"),
+    say("you", "具体的には、どんな場面でしたか。"),
+    say("interviewer", "最初の案件です。"),
+    say("you", "最初はどの工程を担当されることが多いですか。"),
+    say("you", "ありがとうございます。よく分かりました。"),
+  ];
+  const html = renderToStaticMarkup(createElement(Reader, {
+    documentKey: "test:stage", title: "临场卡", sections: [{ id: "q", title: "逆質問", blocks }], presentation: "stage", prepVersion: 2,
+    onClose() {}, onOpenWiki() {}, onOpenCard() {},
+  }));
+  assert.equal((html.match(/data-stage-line/g) ?? []).length, 4, "问法、两句接话、收住");
+  assert.equal((html.match(/class="reader-stage-cue"/g) ?? []).length, 2);
+  assert.equal((html.match(/reader-stage-line reader-stage-reply/g) ?? []).length, 2);
+  assert.doesNotMatch(html.slice(html.indexOf("reader-stage-cue")), /^[^>]*data-stage-line/, "提示行不是 ←/→ 的落点");
+  // 收住一句跟在接话后面，回到主行，不缩进。
+  assert.match(html, /class="reader-stage-line" data-stage-line="true" data-reading-anchor="[^"]+"><div[^>]*><p class="prep-doc-say you"[^>]*><span>あなた<\/span><span>ありがとうございます。よく分かりました。/);
+});
+
 test("本场面试页头显示倒计时，临场卡入口只在有台词章节时出现", async () => {
   const note = {
     path: "test-prep.md", tags: [], stat: { ctime: 0, mtime: 0, size: 0 },

@@ -98,6 +98,9 @@
 .co-compare-toggle.active { background: var(--success-wash); }
 .co-compare-toggle:disabled { opacity: .6; cursor: not-allowed; }
 .co-header-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+/* 对照样稿的切换：和「加入对比」同一种描边按钮，按下时铺底色，表明正在看样稿。 */
+.co-header-actions .co-replay-entry { cursor: pointer; padding: 9px 15px; color: var(--green); background: transparent; border: 1px solid var(--success-line); border-radius: 5px; font-size: 13px; white-space: nowrap; }
+.co-header-actions .co-replay-entry[aria-pressed="true"] { background: var(--success-wash); }
 .co-header-actions .co-compare-entry { cursor: pointer; padding: 9px 15px; color: var(--on-fill); background: var(--green); border: 1px solid var(--green); border-radius: 5px; font-size: 13px; white-space: nowrap; }
 .co-compare-entry span { font-size: 11px; opacity: .8; margin-left: 3px; }
 .co-compare-entry:hover { background: var(--surface-inverse-soft); }

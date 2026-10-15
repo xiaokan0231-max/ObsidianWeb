@@ -10,7 +10,7 @@ const v1 = await readFile(new URL("../app/interview-session.tsx", import.meta.ur
 test("v2：URL 的 prepTab 优先，面试在明天之内默认打开临场卡（底下是纵览）；切换标签与关掉临场卡都写回 URL；纵览顶部渲染本轮提醒", () => {
   assert.match(v2, /get\("prepTab"\)/);
   assert.doesNotMatch(v2, /get\("section"\)|set\("section"/, "不能占用殻的 ?section=");
-  assert.match(v2, /tab: imminent \? "overview" : "company", stage: imminent && hasStageLines/);
+  assert.match(v2, /tab: imminent \|\| doc\.replayOf \? "overview" : "company", stage: imminent && hasStageLines/);
   assert.match(v2, /params\.set\("prepTab", tab\)/);
   assert.doesNotMatch(v2, /params\.delete\("prepTab"\)/, "公司总览也要写进 URL，否则面试当天刷新会再弹临场卡");
   assert.match(v2, /rememberTab\(next\)/);

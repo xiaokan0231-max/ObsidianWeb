@@ -26,6 +26,7 @@ import {
   interviewPrepStructureIssues,
   interviewPrepVersion,
   prepCarryForwardIssues,
+  prepContractReminder,
 } from "../lib/interview-prep-validation.mjs";
 import {
   isLanguageExpressionCourseNote,
@@ -99,6 +100,7 @@ const bodyByName = new Map();
 const frontmatterByName = new Map();
 const duplicateNames = new Set();
 let prepCount = 0;
+let prepReplayCount = 0;
 let prepEmbedCount = 0;
 let languageExpressionCourseCount = 0;
 const languageExpressionCoursePathsById = new Map();
@@ -439,11 +441,17 @@ for (const path of files) {
 
   // 面接準備ノートは共通資産を ![[…]] で参照する形にしているので、参照が切れると
   // Web と当日用 HTML から章がまるごと消える。しかも「空の章」は目視で気づきにくい。
-  if (frontmatter.type === "interview-prep") {
-    prepCount += 1;
+  // 对照样稿（interview-prep-replay）按面试前可得的信息重写某一轮，只供与原稿对照：
+  // 写法按新版契约整篇检查，但轮次身份归原稿，不登记 session、也不进日历。
+  const replay = frontmatter.type === "interview-prep-replay";
+  if (frontmatter.type === "interview-prep" || replay) {
+    if (replay) prepReplayCount += 1;
+    else prepCount += 1;
     const prepVersion = interviewPrepVersion(frontmatter.prep_version);
     if (prepVersion === null) {
       problems.push(`${relativePath}: prep_version 只支持省略、1 或 2（当前 ${String(frontmatter.prep_version)}）`);
+    } else if (replay && prepVersion !== 2) {
+      problems.push(`${relativePath}: 对照样稿只支持 prep_version: 2`);
     }
     for (const key of PREP_REQUIRED) {
       if (!frontmatter[key]) problems.push(`${relativePath}: frontmatter に \`${key}\` が無い`);
@@ -460,7 +468,31 @@ for (const path of files) {
     const sessionOrder = Number(frontmatter.session_order);
     const date = String(frontmatter.date ?? "");
 
-    if (!hasSessionContract) {
+    if (replay) {
+      if (hasSessionContract) {
+        problems.push(`${relativePath}: 对照样稿不写 session_id／session_order／session_status，轮次身份由 replay_of 的原稿持有`);
+      }
+      if (!validCalendarDate(date)) problems.push(`${relativePath}: 对照样稿的 date 写原面试的 YYYY-MM-DD`);
+      const asOf = String(frontmatter.replay_as_of ?? "").replace(/^["']|["']$/g, "");
+      if (!validCalendarDate(asOf) || (validCalendarDate(date) && asOf > date)) {
+        problems.push(`${relativePath}: 对照样稿要写 replay_as_of（依据哪一天以前能拿到的信息，取原面试前一天），且不晚于 date`);
+      }
+      const originalName = wikiTarget(frontmatter.replay_of);
+      const original = originalName ? frontmatterByName.get(originalName) : undefined;
+      if (!originalName) {
+        problems.push(`${relativePath}: 对照样稿需要 replay_of 指向原准备稿`);
+      } else if (!original) {
+        problems.push(`${relativePath}: replay_of の参照先が無い [[${originalName}]]`);
+      } else if (duplicateNames.has(originalName)) {
+        problems.push(`${relativePath}: replay_of「${originalName}」が同名複数あり曖昧`);
+      } else if (original.type !== "interview-prep") {
+        problems.push(`${relativePath}: replay_of [[${originalName}]] は type: interview-prep ではない`);
+      } else if (!context || prepContext(original)?.key !== context.key) {
+        problems.push(`${relativePath}: 对照样稿与原稿要指向同一 case / meeting`);
+      } else if (Number(original.session_order) > 1) {
+        for (const issue of prepCarryForwardIssues(content, 2)) problems.push(`${relativePath}: ${issue}`);
+      }
+    } else if (!hasSessionContract) {
       // 既存の date 命名ノートはそのまま読める。新規ノートだけ安定 session 契約へ移行する。
       if (!date) problems.push(`${relativePath}: legacy prep の frontmatter に \`date\` が無い`);
       else if (!validCalendarDate(date)) {
@@ -553,12 +585,16 @@ for (const path of files) {
       }
     }
     if (prepVersion !== null) {
+      const contract = String(frontmatter.prep_contract ?? "").replace(/^["']|["']$/g, "");
       for (const issue of [
-        ...interviewPrepStructureIssues(content, prepVersion, { date }),
+        ...interviewPrepStructureIssues(content, prepVersion, { date, round: String(frontmatter.round ?? ""), contract, replay }),
         ...companyMotivationIssues(content, prepVersion),
       ]) {
         problems.push(`${relativePath}: ${issue}`);
       }
+      // 旧模板稿到了新契约的面试日期只提醒：要不要升级由本人决定，不能因此拦住整个 vault。
+      const reminder = replay ? null : prepContractReminder(content, prepVersion, { date, contract });
+      if (reminder) warnings.push(`${relativePath}: ${reminder}`);
     }
     if (/{{[^}]+}}/.test(content)) {
       problems.push(`${relativePath}: テンプレートの {{…}} が残っている`);
@@ -646,7 +682,7 @@ if (focusedTodos.length > 1) {
 
 console.log(
   `job-case ノート ${notes.length} 件・owns 規則ID ${ownersById.size} 件・` +
-    `面接準備ノート ${prepCount} 件（埋め込み ${prepEmbedCount} 件）・` +
+    `面接準備ノート ${prepCount} 件（対照稿 ${prepReplayCount} 件・埋め込み ${prepEmbedCount} 件）・` +
     `表現専門コース ${languageExpressionCourseCount} 件を検査`,
 );
 

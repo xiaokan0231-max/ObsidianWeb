@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { PREP_V2_SECTIONS, getPrepV2Section, prepInlineText, type InterviewPrepDoc, type PrepExternalLink } from "@/lib/interview-prep-doc";
+import { PREP_V2_REPLAY_COMPARISON_TITLE, PREP_V2_SECTIONS, getPrepV2Section, prepInlineText, type InterviewPrepDoc, type PrepExternalLink } from "@/lib/interview-prep-doc";
 import { prepSourceHost, prepV2BlockLinks, prepV2Overview, prepV2StageSections } from "@/lib/interview-prep-v2";
 import { selectRelevantInterviewPrepDoc, type InterviewPrepSeries } from "@/lib/interview-prep-index";
 import { companyMotivationAssetTarget, type SharedAssetTarget } from "@/lib/interview-shared-assets";
-import type { Note } from "@/lib/notes";
+import { noteBasename, type Note } from "@/lib/notes";
 import { Blocks } from "./prep-doc-render";
 import { copySelectionWithoutRuby } from "./ruby-copy";
 import PrepMaterialReader from "./prep-material-reader";
@@ -17,6 +17,9 @@ type SectionId = typeof PREP_V2_SECTIONS[number]["id"] | "company";
 
 // 这一轮新加的文案；共用菜单词表（lib/ui-menu-labels）照旧兜底。
 const V2_COPY_JA: Record<string, string> = {
+  "对照样稿": "対照稿",
+  "信息截至 {date}": "{date} までの情報",
+  "对照样稿：按 {date} 以前能拿到的信息重写，不是当时的准备稿；文末「对照」一节写当时实际发生了什么。": "対照稿：{date} までに得られた情報で書き直したもので、当時の準備稿ではありません。末尾の「対照」に当時の実際を記しています。",
   "临场卡": "当日カード",
   "只看要说的话 ↗": "話す言葉だけ ↗",
   "今天": "今日",
@@ -108,12 +111,12 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   // 一句台词都没有时不出入口：点进去只剩一句空提示，等于白跑一趟。
   const hasStageLines = stageSections.some((item) => item.blocks.some((block) => block.kind === "say"));
   // 既定落点：URL 写了就按 URL。面试在今天或明天时直接打开临场卡（底下停在纵览）——当天要的是
-  // 说出口的话，没时间再读纵览；稿里没有台词就停在纵览。其余日子落在公司总览。
+  // 说出口的话，没时间再读纵览；稿里没有台词就停在纵览。对照样稿落在纵览（对照节在最上面）。其余日子落在公司总览。
   const [landing] = useState<{ tab: SectionId; stage: boolean }>(() => {
     const fromUrl = tabFromUrl();
     if (fromUrl) return { tab: fromUrl, stage: false };
     const imminent = /^\d{4}-\d{2}-\d{2}$/.test(doc.date) && doc.date <= nextDay(today) && doc.date >= today;
-    return { tab: imminent ? "overview" : "company", stage: imminent && hasStageLines };
+    return { tab: imminent || doc.replayOf ? "overview" : "company", stage: imminent && hasStageLines };
   });
   const [active, setActive] = useState<SectionId>(landing.tab);
   // section：当前章节的专注阅读；stage：临场卡。
@@ -125,6 +128,11 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   const railRef = useRef<HTMLElement>(null);
   const positionsRef = useRef<Partial<Record<SectionId, number>>>({});
   const overview = useMemo(() => prepV2Overview(doc), [doc]);
+  // 对照样稿文末的对照节写的是面试后才知道的事，放在面谈纵览最上面，不混进按面试前信息写的五章。
+  const comparison = doc.replayOf ? doc.sections.find((item) => item.title === PREP_V2_REPLAY_COMPARISON_TITLE) ?? null : null;
+  // 对照样稿不在轮次列表里，下拉仍停在它所对照的那一轮。
+  const roundPath = (doc.replayOf && selectedSeries?.rounds.find((item) =>
+    [noteBasename(item.note.path), item.note.path.replace(/\.md$/, "")].includes(doc.replayOf))?.note.path) || doc.note.path;
   const section = active === "company" ? null : getPrepV2Section(doc.sections, active);
   const blocks = useMemo(() => active === "overview" ? overview.blocks : section?.blocks ?? [], [active, overview.blocks, section]);
   const headings = useMemo(() => blocks.flatMap((block, index) => block.kind === "heading" && block.level === 3
@@ -209,7 +217,8 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
     <header className="v2-header" ref={headerRef}>
       <div className="v2-heading">
         <p className="v2-kicker">{t("本场面试")} <span>{doc.round || "轮次未定"}</span>
-          {countdown && <b className={`v2-countdown ${countdown.tone}`}>{countdownText}</b>}</p>
+          {doc.replayOf ? <><b className="v2-replay-badge">{t("对照样稿")}</b>{doc.replayAsOf && <span className="v2-replay-asof">{t("信息截至 {date}", { date: doc.replayAsOf })}</span>}</>
+            : countdown && <b className={`v2-countdown ${countdown.tone}`}>{countdownText}</b>}</p>
         <h1>{doc.company || doc.title}</h1>
         {overview.position && <p className="v2-position">{overview.position}</p>}
       </div>
@@ -219,12 +228,13 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
           const next = item && selectRelevantInterviewPrepDoc(item.rounds, today);
           if (next) select(next);
         }}>{series.map((item) => <option key={item.key} value={item.key}>{item.company}{series.filter((other) => other.company === item.company).length > 1 ? `｜${item.caseLink || item.meetingLink}` : ""}（{item.rounds.length}{t("轮")}）</option>)}</select></label>}
-        {(selectedSeries?.rounds.length ?? 0) > 1 && <label>{t("轮次")}<select aria-label={t("切换当前公司的面试轮次")} value={doc.note.path} onChange={(event) => {
+        {(selectedSeries?.rounds.length ?? 0) > 1 && <label>{t("轮次")}<select aria-label={t("切换当前公司的面试轮次")} value={roundPath} onChange={(event) => {
           const next = selectedSeries?.rounds.find((candidate) => candidate.note.path === event.target.value);
           if (next) select(next);
         }}>{selectedSeries?.rounds.map((item) => <option key={item.note.path} value={item.note.path}>{item.round} · {item.date || "未定"}</option>)}</select></label>}
         {companyAction}
       </div>
+      {doc.replayOf && <p className="v2-replay-note">{t("对照样稿：按 {date} 以前能拿到的信息重写，不是当时的准备稿；文末「对照」一节写当时实际发生了什么。", { date: doc.replayAsOf || doc.date })}</p>}
       <div className="v2-logistics"><time>{overview.dateTime}</time><span>{doc.format}</span>{overview.place !== doc.format && overview.place !== "进入会议" && <span>{overview.place}</span>}<span>{doc.interviewers || "面试官未定"}</span>
         {overview.meetingUrl && <a className="v2-meeting" href={overview.meetingUrl} target="_blank" rel="noopener noreferrer">{t("进入会议")} <span aria-hidden="true">↗</span></a>}
       </div>
@@ -240,6 +250,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
       {active === "company" ? <main key="company" id="v2-panel" role="tabpanel" aria-labelledby="v2-tab-company" tabIndex={0} className="v2-company-panel" ref={mainRef}>{companyOverview}</main> : <>
       <main key={active} id="v2-panel" role={active === "backup" ? "region" : "tabpanel"} aria-labelledby={active === "backup" ? "v2-section-title" : `v2-tab-${active}`} tabIndex={0} className={`v2-body v2-${active}`} ref={mainRef}>
         {active === "overview" && briefing}
+        {active === "overview" && comparison && <section className="v2-replay-comparison" aria-labelledby="v2-replay-comparison-title"><h2 id="v2-replay-comparison-title">{comparison.title}</h2><Blocks blocks={comparison.blocks} refs={refs} idPrefix="v2-replay-cmp" /></section>}
         <header className="v2-section-head"><h2 id="v2-section-title">{active === "overview" ? "面谈纵览" : section?.title ?? "临场备用"}</h2><button type="button" onClick={() => { savePosition(); setReading("section"); }}>{t("专注阅读")}</button></header>
         {blocks.length ? <Blocks blocks={blocks} refs={refs} idPrefix={prefix} /> : <p className="v2-empty">本轮没有需要补充的内容，可从回答库打开共用话术。</p>}
         {active === "resources" && sources.some((source) => !doc.externalLinks.some((current) => current.href === source.href)) && <section className="v2-carried-sources"><h3>前轮沿用资料 · 截至本轮</h3><p>本轮新增资料见上文；以下来源保留前轮的阅读范围。</p>{sourceList(sources.filter((source) => !doc.externalLinks.some((current) => current.href === source.href)))}</section>}

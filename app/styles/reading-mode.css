@@ -468,6 +468,16 @@
 }
 .reading-mode.stage-reader .reader-stage-line[data-stage-current] { border-left-color: var(--brand); }
 .reading-mode.stage-reader .reader-stage-line .prep-doc-say { margin: 0; }
+/* 逆質問的「预想回答→接话」：预想回答是小字提示（不进 ←/→），接话缩进、略小于问法，三者一眼分得出层级。 */
+.reading-mode.stage-reader .reader-stage-cue { margin: 1.3em 0 .3em; padding-left: calc(18px + 2.4em); }
+.reading-mode.stage-reader .reader-prose .reader-stage-cue .prep-doc-say {
+  margin: 0;
+  color: var(--nr-muted);
+  font-size: .95em;
+  line-height: 1.9;
+}
+.reading-mode.stage-reader .reader-stage-line.reader-stage-reply { margin-left: 2.4em; }
+.reading-mode.stage-reader .reader-prose .reader-stage-reply .prep-doc-say { font-size: calc(var(--nr-font-size, 18px) * 1.2); }
 .reading-mode.stage-reader .reader-prose h3,
 .reading-mode.stage-reader .reader-prose h4 { margin-top: 1.6em; color: var(--nr-muted); font-size: .9em; }
 .reading-mode .reader-stage-empty { color: var(--nr-muted); font-size: 15px; }
