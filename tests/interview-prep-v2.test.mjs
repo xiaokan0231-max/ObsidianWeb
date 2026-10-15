@@ -14,6 +14,7 @@ import {
   interviewPrepStructureIssues,
   interviewPrepVersion,
   prepCarryForwardIssues,
+  prepStageBlockIssues,
 } from "../lib/interview-prep-validation.mjs";
 import {
   companyMotivationAssetTarget,
@@ -66,6 +67,29 @@ const BODY = `# 株式会社テスト 面接準備
 
 [会议入口](https://example.com/meeting)
 `;
+
+const STAGE = `### 冒頭30秒
+
+【あなた】本日はお時間をいただき、ありがとうございます。
+
+自己紹介を求められたら：[[自己紹介_音読台本#30秒版]]
+
+### 本場の懸念 TOP3 と先回り一言
+
+#### 1. 定着
+
+【あなた】腰を据えて長く取り組める環境を探しています。
+
+### 締めの一言
+
+【あなた】ぜひ選考に進ませていただきたいです。
+
+#### 当日お礼メッセージ
+
+本日はお時間をいただき、ありがとうございました。
+
+`;
+const WITH_STAGE = BODY.replace("### 本场难题", `${STAGE}### 本场难题`);
 
 function prepNote(content = BODY, version = 2) {
   return {
@@ -128,6 +152,35 @@ test("v2 校验五节、2至3句台词与同节根拠，不再要求旧版速查
   assert.match(companyMotivationIssues(BODY.replace("御社のデータ基盤事業", "{{公司事实}}"), 2).join("\n"), /置換済み/);
 });
 
+test("临场备用三块：生效前的旧稿不查，开始用或面试日期到生效日后必须写全", () => {
+  assert.deepEqual(prepStageBlockIssues(BODY, { date: "2026-10-15" }), []);
+  assert.deepEqual(prepStageBlockIssues(BODY, { date: "未定" }), []);
+  const due = prepStageBlockIssues(BODY, { date: "2026-10-16" }).join("\n");
+  for (const title of ["冒頭30秒", "本場の懸念 TOP3 と先回り一言", "締めの一言"]) assert.match(due, new RegExp(title));
+  assert.deepEqual(prepStageBlockIssues(WITH_STAGE, { date: "2026-10-16" }), []);
+  // 经由结构检查接进 vault:check；日期从 frontmatter 传入。
+  assert.deepEqual(interviewPrepStructureIssues(WITH_STAGE, 2, { date: "2026-10-16" }), []);
+  assert.match(interviewPrepStructureIssues(BODY, 2, { date: "2026-10-16" }).join("\n"), /締めの一言/);
+  // 只写了一块也要写全，不论日期。
+  const partial = BODY.replace("### 本场难题", "### 締めの一言\n\n【あなた】ぜひ選考に進ませていただきたいです。\n\n#### 当日お礼メッセージ\n\n本日はありがとうございました。\n\n### 本场难题");
+  assert.match(prepStageBlockIssues(partial).join("\n"), /冒頭30秒/);
+});
+
+test("临场备用三块逐项检查：朗读节链接、懸念台词、单纯否定或道歉、お礼短文", () => {
+  const issues = (from, to) => prepStageBlockIssues(WITH_STAGE.replace(from, to)).join("\n");
+  assert.match(issues("[[自己紹介_音読台本#30秒版]]", "[[自己紹介_音読台本]]"), /指定朗读节/);
+  assert.match(issues("【あなた】腰を据えて長く取り組める環境を探しています。", "▷ 只写了推断。"), /懸念「1\. 定着」缺少/);
+  assert.match(issues("#### 1. 定着", "1. 定着"), /1〜3 个/);
+  // 注音不能让单纯否定躲过检查。
+  assert.match(issues("腰を据えて長く取り組める環境を探しています。", "本番運用（ほんばんうんよう）の経験（けいけん）はまだありません。"), /本場の懸念.*单纯否定或道歉/);
+  assert.match(issues("ぜひ選考に進ませていただきたいです。", "申し訳ございません、以上です。"), /締めの一言.*单纯否定或道歉/);
+  assert.match(issues("【あなた】ぜひ選考に進ませていただきたいです。", "▷ 忘了写。"), /志望度表达/);
+  assert.match(issues("本日はお時間をいただき、ありがとうございました。", "▷ 只有发送说明。"), /当日お礼メッセージ」缺少/);
+  assert.match(issues("#### 当日お礼メッセージ", "#### お礼"), /当日お礼メッセージ`（当前 0 个）/);
+  // 被问到才用的高风险短答不在检查范围：边界可以说，是否配了现状＋计划由内容复核把关。
+  assert.deepEqual(prepStageBlockIssues(WITH_STAGE.replace("【あなた】簡潔に説明します。", "【あなた】本番運用の経験はまだありません。")), []);
+});
+
 test("v2 后续轮次只接受纵览内的回流章节，其他节和注释不能替代", () => {
   const carry = "### 前回から今回への回流\n\n前回的事实、出处与本轮调整。\n\n";
   assert.deepEqual(prepCarryForwardIssues(BODY.replace("### 工作与机会", `${carry}### 工作与机会`), 2), []);
@@ -183,6 +236,7 @@ evidence_inputs:
       writeFile(join(directory, "Test_case.md"), "---\ntype: job-case\ncase_id: test-case\ncompany: 株式会社テスト\nstatus: 未応募\norigin: manual\n---\n# Test case\n"),
       writeFile(join(directory, "legacy.md"), legacy),
       writeFile(join(directory, "前回整理稿.md"), "# 前回整理稿\n"),
+      writeFile(join(directory, "自己紹介_音読台本.md"), "# 自己紹介\n\n## 30秒版\n\n【あなた】テストと申します。\n"),
       writeFile(join(directory, "second.md"), second),
     ]);
     const check = () => spawnSync(process.execPath, ["scripts/vault-check.mjs"], {
@@ -198,6 +252,15 @@ evidence_inputs:
     result = check();
     assert.equal(result.status, 1);
     assert.match(result.stderr, /纵览与建议中缺少/);
+    // 面试日期到生效日后，缺临场备用三块会被拦下；补齐即通过。
+    const dated = second.replace("date: 2026-09-01", "date: 2026-10-20");
+    await writeFile(join(directory, "second.md"), dated);
+    result = check();
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /冒頭30秒/);
+    await writeFile(join(directory, "second.md"), dated.replace("### 本场难题", `${STAGE}### 本场难题`));
+    result = check();
+    assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally {
     await rm(vault, { recursive: true, force: true });
   }

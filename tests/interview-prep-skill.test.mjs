@@ -67,3 +67,41 @@ test("默认模板改为五个语义章节的 v2，旧版通过独立文档保�
   assert.match(skill, /不设字数或全文阅读时长上限/);
   assert.match(skill, /不做移动适配或验收/);
 });
+
+test("v2 模板在临场备用开头固定冒頭・懸念・締め三块，填好后通过校验", async () => {
+  const { PREP_V2_STAGE_BLOCKS, prepStageBlockIssues } = await import("../lib/interview-prep-validation.mjs");
+  const template = await readFile(`${SKILL}/assets/面談準備_v2_テンプレート.md`, "utf8");
+  const backup = template.slice(template.indexOf("## 临场备用"));
+  const h3 = [...backup.matchAll(/^### (.+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(h3.slice(0, 3), PREP_V2_STAGE_BLOCKS.map((spec) => spec.title), "固定块在最前，顺序与标题原样");
+  assert.match(backup, /\[\[自己紹介_音読台本#30秒版\]\]/);
+  assert.equal([...backup.matchAll(/^#### [1-3]\. /gm)].length, 3, "懸念默认三点");
+  assert.match(backup, /^#### 当日お礼メッセージ$/m);
+  assert.match(backup, /ぜひ選考（せんこう）に進（すす）ませていただきたい/);
+  assert.match(backup, /第一志望群/);
+  // 占位符换成任意正文后，三块满足校验器（即生效日后的新稿照模板写就能过）。
+  const filled = template.replace(/\{\{[^}]*\}\}/g, "テストです。");
+  assert.deepEqual(prepStageBlockIssues(filled, { date: "2026-10-16" }), []);
+  // 逆質問不再「为做判断而问」：主问题 2 个意欲・贡献型＋1 个业务理解型，条件确认移出。
+  const questions = template.slice(template.indexOf("## 逆質問"), template.indexOf("## 研究资料"));
+  assert.equal([...questions.matchAll(/^### [12]\. \{\{意欲・贡献型/gm)].length, 2);
+  assert.match(questions, /^### 3\. \{\{业务理解型/m);
+  assert.doesNotMatch(questions, /如何判断/);
+  assert.match(questions, /人事面、内定前或文字联络/);
+});
+
+test("SKILL 与方法论：被问到才说边界，逆質問表达意欲，交付前查主动示弱", async () => {
+  const [skill, methodology] = await Promise.all([
+    readFile(`${SKILL}/SKILL.md`, "utf8"),
+    readFile(`${SKILL}/references/methodology.md`, "utf8"),
+  ]);
+  for (const text of [skill, methodology]) {
+    assert.match(text, /2 个意欲・贡献型＋1 个业务理解型/);
+    assert.match(text, /人事面、内定前或文字联络/);
+    assert.match(text, /未被问的负面信息或道歉/);
+  }
+  assert.match(methodology, /被问到才说边界，并配现状＋计划/);
+  assert.doesNotMatch(methodology, /边界 → 真实证据 → 能承担的范围/);
+  assert.match(skill, /冒頭30秒、本場の懸念 TOP3 と先回り一言、締めの一言/);
+  assert.match(skill, /面试当天和前一天默认打开临场卡/);
+});

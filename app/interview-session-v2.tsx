@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { PREP_V2_SECTIONS, getPrepV2Section, prepInlineText, type InterviewPrepDoc, type PrepExternalLink } from "@/lib/interview-prep-doc";
-import { prepSourceHost, prepV2BlockLinks, prepV2Overview } from "@/lib/interview-prep-v2";
+import { prepSourceHost, prepV2BlockLinks, prepV2Overview, prepV2StageSections } from "@/lib/interview-prep-v2";
 import { selectRelevantInterviewPrepDoc, type InterviewPrepSeries } from "@/lib/interview-prep-index";
 import { companyMotivationAssetTarget, type SharedAssetTarget } from "@/lib/interview-shared-assets";
 import type { Note } from "@/lib/notes";
@@ -103,16 +103,21 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   const t = (label: string, values: Record<string, string | number> = {}) =>
     (locale === "ja" ? V2_COPY_JA[label] ?? menuLabel(label, locale) : label)
       .replace(/\{(\w+)\}/g, (match, name: string) => String(values[name] ?? match));
-  // 既定タブ：URL に書いてあればそれ、面接が明日までに迫っていれば纵览、そうでなければ会社総覧。
-  // 以前は常に会社総覧で、当日に日历から来ても「面谈纵览」をもう一度押す必要があった。
-  const [active, setActive] = useState<SectionId>(() => {
+  // 临场卡按面试流程排好的台词（冒頭→懸念→志望動機→逆質問→締め→其余备用）。
+  const stageSections = useMemo(() => prepV2StageSections(doc), [doc]);
+  // 一句台词都没有时不出入口：点进去只剩一句空提示，等于白跑一趟。
+  const hasStageLines = stageSections.some((item) => item.blocks.some((block) => block.kind === "say"));
+  // 既定落点：URL 写了就按 URL。面试在今天或明天时直接打开临场卡（底下停在纵览）——当天要的是
+  // 说出口的话，没时间再读纵览；稿里没有台词就停在纵览。其余日子落在公司总览。
+  const [landing] = useState<{ tab: SectionId; stage: boolean }>(() => {
     const fromUrl = tabFromUrl();
-    if (fromUrl) return fromUrl;
+    if (fromUrl) return { tab: fromUrl, stage: false };
     const imminent = /^\d{4}-\d{2}-\d{2}$/.test(doc.date) && doc.date <= nextDay(today) && doc.date >= today;
-    return imminent ? "overview" : "company";
+    return { tab: imminent ? "overview" : "company", stage: imminent && hasStageLines };
   });
-  // section：当前章节的专注阅读；stage：临场卡，只留三章里要说出口的台词。
-  const [reading, setReading] = useState<"section" | "stage" | null>(null);
+  const [active, setActive] = useState<SectionId>(landing.tab);
+  // section：当前章节的专注阅读；stage：临场卡。
+  const [reading, setReading] = useState<"section" | "stage" | null>(landing.stage ? "stage" : null);
   const [currentHeading, setCurrentHeading] = useState<number | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLElement>(null);
@@ -128,15 +133,23 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   const savePosition = () => {
     positionsRef.current[active] = window.scrollY;
   };
+  // 刷新、分享时回到同一处（不进历史）。公司总览也要写：面试当天不写 URL 就等于默认，刷新会再弹临场卡。
+  const rememberTab = (tab: SectionId) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("prepTab", tab);
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}?${params}`);
+  };
   const switchSection = (next: SectionId) => {
     if (next === active) return;
     savePosition();
     setCurrentHeading(null);
     setActive(next);
-    // 刷新・共有で同じタブに戻れるよう URL に残す（履歴には積まない）。
-    const params = new URLSearchParams(window.location.search);
-    if (next === "company") params.delete("prepTab"); else params.set("prepTab", next);
-    window.history.replaceState(window.history.state, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
+    rememberTab(next);
+  };
+  // 关掉临场卡就记下当前标签：当天手动关过，刷新时不再自动弹出。
+  const closeStage = () => {
+    setReading(null);
+    rememberTab(active);
   };
   useLayoutEffect(() => {
     if (railRef.current) railRef.current.scrollTop = 0;
@@ -187,12 +200,6 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   const countdown = prepCountdown(doc.date, today);
   const countdownText = countdown === null ? "" : countdown.days === 0 ? t("今天") : countdown.days === 1 ? t("明天")
     : countdown.days > 0 ? t("{n} 天后", { n: countdown.days }) : t("{n} 天前", { n: -countdown.days });
-  // 三章里一句台词都没有时不出入口：点进去只剩一句空提示，等于白跑一趟。
-  const stageSections = (["motivation", "questions", "backup"] as const).flatMap((id) => {
-    const found = getPrepV2Section(doc.sections, id);
-    return found ? [{ id: found.id, title: found.title, blocks: found.blocks }] : [];
-  });
-  const hasStageLines = stageSections.some((item) => item.blocks.some((block) => block.kind === "say"));
   const sourceList = (links: PrepExternalLink[]) => <ol className="v2-source-list">{links.map((link) => <li key={link.href}>
     <a href={link.href} target="_blank" rel="noopener noreferrer"><span>{link.label.replace(/^★\s*/, "")}</span><span aria-hidden="true">↗</span></a>
     <small>{prepSourceHost(link.href)}</small>
@@ -253,6 +260,6 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
       </>}
     </div>
     {reading === "section" && <PrepMaterialReader prepVersion={2} documentKey={`${doc.note.path}:${active}`} title={section?.title ?? "临场备用"} sections={[{ id: section?.id ?? active, title: section?.title ?? "临场备用", blocks }]} onClose={() => setReading(null)} onOpenWiki={refs.onOpenWiki} onOpenCard={refs.onOpenCard} />}
-    {reading === "stage" && <PrepMaterialReader prepVersion={2} presentation="stage" documentKey={`${doc.note.path}:stage`} title={`${doc.company || doc.title} · ${t("临场卡")}`} sections={stageSections} onClose={() => setReading(null)} onOpenWiki={refs.onOpenWiki} onOpenCard={refs.onOpenCard} />}
+    {reading === "stage" && <PrepMaterialReader prepVersion={2} presentation="stage" documentKey={`${doc.note.path}:stage`} title={`${doc.company || doc.title} · ${t("临场卡")}`} sections={stageSections} onClose={closeStage} onOpenWiki={refs.onOpenWiki} onOpenCard={refs.onOpenCard} />}
   </div>;
 }

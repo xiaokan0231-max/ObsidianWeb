@@ -554,7 +554,7 @@ for (const path of files) {
     }
     if (prepVersion !== null) {
       for (const issue of [
-        ...interviewPrepStructureIssues(content, prepVersion),
+        ...interviewPrepStructureIssues(content, prepVersion, { date }),
         ...companyMotivationIssues(content, prepVersion),
       ]) {
         problems.push(`${relativePath}: ${issue}`);
