@@ -9,15 +9,17 @@ const raw = (id, extra = {}, content = "質問です。\n回答です。") => no
 const studyBody = "## q01 中文摘要\n- **s001｜面**\n    - 正:: 経験を教えてください。\n    - 訳:: 请介绍经历。\n    - 注:: INTERNAL-ANNOTATION\n- **s002｜私?**\n    - 正:: 開発を担当しました。\n    - 誤:: AI-EVALUATION";
 const study = (id, extra = {}, content = studyBody) => note(`${root}/${id}_整理稿.md`, { type: "transcript-study", company: "株式会社テスト", date: "2026-09-20", round: "一次面接", ...extra }, content);
 
-test("全量保留已应募公司和每个岗位，未応募与准备稿不进入清单", () => {
+test("有面试记录的公司不限五家，只保留面试过的岗位，无面试公司与准备稿不进入清单", () => {
   const jobs = Array.from({ length: 8 }, (_, index) => job(`test-${index}`, "不採用", { company: `株式会社テスト${index}`, position: "エンジニア" }));
-  const notes = [...jobs, job("another-role", "面接中", { company: "テスト0", position: "リーダー" }), job("not-applied", "未応募", { company: "株式会社未応募テスト" }),
+  const studies = jobs.map((item, index) => study(`test-study-${index}`, { company: item.frontmatter.company, case_id: item.frontmatter.case_id }));
+  const notes = [...jobs, ...studies, job("another-role", "面接中", { company: "テスト0", position: "リーダー" }), job("not-applied", "未応募", { company: "株式会社未応募テスト" }),
+    job("documents-only", "書類通過", { company: "株式会社書類のみテスト" }),
     note(`${root}/prep.md`, { type: "interview-prep", company: "株式会社準備テスト", date: "2026-10-01" })];
   const catalog = buildConsultationCatalog(notes);
   assert.equal(catalog.companies.length, 8);
-  assert.equal(catalog.companies.reduce((count, company) => count + company.applications.length, 0), 9);
-  assert.deepEqual(catalog.companies.find(company => company.company === "テスト0").applications.map(application => application.status).sort(), ["不採用", "面接中"]);
-  assert.equal(catalog.sessions.length, 0);
+  assert.equal(catalog.companies.reduce((count, company) => count + company.applications.length, 0), 8);
+  assert.deepEqual(catalog.companies.find(company => company.company === "株式会社テスト0").applications.map(application => application.status), ["不採用"]);
+  assert.equal(catalog.sessions.length, 8);
 });
 
 test("当前案件状态是正本，不被历史复盘结果覆盖；没有关联不猜同公司岗位", () => {
@@ -40,7 +42,7 @@ test("品牌名只凭明确 case_id 归入法人公司，不猜未关联品牌�
   const linked = catalog.sessions.find(session => session.date === "2026-09-20");
   const unlinked = catalog.sessions.find(session => session.date === "2026-09-21");
   assert.equal(catalog.companies.length, 2);
-  assert.equal(legal.applications.length, 2);
+  assert.equal(legal.applications.length, 1);
   assert.deepEqual(legal.sessionIds, [linked.id]);
   assert.equal(linked.companyId, legal.id);
   assert.equal(linked.company, "株式会社法人A");
@@ -50,13 +52,17 @@ test("品牌名只凭明确 case_id 归入法人公司，不猜未关联品牌�
   assert.equal(unlinked.outcomeKind, "unknown");
 });
 
-test("同一案件的前轮与末轮分开判断，不把另一岗位后续面试当作通过", () => {
+test("终面落选仍算进入终面、前轮通过，不把另一岗位后续面试当作通过", () => {
   const notes = [job("main"), job("different", "内定"), study("first", { case: "[[main]]" }),
     study("final", { date: "2026-09-23", round: "最終面接", case: "[[main]]" }),
     study("other-role", { date: "2026-10-01", case: "[[different]]" })];
-  const sessions = buildConsultationCatalog(notes).sessions;
+  const catalog = buildConsultationCatalog(notes);
+  const sessions = catalog.sessions;
   assert.equal(sessions.find(session => session.date === "2026-09-20").outcomeKind, "passed");
   assert.equal(sessions.find(session => session.date === "2026-09-23").outcomeKind, "rejected");
+  assert.equal(sessions.find(session => session.date === "2026-09-23").stage, "final");
+  assert.equal(catalog.companies[0].reachedFinal, true);
+  assert.equal(catalog.companies[0].hasPassedInterview, true);
 });
 
 test("原稿单独存在也可读，整理稿明确引用原稿时合并，输入顺序不改变稳定 ID", () => {
@@ -77,12 +83,91 @@ test("原稿单独存在也可读，整理稿明确引用原稿时合并，输�
   assert.equal(findConsultationTranscript(notes, "../../private.md"), null);
 });
 
-test("原稿だけの次轮仍参与权威结果判断，中介面谈不计作企业落选", () => {
+test("原稿的次轮仍参与结果判断，中介面谈排除且不能证明企业面试通过", () => {
   const notes = [job("main"), raw("early", { case: "[[main]]" }), raw("late", { date: "2026-09-22", case: "[[main]]", round: "最終面接" }),
     raw("agent", { date: "2026-09-23", case: "[[main]]", round: "エージェント面談" })];
   const sessions = buildConsultationCatalog(notes).sessions;
+  assert.equal(sessions.length, 2);
   assert.equal(sessions.find(session => session.date === "2026-09-20").outcomeKind, "passed");
-  assert.equal(sessions.find(session => session.date === "2026-09-23").outcomeKind, "not-applicable");
+  assert.equal(sessions.find(session => session.date === "2026-09-22").outcomeKind, "rejected");
+  assert.equal(sessions.find(session => session.date === "2026-09-23"), undefined);
+});
+
+test("空稿、无稿公司、中介与明确平台服务不生成入口，未知结果的真实企业场次保留", () => {
+  const notes = [job("no-interview", "不採用", { company: "株式会社無面接テスト" }),
+    raw("empty-raw", { company: "株式会社空原稿テスト" }, "---\ntype: transcript\n---\n# 原稿\n \n"),
+    study("empty-study", { company: "株式会社空整理テスト" }, "## q01 経験\n- **s001｜面**\n    - 正::   "),
+    raw("agent-only", { company: "株式会社紹介テスト", round: "エージェント面談" }),
+    raw("service-raw", { company: "株式会社媒体テスト", round: "" }),
+    study("service-study", { company: "株式会社媒体テスト", round: "ユーザーサクセス面談", source_note: "[[service-raw]]" }),
+    study("explicit-support", { company: "株式会社支援テスト", session_kind: "platform-support" }),
+    ...["会社説明会", "説明会", "セミナー", "seminar"].map((round, index) => raw(`seminar-${index}`, { company: `株式会社説明テスト${index}`, round })),
+    raw("unknown-employer", { company: "株式会社企業テスト", round: "面談" })];
+  const catalog = buildConsultationCatalog(notes);
+  assert.deepEqual(catalog.companies.map(company => company.company), ["株式会社企業テスト"]);
+  assert.equal(catalog.sessions.length, 1);
+  assert.equal(catalog.sessions[0].outcomeKind, "unknown");
+  assert.equal(catalog.companies[0].reachedFinal, false);
+  assert.equal(catalog.companies[0].hasPassedInterview, false);
+});
+
+test("同一案件的确认终面邀约可标进入终面，草稿、未确认准备与同公司另一岗位不可推断", () => {
+  const base = [job("main", "面接中"), study("first", { case_id: "main" })];
+  const invitation = status => note(`${root}/final-prep.md`, { type: "interview-prep", company: "株式会社テスト", date: "2026-10-01", round: "最終面接", case_id: "main", ...(status ? { session_status: status } : {}) });
+  const confirmed = buildConsultationCatalog([...base, invitation("scheduled")]);
+  assert.equal(confirmed.sessions.length, 1);
+  assert.equal(confirmed.companies[0].reachedFinal, true);
+  assert.equal(confirmed.companies[0].hasPassedInterview, true);
+  assert.equal(confirmed.sessions[0].stage, "round-1");
+  for (const status of ["draft", "preparing", "cancelled", ""]) {
+    const catalog = buildConsultationCatalog([...base, invitation(status)]);
+    assert.equal(catalog.companies[0].reachedFinal, false, status);
+    assert.equal(catalog.companies[0].hasPassedInterview, false, status);
+    assert.equal(catalog.sessions[0].outcomeKind, "waiting", status);
+  }
+  const differentRole = buildConsultationCatalog([...base, job("other", "面接中"), { ...invitation("scheduled"), frontmatter: { ...invitation("scheduled").frontmatter, case_id: "other" } }]);
+  assert.equal(differentRole.companies[0].applications.length, 1);
+  assert.equal(differentRole.companies[0].reachedFinal, false);
+  assert.equal(differentRole.companies[0].hasPassedInterview, false);
+});
+
+test("结构化终面确约只作用于同一归属已有面试记录的公司，不从正文或准备标题猜进展", () => {
+  const scheduled = job("main", "面接中", { next_event_at: "2026-10-01 14:00", next_event_label: "最終面接" });
+  const catalog = buildConsultationCatalog([scheduled, study("first", { case_id: "main" }),
+    job("no-record", "面接中", { company: "株式会社記録なしテスト", next_event_at: "2026-10-02 15:00 最終面接" })]);
+  assert.equal(catalog.companies.length, 1);
+  assert.equal(catalog.companies[0].reachedFinal, true);
+  assert.equal(catalog.companies[0].hasPassedInterview, true);
+  assert.equal(catalog.sessions[0].outcomeKind, "passed");
+  const unknown = buildConsultationCatalog([job("unknown", "面接中"), raw("unknown", { case_id: "unknown", round: "面談" }, "次は最終面接かもしれません。"),
+    note(`${root}/title-only-prep.md`, { type: "interview-prep", company: "株式会社テスト", date: "2026-10-01", case_id: "unknown", session_status: "scheduled" }, "# 最終面接の準備")]);
+  assert.equal(unknown.companies[0].reachedFinal, false);
+  assert.equal(unknown.sessions[0].stage, "");
+});
+
+test("结构化后轮邀约必须有同案件的明确先后，同日缺时间或其他岗位不能证明前轮通过", () => {
+  const invitation = (at, extra = {}) => job("main", "面接中", { next_event_at: at, next_event_label: "最終面接", ...extra });
+  const first = extra => study("first", { case_id: "main", ...extra });
+  const sameDayUnknown = buildConsultationCatalog([invitation("2026-09-20 14:00"), first({})]);
+  assert.equal(sameDayUnknown.sessions[0].outcomeKind, "waiting");
+  assert.equal(sameDayUnknown.companies[0].hasPassedInterview, false);
+  const sameDayLater = buildConsultationCatalog([invitation("2026-09-20 14:00"), first({ time: "10:00" })]);
+  assert.equal(sameDayLater.sessions[0].outcomeKind, "passed");
+  assert.equal(sameDayLater.companies[0].hasPassedInterview, true);
+  const earlier = buildConsultationCatalog([invitation("2026-09-19 14:00"), first({ time: "10:00" })]);
+  assert.equal(earlier.companies[0].hasPassedInterview, false);
+  const anotherRole = buildConsultationCatalog([job("main", "面接中"), first({}),
+    job("other-role", "面接中", { next_event_at: "2026-10-01 14:00", next_event_label: "最終面接" })]);
+  assert.equal(anotherRole.companies[0].hasPassedInterview, false);
+  assert.equal(anotherRole.companies[0].reachedFinal, false);
+});
+
+test("实录对应内定计面试通过，只有書類通過状态不计面试通过", () => {
+  const offer = buildConsultationCatalog([job("offered", "内定"), study("offered", { case_id: "offered" })]);
+  assert.equal(offer.companies[0].hasPassedInterview, true);
+  const documents = buildConsultationCatalog([job("documents", "書類通過"), study("documents", { case_id: "documents" })]);
+  assert.equal(documents.companies[0].hasPassedInterview, false);
+  assert.equal(documents.companies[0].reachedFinal, false);
 });
 
 test("明确但失效的案件链接不回退到同公司，多个同日原稿不任意合并", () => {
@@ -108,9 +193,27 @@ test("合并必须双向唯一，明确原稿链接不能掩盖不同岗位归�
 test("公司级台账补全单岗位応募日，不把拒信日期或同公司另一岗位日期当作応募日", () => {
   const ledger = note("20_求職/_応募日台帳.md", { type: "ledger" }, "| 2026-08-01 | 株式会社テスト | 株式会社テスト | one | Green |\n| 2026-08-02 | 株式会社サンプル | 株式会社サンプル | two | Green |");
   const catalog = buildConsultationCatalog([job("one", "不採用（2026-09-30・書類選考）"), job("second", "不採用", { company: "株式会社サンプル" }),
-    job("third", "面接中", { company: "株式会社サンプル", applied_on: "2026-09-01" }), ledger]);
+    job("third", "面接中", { company: "株式会社サンプル", applied_on: "2026-09-01" }), study("one-session", { case_id: "one" }),
+    study("second-session", { company: "株式会社サンプル", case_id: "second" }),
+    study("third-session", { company: "株式会社サンプル", case_id: "third" }), ledger]);
   assert.equal(catalog.companies.find(company => company.company === "株式会社テスト").applications[0].appliedOn, "2026-08-01");
   assert.deepEqual(catalog.companies.find(company => company.company === "株式会社サンプル").applications.map(application => application.appliedOn).sort(), ["", "2026-09-01"]);
+});
+
+test("同法人没有面试过的岗位不进入公司行，也不抬高最新日期或覆盖面试结果", () => {
+  const notes = [job("interviewed", "不採用", { status_updated: "2026-09-21", position: "面接済エンジニア" }),
+    job("not-interviewed", "内定", { status_updated: "2026-10-18", position: "別ポジション" }),
+    study("interviewed", { case_id: "interviewed" })];
+  const catalog = buildConsultationCatalog(notes);
+  assert.equal(catalog.companies.length, 1);
+  assert.deepEqual(catalog.companies[0].applications.map(application => application.position), ["面接済エンジニア"]);
+  assert.equal(catalog.companies[0].latestDate, "2026-09-21");
+  assert.equal(catalog.companies[0].outcome, "不採用");
+  assert.equal(catalog.companies[0].hasPassedInterview, false);
+  const unlinked = buildConsultationCatalog([job("same-name", "内定"), study("unknown-owner")]);
+  assert.equal(unlinked.companies.length, 1);
+  assert.deepEqual(unlinked.companies[0].applications, []);
+  assert.equal(unlinked.sessions[0].outcomeKind, "unknown");
 });
 
 test("老师投影只给发言与原稿，隐藏联系方式、内部链接和路径，不返回批注或 AI 评价", () => {
@@ -140,10 +243,11 @@ test("未裁定话者保留不确定性，记忆重构提示不能声称逐字�
 
 test("更新时间来自笔记 mtime；模板与归档不是当前投影资料", () => {
   const notes = [note("20_求職/current.md", { type: "job-case", company: "株式会社テスト", status: "応募済" }, "", Date.UTC(2026, 9, 17)),
+    raw("current-session", { case: "[[current]]" }),
     note("90_归档/old.md", { type: "transcript", company: "株式会社アーカイブ" }, "", Date.UTC(2026, 9, 18))];
   const catalog = buildConsultationCatalog(notes);
   assert.equal(catalog.updatedAt, "2026-10-17T00:00:00.000Z");
   assert.equal(catalog.companies.length, 1);
-  assert.equal(catalog.sessions.length, 0);
+  assert.equal(catalog.sessions.length, 1);
   assert.equal(buildConsultationCatalog([]).updatedAt, "");
 });

@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     let filename: string;
     if (companies) {
       bytes = exportConsultationCompanies(buildConsultationCatalog(notes));
-      filename = "応募企業一覧.docx";
+      filename = "面接企業一覧.docx";
     } else {
       const transcript = findConsultationTranscript(notes, session!);
       if (!transcript) return Response.json({ error: "この面接記録は見つかりません。" }, { status: 404, headers });

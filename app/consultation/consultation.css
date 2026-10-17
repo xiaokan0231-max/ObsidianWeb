@@ -76,7 +76,7 @@
 .consultation-tabs button[aria-selected="true"] span { color: var(--green); background: var(--success-wash); }
 .consultation-download-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px; font-size: 11px; font-weight: 500; white-space: nowrap; background: var(--surface); }
 .consultation-filters { padding: 17px 28px 14px; display: flex; gap: 16px; align-items: center; }
-.consultation-search { width: 360px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 0 13px; background: var(--surface-overlay); color: var(--text-tertiary); }
+.consultation-search { width: min(300px, 27vw); display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 0 13px; background: var(--surface-overlay); color: var(--text-tertiary); }
 .consultation-search:focus-within { border-color: var(--green); }
 .consultation-search input { width: 100%; border: 0; outline: 0; min-width: 0; font-size: 12px; padding: 11px 0; background: transparent; color: var(--ink); }
 .consultation-search input::placeholder { color: var(--text-tertiary); }
@@ -204,3 +204,9 @@
   .consultation-turn { break-inside: avoid; }
   .consultation-transcript-meta, .consultation-badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
+
+.consultation-progress-badges { display: flex; gap: 7px; margin: 5px 0 9px; }
+.consultation-progress-badges > span { color: var(--green); background: var(--success-wash); border: 1px solid var(--line); border-radius: 4px; padding: 3px 7px; font-size: 11px; line-height: 1.5; }
+.consultation-progress-badges > span:first-child { color: var(--green-deep); }
+.consultation-session-row time .consultation-final-stage { color: var(--green); font-weight: 600; }
+.consultation-round-result-label { color: var(--text-tertiary); font-size: 10px; white-space: nowrap; }

@@ -128,12 +128,14 @@ function document(title: string, body: string): Uint8Array {
 }
 
 export function exportConsultationCompanies(catalog: ConsultationCatalog): Uint8Array {
-  const title = "応募先と選考結果の一覧";
-  const parts = [paragraph(title, "Title"), paragraph("応募先ごとの職種と現在の選考状況をまとめています。複数の職種に応募した会社は、職種ごとに記載しています。結果が未確認のものは未確認のまま表示しています。"), metadata("情報更新", shown(catalog.updatedAt, "日時未確認"))];
+  const title = "面接した企業と選考の記録";
+  const parts = [paragraph(title, "Title"), paragraph("面接記録のある企業について、職種ごとの現在の選考状況と各回の面接結果を並べて記載しています。過去の面接通過と、その後の不採用は別々の事実として確認できます。未確認の結果は未確認のまま表示しています。"), metadata("情報更新", shown(catalog.updatedAt, "日時未確認"))];
   const sessions = new Map(catalog.sessions.map((session) => [session.id, session]));
   for (const company of catalog.companies) {
     parts.push(paragraph(company.company, "Heading1"));
-    parts.push(metadata("現在の状況", shown(company.outcome)));
+    parts.push(metadata("現在の応募状況", shown(company.outcome)));
+    const progress = [company.reachedFinal ? "最終面接に進行" : "", company.hasPassedInterview ? "面接通過の記録あり" : ""].filter(Boolean);
+    if (progress.length) parts.push(metadata("面接の進行記録", progress.join(" / ")));
     if (company.applications.length) {
       parts.push(table(["職種", "選考状況", "応募日", "更新日", "応募経路"], company.applications.map((application) => [shown(application.position, "職種未記録"), shown(application.status), shown(application.appliedOn, "未記録"), shown(application.updatedOn, "未記録"), shown(application.channel, "未記録")])));
       parts.push(paragraph("", "Metadata"));
@@ -146,7 +148,7 @@ export function exportConsultationCompanies(catalog: ConsultationCatalog): Uint8
       parts.push(metadata("面接記録", `${shown(session.date, "日付未確認")}　${shown(session.round, "面接・面談")}　${shown(session.outcome)}${session.recordKind === "memory" ? "　記憶からの再構成" : ""}`));
     }
   }
-  if (!catalog.companies.length) parts.push(paragraph("応募先の記録はありません。"));
+  if (!catalog.companies.length) parts.push(paragraph("面接記録のある企業はありません。"));
   return document(title, parts.join(""));
 }
 
