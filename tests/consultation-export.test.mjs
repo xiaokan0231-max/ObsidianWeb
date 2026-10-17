@@ -124,6 +124,8 @@ test("company exports retain all companies and positions with exact known or unk
   const catalog = { updatedAt: "2026-10-18", sessions: [summary], companies: [{ id: "company-a", company: summary.company, applications: [{ id: "job-a", position: "開発エンジニア", status: "結果未確認", appliedOn: "2026-10-01", updatedOn: "2026-10-15", channel: "直接応募" }, { id: "job-b", position: "運用エンジニア", status: "面接中", appliedOn: "2026-10-02", updatedOn: "2026-10-16", channel: "求人サイト" }], sessionIds: [summary.id], latestDate: summary.date, outcome: "複数の選考状況あり" }, ...Array.from({ length: 7 }, (_, index) => ({ id: `other-${index}`, company: `株式会社テスト${index}`, applications: [], sessionIds: [], latestDate: "", outcome: "未確認" }))] };
   const source = unpack(exportConsultationCompanies(catalog)).get("word/document.xml");
   const text = plain(source);
+  assert.match(text, /面接した企業と選考の記録/);
+  assert.match(text, /面接記録のある企業について/);
   for (const company of catalog.companies) assert.ok(text.includes(company.company));
   assert.match(text, /開発エンジニア/);
   assert.match(text, /運用エンジニア/);
@@ -131,12 +133,35 @@ test("company exports retain all companies and positions with exact known or unk
   assert.match(text, /面接中/);
   assert.match(text, /一次面接/);
   assert.match(source, /<w:tblHeader\/>/);
-  assert.doesNotMatch(text, /不採用/);
+  assert.doesNotMatch(text, /最終面接に進行|面接通過の記録あり/);
+});
+
+test("company histories retain earlier interview success alongside later final-round rejection", () => {
+  const first = { ...summary, id: "first", date: "2026-10-01", round: "一次面接", outcome: "次の選考へ進行", outcomeKind: "passed" };
+  const last = { ...summary, id: "final", date: "2026-10-15", round: "最終面接", outcome: "不採用", outcomeKind: "rejected" };
+  const catalog = { updatedAt: "2026-10-18", sessions: [first, last], companies: [{ id: summary.companyId, company: summary.company, applications: [{ id: "job-a", position: "開発エンジニア", status: "不採用", appliedOn: "2026-09-15", updatedOn: "2026-10-16", channel: "直接応募" }, { id: "job-b", position: "運用エンジニア", status: "面接中", appliedOn: "2026-10-02", updatedOn: "2026-10-16", channel: "求人サイト" }], sessionIds: [first.id, last.id], latestDate: last.date, outcome: "不採用 / 面接中", reachedFinal: true, hasPassedInterview: true }] };
+  const text = plain(unpack(exportConsultationCompanies(catalog)).get("word/document.xml"));
+  assert.match(text, /現在の応募状況　不採用 \/ 面接中/);
+  assert.match(text, /最終面接に進行 \/ 面接通過の記録あり/);
+  assert.match(text, /2026-10-01　一次面接　次の選考へ進行/);
+  assert.match(text, /2026-10-15　最終面接　不採用/);
+  assert.match(text, /開発エンジニア\n不採用/);
+  assert.match(text, /運用エンジニア\n面接中/);
+});
+
+test("absent or false interview milestones do not imply rejection or claim progress", () => {
+  for (const milestones of [{}, { reachedFinal: false, hasPassedInterview: false }]) {
+    const catalog = { updatedAt: "", sessions: [summary], companies: [{ id: summary.companyId, company: summary.company, applications: [], sessionIds: [summary.id], latestDate: summary.date, outcome: "結果未確認", ...milestones }] };
+    const text = plain(unpack(exportConsultationCompanies(catalog)).get("word/document.xml"));
+    assert.match(text, /現在の応募状況　結果未確認/);
+    assert.doesNotMatch(text, /最終面接に進行|面接通過の記録あり|面接の進行記録/);
+    assert.doesNotMatch(text.split("情報更新")[1], /不採用/);
+  }
 });
 
 test("empty catalogs and XML-invalid control characters still produce a readable package", () => {
   const empty = plain(unpack(exportConsultationCompanies({ companies: [], sessions: [], updatedAt: "" })).get("word/document.xml"));
-  assert.match(empty, /応募先の記録はありません。/);
+  assert.match(empty, /面接記録のある企業はありません。/);
   const unsafe = { ...transcript, raw: "有効な文字\u0000\u000b\u000cと日本語😀" };
   const source = unpack(exportConsultationTranscript(unsafe, "raw")).get("word/document.xml");
   assert.doesNotMatch(source, /[\u0000\u000b\u000c]/);
