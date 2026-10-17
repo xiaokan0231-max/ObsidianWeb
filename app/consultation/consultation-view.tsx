@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import type { ConsultationCatalog, ConsultationCompany, ConsultationSessionSummary, ConsultationTranscript } from "@/lib/consultation-library";
+import type { ConsultationCatalog, ConsultationCompany, ConsultationInterview, ConsultationSessionSummary, ConsultationTranscript } from "@/lib/consultation-library";
 import { UiLocaleProvider } from "../ui-locale";
 import "./consultation.css";
 
@@ -72,25 +72,31 @@ function matchesOutcome(kind: ConsultationSessionSummary["outcomeKind"], filter:
 function hasRecord(session: ConsultationSessionSummary) {
   return session.hasRaw || session.hasReadable;
 }
+function companyHistory(company: ConsultationCompany, sessions: ConsultationSessionSummary[]): ConsultationInterview[] {
+  const history = company.interviews ?? sessions.filter(session => session.companyId === company.id && hasRecord(session)).map(session => ({
+    id: session.id, date: session.date, round: session.round, stage: session.stage || "", outcome: session.outcome,
+    outcomeKind: session.outcomeKind, sessionId: session.id, evidenceKind: "transcript" as const,
+  }));
+  return [...history].sort((a, b) => b.date.localeCompare(a.date));
+}
 function companyProgress(company: ConsultationCompany, sessions: ConsultationSessionSummary[]) {
-  const linked = sessions.filter(session => session.companyId === company.id && hasRecord(session));
+  const history = companyHistory(company, sessions);
   return {
-    final: company.reachedFinal ?? linked.some(session => session.stage === "final"),
-    passed: company.hasPassedInterview ?? linked.some(session => session.outcomeKind === "passed" || session.outcomeKind === "offer"),
+    final: company.reachedFinal ?? history.some(interview => interview.stage === "final"),
+    passed: company.hasPassedInterview ?? history.some(interview => interview.outcomeKind === "passed" || interview.outcomeKind === "offer"),
   };
 }
 /** 公司当前结果和历史面试进展是两个维度；后来的落选不能抹掉曾经通过的轮次。 */
 export function filterConsultationCompanies(companies: ConsultationCompany[], sessions: ConsultationSessionSummary[], query: string, outcome: OutcomeFilter, progress: ProgressFilter = "all") {
   const normalized = query.trim().toLocaleLowerCase();
   return companies.filter(company => {
-    const linked = sessions.filter(session => session.companyId === company.id && hasRecord(session));
-    if (!linked.length) return false;
+    const history = companyHistory(company, sessions);
     if (normalized && !`${company.company} ${company.applications.map(application => application.position).join(" ")}`.toLocaleLowerCase().includes(normalized)) return false;
-    if (progress !== "all" && !companyProgress(company, linked)[progress]) return false;
+    if (progress !== "all" && !companyProgress(company, sessions)[progress]) return false;
     if (outcome === "all") return true;
     const kinds = company.applications.length
       ? company.applications.map(application => applicationKind(application.status))
-      : linked.map(session => session.outcomeKind);
+      : [history[0]?.outcomeKind ?? "unknown"];
     return kinds.some(kind => matchesOutcome(kind, outcome));
   });
 }
@@ -100,7 +106,7 @@ export function filterConsultationSessions(companies: ConsultationCompany[], ses
   return sessions.filter(session => hasRecord(session) && eligible.has(session.companyId)
     && (!companyId || session.companyId === companyId) && matchesOutcome(session.outcomeKind, outcome));
 }
-function stageLabel(session: ConsultationSessionSummary) {
+function stageLabel(session: { stage?: string; round: string }) {
   if (session.stage === "final") return "最終面接";
   if (session.stage?.startsWith("round-")) {
     const numeral = ["一", "二", "三", "四", "五", "六"][Number(session.stage.slice(6)) - 1];
@@ -183,8 +189,9 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
     navigate({ sessionId: session.id, view: session.hasReadable ? "readable" : "raw" });
   }
   const query = route.query.trim().toLocaleLowerCase();
-  const companies = useMemo(() => initial.companies.filter(company => initial.sessions.some(session => session.companyId === company.id && hasRecord(session))).sort((a, b) => b.latestDate.localeCompare(a.latestDate) || a.company.localeCompare(b.company, "ja")), [initial.companies, initial.sessions]);
+  const companies = useMemo(() => [...initial.companies].sort((a, b) => b.latestDate.localeCompare(a.latestDate) || a.company.localeCompare(b.company, "ja")), [initial.companies]);
   const sessions = useMemo(() => initial.sessions.filter(hasRecord).sort((a, b) => b.date.localeCompare(a.date) || a.company.localeCompare(b.company, "ja")), [initial.sessions]);
+  const manuscriptCompanyCount = new Set(sessions.map(session => session.companyId)).size;
   const selectedCompany = initial.companies.find(company => company.id === route.companyId);
   const visibleCompanies = filterConsultationCompanies(companies, sessions, query, route.outcome, route.progress);
   const visibleSessions = filterConsultationSessions(companies, sessions, query, route.outcome, route.progress, route.companyId);
@@ -194,13 +201,14 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
     <LibraryHeader />
     <div className="consultation-library-scroll" ref={listScroll} hidden={readerOpen}>
       <main className="consultation-library">
-        <section className="consultation-intro"><div><p className="consultation-eyebrow">先生との相談に向けて</p><h1>面接した企業と記録</h1><p className="consultation-lead">原稿のある企業面接をまとめています。<br />進んだ段階や各回の結果から、会話をお読みください。</p></div><div className="consultation-guide" aria-label="資料の読み方"><h2>資料の読み方</h2><ol><li><span>1</span><div><strong>面接した企業を見る</strong><p>職種ごとの現在の状況</p></div></li><li><span>2</span><div><strong>面接記録を開く</strong><p>進んだ段階・各回の結果から</p></div></li><li><span>3</span><div><strong>必要なら Word で保存</strong><p>一覧・原稿をダウンロード</p></div></li></ol></div></section>
+        <section className="consultation-intro"><div><p className="consultation-eyebrow">先生との相談に向けて</p><h1>面接・面談の企業一覧と原稿</h1><p className="consultation-lead">面接・面談の履歴と、読める原稿を分けて表示しています。<br />原稿未登録の企業も、履歴と結果を確認できます。</p></div><div className="consultation-guide" aria-label="資料の読み方"><h2>資料の読み方</h2><ol><li><span>1</span><div><strong>面接・面談した企業を見る</strong><p>職種ごとの現在の状況</p></div></li><li><span>2</span><div><strong>読める原稿を開く</strong><p>進んだ段階・各回の結果から</p></div></li><li><span>3</span><div><strong>必要なら Word で保存</strong><p>一覧・原稿をダウンロード</p></div></li></ol></div></section>
+        <section className="consultation-coverage" aria-label="資料の収録範囲"><div><span>面接・面談した企業</span><strong>{companies.length}<small>社</small></strong></div><div><span>原稿のある企業</span><strong>{manuscriptCompanyCount}<small>社</small></strong></div><div><span>読める原稿</span><strong>{sessions.length}<small>件</small></strong></div><p>現在の記録で確認できる範囲です。<br />すべての面接履歴を網羅した件数ではありません。</p></section>
         <section className="consultation-materials" aria-label="相談資料">
-          <div className="consultation-materials-top"><div className="consultation-tabs" role="tablist" aria-label="資料の種類"><button role="tab" id="companies-tab" aria-selected={route.tab === "companies"} aria-controls="companies-panel" onClick={() => navigate({ tab: "companies", companyId: "" })}>面接した企業<span>{companies.length}</span></button><button role="tab" id="sessions-tab" aria-selected={route.tab === "sessions"} aria-controls="sessions-panel" onClick={() => navigate({ tab: "sessions" })}>面接記録<span>{sessions.length}</span></button></div><a className="consultation-download-link" href="/api/consultation/export?format=companies" download><DownloadIcon />面接企業一覧を Word で保存</a></div>
-          <div className="consultation-filters"><label className="consultation-search"><SearchIcon /><span className="consultation-sr-only">企業名・職種で検索</span><input type="search" placeholder="企業名・職種で検索" value={route.query} onChange={event => navigate({ query: event.target.value }, true)} /></label><label className="consultation-result-filter"><span>選考の進み方</span><select value={route.progress} onChange={event => navigate({ progress: event.target.value as ProgressFilter }, true)}>{PROGRESS_FILTERS.map(filter => <option key={filter.value} value={filter.value}>{filter.label}</option>)}</select></label><label className="consultation-result-filter"><span>{route.tab === "companies" ? "現在の選考状況" : "この回の結果"}</span><select value={route.outcome} onChange={event => navigate({ outcome: event.target.value as OutcomeFilter }, true)}>{FILTERS.map(filter => <option key={filter.value} value={filter.value}>{filter.value === "all" && route.tab === "companies" ? "すべての状況" : filter.value === "positive" && route.tab === "companies" ? "内定・書類通過" : filter.value === "unknown" && route.tab === "companies" ? "保留・未確認" : filter.label}</option>)}</select></label><span className="consultation-sort-label">日付の新しい順 ↓</span></div>
-          {selectedCompany && route.tab === "sessions" && <div className="consultation-company-filter"><span>{selectedCompany.company} の面接記録</span><button onClick={() => navigate({ companyId: "" }, true)} aria-label="企業の絞り込みを解除">絞り込みを解除 ×</button></div>}
-          <div className="consultation-results-caption" aria-live="polite"><span>{route.tab === "companies" ? `${visibleCompanies.length} 社` : `${visibleSessions.length} 件`}{hasFilters && " が見つかりました"}</span><small>{route.tab === "companies" ? "原稿のある企業面接のみ掲載。現在の状況と、過去に進んだ段階を分けて表示しています。" : "各回の面接結果です。後の選考結果と分けて、当時の通過・不採用を表示しています。"}</small></div>
-          {route.tab === "companies" ? <div role="tabpanel" id="companies-panel" aria-labelledby="companies-tab"><div className="consultation-table"><div className="consultation-table-head" aria-hidden="true"><span>企業・応募職種</span><span>現在の選考状況</span><span>応募日</span><span>面接記録</span></div>{visibleCompanies.map(company => <CompanyRow key={company.id} company={company} sessions={sessions.filter(session => session.companyId === company.id)} onOpen={openSession} onBrowse={() => navigate({ tab: "sessions", companyId: company.id, outcome: "all" })} />)}</div>{visibleCompanies.length === 0 && <EmptyState filtered={hasFilters} onReset={() => navigate({ query: "", outcome: "all", progress: "all", companyId: "" }, true)} />}</div>
+          <div className="consultation-materials-top"><div className="consultation-tabs" role="tablist" aria-label="資料の種類"><button role="tab" id="companies-tab" aria-selected={route.tab === "companies"} aria-controls="companies-panel" onClick={() => navigate({ tab: "companies", companyId: "" })}>面接・面談した企業<span>{companies.length}</span></button><button role="tab" id="sessions-tab" aria-selected={route.tab === "sessions"} aria-controls="sessions-panel" onClick={() => navigate({ tab: "sessions" })}>読める原稿<span>{sessions.length}</span></button></div><a className="consultation-download-link" href="/api/consultation/export?format=companies" download><DownloadIcon />企業一覧を Word で保存</a></div>
+          <div className="consultation-filters"><label className="consultation-search"><SearchIcon /><span className="consultation-sr-only">企業名・職種で検索</span><input type="search" placeholder="企業名・職種で検索" value={route.query} onChange={event => navigate({ query: event.target.value }, true)} /></label><label className="consultation-result-filter"><span>選考の進み方</span><select value={route.progress} onChange={event => navigate({ progress: event.target.value as ProgressFilter }, true)}>{PROGRESS_FILTERS.map(filter => <option key={filter.value} value={filter.value}>{filter.label}</option>)}</select></label><label className="consultation-result-filter"><span>{route.tab === "companies" ? "現在の選考状況" : "この回の結果"}</span><select value={route.outcome} onChange={event => navigate({ outcome: event.target.value as OutcomeFilter }, true)}>{FILTERS.map(filter => <option key={filter.value} value={filter.value}>{filter.value === "all" && route.tab === "companies" ? "すべての状況" : filter.value === "positive" && route.tab === "companies" ? "内定・書類通過" : filter.value === "unknown" && route.tab === "companies" ? "保留・未確認" : filter.label}</option>)}</select></label><span className="consultation-sort-label">面接・面談日の新しい順 ↓</span></div>
+          {selectedCompany && route.tab === "sessions" && <div className="consultation-company-filter"><span>{selectedCompany.company} の読める原稿</span><button onClick={() => navigate({ companyId: "" }, true)} aria-label="企業の絞り込みを解除">絞り込みを解除 ×</button></div>}
+          <div className="consultation-results-caption" aria-live="polite"><span>{route.tab === "companies" ? `${visibleCompanies.length} 社` : `${visibleSessions.length} 件`}{hasFilters && " が見つかりました"}</span><small>{route.tab === "companies" ? "原稿未登録の企業も含みます。現在の状況と、過去に進んだ段階を分けて表示しています。" : "ここには読める原稿のみ掲載しています。各回の結果は、後の選考結果と分けて表示しています。"}</small></div>
+          {route.tab === "companies" ? <div role="tabpanel" id="companies-panel" aria-labelledby="companies-tab"><div className="consultation-table"><div className="consultation-table-head" aria-hidden="true"><span>企業・応募職種</span><span>現在の選考状況</span><span>応募日</span><span>読める原稿</span></div>{visibleCompanies.map(company => <CompanyRow key={company.id} company={company} sessions={sessions.filter(session => session.companyId === company.id)} onOpen={openSession} onBrowse={() => navigate({ tab: "sessions", companyId: company.id, outcome: "all" })} />)}</div>{visibleCompanies.length === 0 && <EmptyState filtered={hasFilters} onReset={() => navigate({ query: "", outcome: "all", progress: "all", companyId: "" }, true)} />}</div>
             : <div role="tabpanel" id="sessions-panel" aria-labelledby="sessions-tab" className="consultation-session-list">{visibleSessions.map(session => <SessionRow key={session.id} session={session} onOpen={() => openSession(session)} />)}{visibleSessions.length === 0 && <EmptyState filtered={hasFilters} onReset={() => navigate({ query: "", outcome: "all", progress: "all", companyId: "" }, true)} />}</div>}
         </section>
         <footer className="consultation-library-footer"><span><BookIcon small />面接相談の資料 · 閲覧専用</span><span>資料更新：{dateLabel(initial.updatedAt)}<span className="consultation-footer-separator">／</span>時刻のある日程は日本時間（JST）</span></footer>
@@ -212,8 +220,11 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
 
 function CompanyRow({ company, sessions, onOpen, onBrowse }: { company: ConsultationCompany; sessions: ConsultationSessionSummary[]; onOpen: (session: ConsultationSessionSummary) => void; onBrowse: () => void }) {
   const recent = sessions[0];
+  const history = companyHistory(company, sessions);
+  const latestInterview = history[0];
   const progress = companyProgress(company, sessions);
-  return <article className="consultation-company-row"><div className="consultation-company-heading"><h2>{company.company}</h2>{(progress.final || progress.passed) && <div className="consultation-progress-badges">{progress.final && <span>最終面接に進行</span>}{progress.passed && <span>面接通過あり</span>}</div>}<span>{company.applications.length ? `${company.applications.length} 職種` : "この面接の応募情報は未確認"}{company.latestDate && ` · 最終更新 ${dateLabel(company.latestDate)}`}</span></div><div className="consultation-applications">{company.applications.length === 0 && recent && <div className="consultation-application"><div><strong>応募職種は未確認</strong></div><div><small>直近の面接結果</small><Badge kind={recent.outcomeKind}>{recent.outcome || OUTCOMES[recent.outcomeKind]}</Badge></div><span className="consultation-no-record">未確認</span></div>}{company.applications.map(application => <div className="consultation-application" key={application.id}><div><strong>{application.position || "職種未確認"}</strong>{application.channel && <small>{application.channel}</small>}</div><div><Badge kind={applicationKind(application.status)}>{application.status || "未確認"}</Badge></div><time dateTime={application.appliedOn || undefined}>{application.appliedOn ? dateLabel(application.appliedOn) : "未確認"}</time></div>)}</div><div className="consultation-company-records">{recent ? <><button className="consultation-record-button" id={`company-session-${recent.id}`} onClick={() => onOpen(recent)}><BookIcon small />{recent.recordKind === "memory" ? "最新の記録を読む" : "最新の原稿を読む"}<span>↗</span></button><button className="consultation-text-button" onClick={onBrowse}>{sessions.length} 件の面接記録を見る →</button>{recent.recordKind === "memory" && <small className="consultation-memory-label">記憶から再構成</small>}</> : <span className="consultation-no-record">面接記録はありません</span>}</div></article>;
+  const readableIds = new Set(sessions.map(session => session.id));
+  return <article className="consultation-company-row"><div className="consultation-company-heading"><h2>{company.company}</h2>{(progress.final || progress.passed) && <div className="consultation-progress-badges">{progress.final && <span>最終面接に進行</span>}{progress.passed && <span>面接通過あり</span>}</div>}<span>{company.applications.length ? `${company.applications.length} 職種` : "この面接の応募情報は未確認"}</span></div><div className="consultation-applications">{company.applications.length === 0 && latestInterview && <div className="consultation-application"><div><strong>{latestInterview.position || "応募職種は未確認"}</strong></div><div><small>直近の面接結果</small><Badge kind={latestInterview.outcomeKind}>{latestInterview.outcome || OUTCOMES[latestInterview.outcomeKind]}</Badge></div><span className="consultation-no-record">未確認</span></div>}{company.applications.map(application => <div className="consultation-application" key={application.id}><div><strong>{application.position || "職種未確認"}</strong>{application.channel && <small>{application.channel}</small>}</div><div><Badge kind={applicationKind(application.status)}>{application.status || "未確認"}</Badge></div><time dateTime={application.appliedOn || undefined}>{application.appliedOn ? dateLabel(application.appliedOn) : "未確認"}</time></div>)}{history.length > 0 && <div className="consultation-company-history" aria-label="確認できている面接・面談の履歴"><h3>確認できている面接・面談</h3>{history.map(interview => <div key={interview.id}><time dateTime={interview.date || undefined}>{dateLabel(interview.date)}</time><span>{stageLabel(interview)}</span><Badge kind={interview.outcomeKind}>{interview.outcome || OUTCOMES[interview.outcomeKind]}</Badge>{(!interview.sessionId || !readableIds.has(interview.sessionId)) && <small>原稿未登録</small>}</div>)}</div>}</div><div className="consultation-company-records">{recent ? <><button className="consultation-record-button" id={`company-session-${recent.id}`} onClick={() => onOpen(recent)}><BookIcon small />{recent.recordKind === "memory" ? "最新の記録を読む" : "最新の原稿を読む"}<span>↗</span></button><button className="consultation-text-button" onClick={onBrowse}>{sessions.length} 件の読める原稿を見る →</button>{recent.recordKind === "memory" && <small className="consultation-memory-label">記憶から再構成</small>}</> : <><strong className="consultation-no-record">原稿未登録</strong><small className="consultation-record-absence">面接・面談の履歴のみ</small></>}</div></article>;
 }
 function SessionRow({ session, onOpen }: { session: ConsultationSessionSummary; onOpen: () => void }) {
   const available = session.hasReadable || session.hasRaw;

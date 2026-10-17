@@ -25,16 +25,17 @@ test("老师入口默认日语，七家公司完整呈现，每个岗位保留�
   initial.companies[6].applications.push({ id: "second-role", position: "品質エンジニア", status: "面接中", appliedOn: "2026-09-15", updatedOn: "2026-10-07", channel: "直接応募" });
   const html = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial }));
   assert.match(html, /lang="ja"/);
-  assert.match(html, /面接した企業/);
+  assert.match(html, /面接・面談した企業/);
   assert.match(html, /選考の進み方/);
   assert.match(html, /現在の選考状況/);
-  assert.match(html, /面接記録/);
+  assert.match(html, /読める原稿/);
   assert.match(html, /資料の読み方/);
   for (const company of companies) assert.ok(html.includes(company.company), company.company);
   assert.match(html, /品質エンジニア/);
   assert.match(html, /面接中/);
   assert.match(html, /2026\.09\.15/);
   assert.match(html, /企業名・職種で検索/);
+  assert.match(html, /面接・面談日の新しい順/);
   assert.match(html, /href="\/api\/consultation\/export\?format=companies"/);
   assert.doesNotMatch(html, /メモを保存|中文辅助|本機で一緒に読む/);
 });
@@ -83,17 +84,18 @@ test("记忆重构在企业入口和原稿详情都明确标识，不冒充录�
   assert.doesNotMatch(readerHtml, /当日の会話を読みやすく整理した原稿です/);
 });
 
-test("保留不混入进行中筛选，无原稿的公司不显示空入口", async () => {
-  const { filterConsultationCompanies } = await loadAppModule("app/consultation/consultation-view.tsx");
+test("保留不混入进行中筛选，无稿公司保留在目录但不进入可读原稿筛选", async () => {
+  const { filterConsultationCompanies, filterConsultationSessions } = await loadAppModule("app/consultation/consultation-view.tsx");
   const held = { ...companies[0], applications: [{ ...companies[0].applications[0], status: "保留（本人確認待ち）" }] };
   const active = { ...companies[1], applications: [{ ...companies[1].applications[0], status: "面接中" }] };
-  const empty = { ...companies[2], applications: [] };
+  const empty = { ...companies[2], applications: [], interviews: [{ id: "history-only", date: "", round: "一次面接", stage: "round-1", outcome: "不採用", outcomeKind: "rejected", evidenceKind: "history" }] };
   const data = [held, active, empty];
   const records = [sessions[0], sessions[1], { ...sessions[2], hasRaw: false, hasReadable: false }];
   assert.deepEqual(filterConsultationCompanies(data, records, "", "waiting").map(company => company.id), [active.id]);
   assert.deepEqual(filterConsultationCompanies(data, records, "", "unknown").map(company => company.id), [held.id]);
-  assert.deepEqual(filterConsultationCompanies(data, records, "", "all").map(company => company.id), [held.id, active.id]);
-  assert.equal(filterConsultationCompanies(data, records, empty.company, "all").length, 0);
+  assert.deepEqual(filterConsultationCompanies(data, records, "", "all").map(company => company.id), [held.id, active.id, empty.id]);
+  assert.equal(filterConsultationCompanies(data, records, empty.company, "all").length, 1);
+  assert.equal(filterConsultationSessions(data, records, empty.company, "all").length, 0);
 });
 
 test("公司进展与各轮结果独立筛选，初面通过后终面落选仍能找到先前通过记录", async () => {
@@ -111,8 +113,8 @@ test("公司进展与各轮结果独立筛选，初面通过后终面落选仍�
   ];
   const data = [finalCompany, passedCompany, unknownCompany, emptyCompany];
   const ids = values => values.map(value => value.id);
-  assert.deepEqual(ids(filterConsultationCompanies(data, records, "", "all", "final")), [finalCompany.id]);
-  assert.deepEqual(ids(filterConsultationCompanies(data, records, "", "rejected", "passed")), [finalCompany.id, passedCompany.id]);
+  assert.deepEqual(ids(filterConsultationCompanies(data, records, "", "all", "final")), [finalCompany.id, emptyCompany.id]);
+  assert.deepEqual(ids(filterConsultationCompanies(data, records, "", "rejected", "passed")), [finalCompany.id, passedCompany.id, emptyCompany.id]);
   assert.deepEqual(ids(filterConsultationSessions(data, records, "", "all", "final")), ["first-passed", "final-rejected"]);
   assert.deepEqual(ids(filterConsultationSessions(data, records, "", "positive", "final")), ["first-passed"]);
   assert.deepEqual(ids(filterConsultationSessions(data, records, "", "rejected", "final")), ["final-rejected"]);
@@ -157,5 +159,40 @@ test("案件关联未确认但有真实面试稿时展示最近面试结果，�
   assert.match(html, /この面接の応募情報は未確認/);
   assert.match(html, /直近の面接結果/);
   assert.match(html, /面接後に不採用/);
-  assert.doesNotMatch(html, /一次面接通過|応募情報は未登録/);
+  assert.ok(html.indexOf("面接後に不採用") < html.indexOf("一次面接通過"));
+  assert.doesNotMatch(html, /応募情報は未登録/);
+});
+
+test("目录总量与有稿覆盖分开，无稿企业展示历史事实但没有原稿打开按钮", async () => {
+  const { ConsultationLibrary, filterConsultationCompanies, filterConsultationSessions } = await loadAppModule("app/consultation/consultation-view.tsx");
+  const company = { id: "no-manuscript", company: "株式会社テスト原稿未登録", applications: [], sessionIds: [], latestDate: "2026-10-18", outcome: "面接通過", hasTranscript: false,
+    reachedFinal: true, hasPassedInterview: true, interviews: [{ id: "known-final", date: "", position: "品質保証エンジニア", round: "最終面接", stage: "final", outcome: "最終面接通過", outcomeKind: "passed", evidenceKind: "history" }] };
+  const initial = { ...catalog, companies: [...companies, company] };
+  const html = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial }));
+  const coverage = html.match(/<section class="consultation-coverage"[\s\S]*?<\/section>/)?.[0] || "";
+  assert.match(coverage, /面接・面談した企業/);
+  assert.match(coverage, /<strong>8<small>社<\/small>/);
+  assert.match(coverage, /原稿のある企業/);
+  assert.match(coverage, /<strong>7<small>社<\/small>/);
+  assert.match(coverage, /<strong>7<small>件<\/small>/);
+  assert.match(coverage, /すべての面接履歴を網羅した件数ではありません/);
+  const row = html.split("<article").find(part => part.includes(company.company)) || "";
+  assert.match(row, /原稿未登録/);
+  assert.match(row, /最終面接通過/);
+  assert.match(row, /品質保証エンジニア/);
+  assert.doesNotMatch(row, /応募職種は未確認/);
+  assert.match(row, /日付未確認/);
+  assert.doesNotMatch(row, /2026\.10\.18|company-session-|最新の原稿を読む|件の読める原稿を見る/);
+  assert.deepEqual(filterConsultationCompanies([company], [], "", "positive", "final").map(value => value.id), [company.id]);
+  assert.deepEqual(filterConsultationSessions([company], [], "", "positive", "final"), []);
+});
+
+test("无案件关联时当前结果取最近历史，历史通过仍能通过进展筛选找到", async () => {
+  const { filterConsultationCompanies } = await loadAppModule("app/consultation/consultation-view.tsx");
+  const company = { ...companies[0], applications: [], sessionIds: [], reachedFinal: true, hasPassedInterview: true, interviews: [
+    { id: "first", date: "2026-09-01", round: "一次面接", stage: "round-1", outcome: "通過", outcomeKind: "passed", evidenceKind: "review" },
+    { id: "last", date: "2026-10-01", round: "最終面接", stage: "final", outcome: "不採用", outcomeKind: "rejected", evidenceKind: "completed-prep" },
+  ] };
+  assert.equal(filterConsultationCompanies([company], [], "", "positive").length, 0);
+  assert.equal(filterConsultationCompanies([company], [], "", "rejected", "passed").length, 1);
 });
