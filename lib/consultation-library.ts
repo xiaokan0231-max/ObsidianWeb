@@ -21,6 +21,13 @@ export type ConsultationCompany = {
   applications: { id: string; position: string; status: string; appliedOn: string; updatedOn: string; channel: string }[];
   sessionIds: string[]; latestDate: string; outcome: string;
   reachedFinal?: boolean; hasPassedInterview?: boolean;
+  hasTranscript?: boolean; interviews?: ConsultationInterview[];
+};
+export type ConsultationInterview = {
+  id: string; date: string; round: string; stage: string; outcome: string;
+  outcomeKind: ConsultationSessionSummary["outcomeKind"]; sessionId?: string;
+  evidenceKind: "transcript" | "review" | "completed-prep" | "job-case" | "history";
+  position?: string;
 };
 export type ConsultationCatalog = { companies: ConsultationCompany[]; sessions: ConsultationSessionSummary[]; updatedAt: string };
 export type ConsultationTranscript = ConsultationSessionSummary & {
@@ -29,6 +36,7 @@ export type ConsultationTranscript = ConsultationSessionSummary & {
 };
 
 type SourceSession = { note: Note; raw?: Note; readable?: JoinedReviewNotes };
+type CompletedEvidence = { note: Note; original: Note; date: string; round: string; result: string; position: string; kind: Exclude<ConsultationInterview["evidenceKind"], "transcript"> };
 
 // 页面只拿稳定 ID；查询参数始终在已投影的场次集合里匹配，不解码成任意文件路径。
 function stableId(kind: string, value: string) {
@@ -170,7 +178,60 @@ function structuredInvitations(notes: Note[]): Note[] {
   });
 }
 
+function completedEvidence(notes: Note[]): CompletedEvidence[] {
+  const entries: CompletedEvidence[] = [];
+  const add = (original: Note, date: string, round: string, result: string, kind: CompletedEvidence["kind"], suffix = "", company = nameOf(original), position = "") => {
+    if (kind !== "history" && !isEnterpriseSession({ note: original }, notes)) return;
+    const owner = kind === "history" ? null : interviewSessionOwner(original, notes);
+    const note: Note = { ...original, path: `${original.path}::consultation-history${suffix}`, content: "", frontmatter: {
+      type: "transcript-study", company: owner && getType(owner) === JOB_CASE_TYPE ? nameOf(owner) : company,
+      date, round, time: kind === "history" ? "" : interviewNoteTime(original, date),
+      ...(owner ? { [getType(owner) === JOB_CASE_TYPE ? "case" : "meeting"]: `[[${owner.path}]]` } :
+        Object.fromEntries(["case", "meeting", "case_id"].map(field => [field, getString(original.frontmatter[field])]))),
+    } };
+    if (company.trim() && isEnterpriseSession({ note }, notes)) entries.push({ note, original, date, round, result, kind,
+      position: safeText(position || (owner && getType(owner) === JOB_CASE_TYPE ? jobPosition(owner) : "")) });
+  };
+  for (const note of notes) {
+    const type = getType(note);
+    if (type === "review") {
+      const round = getString(note.frontmatter.round);
+      const heading = note.content.match(/^#\s+(.+)$/m)?.[1] ?? note.path.split("/").at(-1) ?? "";
+      // review 也用于邮件审阅与报告；只有有日期、轮次且明确是单场面试的复盘才是完成证据。
+      if (day(note.frontmatter.date) && (interviewRound(round) || /面接|面談|面试|面谈|\binterview\b|\bmeeting\b/i.test(round)) &&
+        !/メール|邮件|审阅|審閱|報告書|レポート|準備|准备|\bmail\b|\breport\b/i.test(heading)) {
+        add(note, day(note.frontmatter.date), round, getString(note.frontmatter.result), "review");
+      }
+    } else if (type === "interview-prep" && getString(note.frontmatter.session_status ?? note.frontmatter.schedule_status) === "completed" && day(note.frontmatter.date)) {
+      add(note, day(note.frontmatter.date), getString(note.frontmatter.round), getString(note.frontmatter.result), "completed-prep");
+    } else if (type === JOB_CASE_TYPE && note.frontmatter.interview_completed === true) {
+      add(note, day(note.frontmatter.interview_date), getString(note.frontmatter.interview_round), getString(note.frontmatter.status), "job-case");
+    } else if (type === "material" && note.frontmatter.material_kind === "interview-history" && Array.isArray(note.frontmatter.records)) {
+      for (const record of note.frontmatter.records) {
+        if (!record || typeof record !== "object" || Array.isArray(record)) continue;
+        const fields = record as Record<string, unknown>;
+        const company = getString(fields.company);
+        if (fields.completed !== true || !company.trim()) continue;
+        // result_date 是结果通知日，不能替代未知的面试日期；来源仅参与稳定 ID，不返回内部引用。
+        const key = [company, getString(fields.date), getString(fields.round), getString(fields.result_date), getString(fields.position), getString(fields.source)].join("\u0000");
+        add(note, day(fields.date), getString(fields.round), getString(fields.result), "history", `:${stableId("record", key)}`, company, getString(fields.position));
+      }
+    }
+  }
+  return [...new Map(entries.map(entry => [entry.note.path, entry])).values()].sort((a, b) => a.note.path.localeCompare(b.note.path));
+}
+
+function recordedOutcome(value: string): Pick<ConsultationSessionSummary, "outcome" | "outcomeKind"> | null {
+  const status = normalizeJobStatus(value);
+  if (status === "不採用") return { outcome: "不採用", outcomeKind: "rejected" };
+  if (status === "内定") return { outcome: "内定", outcomeKind: "offer" };
+  if (/^(?:通過|通过|合格)(?:$|[（(\s・])/.test(value)) return { outcome: "当日の面接を通過", outcomeKind: "passed" };
+  if (/^(?:結果待ち|結果未定|等待结果)/.test(value)) return { outcome: "結果待ち", outcomeKind: "waiting" };
+  return null;
+}
+
 function resultFor(source: SourceSession, result: InterviewOutcome | undefined, notes: Note[]): Pick<ConsultationSessionSummary, "outcome" | "outcomeKind"> {
+  if (result?.source === "next-round" && !day(source.note.frontmatter.date)) return { outcome: "面接日が未確認のため当輪結果は未確認", outcomeKind: "unknown" };
   if (result?.kind === "not_applicable") return { outcome: "企業選考の対象外", outcomeKind: "not-applicable" };
   if (result?.kind === "rejected") return { outcome: "不採用", outcomeKind: "rejected" };
   if (result?.kind === "no_response") return { outcome: "結果待ち", outcomeKind: "waiting" };
@@ -187,13 +248,14 @@ function model(notes: Note[]) {
   const available = notes.filter(note => includeRuntimeNote(note));
   const sources = sourceSessions(available).filter(source => (hasRawContent(source) || hasReadableContent(source)) && isEnterpriseSession(source, available));
   const sourcePaths = new Set(sources.flatMap(source => [source.note.path, ...(source.raw ? [source.raw.path] : [])]));
+  const evidence = completedEvidence(available);
   // 只有原稿的场次也复用同一归属与次轮判定，不从正文或准备稿补造场次。
   const outcomeNotes = [...available.filter(note => !["transcript", "transcript-study"].includes(getType(note)) || sourcePaths.has(note.path)).map(note => {
     if (getType(note) === "transcript" && sources.some(source => !source.readable && source.raw === note)) return { ...note, frontmatter: { ...note.frontmatter, type: "transcript-study" } };
     // 未确认的准备稿仍可用于旧稿归属回退，但不能证明已经通过或进入下一轮。
     if (getType(note) === "interview-prep" && (!confirmedPrep(note) || !isEnterpriseSession({ note }, available))) return { ...note, frontmatter: { ...note.frontmatter, session_status: "draft" } };
     return note;
-  }), ...structuredInvitations(available)];
+  }), ...structuredInvitations(available), ...evidence.filter(entry => entry.date).map(entry => entry.note)];
   const outcomes = resolveInterviewOutcomes(outcomeNotes);
   const sessions = sources.map(source => {
     const owner = interviewSessionOwner(source.note, outcomeNotes);
@@ -207,14 +269,62 @@ function model(notes: Note[]) {
       recordKind: isMemory(source) ? "memory" as const : "transcript" as const,
     };
   }).sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
-  return { available, sources, sessions };
+  for (const entry of evidence.filter(item => item.kind === "review")) {
+    const explicit = recordedOutcome(entry.result);
+    if (!explicit || !entry.date) continue;
+    const owner = interviewSessionOwner(entry.note, outcomeNotes);
+    const companyId = companyIdOf(owner && getType(owner) === JOB_CASE_TYPE ? owner : entry.note);
+    const time = interviewNoteTime(entry.note, entry.date);
+    const stage = interviewRound(entry.round);
+    const matches = sessions.filter(session => {
+      const source = sources.find(item => sessionId(item) === session.id)!;
+      const sourceOwner = interviewSessionOwner(source.note, outcomeNotes);
+      const sourceTime = interviewNoteTime(source.note, session.date);
+      return session.companyId === companyId && session.date === entry.date && (sourceOwner?.path ?? "") === (owner?.path ?? "") &&
+        !(time && sourceTime && time !== sourceTime) && !(stage && session.stage && stage !== session.stage);
+    });
+    // 同场明确复盘结果在共同模型里判定，目录、详情和导出必须读到同一个当轮结果。
+    if (matches.length === 1 && !["offer", "passed"].includes(matches[0].outcomeKind)) Object.assign(matches[0], explicit);
+  }
+  return { available, sources, sessions, evidence, outcomes, outcomeNotes };
 }
 
 export function buildConsultationCatalog(notes: Note[]): ConsultationCatalog {
-  const { available, sources, sessions } = model(notes);
-  const companyIds = new Set(sessions.map(session => session.companyId));
-  const interviewedApplications = new Set(sources.flatMap(source => {
+  const { available, sources, sessions, evidence, outcomes, outcomeNotes } = model(notes);
+  const completed: { companyId: string; company: string; ownerPath: string; time: string; interview: ConsultationInterview }[] = [];
+  for (const session of sessions) {
+    const source = sources.find(item => sessionId(item) === session.id)!;
     const owner = interviewSessionOwner(source.note, available);
+    completed.push({ companyId: session.companyId, company: session.company, ownerPath: owner?.path ?? "", time: interviewNoteTime(source.note, session.date),
+      interview: { id: session.id, date: session.date, round: session.round, stage: session.stage ?? "", outcome: session.outcome,
+        outcomeKind: session.outcomeKind, sessionId: session.id, evidenceKind: "transcript", position: owner && getType(owner) === JOB_CASE_TYPE ? safeText(jobPosition(owner)) : "" } });
+  }
+  for (const entry of evidence) {
+    const owner = interviewSessionOwner(entry.note, outcomeNotes);
+    const companySource = owner && getType(owner) === JOB_CASE_TYPE ? owner : entry.note;
+    const companyId = companyIdOf(companySource);
+    const explicit = ["review", "history"].includes(entry.kind) || !entry.date ? recordedOutcome(entry.result) : null;
+    const result = explicit ?? resultFor({ note: entry.note }, outcomes.get(entry.note.path), outcomeNotes);
+    const stage = interviewRound(entry.round);
+    const projected: ConsultationInterview = { id: stableId("interview", entry.note.path), date: entry.date,
+      round: safeText(interviewRoundLabelJa(entry.round) || entry.round), stage, ...result, evidenceKind: entry.kind, position: entry.position };
+    if (completed.some(item => item.interview.id === projected.id)) continue;
+    const time = interviewNoteTime(entry.note, entry.date);
+    const matches = entry.date && entry.kind !== "history" ? completed.filter(item => item.companyId === companyId && item.interview.date === entry.date &&
+      (owner?.path ?? "") === item.ownerPath && !(time && item.time && time !== item.time) &&
+      !(stage && item.interview.stage && stage !== item.interview.stage)) : [];
+    if (matches.length === 1) {
+      const existing = matches[0].interview;
+      // 多版准备稿和同场复盘只算一次；当轮明确结果可补历史判断，但不修改案件的当前状态。
+      if (explicit && !existing.sessionId && !["offer", "passed"].includes(existing.outcomeKind)) { existing.outcome = explicit.outcome; existing.outcomeKind = explicit.outcomeKind; }
+      if (!existing.stage && stage) { existing.stage = stage; existing.round = projected.round; }
+      continue;
+    }
+    completed.push({ companyId, company: safeText(nameOf(companySource)) || "会社名は未確認", ownerPath: owner?.path ?? "", time, interview: projected });
+  }
+  const companyIds = new Set(completed.map(item => item.companyId));
+  const interviewedApplications = new Set([...sources.map(source => source.note), ...evidence.map(entry => entry.note)].flatMap(note => {
+    const owner = interviewSessionOwner(note, outcomeNotes);
     return owner && getType(owner) === JOB_CASE_TYPE ? [owner.path] : [];
   }));
   const applications = available.filter(note => getType(note) === JOB_CASE_TYPE &&
@@ -230,7 +340,7 @@ export function buildConsultationCatalog(notes: Note[]): ConsultationCatalog {
   const companies = new Map<string, ConsultationCompany>();
   const ensureCompany = (id: string, company: string) => {
     let item = companies.get(id);
-    if (!item) { item = { id, company, applications: [], sessionIds: [], latestDate: "", outcome: "応募結果は未確認", reachedFinal: false, hasPassedInterview: false }; companies.set(id, item); }
+    if (!item) { item = { id, company, applications: [], sessionIds: [], latestDate: "", outcome: "応募結果は未確認", reachedFinal: false, hasPassedInterview: false, hasTranscript: false, interviews: [] }; companies.set(id, item); }
     return item;
   };
   for (const note of applications.sort((a, b) => a.path.localeCompare(b.path))) {
@@ -242,22 +352,23 @@ export function buildConsultationCatalog(notes: Note[]): ConsultationCatalog {
     const appliedOn = explicitDate || (uniqueCompany ? appliedDates.get(identityOf(note)) ?? "" : "");
     const updatedOn = day(note.frontmatter.status_updated) || day(note.frontmatter.updated);
     item.applications.push({ id: stableId("application", note.path), position: safeText(jobPosition(note)), status, appliedOn, updatedOn, channel: safeText(getString(note.frontmatter.channel)) });
-    item.latestDate = [item.latestDate, appliedOn, updatedOn].sort().at(-1) ?? "";
     item.outcome = [...new Set(item.applications.map(application => application.status))].join(" / ");
   }
-  for (const session of sessions) {
-    const item = ensureCompany(session.companyId, session.company);
-    item.sessionIds.push(session.id);
-    item.reachedFinal ||= session.stage === "final";
-    item.hasPassedInterview ||= session.outcomeKind === "passed" || session.outcomeKind === "offer";
-    if (session.date > item.latestDate) item.latestDate = session.date;
+  for (const record of completed) {
+    const item = ensureCompany(record.companyId, record.company);
+    item.interviews!.push(record.interview);
+    if (record.interview.sessionId) { item.sessionIds.push(record.interview.sessionId); item.hasTranscript = true; }
+    item.reachedFinal ||= record.interview.stage === "final";
+    item.hasPassedInterview ||= record.interview.outcomeKind === "passed" || record.interview.outcomeKind === "offer";
+    if (record.interview.date > item.latestDate) item.latestDate = record.interview.date;
+  }
+  for (const company of companies.values()) {
+    company.interviews!.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+    if (!company.applications.length) company.outcome = company.interviews![0]?.outcome ?? "応募結果は未確認";
   }
   const ownersWithRecords = new Map<string, Set<string>>();
-  for (const source of sources) {
-    const owner = interviewSessionOwner(source.note, available);
-    const summary = sessions.find(session => session.id === sessionId(source));
-    if (!owner || !summary) continue;
-    ownersWithRecords.set(owner.path, new Set([...(ownersWithRecords.get(owner.path) ?? []), summary.companyId]));
+  for (const record of completed) {
+    if (record.ownerPath) ownersWithRecords.set(record.ownerPath, new Set([...(ownersWithRecords.get(record.ownerPath) ?? []), record.companyId]));
   }
   for (const note of available) {
     const tentative = ["draft", "preparing", "cancelled", "canceled", "tentative"].includes(getString(note.frontmatter.session_status ?? note.frontmatter.schedule_status));

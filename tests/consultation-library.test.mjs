@@ -207,7 +207,7 @@ test("同法人没有面试过的岗位不进入公司行，也不抬高最新�
   const catalog = buildConsultationCatalog(notes);
   assert.equal(catalog.companies.length, 1);
   assert.deepEqual(catalog.companies[0].applications.map(application => application.position), ["面接済エンジニア"]);
-  assert.equal(catalog.companies[0].latestDate, "2026-09-21");
+  assert.equal(catalog.companies[0].latestDate, "2026-09-20");
   assert.equal(catalog.companies[0].outcome, "不採用");
   assert.equal(catalog.companies[0].hasPassedInterview, false);
   const unlinked = buildConsultationCatalog([job("same-name", "内定"), study("unknown-owner")]);
@@ -250,4 +250,113 @@ test("更新时间来自笔记 mtime；模板与归档不是当前投影资料",
   assert.equal(catalog.companies.length, 1);
   assert.equal(catalog.sessions.length, 1);
   assert.equal(buildConsultationCatalog([]).updatedAt, "");
+});
+
+test("只有实际单场复盘也进入企业目录，保留无稿终面及前轮通过，不生成可读稿", () => {
+  const reviews = [
+    note(`${root}/first-review.md`, { type: "review", company: "株式会社履歴テスト", date: "2026-07-01", round: "一次", result: "通過" }, "# 一次面接の振り返り"),
+    note(`${root}/final-review.md`, { type: "review", company: "株式会社履歴テスト", date: "2026-07-10", round: "最終", result: "不採用" }, "# 最終面接の振り返り"),
+    note(`${root}/email-review.md`, { type: "review", company: "株式会社メールテスト", date: "2026-07-11", round: "一次面接", result: "通過" }, "# 宿題メールの審査"),
+    note(`${root}/service-review.md`, { type: "review", company: "株式会社サービステスト", date: "2026-07-12", round: "面談", purpose: "career-support" }, "# 面談の振り返り"),
+  ];
+  const catalog = buildConsultationCatalog(reviews);
+  assert.equal(catalog.companies.length, 1);
+  assert.deepEqual(catalog.sessions, []);
+  const company = catalog.companies[0];
+  assert.equal(company.hasTranscript, false);
+  assert.deepEqual(company.sessionIds, []);
+  assert.equal(company.interviews.length, 2);
+  assert.equal(company.reachedFinal, true);
+  assert.equal(company.hasPassedInterview, true);
+  assert.equal(company.outcome, "不採用");
+  assert.equal(company.latestDate, "2026-07-10");
+  assert.ok(company.interviews.every(interview => interview.evidenceKind === "review" && !interview.sessionId));
+  assert.equal(findConsultationTranscript(reviews, company.interviews[0].id), null);
+});
+
+test("完成准备稿及明确案件实施字段补目录，未完成或未来预约不算实施，版本不重复计算", () => {
+  const completed = note(`${root}/completed-prep.md`, { type: "interview-prep", company: "株式会社テスト", case_id: "prepared", date: "2026-09-20", round: "カジュアル面談", session_status: "completed" });
+  const notes = [job("prepared"), completed, { ...completed, path: `${root}/completed-prep-v2.md` },
+    job("flagged", "不採用（2026-10-02・書類選考）", { company: "株式会社完了テスト", interview_completed: true, interview_date: "2026-09-24", interview_round: "カジュアル面談", position: "実施済ポジション" }),
+    note(`${root}/upcoming-prep.md`, { type: "interview-prep", company: "株式会社予定テスト", date: "2026-12-01", round: "最終面接", session_status: "scheduled" }),
+    note(`${root}/draft-prep.md`, { type: "interview-prep", company: "株式会社草稿テスト", date: "2026-01-01", round: "一次面接" })];
+  const catalog = buildConsultationCatalog(notes);
+  assert.equal(catalog.companies.length, 2);
+  assert.deepEqual(catalog.sessions, []);
+  assert.equal(catalog.companies.find(company => company.company === "株式会社テスト").interviews.length, 1);
+  const flagged = catalog.companies.find(company => company.company === "株式会社完了テスト");
+  assert.equal(flagged.latestDate, "2026-09-24");
+  assert.equal(flagged.interviews[0].position, "実施済ポジション");
+  assert.equal(flagged.interviews[0].evidenceKind, "job-case");
+  assert.deepEqual(buildConsultationCatalog([...notes].reverse()), catalog);
+});
+
+test("历史材料只接纳明确completed记录，未知面试日期不拿结果日填补，来源路径不外泄", () => {
+  const history = note("20_求職/_面談相談/history.md", { type: "material", material_kind: "interview-history", records: [
+    { company: "株式会社過去テスト", completed: true, date: "", round: "", result: "不採用", result_date: "2026-03-25", position: "過去のエンジニア", source: "/Users/private/history.csv:20" },
+    { company: "株式会社未確認テスト", completed: false, result: "不採用" },
+    { company: "株式会社紹介テスト", completed: true, round: "エージェント面談" },
+  ] });
+  const notes = [history, job("another-role", "未応募", { company: "株式会社過去テスト" })];
+  const catalog = buildConsultationCatalog(notes);
+  assert.equal(catalog.companies.length, 1);
+  const company = catalog.companies[0];
+  assert.deepEqual(catalog.sessions, []);
+  assert.deepEqual(company.applications, []);
+  assert.equal(company.latestDate, "");
+  assert.equal(company.interviews[0].date, "");
+  assert.equal(company.interviews[0].evidenceKind, "history");
+  assert.equal(company.interviews[0].position, "過去のエンジニア");
+  assert.equal(company.outcome, "不採用");
+  assert.doesNotMatch(JSON.stringify(catalog), /2026-03-25|\/Users|history\.csv/);
+});
+
+test("同公司同日历史合并要求归属相同、已知时间不冲突，不从无关联复盘猜原稿岗位", () => {
+  const first = raw("record", { case_id: "main", time: "10:00" });
+  const review = (id, extra = {}) => note(`${root}/${id}.md`, { type: "review", company: "株式会社テスト", date: "2026-09-20", round: "一次面接", result: "不採用", ...extra }, "# 当日の面接の振り返り");
+  const notes = [job("main"), first, review("unlinked"), review("later", { case_id: "main", time: "15:00" })];
+  const company = buildConsultationCatalog(notes).companies[0];
+  assert.equal(company.interviews.length, 3);
+  assert.equal(company.sessionIds.length, 1);
+  assert.equal(company.hasTranscript, true);
+  const matched = buildConsultationCatalog([job("main"), first, review("same", { case_id: "main", time: "10:00" })]).companies[0];
+  assert.equal(matched.interviews.length, 1);
+  assert.ok(matched.interviews[0].sessionId);
+});
+
+test("未知日期的已实施案件不因后来预约而推断通过，原有内定证据不被旧复盘覆盖", () => {
+  const notes = [job("unknown-date", "不採用", { interview_completed: true, interview_date: "", next_event_at: "2026-10-01 14:00 最終面接" })];
+  const catalog = buildConsultationCatalog(notes);
+  assert.equal(catalog.companies[0].hasPassedInterview, false);
+  assert.equal(catalog.companies[0].interviews[0].outcomeKind, "rejected");
+  const offered = buildConsultationCatalog([job("offered", "内定"), study("offered", { case_id: "offered" }),
+    note(`${root}/old-review.md`, { type: "review", company: "株式会社テスト", date: "2026-09-20", round: "一次面接", result: "不採用", case_id: "offered" }, "# 面接の振り返り")]);
+  assert.equal(offered.companies[0].outcome, "内定");
+  assert.equal(offered.companies[0].hasPassedInterview, true);
+});
+
+test("同公司同日另一历史岗位不合并原稿，完全重复的历史记录只显示一次", () => {
+  const record = { company: "株式会社テスト", completed: true, date: "2026-09-20", round: "一次面接", position: "品質エンジニア", result: "不採用", source: "旧記録:20" };
+  const notes = [raw("unlinked-development", {}, "開発職の経験について回答しました。"),
+    note(`${root}/history-material.md`, { type: "material", material_kind: "interview-history", records: [record, { ...record }] })];
+  const catalog = buildConsultationCatalog(notes);
+  assert.equal(catalog.sessions.length, 1);
+  assert.equal(catalog.sessions[0].outcomeKind, "unknown");
+  assert.equal(catalog.companies[0].interviews.length, 2);
+  const history = catalog.companies[0].interviews.find(interview => interview.evidenceKind === "history");
+  assert.equal(history.position, "品質エンジニア");
+  assert.equal(history.sessionId, undefined);
+  assert.equal(catalog.companies[0].interviews.find(interview => interview.sessionId).outcomeKind, "unknown");
+  assert.equal(findConsultationTranscript(notes, catalog.sessions[0].id).outcomeKind, "unknown");
+});
+
+test("同一案件当轮复盘明确通过时，企业历史、原稿列表与原稿详情结果一致，案件当前落选保持", () => {
+  const notes = [job("main", "不採用"), raw("first-record", { case_id: "main" }),
+    note(`${root}/first-review.md`, { type: "review", company: "株式会社テスト", date: "2026-09-20", round: "一次面接", result: "通過", case_id: "main" }, "# 当日の面接の振り返り")];
+  const catalog = buildConsultationCatalog(notes);
+  assert.equal(catalog.sessions[0].outcomeKind, "passed");
+  assert.equal(catalog.companies[0].interviews.find(interview => interview.sessionId).outcomeKind, "passed");
+  assert.equal(findConsultationTranscript(notes, catalog.sessions[0].id).outcomeKind, "passed");
+  assert.equal(catalog.companies[0].applications[0].status, "不採用");
+  assert.equal(catalog.companies[0].outcome, "不採用");
 });
