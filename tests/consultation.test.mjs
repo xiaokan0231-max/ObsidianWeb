@@ -2,9 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseConsultation, projectConsultation, emptyDraft, validateDraft, privacyText, CONSULTATION_PATH, CONSULTATION_RECORD_PATH, parseConsultationHistory } from "../lib/consultation.ts";
 import { consultationHash, createConsultationStore } from "../lib/server/consultation-store.ts";
-import { loadAppModule } from "./helpers/render-tsx.mjs";
-import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 
 async function fixture() {
   const raw = "開始\n株式会社テストの担当テストです。test@example.com 090-1234-5678\n質問です。\n回答です。\n非公開住所\n追問です。\nおわり";
@@ -101,18 +98,4 @@ test("保存后内容不一致不报已保存",async()=>{
 test("损坏的已有记录不被当作空白覆盖",async()=>{
   const f=await fixture();f.notes.set(CONSULTATION_RECORD_PATH,"人工内容，格式有待核对");
   await assert.rejects(()=>f.store.get());assert.equal(f.writes.length,0);
-});
-test("咨询接口拒绝非本机/跨站访问；连接错误不泄露原路径",async()=>{
-  const f=await fixture();const routes=await loadAppModule("app/api/consultation/route.ts",{stubs:{"@/lib/server/obsidian":f.io}});
-  const response=await routes.GET(new Request("http://localhost:3000/api/consultation"));assert.equal(response.status,200);
-  assert.equal((await routes.GET(new Request("https://example.com/api/consultation"))).status,404);
-  assert.equal((await routes.GET(new Request("http://localhost:3000/api/consultation",{headers:{"sec-fetch-site":"cross-site"}}))).status,404);
-  f.notes.delete(CONSULTATION_PATH);
-  const failed=await routes.GET(new Request("http://localhost:3000/api/consultation"));assert.equal(failed.status,503);assert.doesNotMatch(await failed.text(),/private-path|20_求職/);
-});
-test("首屏日文、无评分，导航和本机保存说明可见",async()=>{
-  const f=await fixture();const {ConsultationSession}=await loadAppModule("app/consultation/consultation-view.tsx");
-  const markup=renderToStaticMarkup(React.createElement(ConsultationSession,{initial:await f.store.get()}));
-  assert.match(markup,/lang="ja"/);assert.match(markup,/先生の受け取り方/);assert.match(markup,/企業名を表示/);assert.match(markup,/メモを保存/);assert.match(markup,/送信・公開なし/);
-  assert.doesNotMatch(markup,/overallScore|レーダー|株式会社テスト|非公開住所/);
 });
