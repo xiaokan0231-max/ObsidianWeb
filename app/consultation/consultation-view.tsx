@@ -134,7 +134,14 @@ export default function ConsultationView() {
 }
 
 function LibraryHeader() {
-  return <header className="consultation-header"><Link className="consultation-brand" href="/consultation" aria-label="面接相談の資料のトップ"><span className="consultation-brand-mark"><BookIcon /></span><span><strong>Obsidian Memory Atlas</strong><small>面接相談の資料</small></span></Link><div className="consultation-header-note"><span className="consultation-readonly-dot" />閲覧専用<span className="consultation-header-divider" />日本語</div></header>;
+  return <header className="consultation-header">
+    <Link className="consultation-brand" href="/consultation" aria-label="面接相談の資料のトップ"><span className="consultation-brand-mark"><BookIcon /></span><span><strong>Obsidian Memory Atlas</strong><small>面接相談の資料</small></span></Link>
+    <div className="consultation-header-actions">
+      <div className="consultation-header-note"><span className="consultation-readonly-dot" />閲覧専用<span className="consultation-header-divider" />日本語</div>
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 独立阅读入口返回主站时需要完整加载首页。 */}
+      <a className="consultation-home-link" href="/">← ホームに戻る</a>
+    </div>
+  </header>;
 }
 
 export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog }) {

@@ -48,6 +48,9 @@
 .consultation-brand-mark { width: 43px; height: 43px; border: 1px solid var(--line-strong); border-radius: 12px; display: grid; place-items: center; color: var(--green); }
 .consultation-brand strong { font-size: 15px; font-weight: 600; letter-spacing: -.015em; color: var(--green-deep); }
 .consultation-brand small { display: block; font-size: 10px; letter-spacing: .12em; margin-top: 5px; color: var(--text-tertiary); }
+.consultation-header-actions { display: flex; align-items: center; gap: 24px; }
+.consultation-home-link { display: inline-flex; align-items: center; padding: 9px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 12px; white-space: nowrap; }
+.consultation-home-link:hover { background: var(--success-wash); border-color: var(--line-strong); }
 .consultation-header-note { display: flex; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 12px; }
 .consultation-readonly-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 .consultation-header-divider { width: 1px; height: 13px; background: var(--line); margin: 0 8px; }
