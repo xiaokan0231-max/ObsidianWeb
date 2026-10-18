@@ -360,3 +360,17 @@ test("同一案件当轮复盘明确通过时，企业历史、原稿列表与�
   assert.equal(catalog.companies[0].applications[0].status, "不採用");
   assert.equal(catalog.companies[0].outcome, "不採用");
 });
+
+
+test("咨询库日语轮次沿用明确阶段，未知名称回退且不改写来源", () => {
+  for (const [label, display] of [["轻松面谈", "カジュアル面談"], ["第三次面试", "三次面接"], ["最终面试", "最終面接"], ["技術面談", "技術面談"]]) {
+    const source = raw("round-display", { case_id: "main", round: label });
+    const notes = [job("main"), source];
+    const catalog = buildConsultationCatalog(notes);
+    const session = catalog.sessions[0];
+    assert.equal(session.round, display, label);
+    assert.equal(findConsultationTranscript(notes, session.id).round, display, label);
+    assert.equal(catalog.companies[0].interviews[0].round, display, label);
+    assert.equal(source.frontmatter.round, label, "显示投影不能改写原始轮次");
+  }
+});

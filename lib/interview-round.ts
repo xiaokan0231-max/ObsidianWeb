@@ -42,6 +42,21 @@ export function interviewRound(value: string): InterviewRound {
   return ordinal ? `round-${ENGLISH_ORDINALS.indexOf(ordinal) + 1}` as InterviewRound : "";
 }
 
+const ROUND_LABEL_JA: Record<Exclude<InterviewRound, "">, string> = {
+  agent: "エージェント面談", casual: "カジュアル面談", final: "最終面接",
+  "round-1": "一次面接", "round-2": "二次面接", "round-3": "三次面接",
+  "round-4": "四次面接", "round-5": "五次面接", "round-6": "六次面接",
+};
+
+/**
+ * 轮次说明的日文名。场次 label 仍以中文为正本（场次合并、轮次解析与准备稿匹配都读它），
+ * 不能改写成日文；日语界面只在显示处换词。读不出轮次时返回空串，由调用方兜底。
+ */
+export function interviewRoundLabelJa(label: string) {
+  const round = interviewRound(label);
+  return round ? ROUND_LABEL_JA[round] : "";
+}
+
 /** 徽标和场次匹配共用同一解析，避免卡片数字与打开的准备稿轮次不一致。 */
 export function calendarRoundBadge(label: string): CalendarRoundBadge | null {
   const round = interviewRound(label);
