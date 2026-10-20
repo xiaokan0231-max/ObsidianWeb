@@ -3,18 +3,20 @@ name: japan-interview-prep
 description: >-
   Prepare Japanese company interviews from the candidate's authoritative Obsidian assets, actual invitations,
   current job descriptions, primary company sources and prior-round evidence. Create a versioned interview-prep
-  note with researched Chinese analysis, a company-specific Japanese 20-second motivation, an opening, the
+  note with a source-backed Chinese story explaining the company and relevant people, a company-specific Japanese 20-second motivation, an opening, the
   interviewer's top three concerns with pre-emptive lines, a closing that states motivation plus a same-day
   thank-you note, interviewer research with five conversational reverse questions (expected answers and
   follow-ups), annotated direct URLs and at most two short backup answers. Use for Japan interview preparation,
-  company/job research for an interview, 志望動機, 逆質問, or follow-up rounds. Deliver through the desktop
-  本场面试 page.
+  company/job research for an interview, 志望動機, 逆質問, follow-up rounds, or explaining prepared company URLs
+  as a story. Deliver saved preparation through the desktop 本场面试 page.
 ---
 
 # 日本面接准备
 
 默认创建 `prep_version: 2` 的本轮增量；继续或局部修改时先定位已有的当前草稿。充分研究，精简需要背诵的话术；纵览不设字数或全文阅读时长上限。
 先读本人正本和现场证据，再研究公司，不能从通用话术开始写。
+
+公司与人物研究默认用连贯中文故事帮助本人理解，再据此准备日语短答；写法与归属见 [公司与人物的故事](references/company-story.md)。用户只要读链接、听讲解时直接在聊天交付，不自动新建或改写准备稿，也不为讲解索取无关的个人条件；明确要求保存或更新后再落到既有资料。
 
 ## 版本与历史边界
 
@@ -54,7 +56,7 @@ description: >-
 
 ## 3. 实读资料，形成判断
 
-研究路线参考 [research-sources.md](references/research-sources.md)，表达重构参考 [methodology.md](references/methodology.md)。求人搜索、求人详情、站内消息和个人账号操作使用本人已登录 Chrome；不可用时请本人接通，不退到游客视角。公开博客、员工访谈、公司／产品介绍等，只要未登录也能取得完整原文，可直接用未登录浏览器或 web 工具读取，包括招聘站点托管的公开文章，无需另行要求登录。摘要、节选或登录墙须明示，不能冒充全文。
+研究路线参考 [research-sources.md](references/research-sources.md)，公司与人物叙事参考 [company-story.md](references/company-story.md)，表达重构参考 [methodology.md](references/methodology.md)。求人搜索、求人详情、站内消息和个人账号操作使用本人已登录 Chrome；不可用时请本人接通，不退到游客视角。公开博客、员工访谈、公司／产品介绍等，只要未登录也能取得完整原文，可直接用未登录浏览器或 web 工具读取，包括招聘站点托管的公开文章，无需另行要求登录。摘要、节选或登录墙须明示，不能冒充全文。
 
 - **实际阅读全文**：当前求人、邀请、采用的业务页、案例、员工访谈、技术文章。搜索摘要只用于发现；打不开、仅见摘要或部分正文就明示限制，不包装成已读全文。
 - 边读边记录直接 URL、阅读日期、支持的事实及适用边界。具体案例不能只给首页。判断来源是不是当前岗位、个别团队、试验或生产案例；不要相互偷换。
@@ -81,7 +83,7 @@ description: >-
 
 逆質問要把对话聊起来：用上对方和本人的信息，问一句话答不完的问题，并准备好对方回答后怎么接。依据与例句见 [methodology.md](references/methodology.md#七逆質問用对方和本人的信息把话聊起来)。
 
-章节开头是 `### 面接官研究`：已确认出席者写与本轮相关的公开事实并附直接 URL（邀请署名、官网成员页、採用サイトの社員紹介、note／Qiita／Zenn、登壇、プレスリリース），按 [research-sources.md](references/research-sources.md) 不写心理画像、注意 LinkedIn 访客记录；未确认时写「未确认，现场用开场自我介绍接」。下面保留三句现场句型：「先ほど〇〇とおっしゃっていましたが、もう少し伺ってもよろしいでしょうか。」「〇〇様ご自身は、〜のとき、どのように〜されましたか。」，以及对方没给提问机会时的「最後に一点だけ、お伺いしてもよろしいでしょうか。」
+章节开头是 `### 面接官研究`：区分确定出席者、身份候选、邀请署名与文章作者，再把可核验的职业转折、做过的工作和本人公开表达串成人物故事，附直接 URL；写法见 [公司与人物的故事](references/company-story.md)。仅有姓氏时按 [research-sources.md](references/research-sources.md) 定向查找，未坐实不补成确定全名；没有资料时写「未确认，现场用开场自我介绍接」。不写心理画像，注意 LinkedIn 访客记录。下面保留三句现场句型：「先ほど〇〇とおっしゃっていましたが、もう少し伺ってもよろしいでしょうか。」「〇〇様ご自身は、〜のとき、どのように〜されましたか。」，以及对方没给提问机会时的「最後に一点だけ、お伺いしてもよろしいでしょうか。」
 
 `### 1.`～`### 3.` 主问题、`### 4.`～`### 5.` 备用，标题写 `### 1. 〔题型〕一句话主题`（备用写 `### 4. 备用｜〔题型〕…`）。主问题里至少 1 个面接官本人型、1 个经验连接型。题型五选一：
 - **面接官本人型**：对方的入社理由、做过的项目、在公司看到的变化、文章或发言。
