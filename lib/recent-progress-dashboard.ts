@@ -2,6 +2,7 @@ import { queueCompanyKey } from "./job-queue.mjs";
 import { SELECTION_STATUSES } from "./job-status.ts";
 import type { RecentProgressEntry } from "./recent-progress.ts";
 import type { RecentProgressOverview } from "./recent-progress-overview.ts";
+import { validActionDate } from "./todo-action-schema.ts";
 
 export const PROGRESS_SEGMENTS = ["advancing", "applied", "held", "rejected"] as const;
 export type ProgressSegment = typeof PROGRESS_SEGMENTS[number];
@@ -26,7 +27,7 @@ function segment(entry: RecentProgressEntry): ProgressSegment | null {
 }
 
 /** 图只使用事件日；工作记录日与事项核实日不画成企业动向。 */
-export function buildProgressDashboard(overview: RecentProgressOverview) {
+export function buildProgressDashboard(overview: RecentProgressOverview, history: readonly RecentProgressEntry[] = overview.entries) {
   const events = overview.entries.filter(companyEvent);
   const monthly = overview.start === null;
   const start = overview.start ?? events.map((entry) => entry.date).sort()[0] ?? overview.end;
@@ -54,8 +55,33 @@ export function buildProgressDashboard(overview: RecentProgressOverview) {
       (entry.date === previous.date && entry.kind === "status" && previous.kind !== "status")) cases.set(key, entry);
   }
   const segments = PROGRESS_SEGMENTS.map((key) => ({ key, entries: [...cases.values()].filter((entry) => segment(entry) === key) }));
+  const heatmap: (ProgressChartBucket & { inRange: boolean; future: boolean })[] = [];
+  const historyEvents = history.filter((entry) => companyEvent(entry) && validActionDate(entry.date) && entry.date <= overview.end);
+  if (overview.end) {
+    const cursor = new Date(`${overview.end}T00:00:00Z`);
+    cursor.setUTCDate(cursor.getUTCDate() - (cursor.getUTCDay() + 6) % 7 - 77);
+    for (let index = 0; index < 84; index++) {
+      const date = cursor.toISOString().slice(0, 10);
+      const entries = historyEvents.filter((entry) => entry.date === date);
+      heatmap.push({ date, end: date, entries, companies: progressCompanyCount(entries),
+        inRange: (!overview.start || date >= overview.start) && date <= overview.end, future: date > overview.end });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+  }
+  const stars = segments.flatMap((item) => item.entries.map((entry) => ({ entry, segment: item.key })));
+  const metricEntries = {
+    all: events,
+    advancing: segments[0].entries,
+    waiting: segments.slice(1, 3).flatMap((item) => item.entries),
+    rejected: segments[3].entries,
+  };
+  const sparks = Object.fromEntries(Object.entries(metricEntries).map(([key, entries]) => [key, buckets.map((bucket) =>
+    progressCompanyCount(entries.filter((entry) => entry.date >= bucket.date && entry.date <= bucket.end)),
+  )])) as Record<keyof typeof metricEntries, number[]>;
   return {
-    buckets, monthly, companies: progressCompanyCount(events),
+    buckets, monthly, heatmap, stars, sparks, companies: progressCompanyCount(events),
+    heatmapPeak: Math.max(1, ...heatmap.map((day) => day.companies)),
+    activeDays: heatmap.filter((day) => day.companies > 0).length,
     advancingCompanies: progressCompanyCount(segments.find((item) => item.key === "advancing")!.entries),
     waitingCompanies: progressCompanyCount(segments.filter((item) => item.key === "applied" || item.key === "held").flatMap((item) => item.entries)),
     rejectedCompanies: progressCompanyCount(segments.find((item) => item.key === "rejected")!.entries),

@@ -75,3 +75,32 @@ test("无企业动态也保留零刻度，不把工作完成记为推进，输�
   assert.equal(result.buckets.length, 7);
   assert.deepEqual(entries, before);
 });
+
+test("热力图独立回看12周，标出所选窗口，历史日不被7日筛选清空", () => {
+  const history = [entry("old", { date: "2026-08-05" }), entry("now"), entry("alias", { company: "テスト株式会社" }),
+    entry("future", { date: "2026-10-26" }), entry("invalid", { date: "2026-02-30" }),
+    entry("work", { date: "2026-08-06", kind: "work", sourceType: "platform-sync", dateBasis: "recorded" })];
+  const result = buildProgressDashboard(buildRecentProgressOverview(history, today), history);
+  assert.equal(result.heatmap.length, 84);
+  assert.equal(result.heatmap[0].date, "2026-08-03");
+  assert.equal(result.heatmap.at(-1).date, today);
+  const old = result.heatmap.find((day) => day.date === "2026-08-05");
+  assert.equal(old.companies, 1); assert.equal(old.inRange, false);
+  const current = result.heatmap.at(-1);
+  assert.equal(current.companies, 1); assert.equal(current.inRange, true);
+  assert.equal(result.activeDays, 2);
+  assert.equal(result.stars.length, 2, "星图仍只显示所选窗口的案件");
+  assert.equal(result.heatmap.find((day) => day.date === "2026-08-06").companies, 0);
+});
+
+test("星图、流向和分布使用同一案件全集，sparkline按公司去重", () => {
+  const result = model([entry("a", { state: "面接中" }), entry("b", { state: "面接中", company: "テスト株式会社" }),
+    entry("c", { state: "不採用", company: "株式会社サンプル" })]);
+  assert.equal(result.stars.length, result.caseCount);
+  assert.equal(result.stars.filter((star) => star.segment === "advancing").length, 2);
+  assert.equal(result.sparks.advancing.at(-1), 1);
+  assert.equal(result.sparks.all.at(-1), 2);
+  const midweek = buildProgressDashboard(buildRecentProgressOverview([], "2026-10-21"));
+  assert.equal(midweek.heatmap.filter((day) => day.future).length, 4);
+  assert.ok(midweek.heatmap.filter((day) => day.future).every((day) => !day.inRange && !day.entries.length));
+});

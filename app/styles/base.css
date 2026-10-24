@@ -83,6 +83,10 @@
   --info: #3f5f8f;
   --info-wash: #e8edf4;
   --info-line: #b0bccd;
+  /* 观测图表的发光色独立于正文状态色，亮色主题保持可读对比度。 */
+  --viz-cyan: #087f83;
+  --viz-blue: #4267cf;
+  --viz-violet: #8758b5;
 
   --green: #2f6b59;
   --green-deep: #203a33;
@@ -252,6 +256,9 @@
   --info: #93b6e8;
   --info-wash: color-mix(in oklab, var(--info) 16%, var(--surface));
   --info-line: #465b6c;
+  --viz-cyan: #66ead9;
+  --viz-blue: #83aaff;
+  --viz-violet: #bd9bff;
 
   --green: #6fb994;
   --green-deep: #cfe3d8;

@@ -1,0 +1,96 @@
+/* 图形内的动效只表达活跃与选中，不制造新的事件、实时同步或状态变化。 */
+.momentum-dashboard { --signal-cyan: var(--viz-cyan); --signal-advancing: var(--viz-cyan); --signal-applied: var(--viz-blue); --signal-held: var(--viz-violet); --signal-rejected: var(--text-tertiary); --momentum-applied: var(--signal-applied); --momentum-held: var(--signal-held); gap: 16px; }
+.signal-eyebrow { display: block; margin-bottom: 6px; color: var(--signal-cyan); font-family: ui-monospace, monospace; font-size: 8px; letter-spacing: .18em; }
+.signal-secondary-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(340px, 1fr); gap: 16px; }
+.signal-flow-map { display: block; width: 100%; height: 218px; margin-top: 8px; overflow: visible; }
+.signal-source-orbit { fill: none; stroke: color-mix(in oklab, var(--signal-cyan) 25%, transparent); stroke-width: 1; stroke-dasharray: 3 10; transform-origin: 100px 125px; animation: signal-orbit 55s linear infinite; }
+.signal-source-orbit-inner { stroke-dasharray: 70 300; stroke-width: 2; animation-direction: reverse; animation-duration: 18s; }
+.signal-source-core { fill: color-mix(in oklab, var(--signal-cyan) 7%, var(--surface)); stroke: color-mix(in oklab, var(--signal-cyan) 55%, var(--line)); filter: drop-shadow(0 0 12px color-mix(in oklab, var(--signal-cyan) 18%, transparent)); }
+.signal-source-value { fill: var(--ink); font-family: ui-monospace, monospace; font-size: 27px; text-anchor: middle; }
+.signal-source-caption { fill: var(--muted); font-size: 9px; text-anchor: middle; }
+.signal-flow-branch { --segment-color: var(--signal-rejected); transition: opacity .2s ease; }
+.signal-flow-branch[data-segment="advancing"] { --segment-color: var(--signal-advancing); }
+.signal-flow-branch[data-segment="applied"] { --segment-color: var(--signal-applied); }
+.signal-flow-branch[data-segment="held"] { --segment-color: var(--signal-held); }
+.signal-flow-ribbon { fill: none; opacity: .75; transition: opacity .2s ease; }
+.signal-flow-photons { fill: none; stroke: var(--segment-color); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: 1 24; animation: signal-stream 3s linear infinite; animation-delay: var(--flow-delay); filter: drop-shadow(0 0 4px var(--segment-color)); opacity: .8; }
+.signal-flow-target { cursor: pointer; outline: none; }
+.signal-flow-target[aria-disabled="true"] { opacity: .4; cursor: default; }
+.signal-flow-target rect { fill: color-mix(in oklab, var(--segment-color) 6%, var(--surface)); stroke: color-mix(in oklab, var(--segment-color) 28%, var(--line)); transition: fill .2s ease, stroke .2s ease; }
+.signal-flow-target circle { fill: var(--segment-color); }
+.signal-flow-label { fill: var(--muted); font-size: 10px; }
+.signal-flow-value { fill: var(--ink); font-family: ui-monospace, monospace; font-size: 18px; text-anchor: end; }
+.signal-flow-target:hover rect, .signal-flow-target:focus-visible rect, .signal-flow-branch[data-selected="true"] rect { stroke: var(--segment-color); fill: color-mix(in oklab, var(--segment-color) 15%, var(--surface)); }
+.signal-flow:has(.signal-flow-target:hover) .signal-flow-branch:not(:hover) { opacity: .25; }
+.momentum-dashboard[data-signal-selection="advancing"] .signal-flow-branch:not([data-segment="advancing"]), .momentum-dashboard[data-signal-selection="applied"] .signal-flow-branch:not([data-segment="applied"]), .momentum-dashboard[data-signal-selection="held"] .signal-flow-branch:not([data-segment="held"]), .momentum-dashboard[data-signal-selection="rejected"] .signal-flow-branch:not([data-segment="rejected"]) { opacity: .2; }
+.signal-flow > .momentum-chart-hint { margin-top: 0; }
+.signal-heatmap-summary { display: flex; gap: 9px; align-items: center; margin: 18px 0 21px; }
+.signal-heatmap-summary > strong { color: var(--signal-cyan); font-family: ui-monospace, monospace; font-size: 34px; font-weight: 400; line-height: 1; }
+.signal-heatmap-summary > span { color: var(--muted); font-size: 11px; }
+.signal-heatmap-summary small { display: block; margin-top: 3px; color: var(--text-tertiary); font-size: 9px; }
+.signal-heatmap-summary svg { width: 95px; height: 30px; margin-left: auto; fill: none; stroke: var(--signal-cyan); stroke-width: 1.2; opacity: .6; }
+.signal-calendar { display: flex; gap: 8px; }
+.signal-weekdays { display: grid; grid-template-rows: repeat(7, 12px); gap: 4px; padding-top: 19px; color: var(--muted); font-size: 8px; line-height: 12px; }
+.signal-calendar-columns { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 5px; flex: 1; }
+.signal-calendar-week { position: relative; display: grid; grid-template-rows: 15px repeat(7, 12px); gap: 4px; min-width: 0; }
+.signal-calendar-month { color: var(--text-tertiary); font-size: 8px; }
+.signal-calendar-day, .signal-heatmap-legend i { --cell-color: color-mix(in oklab, var(--signal-cyan) 5%, var(--surface-sunken)); }
+.signal-calendar-day[data-level="1"], .signal-heatmap-legend [data-level="1"] { --cell-color: color-mix(in oklab, var(--signal-cyan) 23%, var(--surface)); }
+.signal-calendar-day[data-level="2"], .signal-heatmap-legend [data-level="2"] { --cell-color: color-mix(in oklab, var(--signal-cyan) 44%, var(--surface)); }
+.signal-calendar-day[data-level="3"], .signal-heatmap-legend [data-level="3"] { --cell-color: color-mix(in oklab, var(--signal-cyan) 69%, var(--surface)); }
+.signal-calendar-day[data-level="4"], .signal-heatmap-legend [data-level="4"] { --cell-color: var(--signal-cyan); }
+.recent-progress-view .signal-calendar-day { position: relative; display: block; width: 100%; height: 12px; min-height: 0; padding: 0; border: 1px solid transparent; border-radius: 2px; background: var(--cell-color); transition: transform .15s ease, box-shadow .15s ease; }
+.recent-progress-view .signal-calendar-day[data-in-range="true"] { border-color: color-mix(in oklab, var(--signal-cyan) 45%, var(--line)); }
+.recent-progress-view .signal-calendar-day[data-future="true"] { background: transparent; border: 1px dashed var(--line); opacity: .35; }
+.signal-calendar-day:disabled { cursor: default; }
+.recent-progress-view .signal-calendar-day:not(:disabled):hover, .recent-progress-view .signal-calendar-day[aria-pressed="true"] { z-index: 5; transform: scale(1.25); border-color: var(--signal-cyan); background: var(--cell-color); box-shadow: 0 0 10px color-mix(in oklab, var(--signal-cyan) 35%, transparent); }
+.signal-calendar-tooltip { position: absolute; bottom: calc(100% + 7px); left: 50%; z-index: 7; display: none; transform: translateX(-50%); padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-overlay); color: var(--ink); font-size: 9px; white-space: nowrap; pointer-events: none; }
+.signal-calendar-day:hover .signal-calendar-tooltip, .signal-calendar-day:focus-visible .signal-calendar-tooltip { display: block; }
+.signal-heatmap-legend { display: flex; justify-content: end; align-items: center; gap: 4px; margin-top: 13px; color: var(--muted); font-size: 8px; }
+.signal-heatmap-legend i { display: block; width: 9px; height: 9px; border-radius: 2px; background: var(--cell-color); }
+.signal-heatmap > .momentum-chart-hint { margin-top: 11px; }
+.signal-stars-layout { display: grid; grid-template-columns: minmax(0, 1fr) 215px; align-items: center; gap: 30px; }
+.signal-stars-space { position: relative; min-width: 0; }
+.signal-stars-space > svg { display: block; width: 100%; height: 230px; overflow: visible; }
+.signal-star-orbit { fill: none; stroke: var(--line); stroke-width: .65; opacity: .7; }
+.signal-crosshair { fill: none; stroke: var(--line); stroke-width: .65; stroke-dasharray: 2 6; }
+.signal-star { --segment-color: var(--signal-rejected); cursor: pointer; outline: none; transition: opacity .2s ease; }
+.signal-star[data-segment="advancing"] { --segment-color: var(--signal-advancing); }
+.signal-star[data-segment="applied"] { --segment-color: var(--signal-applied); }
+.signal-star[data-segment="held"] { --segment-color: var(--signal-held); }
+.signal-star-core { fill: var(--segment-color); filter: drop-shadow(0 0 3px var(--segment-color)); }
+.signal-star-halo { fill: var(--segment-color); opacity: .09; }
+.signal-star-pulse { fill: none; stroke: var(--segment-color); stroke-width: 1; transform-box: fill-box; transform-origin: center; animation: signal-star-pulse 3.5s ease-out infinite; animation-delay: var(--star-delay); }
+.signal-star-hit { fill: transparent; }
+.signal-star-tether { fill: none; stroke: var(--segment-color); stroke-width: .5; opacity: .1; }
+.signal-star:hover .signal-star-halo, .signal-star:focus-visible .signal-star-halo, .signal-star[data-selected="true"] .signal-star-halo { opacity: .35; }
+.signal-star:hover .signal-star-core, .signal-star:focus-visible .signal-star-core { stroke: var(--ink); stroke-width: 1.5; }
+.signal-star-tooltip { display: none; pointer-events: none; }
+.signal-star-tooltip rect { fill: var(--surface-overlay); stroke: var(--segment-color); stroke-width: .5; }
+.signal-star-tooltip text { fill: var(--ink); font-size: 10px; }
+.signal-star:hover .signal-star-tooltip, .signal-star:focus-visible .signal-star-tooltip { display: block; }
+.signal-stars-space:has(.signal-star:hover) .signal-star:not(:hover) { opacity: .35; }
+.momentum-dashboard[data-signal-selection="advancing"] .signal-star:not([data-segment="advancing"]), .momentum-dashboard[data-signal-selection="applied"] .signal-star:not([data-segment="applied"]), .momentum-dashboard[data-signal-selection="held"] .signal-star:not([data-segment="held"]), .momentum-dashboard[data-signal-selection="rejected"] .signal-star:not([data-segment="rejected"]) { opacity: .12; }
+.signal-space-coordinate { position: absolute; left: 0; bottom: 0; color: var(--text-tertiary); font-family: ui-monospace, monospace; font-size: 8px; letter-spacing: .04em; }
+.signal-star-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--muted); font-size: 11px; pointer-events: none; }
+.signal-star-legend { display: grid; gap: 8px; }
+.recent-progress-view .signal-star-legend button { display: grid; grid-template-columns: 7px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 9px 11px; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in oklab, var(--segment-color) 4%, var(--surface)); color: var(--muted); font-size: 10px; text-align: left; }
+.signal-star-legend [data-segment="advancing"] { --segment-color: var(--signal-advancing); }
+.signal-star-legend [data-segment="applied"] { --segment-color: var(--signal-applied); }
+.signal-star-legend [data-segment="held"] { --segment-color: var(--signal-held); }
+.signal-star-legend [data-segment="rejected"] { --segment-color: var(--signal-rejected); }
+.signal-star-legend i { width: 5px; height: 5px; border-radius: 50%; background: var(--segment-color); box-shadow: 0 0 7px color-mix(in oklab, var(--segment-color) 65%, transparent); }
+.signal-star-legend strong { color: var(--ink); font-family: ui-monospace, monospace; font-size: 15px; font-weight: 400; }
+.signal-star-legend small { color: var(--muted); font-size: 8px; }
+.signal-star-legend button[aria-pressed="true"] { border-color: var(--segment-color); }
+.signal-star-legend button:disabled { opacity: .4; cursor: default; }
+.signal-star-legend > p { margin: 5px 0 0; color: var(--text-tertiary); font-size: 9px; line-height: 1.7; }
+.signal-constellation > .momentum-chart-hint { margin-top: 9px; }
+
+@keyframes signal-stream { to { stroke-dashoffset: -100; } }
+@keyframes signal-orbit { to { transform: rotate(360deg); } }
+@keyframes signal-star-pulse { 0% { transform: scale(.5); opacity: .65; } 100% { transform: scale(1.65); opacity: 0; } }
+@keyframes signal-emerge { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .momentum-dashboard *, .momentum-dashboard *::before, .momentum-dashboard *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

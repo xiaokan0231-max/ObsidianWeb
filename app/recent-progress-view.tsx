@@ -6,6 +6,7 @@ import { buildRecentProgress, type RecentProgressEntry } from "@/lib/recent-prog
 import { buildRecentProgressOverview, progressTone } from "@/lib/recent-progress-overview";
 import { PROGRESS_SEGMENTS } from "@/lib/recent-progress-dashboard";
 import { validActionDate } from "@/lib/todo-action-schema";
+import { prefersReducedMotion } from "@/lib/motion";
 import { useUiLocale } from "./ui-locale";
 import { URL_CHANGE_EVENT } from "./use-url-state";
 import ProgressDashboard from "./progress-dashboard";
@@ -67,7 +68,7 @@ export function recentProgressRoute(search = ""): RecentProgressRoute {
   const range = params.get("activityRange");
   const view = params.get("activityView");
   const chart = params.get("activityChart");
-  const validChart = chart?.startsWith("day:") ? validActionDate(chart.slice(4)) : chart === "group:waiting" || PROGRESS_SEGMENTS.some((key) => chart === `segment:${key}`);
+  const validChart = chart?.startsWith("day:") ? validActionDate(chart.slice(4)) : chart?.startsWith("heat:") ? validActionDate(chart.slice(5)) : chart === "group:waiting" || /^case:[\w-]{1,128}$/.test(chart ?? "") || PROGRESS_SEGMENTS.some((key) => chart === `segment:${key}`);
   return { category, id: params.get("update") || null, range: range === "30d" || range === "all" ? range : "7d",
     // 旧分类深链继续进入原来的日期列表，新增入口默认使用概览。
     view: view === "timeline" || (!view && category !== "all") ? "timeline" : "overview",
@@ -167,9 +168,9 @@ export function ProgressListRow({ item, route, copy, onSelect, today, compact = 
 }
 
 type Overview = ReturnType<typeof buildRecentProgressOverview>;
-type OverviewProps = { overview: Overview; route: RecentProgressRoute; copy: typeof progressZh; today: string; locale: string; onToggle: (key: string) => void; onChartSelection: (selection: string | undefined) => void; onSelect: (event: MouseEvent<HTMLAnchorElement>, item: RecentProgressEntry) => void };
+type OverviewProps = { overview: Overview; history: RecentProgressEntry[]; route: RecentProgressRoute; copy: typeof progressZh; today: string; locale: string; onToggle: (key: string) => void; onChartSelection: (selection: string | undefined) => void; onSelect: (event: MouseEvent<HTMLAnchorElement>, item: RecentProgressEntry) => void };
 
-function ProgressOverview({ overview, route, copy, today, locale, onToggle, onSelect, onChartSelection }: OverviewProps) {
+function ProgressOverview({ overview, history, route, copy, today, locale, onToggle, onSelect, onChartSelection }: OverviewProps) {
   const currentLimit = 2;
   const advancingLimit = Math.max(1, 3 - Math.min(currentLimit, overview.current.length));
   const priorities = [
@@ -181,7 +182,7 @@ function ProgressOverview({ overview, route, copy, today, locale, onToggle, onSe
     window.requestAnimationFrame(() => document.getElementById(`progress-${key}-records`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
   };
   return <div className="recent-progress-overview">
-    <ProgressDashboard overview={overview} locale={locale} onToggle={explore} selection={route.chart} onSelection={onChartSelection} renderRow={(item) => <ProgressListRow key={item.id} item={item} route={route} copy={copy} today={today} compact anchorSuffix="-chart" onSelect={onSelect} />} />
+    <ProgressDashboard overview={overview} history={history} locale={locale} onToggle={explore} selection={route.chart} onSelection={onChartSelection} renderRow={(item) => <ProgressListRow key={item.id} item={item} route={route} copy={copy} today={today} compact anchorSuffix="-chart" onSelect={onSelect} />} />
     <div className={`recent-progress-priorities${overview.current.length ? "" : " recent-progress-priorities-single"}`}>{priorities.map((group) => <section className="recent-progress-priority" key={group.key} data-priority={group.key} data-tone={group.tone}>
       <header><div><h2>{group.title}<span>{group.entries.length}</span></h2><p>{group.note}</p></div>{group.entries.length > group.limit && <button type="button" className="recent-progress-text-button" aria-expanded={route.open.includes(group.key)} aria-controls={`progress-${group.key}-records`} onClick={() => onToggle(group.key)}>{route.open.includes(group.key) ? copy.less : `${copy.more} (${group.entries.length})`}</button>}</header>
       {group.entries.length ? <ul className="recent-progress-list" id={`progress-${group.key}-records`}>{(route.open.includes(group.key) ? group.entries : group.entries.slice(0, group.limit)).map((item) => <ProgressListRow key={item.id} item={item} route={route} copy={copy} today={today} compact onSelect={onSelect} />)}</ul> : <p className="recent-progress-priority-empty">{group.empty}</p>}
@@ -295,7 +296,7 @@ export default function RecentProgressView({ notes, today, loading, fetchedAt, e
       </div> : <>
         {!embedded && <nav className="recent-progress-view-switch" aria-label={copy.records}><button type="button" aria-pressed={view === "overview"} onClick={() => changeRoute({ ...route, view: "overview" })}>{copy.overview}</button><button type="button" aria-pressed={view === "timeline"} onClick={() => changeRoute({ ...route, view: "timeline" })}>{copy.timeline}</button></nav>}
         <div id="recent-progress-records" ref={listRef} tabIndex={-1} aria-label={copy.records} data-progress-category={category} data-progress-view={view}>
-          {view === "overview" ? result.entries.length ? <ProgressOverview overview={overview} route={route} copy={copy} today={today} locale={locale} onSelect={openDetail} onToggle={(key) => setOpen(key, !route.open.includes(key))} onChartSelection={(chart) => changeRoute({ ...route, chart })} /> : <p className="recent-progress-empty">{copy.empty}{hasGaps && <span>{copy.summaryGap}</span>}</p> : <>
+          {view === "overview" ? result.entries.length ? <ProgressOverview overview={overview} history={result.entries} route={route} copy={copy} today={today} locale={locale} onSelect={openDetail} onToggle={(key) => setOpen(key, !route.open.includes(key))} onChartSelection={(chart) => { changeRoute({ ...route, chart }); if (chart) window.requestAnimationFrame?.(() => document.getElementById("momentum-chart-detail")?.scrollIntoView({ behavior: prefersReducedMotion() ? "instant" : "smooth", block: "nearest" })); }} /> : <p className="recent-progress-empty">{copy.empty}{hasGaps && <span>{copy.summaryGap}</span>}</p> : <>
             <p className="recent-progress-timeline-note">{copy.timelineMeaning}</p>
             <nav className="recent-progress-filters" aria-label={copy.filters}>{categories.map((key) => <button key={key} type="button" aria-pressed={key === category} aria-controls="recent-progress-records" onClick={() => changeRoute({ ...route, category: key })}>{copy[key]}<span>{overview.entries.filter((entry) => inCategory(entry, key)).length}</span></button>)}</nav>
             {items.length ? dates.map((date) => <section className="recent-progress-date-group" key={date} aria-labelledby={`progress-date-${date}`}><h2 id={`progress-date-${date}`}><time dateTime={date}>{date}</time></h2><ul className="recent-progress-list">{items.filter((entry) => entry.date === date).map((item) => <ProgressListRow key={item.id} item={item} route={route} copy={copy} today={today} onSelect={openDetail} />)}</ul></section>) : <p className="recent-progress-empty">{copy.emptyCategory}{hasGaps && <span>{copy.summaryGap}</span>}</p>}

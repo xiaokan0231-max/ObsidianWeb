@@ -5,10 +5,12 @@ import Link from "next/link";
 import { buildProgressDashboard, type ProgressSegment } from "@/lib/recent-progress-dashboard";
 import type { RecentProgressOverview } from "@/lib/recent-progress-overview";
 import type { RecentProgressEntry } from "@/lib/recent-progress";
+import { ProgressConstellation, ProgressFlow, ProgressHeatmap } from "./progress-observatory";
+import { CountUp } from "./count-up";
 import "./styles/progress-dashboard.css";
 
 const zh = {
-  eyebrow: "YOUR MOMENTUM", headline: "每一步，都看得见。", description: "看看机会走到了哪里，把注意力留给值得推进的事。",
+  eyebrow: "CAREER SIGNAL / 机会观测台", headline: "你的机会，正在展开。", description: "从动态脉冲到案件星图，把每一次进展连起来。", signal: "记录信号", visualizations: "5 个可交互视图",
   companies: "有动态的公司", advancing: "已确认的推进", waiting: "申请与保留", rejected: "未采用", companyUnit: "家", caseUnit: "个案件",
   trend: "企业动态趋势", trendNote: "按事件日期统计有动态的公司", daily: "每日去重", monthly: "每月去重", trendUnit: "家公司",
   trendHint: "点击柱形，查看对应公司", noEvents: "这段时间还没有已确认的企业动态。", period: "所选时段", clear: "清除选择", records: "条记录", dateRecords: "企业动态明细",
@@ -17,7 +19,7 @@ const zh = {
   countNote: "公司按名称去重；同一公司可涉及多个案件。各类公司数可能重叠，不宜相加。", basis: "根据已记录的事件日期回看，不代表完整历史或转化率。",
 };
 const ja: typeof zh = {
-  eyebrow: "YOUR MOMENTUM", headline: "一歩ずつ、動きが見える。", description: "選考の現在地を確かめて、次に進めたい機会へ。",
+  eyebrow: "CAREER SIGNAL / 機会の観測台", headline: "次の機会が、広がっていく。", description: "動きの波形から案件の星図まで、進展をつなげて見る。", signal: "記録のシグナル", visualizations: "5 つのインタラクティブビュー",
   companies: "動きのあった会社", advancing: "確認できた進展", waiting: "応募・保留", rejected: "不採用", companyUnit: "社", caseUnit: "案件",
   trend: "企業の動き", trendNote: "発生日に基づく、動きのあった会社数", daily: "日ごとに集約", monthly: "月ごとに集約", trendUnit: "社",
   trendHint: "棒をクリックして会社を確認", noEvents: "この期間には確認済みの企業の動きがありません。", period: "選択期間", clear: "選択を解除", records: "件の記録", dateRecords: "企業の動きの明細",
@@ -30,6 +32,7 @@ type Copy = typeof zh;
 type Dashboard = ReturnType<typeof buildProgressDashboard>;
 type Props = {
   overview: RecentProgressOverview;
+  history?: RecentProgressEntry[];
   locale: string;
   onToggle: (key: string) => void;
   selection?: string;
@@ -60,42 +63,47 @@ function ProgressDistribution({ data, copy, selectedSegment, onSelect }: { data:
   </section>;
 }
 
-export default function ProgressDashboard({ overview, locale, onToggle, selection, onSelection, renderRow }: Props) {
+export default function ProgressDashboard({ overview, history, locale, onToggle, selection, onSelection, renderRow }: Props) {
   const copy = locale === "ja" ? ja : zh;
-  const data = buildProgressDashboard(overview);
+  const data = buildProgressDashboard(overview, history);
   const selectedDate = selection?.startsWith("day:") ? selection.slice(4) : null;
   const selectedSegment = data.segments.find((segment) => selection === `segment:${segment.key}`)?.key ?? null;
-  const selected = data.buckets.find((bucket) => bucket.date === selectedDate);
+  const selected = selection?.startsWith("heat:") ? data.heatmap.find((day) => day.date === selection.slice(5) && !day.future) : data.buckets.find((bucket) => bucket.date === selectedDate);
   const selectedCases = selection === "group:waiting" ? { key: "waiting" as const, entries: data.segments.filter((segment) => segment.key === "applied" || segment.key === "held").flatMap((segment) => segment.entries) } : data.segments.find((segment) => segment.key === selectedSegment);
+  const selectedStar = data.stars.find(({ entry }) => selection === `case:${entry.id}`)?.entry;
   const metrics = [
     { key: "all", label: copy.companies, value: data.companies, glyph: "↗" },
     { key: "advancing", label: copy.advancing, value: data.advancingCompanies, glyph: "↑" },
     { key: "waiting", label: copy.waiting, value: data.waitingCompanies, glyph: "◷" },
     { key: "rejected", label: copy.rejected, value: data.rejectedCompanies, glyph: "−" },
-  ];
+  ] as const;
   const tickStep = Math.max(1, Math.ceil(data.peak / 4));
   const ceiling = tickStep * 4;
+  const wave = data.buckets.map((bucket, index) => `${(index + .5) / data.buckets.length * 1000},${180 - bucket.companies / ceiling * 180}`).join(" ");
+  const observatoryProps = { data, locale, selection, onSelection };
 
-  return <div className="momentum-dashboard">
+  return <div className="momentum-dashboard" data-signal-selection={selection?.startsWith("segment:") ? selectedSegment : undefined}>
     <section className="momentum-summary" aria-label={copy.period}>
-      <div className="momentum-intro"><span>{copy.eyebrow}</span><h2>{copy.headline}</h2><p>{copy.description}</p><svg viewBox="0 0 200 80" aria-hidden="true"><path d="M0 75 35 63 70 65 105 39 140 44 175 13 200 0" /></svg></div>
+      <div className="signal-aurora" aria-hidden="true"><i /><i /><i /></div>
+      <div className="momentum-intro"><span>{copy.eyebrow}</span><h2>{copy.headline}</h2><p>{copy.description}</p><div className="signal-status"><i />{copy.signal}<span>{copy.visualizations}</span></div></div>
       <div className="momentum-metrics">{metrics.map((metric) => <button className="momentum-metric" type="button" key={metric.key} data-metric={metric.key} onClick={() => {
         if (metric.key === "all") document.getElementById("momentum-trend-title")?.scrollIntoView({ behavior: "smooth", block: "center" });
         else if (metric.key === "waiting") onSelection(selection === "group:waiting" ? undefined : "group:waiting");
         else onToggle(metric.key);
-      }}><span className="momentum-metric-title">{metric.label}<span aria-hidden="true">{metric.glyph}</span></span><span className="momentum-metric-value"><strong>{metric.value}</strong><span>{copy.companyUnit}</span></span><span className="momentum-metric-foot">{metric.key === "all" ? copy.period : copy.latest}<span aria-hidden="true">↗</span></span></button>)}</div>
+      }}><span className="momentum-metric-title">{metric.label}<span aria-hidden="true">{metric.glyph}</span></span><span className="momentum-metric-value"><CountUp key={`${metric.key}-${metric.value}`} as="strong" value={metric.value} duration={950} /><span>{copy.companyUnit}</span></span><svg className="signal-metric-spark" viewBox="0 0 130 25" preserveAspectRatio="none" aria-hidden="true"><polyline points={data.sparks[metric.key].map((count, index, values) => `${values.length > 1 ? index / (values.length - 1) * 130 : 65},${23 - count / Math.max(1, ...values) * 20}`).join(" ")} /></svg><span className="momentum-metric-foot">{metric.key === "all" ? copy.period : copy.latest}<span aria-hidden="true">↗</span></span></button>)}</div>
     </section>
     <div className="momentum-charts">
       <section className="momentum-panel momentum-trend" aria-labelledby="momentum-trend-title">
-        <header><div><h2 id="momentum-trend-title">{copy.trend}</h2><p>{copy.trendNote} · {data.monthly ? copy.monthly : copy.daily}</p></div><span className="momentum-panel-number">01</span></header>
+        <header><div><span className="signal-eyebrow">MOMENTUM PULSE</span><h2 id="momentum-trend-title">{copy.trend}</h2><p>{copy.trendNote} · {data.monthly ? copy.monthly : copy.daily}</p></div><span className="momentum-panel-number">01 / PULSE</span></header>
         <div className="momentum-chart-area">
           <div className="momentum-y-axis" aria-hidden="true">{[4, 3, 2, 1, 0].map((step) => <span key={step}>{step * tickStep}</span>)}</div>
           <div className="momentum-plot">
             <div className="momentum-grid" aria-hidden="true">{[0, 1, 2, 3, 4].map((line) => <i key={line} />)}</div>
+            <svg className="signal-trend-wave" viewBox="0 0 1000 180" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="signal-wave-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--signal-cyan)" stopOpacity=".24" /><stop offset="1" stopColor="var(--signal-cyan)" stopOpacity="0" /></linearGradient></defs><polygon points={`0,180 ${wave} 1000,180`} fill="url(#signal-wave-fill)" /><polyline className="signal-wave-glow" points={wave} /><polyline className="signal-wave-line" points={wave} pathLength="1000" /></svg>
             <div className="momentum-bars" style={{ "--bucket-count": data.buckets.length } as CSSProperties}>{data.buckets.map((bucket, index) => {
               const label = `${shortDate(bucket.date, data.monthly)} · ${bucket.companies} ${copy.trendUnit}`;
               const showLabel = data.buckets.length <= 10 || index % Math.ceil(data.buckets.length / 7) === 0 || index === data.buckets.length - 1;
-              return <button type="button" className="momentum-bar" key={bucket.date} aria-label={label} aria-pressed={selectedDate === bucket.date} disabled={!bucket.entries.length} onClick={() => onSelection(selectedDate === bucket.date ? undefined : `day:${bucket.date}`)} style={{ "--bar-height": `${bucket.companies / ceiling * 100}%` } as CSSProperties}>
+              return <button type="button" className="momentum-bar" key={bucket.date} aria-label={label} aria-pressed={selectedDate === bucket.date} disabled={!bucket.entries.length} onClick={() => onSelection(selectedDate === bucket.date ? undefined : `day:${bucket.date}`)} style={{ "--bar-height": `${bucket.companies / ceiling * 100}%`, "--bar-delay": `${Math.min(index, 20) * .025}s` } as CSSProperties}>
                 <span className="momentum-bar-tooltip">{label}</span><span className="momentum-bar-fill">{bucket.companies > 0 && data.buckets.length <= 10 && <b>{bucket.companies}</b>}</span><span className={`momentum-x-label${showLabel ? "" : " momentum-x-label-hidden"}`}>{shortDate(bucket.date, data.monthly)}</span>
               </button>;
             })}</div>
@@ -105,8 +113,11 @@ export default function ProgressDashboard({ overview, locale, onToggle, selectio
       </section>
       <ProgressDistribution data={data} copy={copy} selectedSegment={selectedSegment} onSelect={(key) => onSelection(selectedSegment === key ? undefined : `segment:${key}`)} />
     </div>
-    {selected && <section className="momentum-day-detail" aria-label={copy.dateRecords} aria-live="polite"><header><div><h3>{shortDate(selected.date, data.monthly)}{data.monthly && ` — ${shortDate(selected.end, false)}`} <span>{selected.companies} {copy.trendUnit} · {selected.entries.length} {copy.records}</span></h3></div><button type="button" onClick={() => onSelection(undefined)}>{copy.clear} ×</button></header><ul className="recent-progress-list">{selected.entries.map(renderRow)}</ul></section>}
-    {selectedCases && <section className="momentum-day-detail" aria-label={copy.distribution} aria-live="polite"><header><h3>{selectedCases.key === "waiting" ? copy.waiting : segmentLabel(selectedCases.key, copy)} <span>{selectedCases.entries.length} {copy.caseUnit}</span></h3><button type="button" onClick={() => onSelection(undefined)}>{copy.clear} ×</button></header><ul className="recent-progress-list">{selectedCases.entries.map(renderRow)}</ul></section>}
+    <div className="signal-secondary-grid"><ProgressFlow {...observatoryProps} /><ProgressHeatmap {...observatoryProps} /></div>
+    <ProgressConstellation {...observatoryProps} />
+    {selected && <section id="momentum-chart-detail" className="momentum-day-detail" aria-label={copy.dateRecords} aria-live="polite"><header><div><h3>{shortDate(selected.date, selection?.startsWith("heat:") ? false : data.monthly)}{data.monthly && !selection?.startsWith("heat:") && ` — ${shortDate(selected.end, false)}`} <span>{selected.companies} {copy.trendUnit} · {selected.entries.length} {copy.records}</span></h3></div><button type="button" onClick={() => onSelection(undefined)}>{copy.clear} ×</button></header><ul className="recent-progress-list">{selected.entries.map(renderRow)}</ul></section>}
+    {selectedCases && <section id="momentum-chart-detail" className="momentum-day-detail" aria-label={copy.distribution} aria-live="polite"><header><h3>{selectedCases.key === "waiting" ? copy.waiting : segmentLabel(selectedCases.key, copy)} <span>{selectedCases.entries.length} {copy.caseUnit}</span></h3><button type="button" onClick={() => onSelection(undefined)}>{copy.clear} ×</button></header><ul className="recent-progress-list">{selectedCases.entries.map(renderRow)}</ul></section>}
+    {selectedStar && <section id="momentum-chart-detail" className="momentum-day-detail" aria-label={copy.dateRecords} aria-live="polite"><header><h3>{selectedStar.company}</h3><button type="button" onClick={() => onSelection(undefined)}>{copy.clear} ×</button></header><ul className="recent-progress-list">{renderRow(selectedStar)}</ul></section>}
     <div className="momentum-action-strip" data-has-actions={overview.current.length > 0}>
       <span className="momentum-action-icon" aria-hidden="true">{overview.current.length ? "!" : "✓"}</span>
       <div><strong>{overview.current.length ? <>{copy.actionTitle} · {overview.current.length} {copy.actionUnit}</> : copy.actionClear}</strong><p>{overview.current.length ? copy.actionNote : copy.actionClearNote}</p></div>
