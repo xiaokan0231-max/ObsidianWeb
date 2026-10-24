@@ -51,7 +51,7 @@ test("下一场只在未来议程显示一次，等待案件仍按案件去重",
   assert.match(aside, /明天/);
   assert.match(aside, /round-final/);
   assert.match(aside, /查看安排/);
-  assert.equal((aside.match(/<strong>株式会社ダミー<\/strong>/g) ?? []).length, 1, "下一场不再重复为独立大卡");
+  assert.equal((aside.match(/<strong>ダミー<\/strong>/g) ?? []).length, 1, "下一场不再重复为独立大卡");
   assert.doesNotMatch(html, /calendar-next-hero|未来 7 天场次/);
 });
 
@@ -63,7 +63,7 @@ test("下一场超过七天时保留在稍后安排，不重复挤进未来七�
   assert.match(upcoming, /未来七天没有已确认的安排/);
   assert.doesNotMatch(upcoming, /株式会社ダミー|data-next/);
   assert.match(aside, /<[^>]+class="agenda-item [^>]+data-next=""/);
-  assert.equal((aside.match(/<strong>株式会社ダミー<\/strong>/g) ?? []).length, 1);
+  assert.equal((aside.match(/<strong>ダミー<\/strong>/g) ?? []).length, 1);
 });
 
 test("同日重叠的场次追加 conflict 类与读屏说明，已结束的旧预约不参与", () => {

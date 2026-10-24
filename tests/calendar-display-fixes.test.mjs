@@ -350,7 +350,7 @@ test("周视图：分数排进 meta 行末、公司名独占标题行；带结�
   assert.match(scored, /data-ranged=""/);
   assert.match(scored, /aria-label="2026-09-08 · 10:00–11:00 · JST/, "起止时刻仍完整写在说明里");
   assert.match(scored, /<span class="cw-block-meta"><time class="cw-block-time" dateTime="2026-09-08T10:00\+09:00">10:00<\/time><span class="calendar-round-badge[^"]*"[^>]*>1<\/span><span class="cw-block-stage">面试<\/span><span class="calendar-interview-score"[^>]*>85分<\/span><\/span>/);
-  assert.match(scored, /<span class="cw-block-title"><strong class="cw-block-company">株式会社テストw1<\/strong><\/span>/);
+  assert.match(scored, /<span class="cw-block-title"><strong class="cw-block-company">テストw1<\/strong><\/span>/);
 
   // 短场次也把分数排进 meta 行（上行时刻＋轮次＋分数、下行公司名整宽），只写开始时刻。
   // 改写理由：原两列布局把公司名挤到约 56px，时刻与徽标缩到 8–9px。

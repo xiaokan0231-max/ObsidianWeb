@@ -57,13 +57,13 @@
 }
 
 .calendar-event strong {
-  display: -webkit-box;
+  display: block;
   font-size: 13px;
   line-height: 1.45;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 每周一行 role="row"，行本身不占格子（display: contents），月格仍是一张 7 列网格。 */
@@ -93,14 +93,13 @@
 }
 
 .calendar-agenda .agenda-copy > strong {
-  display: -webkit-box;
+  display: block;
   overflow: hidden;
-  overflow-wrap: anywhere;
-  white-space: normal;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  overflow-wrap: normal;
+  white-space: nowrap;
   font-size: 14px;
   line-height: 1.5;
+  text-overflow: ellipsis;
 }
 .calendar-agenda .agenda-copy small,
 .calendar-agenda .agenda-main time span,
@@ -1130,16 +1129,16 @@
 }
 
 .cw-block-company {
-  display: -webkit-box;
+  display: block;
   max-width: 100%;
   overflow: hidden;
   font-family: var(--font-serif);
   font-size: 13px;
   font-weight: 600;
   line-height: 1.35;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* 短场次单行：时刻＋公司，类型让位（完整信息仍在 aria-label 与 title 里）。 */

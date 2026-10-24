@@ -785,7 +785,7 @@ function CalendarView({
                                     <span className="calendar-status-dot" aria-hidden="true" />
                                   </span>
                                   {event.time && <time className="calendar-event-time" dateTime={`${event.date}T${event.time}+09:00`}>{calendarEventTime(event)}</time>}
-                                  <strong>{event.company}</strong>
+                                  <strong>{compactCompany(event.company)}</strong>
                                   <CalendarOriginBadge origin={originByEvent.get(event.id)} compact locale={locale} />
                                   {target && <span className="calendar-interview-destination" aria-hidden="true">{interviewDestination(target, copy, true)} →</span>}
                                 </button>
@@ -898,9 +898,10 @@ function CalendarView({
   );
 }
 
-/** 30 分钟的短块只有一行给公司名：去掉法人格（株式会社 等）省出 4 个字；全称仍在按钮的 title 与 aria-label 里。 */
+/** 日历卡片只显示公司简称，完整名称保留在按钮提示和读屏说明中。 */
 function compactCompany(name: string) {
-  return name.replace(/^(株式会社|有限会社|合同会社)\s*|\s*(株式会社|有限会社|合同会社)$/gu, "").trim() || name;
+  const trimmed = name.trim();
+  return trimmed.replace(/^(株式会社|有限会社|合同会社)\s*|\s*(株式会社|有限会社|合同会社)$/gu, "").trim() || trimmed;
 }
 
 function eventStage(event: CalendarEvent, round: CalendarBadge | null, copy: CalendarCopy) {
@@ -975,7 +976,7 @@ function WeekBoard({
           <span className="cw-block-stage">{eventStage(event, round, copy)}</span>
           {scoreInMeta && score}
         </span>
-        <span className="cw-block-title"><strong className="cw-block-company">{short ? compactCompany(event.company) : event.company}</strong>{!scoreInMeta && score}</span>
+        <span className="cw-block-title"><strong className="cw-block-company">{compactCompany(event.company)}</strong>{!scoreInMeta && score}</span>
         <CalendarOriginBadge origin={originByEvent.get(event.id)} compact />
       </button>
     );
@@ -1129,7 +1130,7 @@ function AgendaGroup({
                     <small>{event.time ? `${calendarEventTime(event)} · ${copy.eventLabel(event.label)}` : copy.eventLabel(event.label)}</small>
                     {offset !== null && <span className="agenda-when" data-soon={offset === 0 || offset === 1 ? "" : undefined}>{copy.countdown(offset)}</span>}
                   </span>
-                  <strong>{event.company}</strong>
+                  <strong>{compactCompany(event.company)}</strong>
                   <CalendarOriginBadge origin={originByEvent.get(event.id)} locale={locale} />
                   {target && <span className="calendar-interview-destination" aria-hidden="true">{interviewDestination(target, copy)} →</span>}
                 </span>
