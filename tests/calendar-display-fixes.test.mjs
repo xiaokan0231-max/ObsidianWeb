@@ -272,9 +272,17 @@ test("日文月格与议程各有独立的准备和复盘链接", () => {
   const event = simpleEvent("reviewed", { label: "第一次面试", phase: "past", date: "2026-08-07" });
   const interviewTargets = new Map([[event.id, { view: "review", path: "study.md", sourcePath: event.note.path, company: event.company, date: event.date, label: event.label, caseId: "" }]]);
   const html = render(ja, { events: [event], interviewTargets });
-  assert.match(html, /class="calendar-interview-links compact"/);
-  assert.match(html, /data-view="session"[^>]*[\s\S]*?準備/);
-  assert.match(html, /data-view="review"[^>]*[\s\S]*?振り返り/);
+  const compactLinks = html.match(/<span class="calendar-interview-links compact icon-actions">([\s\S]*?)<\/span>/)?.[1] ?? "";
+  const links = [...compactLinks.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)].map((match) => match[0]);
+  assert.equal(links.length, 2);
+  for (const [index, view, label] of [[0, "session", "面接準備"], [1, "review", "面接の振り返り"]]) {
+    assert.match(links[index], new RegExp(`data-view="${view}"`));
+    assert.match(links[index], new RegExp(`aria-label="[^"]*${label}"`));
+    assert.match(links[index], /<svg[^>]*aria-hidden="true"/);
+    assert.equal(links[index].replace(/<[^>]+>/g, ""), "", "月格入口使用图标，完整名称供提示与读屏使用");
+  }
+  assert.match(html, /class="calendar-interview-links">[\s\S]*?面接準備/);
+  assert.match(html, /class="calendar-interview-links">[\s\S]*?面接の振り返り/);
   assert.match(html, /aria-label="[^"]*面接準備"/);
   assert.match(html, /href="\/interview\?[^"]*date=2026-08-07/);
   assert.match(html, /href="\/interview\/review\?[^"]*date=2026-08-07/);
@@ -330,11 +338,11 @@ const renderWith = async (search, fixtures) => {
   return renderToStaticMarkup(createElement(view.default, { today: "2026-09-13", notes, events, interviewTargets, onOpen() {}, onInterview() {} }));
 };
 
-test("月格：有分数时阶段文字让位（CSS 隐藏），类型仍留在按钮的 title 与 aria-label 里", async () => {
-  assert.match(ruleOf(".calendar-event-heading:has(.calendar-interview-score) .calendar-event-stage"), /display: none/);
+test("月格：表现分使用数字短标，完整分数和面试类型仍留在提示与读屏说明里", async () => {
   const html = await renderWith("?month=2026-09", [scoredStudy("m1", "2026-09-10", "10:00", "11:00")]);
   const card = html.match(/<button\b[^>]*class="calendar-event [^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
-  assert.match(card, /<span class="calendar-event-stage">面试<\/span><span class="calendar-interview-score"[^>]*>85分<\/span><span class="calendar-status-dot"/);
+  assert.match(card, /class="calendar-round-badge round-numbered"[^>]*>1<\/span>/);
+  assert.match(card, /class="calendar-interview-score"[^>]*data-kind="overall"[^>]*data-compact="true"[^>]*title="85分"[^>]*>85<\/span>/);
   assert.match(card, /aria-label="2026-09-10 · 10:00–11:00 · JST · 株式会社テストm1 · 第一次面试 · [^"]*85分/);
   assert.match(card, /title="2026-09-10 · 10:00–11:00 · JST · 株式会社テストm1 · 第一次面试 · /);
 });

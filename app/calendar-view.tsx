@@ -311,11 +311,11 @@ function scoreText(score: CalendarInterviewScore | null | undefined, copy: Calen
   return score.kind === "overall" ? copy.score(points) : copy.localScore(points);
 }
 
-function InterviewScoreBadge({ score, copy }: { score?: CalendarInterviewScore | null; copy: CalendarCopy }) {
+function InterviewScoreBadge({ score, copy, compact = false }: { score?: CalendarInterviewScore | null; copy: CalendarCopy; compact?: boolean }) {
   if (!score) return null;
   const band = score.kind === "local" ? "local" : score.scores[0] < 65 ? "attention" : "standard";
   // 标签属于原生面试按钮，整块支持触控、Enter和Space，不另塞嵌套按钮。
-  return <span className="calendar-interview-score" data-kind={score.kind} data-band={band} aria-hidden="true">{scoreText(score, copy)}</span>;
+  return <span className="calendar-interview-score" data-kind={score.kind} data-band={band} data-compact={compact || undefined} title={scoreText(score, copy)} aria-hidden="true">{compact ? score.scores.join("/") : scoreText(score, copy)}</span>;
 }
 
 function eventActionLabel(event: CalendarEvent, progress: CalendarProgress, copy: CalendarCopy, target?: CalendarInterviewTarget, conflict = false, score?: CalendarInterviewScore | null) {
@@ -787,15 +787,17 @@ function CalendarView({
                                   aria-label={actionLabel}
                                 >
                                   <span className="calendar-event-heading">
+                                    {event.time ? <time className="calendar-event-time" dateTime={`${event.date}T${event.time}+09:00`}>{event.time}</time> : <span className="calendar-event-stage">{stage}</span>}
                                     {round && <RoundBadge round={round} />}
-                                    <span className="calendar-event-stage">{stage}</span>
-                                    <InterviewScoreBadge score={scoreByEvent.get(event.id)} copy={copy} />
                                     <span className="calendar-status-dot" aria-hidden="true" />
                                   </span>
-                                  {event.time && <time className="calendar-event-time" dateTime={`${event.date}T${event.time}+09:00`}>{calendarEventTime(event)}</time>}
                                   <strong>{compactCompany(event.company)}</strong>
-                                  <span className="calendar-card-footer"><CalendarOriginBadge origin={originByEvent.get(event.id)} compact locale={locale} /><CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact /></span>
-                                </button><CalendarInterviewLinks targets={interviewDestinations.get(event.id)} compact onNavigate={(view) => onInterview(event, view)} /></div>
+                                  <span className="calendar-month-signals">
+                                    <CalendarOriginBadge origin={originByEvent.get(event.id)} compact locale={locale} className="calendar-origin-dot" />
+                                    <InterviewScoreBadge score={scoreByEvent.get(event.id)} copy={copy} compact />
+                                    <CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact />
+                                  </span>
+                                </button><CalendarInterviewLinks targets={interviewDestinations.get(event.id)} compact icons onNavigate={(view) => onInterview(event, view)} /></div>
                               );
                             })}
                             {dayEvents.length > 3 && (

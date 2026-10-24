@@ -1336,3 +1336,24 @@
 .cw-event-shell > .calendar-interview-links { position: absolute; top: 100%; left: 0; z-index: 3; width: max-content; padding: 3px 7px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-overlay); box-shadow: var(--shadow); visibility: hidden; }
 .cw-event-shell:is(:hover, :focus-within) { z-index: 5; }
 .cw-event-shell:is(:hover, :focus-within) > .calendar-interview-links { visibility: visible; }
+
+/* 月格是一张可扫读的日程签：三行信息加一条图标操作，不为长时间范围或说明词增高。 */
+.calendar-event-item > .calendar-event { width: 100%; gap: 3px; padding: 5px 6px; border-left-width: 2px; border-radius: 6px; }
+.calendar-event-item:has(.calendar-interview-links) > .calendar-event { padding-bottom: 25px; }
+.calendar-event-item .calendar-event-heading { flex-wrap: nowrap; gap: 3px; min-height: 14px; height: 14px; margin: 0; }
+.calendar-event-item .calendar-event-time { flex: 1 1 auto; min-width: 0; font-size: 11px; line-height: 14px; letter-spacing: -.4px; white-space: nowrap; }
+.calendar-event-item .calendar-event-stage { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.calendar-event-item .calendar-round-badge { flex: 0 0 13px; width: 13px; height: 13px; border-radius: 3px; font-size: 9px; line-height: 1; }
+.calendar-event-item .calendar-event-heading > .calendar-status-dot { flex: 0 0 10px; width: 10px; height: 10px; margin-left: 0; }
+.calendar-event-item > .calendar-event > strong { width: 100%; font-size: 12px; font-weight: 650; line-height: 18px; letter-spacing: -.15px; }
+.calendar-event-item .calendar-month-signals { display: flex; align-items: center; gap: 2px; width: 100%; min-height: 15px; overflow: visible; }
+.calendar-month-signals > .calendar-origin-dot { flex: 0 0 5px; min-height: 12px; gap: 0; overflow: visible; }
+.calendar-month-signals .calendar-origin-dot > span { display: none; }
+.calendar-month-signals .calendar-origin-dot > i { flex-basis: 5px; width: 5px; height: 5px; }
+.calendar-month-signals > .calendar-interview-score { flex: 0 0 auto; max-width: 30px; padding: 0 2px; font-size: 9px; line-height: 13px; }
+.calendar-month-signals > .calendar-company-rating { margin-left: auto; font-size: 9px; line-height: 14px; }
+.calendar-event-item > .calendar-interview-links.icon-actions { left: 6px; right: 5px; bottom: 3px; gap: 0; border-top: 1px solid color-mix(in oklab, var(--line) 65%, transparent); }
+.calendar-event-item .icon-actions a { flex: 1 1 0; justify-content: center; min-width: 0; height: 18px; border-radius: 3px; }
+.calendar-event-item .icon-actions a + a { border-left: 1px solid color-mix(in oklab, var(--line) 65%, transparent); }
+.calendar-event-item .icon-actions a:hover { background: color-mix(in oklab, currentColor 12%, transparent); }
+.calendar-event-item .icon-actions a[data-missing] { opacity: .55; }
