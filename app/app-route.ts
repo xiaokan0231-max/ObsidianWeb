@@ -12,6 +12,8 @@ export type AppView =
   | "analytics"
   | "graph"
   | "calendar"
+  | "actions"
+  | "activity"
   | "timeline"
   | "library"
   | "settings";
@@ -20,6 +22,8 @@ const VIEW_PATHS: Record<AppView, string> = {
   analytics: "/progress",
   jobs: "/jobs",
   calendar: "/calendar",
+  actions: "/actions",
+  activity: "/activity",
   session: "/interview",
   prep: "/interview/prep",
   review: "/interview/review",

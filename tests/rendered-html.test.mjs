@@ -72,8 +72,8 @@ test("保存的日语选择在服务端首屏、菜单与元数据中保持一�
   assert.doesNotMatch(html, /搜索与命令|正在加载求职作战室|回声/);
 });
 
-test("根入口及旧行动、总览入口重定向日历并保留笔记定位", async () => {
-  for (const path of ["/", "/actions", "/actions/", "/overview", "/overview/"]) {
+test("根及总览入口重定向日历并保留笔记定位", async () => {
+  for (const path of ["/", "/overview", "/overview/"]) {
     let response = await render(`${path}?tab=open&who=system&note=test.md&section=background&tag=a&tag=b`);
     if (path.length > 1 && path.endsWith("/")) {
       assert.equal(response.status, 308);
@@ -92,9 +92,45 @@ test("根入口及旧行动、总览入口重定向日历并保留笔记定位",
   }
 });
 
-test("移除的待办状态接口不再接受写入", async () => {
+test("事项记录与进展共用一个导航入口，中日文首屏均可到达", async () => {
+  for (const [cookie, label] of [["", "最近进展"], ["career-room-locale=ja", "最近の進展"]]) {
+    const response = await render("/actions?note=test.md", "GET", cookie);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, new RegExp(label));
+    assert.match(html, /href="\/activity"/);
+    assert.doesNotMatch(html, /class="user-actions-entry"/);
+    assert.doesNotMatch(html, /0 件待办/);
+  }
+});
+
+test("待办写入接口拒绝缺少同源依据的请求", async () => {
   const response = await render("/api/todos/status", "POST");
-  assert.ok([404, 405].includes(response.status), `删除的接口返回 ${response.status}`);
+  assert.equal(response.status, 403);
+});
+
+test("最近进展有中日文独立入口", async () => {
+  for (const [cookie, label] of [["", "最近进展"], ["career-room-locale=ja", "最近の進展"]]) {
+    const response = await render("/activity?update=example", "GET", cookie);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.ok(html.includes(label));
+    assert.match(html, /href="\/activity"/);
+  }
+});
+
+test("最近进展只在独立目录，日历保留原日程与代投组件", async () => {
+  const client = await readFile(new URL("../app/memory-atlas.tsx", import.meta.url), "utf8");
+  const calendar = client.match(/\{view === "calendar" && \(([\s\S]*?)\n              \)\}/)?.[1];
+  assert.ok(calendar);
+  assert.match(calendar, /<CalendarView/);
+  assert.match(calendar, /onOpenCompany=\{openApplicationCompany\}/);
+  assert.match(calendar, /interviewTargets=\{calendarInterviewTargets\}/);
+  assert.doesNotMatch(calendar, /RecentProgress|recent-progress/);
+  assert.doesNotMatch(client, /RecentProgressSummary/);
+  const response = await render("/calendar");
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /href="\/activity"/);
 });
 
 test("keeps the Obsidian credential server-side", async () => {

@@ -35,6 +35,7 @@ import {
   MOBILE_PRIMARY_NAV_IDS,
   getNavigation,
   getSecondaryNavigation,
+  navigationView,
   TOP_BAR_SECTION_IDS,
   type NavIconName,
 } from "./navigation";
@@ -89,7 +90,10 @@ import {
 
 // 业务页首次进入时再加载；组件身份固定，笔记刷新和 URL 更新不能重建页面状态。
 // 加载器与预取共用一份：侧栏悬停／聚焦时先拉 chunk，切换时 lazy 当场读到模块，转场的新快照里不是骨架。
+const PROGRESS_MODULE = createPreloadable(() => import("./progress-workspace"));
 const VIEW_MODULES = {
+  activity: PROGRESS_MODULE,
+  actions: PROGRESS_MODULE,
   review: createPreloadable(() => import("./interview-review")),
   insights: createPreloadable(() => import("./interview-insights")),
   practice: createPreloadable(() => import("./interview-practice")),
@@ -117,6 +121,7 @@ const GraphView = lazy(VIEW_MODULES.graph.load);
 const LibraryView = lazy(VIEW_MODULES.library.load);
 const SettingsView = lazy(VIEW_MODULES.settings.load);
 const TimelineView = lazy(VIEW_MODULES.timeline.load);
+const ProgressWorkspace = lazy(PROGRESS_MODULE.load);
 
 /** 日历是外壳的静态依赖，不在表里；其余页面按需预取，失败留给页面自己的错误边界。 */
 function viewModule(view: AppView) {
@@ -529,6 +534,11 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const readyScopes = vaultState.readyScopes;
   const interviewScopeReady = readyScopes.has("all") || readyScopes.has("interview");
   const scopeReady = readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
+  const actionsReady = readyScopes.has("all") || readyScopes.has("actions");
+  const activityReady = readyScopes.has("all") || readyScopes.has("activity");
+  const activityError = vaultState.errors.get("activity") ?? vaultState.errors.get("all") ?? "";
+  const activityFetchedAt = vaultState.checkedAt.get("activity") ?? vaultState.checkedAt.get("all") ?? null;
+  const actionsFetchedAt = vaultState.checkedAt.get("actions") ?? vaultState.checkedAt.get("all") ?? null;
 
   // 浏览器后退／前进回到某一页时要回到的纵向位置。
   const pendingScrollRestore = useRef<number | null>(null);
@@ -1369,8 +1379,9 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const secondaryPlacement = TOP_BAR_SECTION_IDS.has(activeNavigation.id)
     ? "bar"
     : "rail";
+  const activeNavigationView = navigationView(view);
   const activeSecondaryLabel =
-    secondaryNavigation.find((item) => item.id === view)?.label ?? "";
+    secondaryNavigation.find((item) => item.id === activeNavigationView)?.label ?? "";
   useEffect(() => {
     document.title = `${activeSecondaryLabel || activeNavigation.label} · ${branding.name}`;
   }, [activeNavigation.label, activeSecondaryLabel, branding.name]);
@@ -1445,12 +1456,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                     {subItems.map((sub) => (
                       <a
                         key={sub.id}
-                        className={view === sub.id ? "active" : ""}
+                        className={activeNavigationView === sub.id ? "active" : ""}
                         href={appViewHref(sub.id)}
                         onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(sub.id); } }}
                         onPointerEnter={() => preloadView(sub.id)}
                         onFocus={() => preloadView(sub.id)}
-                        aria-current={view === sub.id ? "page" : undefined}
+                        aria-current={activeNavigationView === sub.id ? "page" : undefined}
                         data-label={sub.label}
                       >
                         <span className="nav-glyph" aria-hidden="true">{sub.glyph}</span>
@@ -1500,8 +1511,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           </div>
 
           {/* 当前面试页已经有“本场”倒计时；再放全局下一场会让两家公司同时争夺上下文。 */}
-          {/* 日历首页自己有下一场的大卡，顶栏不再重复一条。 */}
-          {nextEvent && view !== "session" && view !== "calendar" && (
+          {/* 日历负责近期日程；进展工作区的顶栏也留给当前位置。 */}
+          {nextEvent && !["session", "calendar", "activity", "actions"].includes(view) && (
             <button
               className="topbar-next"
               onClick={openNextEvent}
@@ -1573,12 +1584,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   {secondaryNavigation.map((item) => (
                     <a
                       key={item.id}
-                      className={view === item.id ? "active" : ""}
+                      className={activeNavigationView === item.id ? "active" : ""}
                       href={appViewHref(item.id)}
                       onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(item.id); } }}
                       onPointerEnter={() => preloadView(item.id)}
                       onFocus={() => preloadView(item.id)}
-                      aria-current={view === item.id ? "page" : undefined}
+                      aria-current={activeNavigationView === item.id ? "page" : undefined}
                     >
                       <i aria-hidden="true">{item.glyph}</i>
                       <span>
@@ -1714,6 +1725,21 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   onOpen={openNote}
                   interviewTargets={calendarInterviewTargets}
                   onInterview={openCalendarInterview}
+                />
+              )}
+              {(view === "actions" || view === "activity") && (
+                <ProgressWorkspace
+                  notes={notes}
+                  today={calendarToday}
+                  view={view}
+                  actionsLoading={!actionsReady}
+                  activityLoading={!activityReady && !activityError}
+                  actionsFetchedAt={actionsFetchedAt}
+                  activityFetchedAt={activityFetchedAt}
+                  activityError={activityError}
+                  onNavigate={navigateToView}
+                  onOpen={openNote}
+                  onNoteWritten={patchNote}
                 />
               )}
               {view === "timeline" && (

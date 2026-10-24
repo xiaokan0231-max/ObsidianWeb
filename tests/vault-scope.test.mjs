@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { noteInVaultScope, vaultScopeForView } from "../lib/vault-scope.ts";
+import { normalizeVaultScope, noteInVaultScope, vaultScopeForView } from "../lib/vault-scope.ts";
 
 const note = (type) => ({ path: `${type}.md`, stat: { ctime: 0, mtime: 0, size: 0 }, tags: [], frontmatter: { type }, content: "" });
 
@@ -26,6 +26,17 @@ test("views map to stable module scopes", () => {
   assert.equal(vaultScopeForView("calendar"), "actions");
   assert.equal(vaultScopeForView("practice"), "interview");
   assert.equal(vaultScopeForView("graph"), "all");
+});
+
+test("进展页与首页摘要读取同一白名单，不扩到内部材料或一般笔记", () => {
+  assert.equal(normalizeVaultScope("activity"), "activity");
+  assert.equal(vaultScopeForView("activity"), "activity");
+  for (const type of ["job-case", "todo", "application_log", "job_platform_sync", "profile_sync", "outbound-draft"]) {
+    assert.equal(noteInVaultScope(note(type), "activity"), true);
+  }
+  for (const type of ["note", "material", "self", "ai-report", "transcript"]) {
+    assert.equal(noteInVaultScope(note(type), "activity"), false);
+  }
 });
 
 test("专项训练冷启动同时读取两版课程，只收课程 material", () => {

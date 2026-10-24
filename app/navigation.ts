@@ -45,15 +45,7 @@ export const NAVIGATION: PrimaryNavigationItem[] = [
     mobileLabel: "日历",
     glyph: "actions",
     target: "calendar",
-    views: ["calendar"],
-  },
-  {
-    id: "career",
-    label: "求职",
-    mobileLabel: "求职",
-    glyph: "career",
-    target: "jobs",
-    views: ["jobs", "analytics"],
+    views: ["calendar", "actions", "activity"],
   },
   {
     id: "interview",
@@ -61,7 +53,7 @@ export const NAVIGATION: PrimaryNavigationItem[] = [
     mobileLabel: "面试",
     glyph: "interview",
     target: "session",
-    views: ["session", "prep", "review", "insights", "practice"],
+    views: ["session", "review", "insights", "practice", "prep"],
   },
   {
     id: "training",
@@ -70,6 +62,14 @@ export const NAVIGATION: PrimaryNavigationItem[] = [
     glyph: "training",
     target: "language",
     views: ["language", "topics"],
+  },
+  {
+    id: "career",
+    label: "求职",
+    mobileLabel: "求职",
+    glyph: "career",
+    target: "jobs",
+    views: ["jobs", "analytics"],
   },
   {
     id: "resources",
@@ -91,16 +91,20 @@ export const NAVIGATION: PrimaryNavigationItem[] = [
 ];
 
 export const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigationItem[]>> = {
+  actions: [
+    { id: "calendar", label: "日历", glyph: "暦", caption: "CALENDAR" },
+    { id: "activity", label: "最近进展", glyph: "報", caption: "RECENT UPDATES" },
+  ],
   career: [
     { id: "jobs", label: "岗位机会", glyph: "機", caption: "OPPORTUNITIES" },
     { id: "analytics", label: "选考与分析", glyph: "選", caption: "PIPELINE" },
   ],
   interview: [
-    { id: "session", label: "本场面试", glyph: "場", caption: "SESSION" },
-    { id: "prep", label: "通用准备", glyph: "備", caption: "PLAYBOOK" },
+    { id: "session", label: "面试准备", glyph: "準", caption: "INTERVIEW PREP" },
     { id: "review", label: "面试复盘", glyph: "復", caption: "REVIEW" },
     { id: "insights", label: "横向对照", glyph: "比", caption: "INSIGHTS" },
     { id: "practice", label: "回答重练", glyph: "練", caption: "PRACTICE" },
+    { id: "prep", label: "通用准备", glyph: "備", caption: "PLAYBOOK" },
   ],
   training: [
     { id: "language", label: "日语训练", glyph: "話", caption: "NIHONGO" },
@@ -123,9 +127,11 @@ const JAPANESE_PRIMARY_LABELS: Record<PrimaryNavId, { label: string; mobileLabel
 };
 
 const JAPANESE_SECONDARY_LABELS: Record<Exclude<AppView, "calendar">, string> = {
+  actions: "あなたの対応が必要",
+  activity: "最近の進展",
   jobs: "求人・応募先",
   analytics: "選考・分析",
-  session: "今回の面接",
+  session: "面接準備",
   prep: "基本の準備",
   review: "面接の振り返り",
   insights: "面接の比較",
@@ -175,6 +181,11 @@ export const MOBILE_PRIMARY_NAV_IDS: ReadonlySet<PrimaryNavId> = new Set<Primary
   "interview",
 ]);
 
+/** 事项是进展工作区内的记录页，保留旧链接但不再占一个导航入口。 */
+export function navigationView(view: AppView): AppView {
+  return view === "actions" ? "activity" : view;
+}
+
 export type PageCommand = {
   view: AppView;
   label: string;
@@ -188,6 +199,8 @@ export type PageCommand = {
  * 检索词混写中・日・英：本人会按当时脑子里的那个词去搜（「応募」「复盘」「calendar」都有）。
  */
 const PAGE_COMMAND_HINTS: Record<AppView, { description: string; keywords: string }> = {
+  actions: { description: "你现在必须采取的具体行动与待核事项", keywords: "需要你处理 本人 待办 任务 确认 action todo task 対応 確認" },
+  activity: { description: "查看选考进展、待关注事项与处理记录", keywords: "最近 进展 进度 日报 回复 记录 需要你处理 待办 事项 todo action activity updates recent daily 進展 経過 記録" },
   calendar: { description: "已约定的面试与面谈日程", keywords: "日历 首页 日程 安排 面试时间 home calendar schedule 予定 カレンダー" },
   jobs: { description: "判断下一项応募", keywords: "岗位 机会 求职 応募 求人 就職 就活 job" },
   analytics: { description: "选考进度、渠道与到达率", keywords: "选考 分析 进度 统计 漏斗 渠道 pipeline analytics progress 選考 応募状況" },
@@ -205,6 +218,8 @@ const PAGE_COMMAND_HINTS: Record<AppView, { description: string; keywords: strin
 };
 
 const JAPANESE_COMMAND_DESCRIPTIONS: Record<AppView, string> = {
+  actions: "今あなたが行う必要のある具体的な対応と確認待ち事項",
+  activity: "選考の進展・確認事項・対応の記録を見る",
   calendar: "確定した面接・面談の予定",
   jobs: "次の応募先を検討する",
   analytics: "選考の進捗・応募経路・通過率",
@@ -229,6 +244,7 @@ export function getPageCommands(locale: UiLocale): readonly PageCommand[] {
   for (const primary of getNavigation(locale)) {
     const secondary = secondaryNavigation[primary.id] ?? [];
     for (const view of primary.views) {
+      if (navigationView(view) !== view) continue;
       if (seen.has(view)) continue;
       seen.add(view);
       const label = secondary.find((item) => item.id === view)?.label ?? primary.label;

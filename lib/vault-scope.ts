@@ -1,7 +1,10 @@
 import { getType, type Note } from "./notes.ts";
 import { isLanguageTextbookChapter } from "./language-textbook.ts";
 
-export type VaultScope = "all" | "overview" | "actions" | "jobs" | "interview" | "training";
+export type VaultScope = "all" | "overview" | "actions" | "activity" | "jobs" | "interview" | "training";
+
+// 进展只读取已有业务记录；一般笔记与内部指令不进入这份来源集合。
+const ACTIVITY_TYPES = new Set(["job-case", "todo", "application_log", "job_platform_sync", "profile_sync", "outbound-draft"]);
 
 // 场次材料也是日历历史来源；冷启动与打开复盘后的投影必须相同。
 const COMMITMENT_TYPES = new Set(["job-case", "todo", "interview-prep", "review", "transcript", "transcript-study"]);
@@ -28,7 +31,7 @@ export function isLanguageScenarioResource(note: Note) {
 }
 
 export function normalizeVaultScope(value: string | null): VaultScope {
-  return value === "overview" || value === "actions" || value === "jobs" || value === "interview" || value === "training"
+  return value === "overview" || value === "actions" || value === "activity" || value === "jobs" || value === "interview" || value === "training"
     ? value
     : "all";
 }
@@ -36,6 +39,7 @@ export function normalizeVaultScope(value: string | null): VaultScope {
 export function noteInVaultScope(note: Note, scope: VaultScope) {
   if (scope === "all") return true;
   const type = getType(note);
+  if (scope === "activity") return ACTIVITY_TYPES.has(type);
   if (scope === "overview") {
     return COMMITMENT_TYPES.has(type) || OVERVIEW_REVIEW_TYPES.has(type);
   }
@@ -66,7 +70,8 @@ export function scopesToReloadAfterStats(loaded: Iterable<VaultScope>): VaultSco
 export function vaultScopeForView(view: string): VaultScope {
   // 设置页不读笔记：借外壳常驻的 actions scope，别落到最后的 all（整库读取）。
   if (view === "settings") return "actions";
-  if (view === "calendar") return "actions";
+  if (view === "activity") return "activity";
+  if (view === "calendar" || view === "actions") return "actions";
   if (view === "jobs" || view === "analytics") return "jobs";
   if (view === "session" || view === "prep" || view === "review" || view === "practice" || view === "insights") return "interview";
   if (view === "language" || view === "topics") return "training";

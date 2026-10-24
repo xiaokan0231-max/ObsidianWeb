@@ -216,7 +216,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   return <div className="session-v2" onCopy={copySelectionWithoutRuby}>
     <header className="v2-header" ref={headerRef}>
       <div className="v2-heading">
-        <p className="v2-kicker">{t("本场面试")} <span>{doc.round || "轮次未定"}</span>
+        <p className="v2-kicker">{t("面试准备")} <span>{doc.round || "轮次未定"}</span>
           {doc.replayOf ? <><b className="v2-replay-badge">{t("对照样稿")}</b>{doc.replayAsOf && <span className="v2-replay-asof">{t("信息截至 {date}", { date: doc.replayAsOf })}</span>}</>
             : countdown && <b className={`v2-countdown ${countdown.tone}`}>{countdownText}</b>}</p>
         <h1>{doc.company || doc.title}</h1>
