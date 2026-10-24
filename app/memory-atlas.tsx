@@ -66,7 +66,7 @@ import {
   type GroupKey,
 } from "@/lib/memory-atlas-data";
 import { scopesToReloadAfterStats, vaultScopeForView } from "@/lib/vault-scope";
-import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
+import { resolveCalendarInterview, resolveCalendarInterviewDestinations, resolveCalendarInterviewRequest, type CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { calendarProgress } from "@/lib/calendar-progress";
 import { buildCalendarSummary } from "@/lib/calendar-summary";
 import { tokyoParts } from "@/lib/dojo/utils";
@@ -1099,25 +1099,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const calendarInterview = useMemo(() => {
     const requested = calendarInterviewFromSearch(view, interviewRouteSearch);
     if (!requested) return null;
-    const source = notes.find((note) => note.path === requested.sourcePath);
-    if (!source) return { ...requested, path: null };
-    const event = calendarEvents.find((item) =>
-      item.date === requested.date && item.note.path === requested.sourcePath,
-    );
-    // 日历只加载行动资料；到面试页加载完整资料后重新匹配，不能把先前的空结果冻结。
-    const resolved = resolveCalendarInterview({
-      id: event?.id ?? requested.sourcePath,
-      note: source,
-      kind: "event",
-      company: requested.company,
-      date: requested.date,
-      time: requested.time || event?.time || "",
-      label: requested.label,
-      phase: requested.date < calendarToday ? "past" : "upcoming",
-      caseId: requested.caseId,
-      prepPath: "",
-    }, notes);
-    return resolved ?? { ...requested, path: null };
+    // 完整资料加载后只补齐所选材料，不能把“准备”改成自动判定的“复盘”。
+    return resolveCalendarInterviewRequest(requested, notes, calendarEvents, calendarToday);
   }, [view, interviewRouteSearch, notes, calendarEvents, calendarToday]);
   const interviewParams = new URLSearchParams(interviewRouteSearch);
   const reviewInitialKey = calendarInterview?.path ?? interviewParams.get("review");
@@ -1267,11 +1250,11 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     navigateToView("jobs", params, true, () => setJobsInitialFilters(filters ?? null));
   }, [navigateToView]);
 
-  const openCalendarInterview = useCallback((commitment: Commitment) => {
-    const target = calendarInterviewTargets.get(commitment.id);
+  const openCalendarInterview = useCallback((commitment: Commitment, view?: CalendarInterviewTarget["view"]) => {
+    const target = view ? resolveCalendarInterviewDestinations(commitment, notes)[view] : calendarInterviewTargets.get(commitment.id);
     if (target) navigateToView(target.view, calendarInterviewSearch(target));
     else openNote(commitment.note);
-  }, [calendarInterviewTargets, navigateToView, openNote]);
+  }, [calendarInterviewTargets, notes, navigateToView, openNote]);
 
   // 顶栏「最近安排」直达那场面试的准备页；认不出对应面试的日程才退回日历。
   const openNextEvent = useCallback(() => {
@@ -1343,16 +1326,6 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     interviewNavigation.current = interviewNavigationKey("review", params.toString());
   }, []);
 
-  useEffect(() => {
-    if (!calendarInterview || !interviewScopeReady || calendarInterview.view === view) return;
-    // 当天的新整理稿可能只在进入面试页后才加载；补齐完成证据后更新同一个历史入口。
-    const params = calendarInterviewSearch(calendarInterview);
-    window.history.replaceState(
-      { ...(window.history.state ?? {}), __echoAppView: calendarInterview.view }, "",
-      appViewHref(calendarInterview.view, params),
-    );
-    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
-  }, [calendarInterview, interviewScopeReady, view]);
 
   useEffect(() => {
     if (view !== "library" && view !== "graph") return;

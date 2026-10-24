@@ -1308,8 +1308,31 @@
 .calendar-rating-star { color: var(--gold-text); }
 .calendar-company-rating.compact { font-size: 10px; line-height: 16px; }
 .calendar-event .calendar-card-footer .calendar-company-rating { font-size: 10px; }
+.calendar-event .calendar-card-footer { width: 100%; gap: 2px; }
+.calendar-event .calendar-card-footer > .calendar-origin-badge { flex: 1 1 0; min-width: 0; }
 .calendar-agenda .calendar-card-footer { justify-content: flex-start; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
 .cw-rating-footer { position: absolute; left: 5px; bottom: 0; }
 .cw-rating-footer .calendar-company-rating { font-size: 9px; line-height: 12px; }
 .cw-short .cw-block-title .calendar-company-rating { align-self: center; font-size: 9px; line-height: 14px; }
 .calendar-company-rating span { font-size: inherit; }
+
+/* 资料链接与主按钮平级，既保留整卡默认动作，也允许直接回看准备稿。 */
+.calendar-event-item { position: relative; min-width: 0; }
+.calendar-event-item:has(.calendar-interview-links) > .calendar-event { width: 100%; padding-bottom: 24px; }
+.calendar-interview-links { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.calendar-interview-links a { display: inline-flex; align-items: center; gap: 3px; color: var(--green); font-size: 12px; font-weight: 550; line-height: 20px; text-decoration: none; white-space: nowrap; }
+.calendar-interview-links a[data-view="review"] { color: var(--info); }
+.calendar-interview-links a[data-missing] { color: var(--muted); }
+.calendar-interview-links a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.calendar-interview-links a:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.calendar-interview-links.compact { gap: 8px; }
+.calendar-interview-links.compact a { gap: 1px; font-size: 10px; line-height: 18px; }
+.calendar-event-item > .calendar-interview-links { position: absolute; bottom: 3px; left: 7px; right: 5px; justify-content: space-between; }
+.calendar-agenda .agenda-item > .calendar-interview-links { margin: 3px 15px 6px 62px; }
+.cw-event-shell { position: relative; min-width: 0; }
+.cw-event-shell.timed { position: absolute; z-index: 1; min-height: 22px; }
+.cw-event-shell.timed > .cw-block { position: relative; width: 100%; height: 100%; }
+.cw-event-shell > .cw-chip { width: 100%; }
+.cw-event-shell > .calendar-interview-links { position: absolute; top: 100%; left: 0; z-index: 3; width: max-content; padding: 3px 7px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-overlay); box-shadow: var(--shadow); visibility: hidden; }
+.cw-event-shell:is(:hover, :focus-within) { z-index: 5; }
+.cw-event-shell:is(:hover, :focus-within) > .calendar-interview-links { visibility: visible; }

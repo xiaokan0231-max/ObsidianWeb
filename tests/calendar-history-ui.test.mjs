@@ -99,7 +99,8 @@ test("历史说明可展开九场理由与精确原始来源，打开记录不�
   assert.match(html, /当轮通过/); assert.match(html, /面谈已完成/); assert.match(html, /当轮结果已记录/); assert.doesNotMatch(html, /旧準備作業|テスト担当|999|翌日の返信で終了を記録/);
   const sourceLabel = `${historyNotes[0].frontmatter.date} · ${historyNotes[0].frontmatter.company} · 查看原始记录`;
   button(content, sourceLabel).props.onClick();
-  button(content, `${historyNotes[0].frontmatter.date} · ${historyNotes[0].frontmatter.company} · 面试复盘`).props.onClick();
+  const links = find(content, (item) => typeof item.type === "function" && item.type.name === "CalendarInterviewLinks" && item.props.targets?.review?.sourcePath === historyEvents[0].note.path);
+  links.props.onNavigate("review");
   assert.deepEqual(ui.opened, [historyNotes[0].path]); assert.deepEqual(ui.reviewed, [historyEvents[0].id]);
   button(content, `${historyNotes[5].frontmatter.date} · ${historyNotes[5].frontmatter.company} · 查看原始记录`).props.onClick();
   assert.equal(ui.openedNotes.at(-1).frontmatter.result, sensitiveResult, "原始记录完整保留，只有主动打开才交给阅读器");

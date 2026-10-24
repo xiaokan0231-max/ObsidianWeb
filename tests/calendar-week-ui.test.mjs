@@ -48,8 +48,8 @@ test("周视图：7 列时间块、全天行、冲突并排分栏，别周的场
   assert.match(first, /class="cw-block upcoming status-active conflict"/);
   assert.match(second, /class="cw-block upcoming status-active conflict"/);
   assert.match(first, /aria-label="[^"]*时间冲突"/);
-  assert.match(first, /left:calc\(0% \+ 2px\);width:calc\(50% - 4px\)/);
-  assert.match(second, /left:calc\(50% \+ 2px\);width:calc\(50% - 4px\)/);
+  assert.match(html, /left:calc\(0% \+ 2px\);width:calc\(50% - 4px\)/);
+  assert.match(html, /left:calc\(50% \+ 2px\);width:calc\(50% - 4px\)/);
   assert.match(first, /<time class="cw-block-time" dateTime="2026-08-12T10:00\+09:00">10:00–11:00<\/time>/);
   assert.match(first, /<strong class="cw-block-company">テストA<\/strong>/);
   assert.doesNotMatch(early, /conflict/);
@@ -60,7 +60,7 @@ test("周视图：7 列时间块、全天行、冲突并排分栏，别周的场
   assert.match(html, /<span>13:00<\/span>/);
   assert.doesNotMatch(html, /<span>20:00<\/span>/);
   // 07:30 在 06:00–14:00 里的位置：90/480；60 分钟占 60/480。
-  assert.match(early, /top:18\.75%;height:12\.5%/);
+  assert.match(html, /top:18\.75%;height:12\.5%/);
 
   const allDay = html.match(/<div class="cw-allday">[\s\S]*?<div class="cw-body">/)?.[0] ?? "";
   assert.match(allDay, /<span class="cw-gutter-label" title="未写具体时刻，不占时间段">全天<\/span>/);

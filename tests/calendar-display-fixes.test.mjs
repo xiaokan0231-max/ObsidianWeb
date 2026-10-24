@@ -268,17 +268,19 @@ test("日文界面的议程与卡片说明不再露出中文轮次名", () => {
 });
 
 // ── 8. 月格卡片用短文案，右栏保留完整文案 ──
-test("日文月格卡片的去向写「振り返り →」，右栏议程和 aria-label 仍是「面接の振り返り」", () => {
+test("日文月格与议程各有独立的准备和复盘链接", () => {
   const event = simpleEvent("reviewed", { label: "第一次面试", phase: "past", date: "2026-08-07" });
   const interviewTargets = new Map([[event.id, { view: "review", path: "study.md", sourcePath: event.note.path, company: event.company, date: event.date, label: event.label, caseId: "" }]]);
   const html = render(ja, { events: [event], interviewTargets });
-  const card = html.match(/<button\b[^>]*class="calendar-event [^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
-  assert.match(card, /<span class="calendar-interview-destination" aria-hidden="true">振り返り →<\/span>/);
-  assert.match(card, /aria-label="[^"]*面接の振り返り"/);
-  const history = section(html, "<h2>過去の記録</h2>");
-  assert.match(history, /<span class="calendar-interview-destination" aria-hidden="true">面接の振り返り →<\/span>/);
+  assert.match(html, /class="calendar-interview-links compact"/);
+  assert.match(html, /data-view="session"[^>]*[\s\S]*?準備/);
+  assert.match(html, /data-view="review"[^>]*[\s\S]*?振り返り/);
+  assert.match(html, /aria-label="[^"]*面接準備"/);
+  assert.match(html, /href="\/interview\?[^"]*date=2026-08-07/);
+  assert.match(html, /href="\/interview\/review\?[^"]*date=2026-08-07/);
   const zhHtml = render(zh, { events: [event], interviewTargets });
-  assert.match(zhHtml, /class="calendar-interview-destination" aria-hidden="true">面试复盘 →<\/span>/);
+  assert.match(zhHtml, /面试准备/);
+  assert.match(zhHtml, /面试复盘/);
 });
 
 // ── 布局与样式：状态点、分数徽章、周视图 meta 行、已结束色、工具栏、代投记号 ──

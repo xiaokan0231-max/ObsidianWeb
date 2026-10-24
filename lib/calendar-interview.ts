@@ -1,4 +1,4 @@
-import type { Commitment } from "./memory-atlas-data.ts";
+import type { CalendarEvent, Commitment } from "./memory-atlas-data.ts";
 import { companyIdentity, getString, getType, type Note } from "./notes.ts";
 import { calendarRoundBadge, interviewRound, type CalendarRoundBadge } from "./interview-round.ts";
 
@@ -11,6 +11,11 @@ export type CalendarInterviewTarget = {
   sourcePath: string;
   caseId: string;
   time?: string;
+};
+
+export type CalendarInterviewDestinations = {
+  session: CalendarInterviewTarget | null;
+  review: CalendarInterviewTarget | null;
 };
 
 type InterviewContext = {
@@ -272,19 +277,19 @@ export function resolveCalendarRoundBadge(event: Commitment, notes: Note[]): Cal
   return rounds.length ? calendarRoundBadge(rounds[0]) : null;
 }
 
-export function resolveCalendarInterview(event: Commitment, notes: Note[]): CalendarInterviewTarget | null {
-  if (!isInterviewEvent(event)) return null;
+function calendarInterviewMaterials(event: Commitment, notes: Note[]) {
   const compatible = compatibleInterviewNotes(event, notes);
-  const prep = selectMatchingNote(compatible, "interview-prep");
-  const review = selectMatchingNote(compatible, "transcript-study");
-  const transcript = selectMatchingNote(compatible, "transcript");
-  const completedPrep = prep && getString(prep.frontmatter.session_status ?? prep.frontmatter.schedule_status) === "completed";
-  const sourceReview = getType(event.note) === "review" && getString(event.note.frontmatter.date) === event.date;
-  // 当天只知道开场时间不代表已结束；必须有完成状态或实际面谈记录才转复盘。
-  const view = event.phase === "past" || completedPrep || review || transcript || sourceReview ? "review" : "session";
+  return {
+    prep: selectMatchingNote(compatible, "interview-prep"),
+    review: selectMatchingNote(compatible, "transcript-study"),
+    transcript: selectMatchingNote(compatible, "transcript"),
+  };
+}
+
+function calendarInterviewTarget(event: Commitment, view: CalendarInterviewTarget["view"], path: string | null): CalendarInterviewTarget {
   return {
     view,
-    path: (view === "review" ? review : prep)?.path ?? null,
+    path,
     company: event.company,
     date: event.date,
     label: event.label,
@@ -292,4 +297,49 @@ export function resolveCalendarInterview(event: Commitment, notes: Note[]): Cale
     caseId: event.caseId || getString(event.note.frontmatter.case_id),
     time: event.time || undefined,
   };
+}
+
+/** 显式入口不随场次结束而消失；资料缺失或有歧义时，也要保留这场的空状态。 */
+export function resolveCalendarInterviewDestinations(event: Commitment, notes: Note[]): CalendarInterviewDestinations {
+  if (!isInterviewEvent(event)) return { session: null, review: null };
+  const materials = calendarInterviewMaterials(event, notes);
+  return {
+    session: calendarInterviewTarget(event, "session", materials.prep?.path ?? null),
+    review: calendarInterviewTarget(event, "review", materials.review?.path ?? null),
+  };
+}
+
+/** 完整资料加载后可以补齐路径，但不能把本人明确选择的准备／复盘入口改回默认入口。 */
+export function resolveCalendarInterviewRequest(
+  requested: CalendarInterviewTarget,
+  notes: Note[],
+  events: readonly CalendarEvent[],
+  today: string,
+): CalendarInterviewTarget {
+  const source = notes.find((note) => note.path === requested.sourcePath);
+  if (!source) return { ...requested, path: null };
+  const event = events.find((item) => item.date === requested.date && item.note.path === requested.sourcePath);
+  const destinations = resolveCalendarInterviewDestinations({
+    id: event?.id ?? requested.sourcePath,
+    note: source,
+    kind: "event",
+    company: requested.company,
+    date: requested.date,
+    time: requested.time || event?.time || "",
+    label: requested.label,
+    phase: requested.date < today ? "past" : "upcoming",
+    caseId: requested.caseId,
+    prepPath: "",
+  }, notes);
+  return destinations[requested.view] ?? { ...requested, path: null };
+}
+
+export function resolveCalendarInterview(event: Commitment, notes: Note[]): CalendarInterviewTarget | null {
+  if (!isInterviewEvent(event)) return null;
+  const { prep, review, transcript } = calendarInterviewMaterials(event, notes);
+  const completedPrep = prep && getString(prep.frontmatter.session_status ?? prep.frontmatter.schedule_status) === "completed";
+  const sourceReview = getType(event.note) === "review" && getString(event.note.frontmatter.date) === event.date;
+  // 当天只知道开场时间不代表已结束；必须有完成状态或实际面谈记录才转复盘。
+  const view = event.phase === "past" || completedPrep || review || transcript || sourceReview ? "review" : "session";
+  return calendarInterviewTarget(event, view, (view === "review" ? review : prep)?.path ?? null);
 }
