@@ -24,7 +24,7 @@ const COPY = {
   "zh-CN": {
     heading: "机会来源",
     labels: { ai: "AI 代投", self: "自主投递", invited: "主动邀约", unknown: "来源待核实" },
-    short: { ai: "AI", self: "自投", invited: "邀约", unknown: "待核" },
+    short: { ai: "AI代投", self: "自投", invited: "邀约", unknown: "待核" },
     invited: "企业或猎头先发来明确邀约；后续由谁代办不改变机会来源。",
     submitted: (actor: string, date: string) => `已确认由${actor}于 ${date} 提交申请。`,
     self: "本人", ai: "AI",
@@ -40,7 +40,7 @@ const COPY = {
   ja: {
     heading: "機会のきっかけ",
     labels: { ai: "AI 代行応募", self: "本人応募", invited: "先方からの招待", unknown: "きっかけ未確認" },
-    short: { ai: "AI", self: "本人", invited: "招待", unknown: "未確認" },
+    short: { ai: "AI応募", self: "本人", invited: "招待", unknown: "未確認" },
     invited: "企業または紹介会社からの明確な招待がきっかけです。その後の手続きの代行者とは区別します。",
     submitted: (actor: string, date: string) => `${date} に${actor}が応募を提出した記録を確認しています。`,
     self: "本人", ai: "AI",

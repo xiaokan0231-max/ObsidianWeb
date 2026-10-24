@@ -1290,16 +1290,17 @@
   .calendar-view .calendar-toolbar .calendar-legend { grid-column: 1; grid-row: 3; }
 }
 
-/* 半小时只有两行空间：保留开始时刻和公司名，完整起止仍在块的读屏说明与悬停提示里。 */
-.cw-block > .calendar-origin-badge { min-height: 7px; }
-.cw-block > .calendar-origin-badge > span { display: none; }
+/* 来源文字与颜色同时保留，避免只剩色点后无法判断面试来自谁。 */
+.calendar-view .cw-block > .calendar-origin-badge { min-height: 14px; gap: 2px; color: var(--calendar-origin-color); font-size: 9px; }
+.calendar-view .cw-block > .calendar-origin-badge > span { color: inherit; font-size: inherit; }
+.cw-block > .calendar-origin-badge > i { flex-basis: 4px; width: 4px; height: 4px; }
 .cw-block-title { padding-right: 10px; }
 .cw-block.cw-short { flex-direction: column; align-items: stretch; gap: 0; padding-block: 0; }
 .cw-short .cw-block-meta { flex: 0 0 14px; height: 14px; padding-right: 10px; }
 .calendar-view .cw-short .calendar-round-badge { flex-basis: 14px; width: 14px; height: 14px; }
-.cw-short .cw-block-title { width: 100%; }
+.cw-short .cw-block-title { width: 100%; padding-right: 42px; }
 .cw-block.cw-short .cw-block-company { font-size: 11px; line-height: 14px; }
-.cw-short > .calendar-origin-badge { position: absolute; top: 4px; right: 3px; bottom: auto; }
+.cw-short > .calendar-origin-badge { position: absolute; top: auto; right: 3px; bottom: 0; }
 
 /* 外部口碑和机会来源共用页脚；星标与百分制的面试表现徽章保持不同外观。 */
 .calendar-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
@@ -1337,7 +1338,7 @@
 .cw-event-shell:is(:hover, :focus-within) { z-index: 5; }
 .cw-event-shell:is(:hover, :focus-within) > .calendar-interview-links { visibility: visible; }
 
-/* 月格是一张可扫读的日程签：三行信息加一条图标操作，不为长时间范围或说明词增高。 */
+/* 月格保留开始时刻、单行公司名与图标操作；来源必须有文字，评分拥挤时允许换行。 */
 .calendar-event-item > .calendar-event { width: 100%; gap: 3px; padding: 5px 6px; border-left-width: 2px; border-radius: 6px; }
 .calendar-event-item:has(.calendar-interview-links) > .calendar-event { padding-bottom: 25px; }
 .calendar-event-item .calendar-event-heading { flex-wrap: nowrap; gap: 3px; min-height: 14px; height: 14px; margin: 0; }
@@ -1346,10 +1347,10 @@
 .calendar-event-item .calendar-round-badge { flex: 0 0 13px; width: 13px; height: 13px; border-radius: 3px; font-size: 9px; line-height: 1; }
 .calendar-event-item .calendar-event-heading > .calendar-status-dot { flex: 0 0 10px; width: 10px; height: 10px; margin-left: 0; }
 .calendar-event-item > .calendar-event > strong { width: 100%; font-size: 12px; font-weight: 650; line-height: 18px; letter-spacing: -.15px; }
-.calendar-event-item .calendar-month-signals { display: flex; align-items: center; gap: 2px; width: 100%; min-height: 15px; overflow: visible; }
-.calendar-month-signals > .calendar-origin-dot { flex: 0 0 5px; min-height: 12px; gap: 0; overflow: visible; }
-.calendar-month-signals .calendar-origin-dot > span { display: none; }
-.calendar-month-signals .calendar-origin-dot > i { flex-basis: 5px; width: 5px; height: 5px; }
+.calendar-event-item .calendar-month-signals { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; width: 100%; min-height: 15px; overflow: visible; }
+.calendar-month-signals > .calendar-origin-label.compact { flex: 0 0 auto; min-height: 14px; gap: 3px; color: var(--calendar-origin-color); font-size: 9px; }
+.calendar-month-signals .calendar-origin-label > span { color: inherit; font-size: inherit; }
+.calendar-month-signals .calendar-origin-label > i { flex-basis: 5px; width: 5px; height: 5px; }
 .calendar-month-signals > .calendar-interview-score { flex: 0 0 auto; max-width: 30px; padding: 0 2px; font-size: 9px; line-height: 13px; }
 .calendar-month-signals > .calendar-company-rating { margin-left: auto; font-size: 9px; line-height: 14px; }
 .calendar-event-item > .calendar-interview-links.icon-actions { left: 6px; right: 5px; bottom: 3px; gap: 0; border-top: 1px solid color-mix(in oklab, var(--line) 65%, transparent); }

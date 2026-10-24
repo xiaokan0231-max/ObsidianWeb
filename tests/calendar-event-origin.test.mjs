@@ -82,7 +82,8 @@ test("独立中介面谈的预约或 AI 材料提交不能变成 AI 申请来源
 
 test("来源标记和完整说明同时支持中日语；未核实说明不声称已核对", () => {
   const confirmed = origin(application());
-  assert.equal(calendarOriginLabel("ai", "zh-CN", true), "AI");
+  assert.equal(calendarOriginLabel("ai", "zh-CN", true), "AI代投");
+  assert.equal(calendarOriginLabel("ai", "ja", true), "AI応募");
   assert.equal(calendarOriginLabel("self", "ja"), "本人応募");
   assert.match(calendarOriginDescription(confirmed, "zh-CN"), /テストAI.*2026-10-07/);
   assert.match(calendarOriginDescription(confirmed, "ja"), /2026-10-07.*テストAI/);

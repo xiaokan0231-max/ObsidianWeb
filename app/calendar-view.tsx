@@ -793,7 +793,7 @@ function CalendarView({
                                   </span>
                                   <strong>{compactCompany(event.company)}</strong>
                                   <span className="calendar-month-signals">
-                                    <CalendarOriginBadge origin={originByEvent.get(event.id)} compact locale={locale} className="calendar-origin-dot" />
+                                    <CalendarOriginBadge origin={originByEvent.get(event.id)} compact locale={locale} className="calendar-origin-label" />
                                     <InterviewScoreBadge score={scoreByEvent.get(event.id)} copy={copy} compact />
                                     <CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact />
                                   </span>
