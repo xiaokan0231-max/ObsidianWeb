@@ -89,7 +89,7 @@ test("没有时刻的周不画空的全天行；AI 代投只在日期头显示�
   });
   const html = render(zh, { events: [event("A", {})], notes: [applied] });
   assert.doesNotMatch(html, /cw-allday/);
-  assert.match(html, /<button type="button" class="cw-ai" data-heat="1" aria-label="2026-08-10 JST · AI 代投 1 家公司 · 1 个岗位 · 展开申请详情">代投 1家<\/button>/);
+  assert.match(html, /<button type="button" class="cw-ai" data-ai-date="2026-08-10" data-heat="1" aria-label="2026-08-10 JST · AI 代投 1 家公司 · 1 个岗位 · 展开申请详情" aria-expanded="false">代投 1家<\/button>/);
   assert.equal(blocks(html).length, 1);
   assert.match(html, /<span>09:00<\/span>/, "10:00 的场次前留一小时，从 09:00 开始");
   assert.doesNotMatch(html, /<span>08:00<\/span>/);
@@ -118,7 +118,7 @@ test("周视图沿用同一个打开回调与键盘守卫，不在渲染期取�
   const source = await readFile(new URL("../app/calendar-view.tsx", import.meta.url), "utf8");
   assert.match(source, /onOpenEvent=\{openEvent\}/);
   assert.match(source, /useUrlState\("calview", "month"/);
-  const board = source.slice(source.indexOf("function WeekBoard"), source.indexOf("function NextHero"));
+  const board = source.slice(source.indexOf("function WeekBoard"), source.indexOf("function AgendaGroup"));
   assert.ok(board.length > 0);
   assert.doesNotMatch(board, /Date\.now\(\)|new Date\(/);
   // 时间块的位置只来自 lib 的 JST 分钟数，不经 new Date(字符串) 按本机时区解析。

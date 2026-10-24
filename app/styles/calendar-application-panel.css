@@ -1,0 +1,66 @@
+/* 非模态详情低于原笔记抽屉；不设遮罩，不抢占第二套焦点陷阱。 */
+.calendar-application-panel { position: fixed; z-index: calc(var(--z-drawer, 60) - 1); top: 76px; right: 16px; bottom: 16px; width: 500px; max-width: calc(100vw - 32px); display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-raised-solid); color: var(--ink); box-shadow: 0 16px 50px color-mix(in oklab, var(--shadow-color) 24%, transparent); }
+.calendar-application-panel > header { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding: 20px 22px 16px; border-bottom: 1px solid var(--line); }
+.calendar-application-panel > header h2 { margin: 5px 0 9px; font-size: 21px; }
+.calendar-application-panel > header small { color: var(--muted); font-size: 12px; }
+.calendar-application-panel > header strong { font-size: 13px; font-weight: 500; }
+.calendar-application-close { width: 32px; height: 32px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--ink); font-size: 22px; cursor: pointer; }
+.calendar-application-controls { padding: 13px 22px 15px; border-bottom: 1px solid var(--line); }
+.calendar-application-controls p { margin: 0 0 6px; font-size: 12px; line-height: 1.7; color: var(--text-secondary); }
+.calendar-application-controls > small { display: block; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.calendar-application-controls label { display: grid; gap: 5px; margin: 13px 0 11px; font-size: 12px; }
+.calendar-application-controls input { width: 100%; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); color: var(--ink); font: inherit; }
+.calendar-application-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.calendar-application-filters button { display: inline-flex; gap: 5px; padding: 5px 9px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: transparent; color: var(--text-secondary); font-size: 11px; cursor: pointer; }
+.calendar-application-filters button[aria-pressed="true"] { background: var(--brand-wash); color: var(--interactive); border-color: var(--brand-line); }
+.calendar-application-filters span { font-variant-numeric: tabular-nums; }
+.calendar-application-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 22px 22px; flex: 1; }
+.calendar-application-result { font-size: 12px; color: var(--muted); margin: 15px 0; }
+.calendar-application-company { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 14px; overflow: hidden; }
+.calendar-application-company > header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px 10px; padding: 13px 14px; background: var(--surface-sunken); }
+.calendar-application-company h3 { margin: 0; flex: 1 1 220px; font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }
+.calendar-application-company header > span { font-size: 11px; color: var(--text-secondary); }
+.calendar-application-company header > span[data-bucket="needs-user"] { color: var(--danger); }
+.calendar-application-company header > button, .calendar-application-position button, .calendar-application-empty button { border: 0; background: transparent; padding: 4px 0; color: var(--interactive); font-size: 12px; text-align: left; cursor: pointer; }
+.calendar-application-position { padding: 15px 14px; border-top: 1px solid var(--line-soft); }
+.calendar-application-position h4 { margin: 0 0 5px; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.calendar-application-position > small { font-size: 11px; color: var(--muted); }
+.calendar-application-position dl { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 7px 9px; margin: 13px 0; font-size: 12px; line-height: 1.8; }
+.calendar-application-position dt { color: var(--muted); }
+.calendar-application-position dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.calendar-application-actions { display: grid; gap: 4px; margin: 10px 0; }
+.calendar-application-actions > small, .calendar-application-position details { color: var(--muted); font-size: 11px; line-height: 1.8; }
+.calendar-application-position summary { cursor: pointer; }
+.calendar-application-position details > button { display: block; }
+.calendar-application-empty { padding: 15px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.8; }
+.calendar-application-empty button { display: block; margin-top: 8px; }
+.calendar-application-panel :is(button, input, .calendar-application-scroll):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.calendar-application-preview { position: fixed; z-index: calc(var(--z-drawer, 60) - 2); width: 320px; padding: 15px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-raised-solid); color: var(--ink); box-shadow: 0 8px 24px color-mix(in oklab, var(--shadow-color) 18%, transparent); pointer-events: none; }
+.calendar-application-preview > strong { display: block; margin: 6px 0 10px; font-size: 14px; }
+.calendar-application-preview > div { display: flex; flex-wrap: wrap; gap: 5px 12px; font-size: 12px; }
+.calendar-application-preview p, .calendar-application-preview small { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+
+/* 与场次来源分开用色：这里只表达申请公司当前进展，不能把推进中画成成功率。 */
+.application-progress {
+  --application-progress-color: var(--muted);
+  display: flex; flex-direction: column; gap: 6px; width: 100%; min-width: 0;
+}
+.application-progress [data-bucket="needs-user"] { --application-progress-color: var(--warning); }
+.application-progress [data-bucket="progressing"] { --application-progress-color: var(--success); }
+.application-progress [data-bucket="unknown"] { --application-progress-color: #8a9394; }
+.application-progress [data-bucket="waiting"] { --application-progress-color: #91a7b3; }
+.application-progress [data-bucket="paused"] { --application-progress-color: #a49aaf; }
+.application-progress [data-bucket="closed"] { --application-progress-color: #d77f6d; }
+.application-progress-track {
+  display: flex; width: 100%; height: 7px; overflow: hidden; border-radius: 3px;
+  background: color-mix(in oklab, var(--muted) 14%, transparent);
+}
+.application-progress-segment { display: block; height: 100%; flex-shrink: 0; background: var(--application-progress-color); }
+.application-progress-segment + .application-progress-segment { border-left: 1px solid var(--surface); }
+.application-progress-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 11px; color: var(--text-secondary); font-size: 11px; line-height: 1.25; }
+.application-progress-legend > span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.application-progress-legend i { flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--application-progress-color); }
+.application-progress-legend b { color: var(--ink); font-size: inherit; font-weight: 600; font-variant-numeric: tabular-nums; }
+.application-progress-legend-counts { gap: 3px 9px; font-size: 10px; }
+.calendar-ai-applications:has(.calendar-ai-graphic) { width: 100%; padding: 7px 8px 6px; border-radius: 7px; text-align: left; }
+.calendar-ai-graphic { display: block; flex-basis: 100%; width: 100%; margin-top: 4px; }

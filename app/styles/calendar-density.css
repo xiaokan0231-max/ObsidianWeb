@@ -139,7 +139,8 @@
 .calendar-view .status-waiting { --calendar-status-color: var(--info); }
 .calendar-view .status-closed { --calendar-status-color: var(--danger); }
 .calendar-view .status-paused { --calendar-status-color: var(--text-tertiary); }
-/* 待核对与卡片左缘同用金色：图例的点要能对上月格里的色条，空心环形状仍和「暂停」的灰方块区分。 */
+/* 历史关联缺口用中性灰；只有明确关联冲突才使用警示色。 */
+.calendar-view .status-neutral { --calendar-status-color: var(--text-tertiary); }
 .calendar-view .status-unknown { --calendar-status-color: var(--gold-text); }
 
 .calendar-view .calendar-status-dot {
@@ -204,14 +205,13 @@
   background: transparent;
 }
 
-.calendar-view .calendar-event {
-  position: relative;
+.calendar-view .status-neutral .calendar-status-dot {
+  border: 1px solid var(--calendar-status-color);
+  background: transparent;
 }
 
-.calendar-event > .calendar-status-dot {
-  position: absolute;
-  top: 11px;
-  right: 7px;
+.calendar-view .calendar-event {
+  position: relative;
 }
 
 .calendar-agenda .agenda-main { grid-template-columns: 42px minmax(0, 1fr) 12px; }
@@ -219,7 +219,8 @@
 .calendar-view .calendar-progress-legend { color: var(--text-secondary); }
 .calendar-view .calendar-progress-legend .calendar-legend-item { color: inherit; }
 
-.calendar-event.status-waiting > .calendar-status-dot,
+/* 月格的点在标题行里、不是卡片的直接子元素，这里用后代选择器。 */
+.calendar-event.status-waiting .calendar-status-dot,
 .agenda-item.status-waiting .calendar-status-dot {
   animation: calendar-wait-pulse 2.8s ease-in-out infinite;
 }
@@ -230,7 +231,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .calendar-event.status-waiting > .calendar-status-dot,
+  .calendar-event.status-waiting .calendar-status-dot,
   .agenda-item.status-waiting .calendar-status-dot { animation: none; }
 }
 
@@ -355,13 +356,21 @@
 
 .calendar-event .calendar-event-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
   width: 100%;
   min-height: 22px;
-  padding-right: 16px;
+  padding-right: 0;
   margin-bottom: 2px;
 }
+
+/* 缩放后分数可以换行，状态留在同一布局流，不能绝对定位压住数字。
+ * 点保持图例同款 12px，并且自己当 ::before／::after 的定位容器：压成 8px 或改成 static，
+ * 时钟、减号这些形状会跑到卡片左上角，已结束卡就认不出「終了」标记了。 */
+.calendar-event-heading > .calendar-status-dot { position: relative; flex: 0 0 12px; margin-left: auto; }
+/* 点贴在标题行右缘，等回复的呼吸光圈要伸出 4px：标题行不裁内容，交给卡片 7px 的右内边距兜住。 */
+.calendar-event .calendar-event-heading { overflow: visible; }
 
 .calendar-event .calendar-event-stage {
   min-width: 0;
@@ -369,6 +378,32 @@
   font-family: inherit;
   font-size: 11px;
 }
+
+/* 分数是回答评价，不沿用选考通过/结束的状态色；局部分以文字和虚线区分。 */
+.calendar-view .calendar-interview-score {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 1px 4px;
+  border: 1px solid color-mix(in oklab, var(--info) 38%, var(--line));
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--info) 8%, var(--surface));
+  color: var(--info);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.calendar-view .calendar-interview-score[data-band="attention"] { color: var(--gold-text); border-color: color-mix(in oklab, var(--gold-text) 38%, var(--line)); background: color-mix(in oklab, var(--gold-text) 8%, var(--surface)); }
+.calendar-view .calendar-interview-score[data-kind="local"] { color: var(--text-secondary); border-style: dashed; border-color: var(--line-strong); background: var(--surface); }
+/* 有分数时阶段文字让位：徽标＋阶段＋分数＋点合计约 104px，放不进 1440 宽下约 83px 的卡片，标题行必然折成两行。
+ * 阶段只是轮次徽标的文字版，完整类型仍在按钮的 title 与 aria-label 里。 */
+.calendar-event-heading:has(.calendar-interview-score) .calendar-event-stage { display: none; }
+.cw-block-title { display: flex; align-items: start; gap: 4px; width: 100%; min-width: 0; }
+.cw-block-title .cw-block-company { flex: 1 1 auto; min-width: 0; }
+.cw-short .cw-block-title { flex: 1 1 auto; width: auto; }
 
 .calendar-event .calendar-event-time {
   max-width: 100%;
@@ -403,37 +438,21 @@
   font-size: 12px;
 }
 
-/* 申请活动单独展开，避免把提交记录画成有时间的面试卡片。格内只是一枚热度徽标：公司越多底色越深。 */
+/* 申请活动与面试时间分开：月格显示当前进展数字，公司与岗位列表仍在固定详情里。 */
 .calendar-ai-applications {
-  margin-top: 6px;
-}
-
-.calendar-ai-applications summary {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 6px;
-  max-width: 100%;
-  padding: 2px 8px;
+  display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px;
+  max-width: 100%; margin-top: 6px; padding: 2px 8px;
   border: 1px solid color-mix(in oklab, var(--info) 30%, transparent);
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--info) 8%, transparent);
-  color: var(--info);
-  font-size: 11px;
-  list-style: none;
-  cursor: pointer;
+  border-radius: var(--radius-pill); background: color-mix(in oklab, var(--info) 8%, transparent);
+  color: var(--info); font: inherit; font-size: 11px; cursor: pointer;
 }
-
-.calendar-ai-applications summary::-webkit-details-marker { display: none; }
-/* 底色上限 20%：再深，info 字在两套主题下都会掉到 4.5:1 以下；最高一档改靠实线边框区分。 */
-.calendar-ai-applications summary[data-heat="2"] { background: color-mix(in oklab, var(--info) 12%, transparent); }
-.calendar-ai-applications summary[data-heat="3"] { background: color-mix(in oklab, var(--info) 16%, transparent); }
-.calendar-ai-applications summary[data-heat="4"] {
-  border-color: color-mix(in oklab, var(--info) 70%, transparent);
-  background: color-mix(in oklab, var(--info) 20%, transparent);
-}
-.calendar-ai-applications[open] summary { border-color: var(--info); }
-.calendar-ai-applications summary small { color: var(--muted); font-size: 11px; }
+.calendar-ai-applications[data-heat="2"] { background: color-mix(in oklab, var(--info) 12%, transparent); }
+.calendar-ai-applications[data-heat="3"] { background: color-mix(in oklab, var(--info) 16%, transparent); }
+.calendar-ai-applications[data-heat="4"] { border-color: color-mix(in oklab, var(--info) 70%, transparent); background: color-mix(in oklab, var(--info) 20%, transparent); }
+.calendar-ai-applications[aria-expanded="true"] { border-color: var(--info); }
+.calendar-ai-applications small { color: var(--muted); font-size: 11px; }
+.calendar-ai-applications:focus-visible, .calendar-application-open:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.calendar-application-open { border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--interactive); padding: 8px 11px; font-size: 12px; cursor: pointer; }
 
 .calendar-application-summary {
   padding: 16px;
@@ -447,245 +466,54 @@
 .calendar-application-count { margin: 12px 0; color: var(--text-secondary); font-size: 12px; }
 .calendar-application-count > strong { color: var(--info); font-size: 24px; }
 
-.calendar-application-list {
-  display: grid;
-  gap: 5px;
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
+/* 月概况只统计投递，未来安排只在右栏展示一次。进展条与机会来源各用自己的图例。 */
+.calendar-pulse {
+  display: flex; align-items: center; gap: 24px; margin-bottom: 16px; padding: 14px 18px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
 }
+.calendar-month-applications { display: flex; flex: 1 1 500px; align-items: center; gap: 24px; min-width: 0; }
+.calendar-month-metric { flex: 0 0 auto; }
+.calendar-month-metric > span { display: flex; gap: 10px; color: var(--text-secondary); font-size: 12px; }
+.calendar-month-metric time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.calendar-month-metric > div { display: flex; align-items: baseline; gap: 7px; margin-top: 5px; }
+.calendar-month-metric strong { font-size: 29px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.calendar-month-metric > div > span, .calendar-month-metric small { color: var(--muted); font-size: 11px; }
+.calendar-month-graphic { flex: 1 1 auto; min-width: 120px; }
+.calendar-month-graphic .application-progress-track { height: 9px; }
+.calendar-month-graphic .application-progress { gap: 9px; }
+.calendar-month-empty { margin: 0; color: var(--muted); font-size: 12px; }
+.calendar-pulse-actions { display: flex; flex: 0 0 auto; flex-direction: column; gap: 6px; padding-left: 20px; border-left: 1px solid var(--line); }
+.calendar-pulse-action { display: flex; align-items: center; gap: 7px; padding: 3px 0; border: 0; background: transparent; color: var(--text-secondary); text-align: left; cursor: pointer; font-size: 11px; }
+.calendar-pulse-action strong { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+.calendar-pulse-action small { color: var(--muted); font-size: 10px; }
+.calendar-pulse-action:is([aria-pressed="true"], [aria-expanded="true"]) { color: var(--interactive); }
+.calendar-pulse-action:hover { color: var(--ink); }
+.calendar-pulse-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
+.calendar-pulse-action:disabled { opacity: .5; cursor: default; }
+.calendar-stat-skeleton { display: block; width: 56px; height: 26px; margin-top: 5px; }
 
-.calendar-application-list button {
-  display: grid;
-  gap: 3px;
-  width: 100%;
-  padding: 7px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-secondary);
-  text-align: left;
-  overflow-wrap: anywhere;
-  cursor: pointer;
-}
+/* 月／周工具保持同一行，来源常驻，较少查看的状态说明可展开。 */
+.calendar-toolbar { padding: 14px 18px 10px; gap: 10px; }
+.calendar-toolbar h2 { font-size: 21px; }
+.calendar-timezone { display: inline; margin-left: 10px; font-size: 10px; }
+.calendar-visual-guide { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 18px 12px; border-bottom: 1px solid var(--line); }
+.calendar-status-guide { position: relative; flex: 0 0 auto; }
+.calendar-status-guide summary { color: var(--muted); font-size: 10px; cursor: pointer; }
+.calendar-status-guide .calendar-progress-legend { position: absolute; z-index: 20; top: 22px; right: 0; display: grid; gap: 5px; min-width: 160px; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-raised-solid); box-shadow: 0 8px 25px #0002; }
+.calendar-status-guide .calendar-legend-item { padding: 0; border: 0; background: none; font-size: 12px; }
+.calendar-ai-applications[data-heat] { border-color: var(--line-strong); background: var(--surface); color: light-dark(#7957b7, #b0a1d5); }
+.calendar-ai-applications[data-heat]:hover, .calendar-ai-applications[aria-expanded="true"] { border-color: #a18ac9; background: color-mix(in oklab, #a18ac9 7%, var(--surface)); }
+.calendar-ai-applications strong { font-size: 11px; font-weight: 600; }
+.calendar-day:has(> .calendar-ai-applications) { min-height: 104px; }
 
-.calendar-application-list strong { color: var(--ink); font-size: 12px; }
-.calendar-application-list span { font-size: 11px; line-height: 1.5; }
-.calendar-application-list small { color: var(--muted); font-size: 11px; }
-.calendar-application-list button:hover { background: var(--surface-soft); }
-.calendar-ai-applications summary:focus-visible,
-.calendar-application-list button:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
-
-/* ===== 作战态势条 =====
- * 复用全站的 page-stat-strip 外观，只把列数改成 5；「等回复」「资料待核对」两格可点，
- * 和进展图例共用同一个高亮状态。 */
-.calendar-view .calendar-stat {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  margin-bottom: 16px;
-}
-
-.calendar-stat-tile {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 6px 8px;
-  min-width: 0;
-  padding: 12px 16px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-}
-
-.calendar-stat > button.calendar-stat-tile {
-  border-right: 1px solid var(--line);
-  cursor: pointer;
-}
-
-.calendar-stat-tile > span {
-  grid-column: 1 / -1;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.calendar-stat-tile > strong {
-  grid-column: 1;
-  color: var(--ink);
-  font-family: var(--font-serif);
-  font-size: 26px;
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.calendar-stat-tile > small {
-  grid-column: 2;
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.calendar-stat-next > strong { font-size: 22px; }
-.calendar-stat-next[data-urgent] > strong { color: var(--interactive); }
-
-.calendar-stat-skeleton {
-  grid-column: 1 / -1;
-  width: 56px;
-  height: 26px;
-}
-
-.calendar-stat > button.calendar-stat-tile:hover:not(:disabled) { background: var(--surface-lift); }
-.calendar-stat > button.calendar-stat-tile:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
-.calendar-stat > button.calendar-stat-tile[aria-pressed="true"] {
-  background: color-mix(in oklab, var(--calendar-status-color) 10%, transparent);
-  box-shadow: inset 0 -2px 0 var(--calendar-status-color);
-}
-.calendar-stat > button.calendar-stat-tile:disabled { cursor: default; }
-
-/* ===== 下一场 =====
- * 侧栏最上方唯一的「凸起」卡：朱橙左缘 + 外侧一圈朱橙光，暗色下换成反相面。 */
-.calendar-next-hero {
-  position: relative;
-  display: grid;
-  gap: 10px;
-  padding: 18px 18px 16px 21px;
-  border: 1px solid color-mix(in oklab, var(--brand) 30%, var(--line));
-  border-radius: var(--radius-card);
-  background:
-    radial-gradient(120% 90% at 100% 0%, color-mix(in oklab, var(--brand) 10%, transparent), transparent 62%),
-    var(--surface-raised-solid);
-  box-shadow:
-    inset 3px 0 0 var(--brand),
-    0 14px 34px -14px color-mix(in oklab, var(--brand) 45%, transparent);
-  animation: rise-in var(--dur-slow) var(--ease-out);
-}
-
-.calendar-next-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.calendar-next-kicker {
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: .06em;
-}
-
-.calendar-next-countdown {
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
-  background: var(--brand-wash);
-  color: var(--interactive);
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.calendar-next-hero[data-urgent] .calendar-next-countdown {
-  background: var(--interactive-fill);
-  color: var(--on-interactive);
-  animation: pop-in var(--dur-base) var(--ease-spring);
-}
-
-.calendar-next-company {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--text-display);
-  font-family: var(--font-serif);
-  font-size: 24px;
-  font-weight: 600;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.calendar-next-meta {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.calendar-agenda .calendar-next-hero .calendar-round-badge {
-  flex-basis: 30px;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  font-size: 16px;
-}
-
-.calendar-next-when {
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-
-.calendar-next-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  margin-top: 4px;
-}
-
-.calendar-next-primary {
-  min-height: 38px;
-  padding: 0 16px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: var(--interactive-fill);
-  color: var(--on-interactive);
-  font-size: 13px;
-  font-weight: 650;
-  cursor: pointer;
-}
-
-.calendar-next-primary:hover { background: color-mix(in oklab, var(--interactive-fill) 86%, var(--ink)); }
-
-.calendar-next-source {
-  padding: 4px 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-
-.calendar-next-source:hover { color: var(--interactive); }
-.calendar-next-primary:focus-visible,
-.calendar-next-source:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-
-:root:not([data-theme="light"]) .calendar-next-hero {
-  border-color: color-mix(in oklab, var(--brand) 42%, transparent);
-  background:
-    radial-gradient(120% 90% at 100% 0%, color-mix(in oklab, var(--brand) 18%, transparent), transparent 62%),
-    var(--surface-inverse);
-  color: var(--text-on-inverse);
-  box-shadow:
-    inset 3px 0 0 var(--brand),
-    var(--inverse-ring),
-    0 0 34px -6px color-mix(in oklab, var(--brand) 32%, transparent);
-}
-
-:root:not([data-theme="light"]) .calendar-next-hero :is(.calendar-next-kicker, .calendar-next-meta, .calendar-next-when, .calendar-next-source) {
-  color: var(--text-on-inverse-muted);
-}
-
-:root:not([data-theme="light"]) .calendar-next-hero .calendar-next-company { color: var(--text-on-inverse); }
-:root:not([data-theme="light"]) .calendar-next-hero .calendar-next-source:hover { color: var(--brand-on-inverse); }
+/* 第一场只是清单中的重点项，不另复制一张大卡。 */
+.calendar-agenda .agenda-item[data-next] { border-color: color-mix(in oklab, var(--brand) 45%, var(--line)); background: color-mix(in oklab, var(--brand) 6%, var(--surface)); box-shadow: inset 2px 0 var(--brand); }
+.agenda-next-label { color: var(--interactive); font-size: 10px; font-weight: 650; white-space: nowrap; }
+.agenda-event-meta { flex-wrap: wrap; align-items: center; gap: 5px; }
+.agenda-event-meta .agenda-when { margin-left: auto; }
+.calendar-agenda .agenda-copy > .calendar-origin-badge { margin-top: 7px; }
+.cw-block > .calendar-origin-badge { position: absolute; bottom: 3px; right: 4px; }
+.cw-short > .calendar-origin-badge { position: static; flex: 0 0 auto; }
 
 /* ===== 事件卡按进展上色 =====
  * 类型只剩面谈・面试一种，左缘色改为表达「这场之后走到哪了」；状态点的形状仍然保留给色弱。 */
@@ -709,8 +537,8 @@
 
 .calendar-view .calendar-event.status-paused,
 .calendar-view .agenda-item.status-paused,
-.calendar-view .calendar-event.status-closed,
-.calendar-view .agenda-item.status-closed {
+.calendar-view .calendar-event.status-neutral,
+.calendar-view .agenda-item.status-neutral {
   --commitment-tone: var(--text-tertiary);
   --commitment-wash: color-mix(in oklab, var(--text-tertiary) 9%, var(--surface));
 }
@@ -727,9 +555,10 @@
 .calendar-view .calendar-event.status-closed,
 .calendar-view .agenda-item.status-closed { opacity: .62; }
 
-/* 已结束的卡片靠变淡与「終了」标记区分，不再铺灰底：灰底叠上变淡，整张卡显得发暗。 */
+/* 已结束的卡片靠变淡与「終了」标记（红色减号小方块，和图例同色）区分：不铺灰底、不画删除线，
+ * 左缘与文字也用中性灰——本人要已结束的场次退到背景里，整张卡染红会比进行中的还抢眼。 */
 .calendar-view .calendar-event.status-closed,
-.calendar-view .agenda-item.status-closed { --commitment-wash: var(--surface); }
+.calendar-view .agenda-item.status-closed { --commitment-tone: var(--text-tertiary); --commitment-wash: var(--surface); }
 
 .calendar-view .calendar-event.status-closed:is(:hover, :focus-visible),
 .calendar-view .agenda-item.status-closed:is(:hover, :focus-within) { opacity: 1; }
@@ -756,7 +585,8 @@
 
 .calendar-view .agenda-item.conflict { position: relative; }
 
-.calendar-view .calendar-event.conflict > .calendar-status-dot { right: 12px; }
+/* 点在标题行里随布局流排在右端，冲突时再往里让 5px，光圈不压到右缘斜纹。 */
+.calendar-view .calendar-event.conflict .calendar-event-heading > .calendar-status-dot { margin-right: 5px; }
 
 .calendar-view .calendar-event.conflict::before {
   content: "!";
@@ -807,6 +637,7 @@
 .calendar-view[data-focus-tone="waiting"] :is(.calendar-event, .agenda-item).status-waiting,
 .calendar-view[data-focus-tone="closed"] :is(.calendar-event, .agenda-item).status-closed,
 .calendar-view[data-focus-tone="paused"] :is(.calendar-event, .agenda-item).status-paused,
+.calendar-view[data-focus-tone="neutral"] :is(.calendar-event, .agenda-item).status-neutral,
 .calendar-view[data-focus-tone="unknown"] :is(.calendar-event, .agenda-item).status-unknown {
   opacity: 1;
   box-shadow: 0 0 0 2px color-mix(in oklab, var(--commitment-tone) 50%, transparent);
@@ -1008,7 +839,7 @@
   --cw-hour: 56px;
   --cw-gutter: 52px;
   min-width: 0;
-  overflow: clip;
+  overflow-x: auto;
   /* 最右一列时间块的焦点框伸出 1–3px，留一点余量免得被裁掉半边。 */
   overflow-clip-margin: 4px;
 }
@@ -1020,6 +851,7 @@
 .cw-allday,
 .cw-body {
   display: grid;
+  min-width: calc(var(--cw-gutter) + 700px);
   grid-template-columns: var(--cw-gutter) repeat(7, minmax(0, 1fr));
 }
 
@@ -1256,6 +1088,39 @@
   text-overflow: ellipsis;
 }
 
+/* 带结束时刻的块：「17:00–18:00」本身约 63px，阶段文字常常放不下。meta 行允许折行但只露第一行，
+ * 放不下时阶段文字整段折进被裁掉的第二行，不再挤成 3px 的半个字；更宽的屏幕放得下就照常显示。
+ * 完整类型仍在轮次徽标、title 与 aria-label 里。只对起止时刻这样做：只有开始时刻的块放得下，
+ * 冲突分栏的窄块也不该因此把轮次徽标整个折走。 */
+.cw-block[data-ranged]:not(.cw-short) .cw-block-meta {
+  /* 带 overflow 的 flex 子项最小高度算 0：不锁住会被一小时块压成 14px，把轮次徽标和分数的上下边裁掉。 */
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  row-gap: 0;
+  height: 16px;
+  overflow: hidden;
+}
+.cw-block[data-ranged]:not(.cw-short) .cw-block-stage { flex: 0 0 auto; }
+
+/* 分数排在 meta 行末，公司名拿回整宽：一小时块只放得下 meta 一行＋公司两行。
+ * 这一行里分数最后让位：阶段文字直接隐藏；行内反向排布，分数、轮次先占位，放不下的时刻整段折进被裁掉的第二行
+ * （例如「局部85分」这种宽徽章），不会被挤成「1…」，分数也不会被块的 overflow 裁掉。视觉顺序仍是 时刻→轮次→分数，
+ * 时刻本身还由块在时间轴上的位置与 title 表达。徽章压到与轮次徽标同高的 16px，不把公司名往下挤。 */
+.cw-block-meta > .calendar-interview-score { margin-left: auto; padding-block: 0; line-height: 14px; }
+.cw-block .cw-block-meta:has(> .calendar-interview-score) {
+  flex: 0 0 auto;
+  flex-direction: row-reverse;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  row-gap: 0;
+  height: 16px;
+  overflow: hidden;
+}
+.cw-block .cw-block-meta:has(> .calendar-interview-score) > .calendar-interview-score { order: -2; }
+.cw-block .cw-block-meta:has(> .calendar-interview-score) > .calendar-round-badge { order: -1; }
+.cw-block .cw-block-meta:has(> .calendar-interview-score) .cw-block-stage { display: none; }
+
 .calendar-view :is(.cw-block, .cw-chip) .calendar-round-badge {
   flex: 0 0 16px;
   width: 16px;
@@ -1294,6 +1159,20 @@
   line-height: 1.3;
   -webkit-line-clamp: 1;
 }
+
+/* 30 分钟的短块带分数：上下两行——第一行时刻＋轮次＋分数（和长块同一套 meta 规则），第二行公司名占满整宽。
+ * 原先的左右两列把公司名挤到约 56px（「株式会社…」），时刻与徽标还缩到 8–9px，读不出来。
+ * 28px 高刚好放下 14px 的 meta 行与 14px 行高的公司名（日文字形在 12px 行高里会被裁掉上下缘）。 */
+.cw-block.cw-short:has(.calendar-interview-score) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding-block: 0;
+}
+.cw-short .cw-block-meta:has(> .calendar-interview-score) { height: 14px; }
+.calendar-view .cw-short .cw-block-meta:has(> .calendar-interview-score) .calendar-round-badge { flex-basis: 14px; width: 14px; height: 14px; }
+.cw-short:has(.calendar-interview-score) .cw-block-title { width: 100%; }
+.cw-short:has(.calendar-interview-score) .cw-block-company { font-size: 11px; line-height: 14px; -webkit-line-clamp: 1; }
 
 .calendar-view :is(.cw-block, .cw-chip).status-closed { opacity: .62; }
 /* 周视图与月格同一口径：已结束用灰色左缘、不带底色，红色只留在图例与月格的「終了」小方块上。 */
@@ -1351,7 +1230,74 @@
 .calendar-view[data-focus-tone="waiting"] :is(.cw-block, .cw-chip).status-waiting,
 .calendar-view[data-focus-tone="closed"] :is(.cw-block, .cw-chip).status-closed,
 .calendar-view[data-focus-tone="paused"] :is(.cw-block, .cw-chip).status-paused,
+.calendar-view[data-focus-tone="neutral"] :is(.cw-block, .cw-chip).status-neutral,
 .calendar-view[data-focus-tone="unknown"] :is(.cw-block, .cw-chip).status-unknown {
   opacity: 1;
   box-shadow: 0 0 0 2px color-mix(in oklab, var(--calendar-status-color) 50%, transparent);
 }
+
+/* 历史说明保留事实和来源，默认收起，避免旧记录抢占日历首屏。 */
+.calendar-historical-explanation {
+  margin: 0 0 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.calendar-historical-explanation > header { display: flex; align-items: start; justify-content: space-between; gap: 18px; }
+.calendar-historical-explanation h2 { margin: 0 0 5px; color: var(--ink); font-size: 15px; font-weight: 600; }
+.calendar-historical-explanation header p,
+.calendar-historical-explanation .calendar-history-meaning,
+.calendar-association-conflicts > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.75; }
+.calendar-historical-explanation .calendar-history-meaning { margin-top: 8px; }
+.calendar-historical-explanation > header button { flex-shrink: 0; width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.calendar-record-explanations { display: grid; gap: 12px; margin: 14px 0 0; padding: 0; list-style: none; }
+.calendar-record-explanation { padding-top: 12px; border-top: 1px solid var(--line); }
+.calendar-record-explanation-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 12px; }
+.calendar-record-explanation-heading time { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.calendar-record-explanation-heading strong { color: var(--ink); font-size: 13px; font-weight: 500; }
+.calendar-record-explanation-heading > span { color: var(--muted); font-size: 11px; }
+.calendar-record-explanation p { margin: 5px 0; color: var(--muted); font-size: 12px; line-height: 1.75; overflow-wrap: anywhere; }
+.calendar-record-explanation-links { display: flex; flex-wrap: wrap; gap: 12px; }
+.calendar-record-explanation-links button { padding: 2px 0; border: 0; background: transparent; color: var(--green); font: inherit; font-size: 11px; line-height: 1.8; cursor: pointer; }
+.calendar-record-explanation-links button:hover { text-decoration: underline; }
+.calendar-historical-explanation button:focus-visible,
+.calendar-association-conflicts :is(button, summary):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.calendar-association-conflicts { margin: 0 0 16px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--gold-text); font-size: 12px; }
+.calendar-association-conflicts > summary { cursor: pointer; }
+.calendar-association-conflicts > p { margin-top: 8px; }
+
+@media (max-width: 640px) {
+  /* 日历窄屏保留语言与操作入口，收起重复顶栏信息，避免日语标签撑宽页面。 */
+  .app-shell:has(.calendar-view) .topbar { gap: 8px; padding-inline: 16px; }
+  .app-shell:has(.calendar-view) .mobile-brand strong,
+  .app-shell:has(.calendar-view) .topbar-stats,
+  .app-shell:has(.calendar-view) .topbar-next,
+  .app-shell:has(.calendar-view) .theme-switch { display: none; }
+  .app-shell:has(.calendar-view) .user-actions-entry { gap: 6px; padding: 8px; font-size: 11px; }
+
+  /* 历史统计的单位和全量口径必须可读；月历宽表仍由自己的容器横向滚动。 */
+  .calendar-view .calendar-stat.page-stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .calendar-view .calendar-stat > .calendar-stat-tile { padding: 12px 10px; border: 0; border-bottom: 1px solid var(--line); }
+  .calendar-view .calendar-stat > .calendar-stat-tile:nth-child(odd) { border-right: 1px solid var(--line); }
+  .calendar-view .calendar-stat > .calendar-stat-tile:last-child { grid-column: 1 / -1; border: 0; }
+  .calendar-view .calendar-stat-tile > span,
+  .calendar-view .calendar-stat-tile > small { overflow: visible; white-space: normal; text-overflow: clip; font-size: 11px; line-height: 1.5; }
+  .calendar-view .calendar-stat-tile > small { overflow-wrap: anywhere; }
+
+  /* 窄屏先完整显示月份与时区，工具按钮另起一行，避免标题被挤成竖排。 */
+  .calendar-view .calendar-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .calendar-view .calendar-toolbar .calendar-tools { grid-column: 1; grid-row: 2; margin-left: 0; flex-wrap: wrap; }
+  .calendar-view .calendar-toolbar .calendar-legend { grid-column: 1; grid-row: 3; }
+}
+
+/* 半小时只有两行空间：保留开始时刻和公司名，完整起止仍在块的读屏说明与悬停提示里。 */
+.cw-block > .calendar-origin-badge { min-height: 7px; }
+.cw-block > .calendar-origin-badge > span { display: none; }
+.cw-block-title { padding-right: 10px; }
+.cw-block.cw-short { flex-direction: column; align-items: stretch; gap: 0; padding-block: 0; }
+.cw-short .cw-block-meta { flex: 0 0 14px; height: 14px; padding-right: 10px; }
+.calendar-view .cw-short .calendar-round-badge { flex-basis: 14px; width: 14px; height: 14px; }
+.cw-short .cw-block-title { width: 100%; }
+.cw-block.cw-short .cw-block-company { font-size: 11px; line-height: 14px; }
+.cw-short > .calendar-origin-badge { position: absolute; top: 4px; right: 3px; bottom: auto; }

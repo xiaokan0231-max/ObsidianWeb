@@ -1,5 +1,5 @@
 import type { AiApplicationDay } from "./calendar-applications.ts";
-import type { CalendarProgress } from "./calendar-progress.ts";
+import { isCalendarHistoricalProgress, type CalendarProgress } from "./calendar-progress.ts";
 import { queueCompanyKey } from "./job-queue.mjs";
 import type { CalendarEvent } from "./memory-atlas-data.ts";
 
@@ -23,9 +23,24 @@ export type CalendarSummary = {
   next: { event: CalendarEvent; days: number } | null;
   /** 日程已过、仍在等对方回复的案件数（同一案件多场只算一次）。 */
   waitingCount: number;
+  /** 明确关联冲突的场次数；同一 event.id 只算一次，不把资料缺项当异常。 */
   unknownCount: number;
+  /** 全部历史中需说明当轮结果或关联范围的场次，包含已记载当轮不通过。 */
+  historicalCount: number;
   monthAiCompanies: number;
 };
+
+type SummaryProgress = Pick<CalendarProgress, "tone"> & Partial<Pick<CalendarProgress, "code" | "ownerKey" | "occurred">>;
+
+/**
+ * 「下一场」「未来 7 天」和顶栏「最近安排」共用的口径：只留仍会进行的确约。
+ * 同一天的场次可能已面完（已有整理稿或准备稿已完成），phase 仍是 upcoming——它已计入等回复与最近记录，
+ * 不能同时再当下一场；历史通过和拒信之后残留的旧预约也不是要去的面试。
+ */
+export function isCalendarLiveEvent(event: CalendarEvent, progress: SummaryProgress | undefined, today: string) {
+  return event.phase === "upcoming" && event.date >= today && !progress?.occurred && progress?.tone !== "closed"
+    && !(progress?.code && isCalendarHistoricalProgress({ code: progress.code }));
+}
 
 /**
  * 日历首屏的态势数字。
@@ -36,21 +51,23 @@ export type CalendarSummary = {
  */
 export function buildCalendarSummary({ events, progressByEvent, applicationDays, today }: {
   events: readonly CalendarEvent[];
-  progressByEvent: ReadonlyMap<string, Pick<CalendarProgress, "tone">>;
+  progressByEvent: ReadonlyMap<string, SummaryProgress>;
   applicationDays: readonly AiApplicationDay[];
   today: string;
 }): CalendarSummary {
   const horizon = shiftCalendarDay(today, 6);
   const live = [...events]
-    .filter((event) => event.phase === "upcoming" && event.date >= today && progressByEvent.get(event.id)?.tone !== "closed")
+    .filter((event) => isCalendarLiveEvent(event, progressByEvent.get(event.id), today))
     .sort((left, right) => left.date.localeCompare(right.date) || left.time.localeCompare(right.time) || left.id.localeCompare(right.id));
   const first = live[0];
   const waiting = new Set<string>();
-  let unknownCount = 0;
+  const unknown = new Set<string>();
+  const historical = new Set<string>();
   for (const event of events) {
-    const tone = progressByEvent.get(event.id)?.tone;
-    if (tone === "waiting") waiting.add(event.caseId || event.id);
-    if (tone === "unknown") unknownCount += 1;
+    const progress = progressByEvent.get(event.id);
+    if (progress?.tone === "waiting") waiting.add(progress.ownerKey || (event.caseId ? `case:${event.caseId}` : `event:${event.id}`));
+    if (progress?.code === "association-conflict") unknown.add(event.id);
+    if (progress?.code && isCalendarHistoricalProgress({ code: progress.code })) historical.add(event.id);
   }
   const month = today.slice(0, 7);
   const companies = new Set(applicationDays
@@ -60,7 +77,8 @@ export function buildCalendarSummary({ events, progressByEvent, applicationDays,
     weekCount: live.filter((event) => event.date <= horizon).length,
     next: first ? { event: first, days: calendarDayOffset(today, first.date) ?? 0 } : null,
     waitingCount: waiting.size,
-    unknownCount,
+    unknownCount: unknown.size,
+    historicalCount: historical.size,
     monthAiCompanies: companies.size,
   };
 }

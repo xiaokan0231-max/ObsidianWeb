@@ -66,6 +66,8 @@ import {
 } from "@/lib/memory-atlas-data";
 import { scopesToReloadAfterStats, vaultScopeForView } from "@/lib/vault-scope";
 import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
+import { calendarProgress } from "@/lib/calendar-progress";
+import { buildCalendarSummary } from "@/lib/calendar-summary";
 import { tokyoParts } from "@/lib/dojo/utils";
 import { APP_BRANDING } from "@/lib/ui-locale";
 import { LanguageSwitch, useUiLocale } from "./ui-locale";
@@ -1117,15 +1119,15 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   );
 
   // 最近安排只表示实际约定；行动期限和外部跟进留在待办与等待区。
-  const nextEvent = useMemo(
-    () =>
-      calendarEvents
-        .filter((event) => event.phase === "upcoming")
-        .toSorted((left, right) =>
-          `${left.date} ${left.time}`.localeCompare(`${right.date} ${right.time}`),
-        )[0] ?? null,
-    [calendarEvents],
-  );
+  // 与日历「下一场」同一口径（buildCalendarSummary）：已不採用的旧预约、当天已面完的场次都不算。
+  // 只给 upcoming 的场次算进展，calendarProgress 要回查案件，没必要对全部历史跑一遍。
+  const nextEvent = useMemo(() => {
+    const upcoming = calendarEvents.filter((event) => event.phase === "upcoming");
+    const progressByEvent = new Map(upcoming.map((event) => [
+      event.id, calendarProgress(event, notes, calendarInterviewTargets.get(event.id)),
+    ]));
+    return buildCalendarSummary({ events: upcoming, progressByEvent, applicationDays: [], today: calendarToday }).next?.event ?? null;
+  }, [calendarEvents, notes, calendarInterviewTargets, calendarToday]);
 
   // ?note= が指すノートが今の scope に無い（他ページのリンクや共有 URL）：黙って開かないのではなく、全量を一度取りに行く。
   useEffect(() => {
@@ -1239,6 +1241,10 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   // 分析页直接打开看板案件抽屉，跟进操作仍使用案件本身的表单。
   const openCase = useCallback((note: Note) => {
     navigateToView("jobs", new URLSearchParams({ status: "all", case: note.path }), true, () => setJobsInitialFilters(null));
+  }, [navigateToView]);
+
+  const openApplicationCompany = useCallback((company: string, note: Note) => {
+    navigateToView("session", companyOverviewSearch(company, note.path));
   }, [navigateToView]);
 
   // 筛选种子跟导航同一次提交（见 navigateToView 的 alongside），不先落在还没离开的页面上。
@@ -1703,6 +1709,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   notes={notes}
                   today={calendarToday}
                   loading={!scopeReady}
+                  fetchedAt={fetchedAt}
+                  onOpenCompany={openApplicationCompany}
                   onOpen={openNote}
                   interviewTargets={calendarInterviewTargets}
                   onInterview={openCalendarInterview}

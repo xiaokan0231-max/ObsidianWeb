@@ -1,0 +1,52 @@
+/* 来源用一枚独立色点，卡片边框仍只表达选考状态，避免同一颜色承担两种含义。 */
+.calendar-origin-badge,
+.calendar-origin-legend [data-origin] {
+  --calendar-origin-color: light-dark(#65716a, #a5afa9);
+}
+.calendar-origin-badge[data-origin="ai"],
+.calendar-origin-legend [data-origin="ai"] { --calendar-origin-color: light-dark(#7957b7, #ba9deb); }
+.calendar-origin-badge[data-origin="self"],
+.calendar-origin-legend [data-origin="self"] { --calendar-origin-color: light-dark(#317aaa, #8ac7ed); }
+.calendar-origin-badge[data-origin="invited"],
+.calendar-origin-legend [data-origin="invited"] { --calendar-origin-color: light-dark(#9b741c, #e8c36b); }
+.calendar-origin-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-height: 18px;
+  color: var(--calendar-origin-color);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.calendar-origin-badge.compact { gap: 4px; font-size: 10px; }
+.calendar-origin-badge > i,
+.calendar-origin-legend [data-origin] > i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: var(--calendar-origin-color);
+}
+.calendar-origin-badge[data-origin="unknown"] > i,
+.calendar-origin-legend [data-origin="unknown"] > i { background: transparent; }
+.calendar-origin-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.calendar-origin-legend [data-origin] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.calendar-origin-legend [data-origin] > i { color: var(--calendar-origin-color); }

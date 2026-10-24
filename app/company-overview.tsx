@@ -10,6 +10,7 @@ import {
   type CompanyReview,
 } from "@/lib/company-overview";
 import { HARD_GATE_LABEL, JOB_FIT_AXES, JOB_FIT_SCORE_LABEL, UNRATED_V2_LABEL, toJobCard } from "@/lib/jobs";
+import { prefersReducedMotion } from "@/lib/motion";
 import { useDialogFocus } from "./use-dialog-focus";
 import { Inlines } from "./prep-doc-render";
 
@@ -129,7 +130,7 @@ export default function CompanyOverviewContent({ context, onOpenWiki, historical
         event.preventDefault();
         const heading = document.getElementById(`${prefix}-reviews-title`);
         heading?.focus({ preventScroll: true });
-        document.getElementById(`${prefix}-reviews`)?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        document.getElementById(`${prefix}-reviews`)?.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
       }}>查看外部评价 ↓</a></header><p className="co-summary">{assessment?.summary || "根据岗位原文和你的经历补齐资料后，形成面试前判断。"}</p><div className="co-fit-notes"><section><h3>主要契合点</h3>{assessment?.strengths.length ? <ul>{assessment.strengths.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="co-muted">待补充证据</p>}</section><section><h3>面谈核实</h3>{assessment?.questions.length ? <><ol>{assessment.questions.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ol>{assessment.questions.length > 3 && <details className="co-more-questions"><summary>其他核实事项 · {assessment.questions.length - 3}</summary><ol start={4}>{assessment.questions.slice(3).map((item) => <li key={item}>{item}</li>)}</ol></details>}</> : <p className="co-muted">实际岗位、职责分工与工作条件</p>}</section></div></div>
         <aside className="co-fit-chart" aria-label="六维契合画像"><h3>{criteriaVersion === 1 ? "与你的契合画像 · 旧口径" : "面试前契合画像"}</h3><CompanyFitRadar label={context?.company ?? "当前公司"} dimensions={assessment?.dimensions ?? []} criteriaVersion={criteriaVersion} detailPrefix={prefix} /></aside>
       </div>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAiApplicationDays } from "../lib/calendar-applications.ts";
+import { AI_APPLICATION_BUCKETS, buildAiApplicationDays, summarizeAiApplicationDays } from "../lib/calendar-applications.ts";
 import { buildCalendarEvents, buildCommitments, countdownLabel } from "../lib/memory-atlas-data.ts";
 import { resolveCalendarInterview } from "../lib/calendar-interview.ts";
 import { tokyoParts } from "../lib/dojo/utils.ts";
@@ -14,6 +14,19 @@ function application(id, fields = {}) {
     frontmatter: {
       type: "job-case", case_id: id, company: "株式会社テスト", position: "データエンジニア",
       status: "応募済", applied_on: TODAY, application_actor: "ai", application_agent: "Codex",
+      ...fields,
+    },
+  };
+}
+
+function reviewedTodo(caseId, fields = {}, id = caseId) {
+  return {
+    path: `20_求職/_TODO/テスト_${id}.md`, tags: [], stat: { ctime: 0, mtime: 1, size: 0 },
+    content: "# 依頼された書類を提出する\n\n企業から書類の追加提出依頼を確認済み。",
+    frontmatter: {
+      type: "todo", case_id: caseId, status: "未着手", audience: "user",
+      action: "依頼された書類を提出する", action_owner: "user", action_kind: "required", action_reviewed_at: TODAY,
+      action_reason: "企業から追加書類の提出依頼がある", action_source: "https://example.com/messages/request-1",
       ...fields,
     },
   };
@@ -127,4 +140,196 @@ test("冷启动calendar scope可读活动，申请不进入日程、承诺和占
   assert.deepEqual(buildCommitments(notes, now), []);
   const scheduled = { ...note, frontmatter: { ...note.frontmatter, next_event_at: "2026-08-12 10:00", next_event_label: "一次面接" } };
   assert.deepEqual(buildCalendarEvents([scheduled], now).map((event) => event.date), ["2026-08-12"]);
+});
+
+test("六桶互斥统计公司，只有审核明确的本人动作进入needs-user", () => {
+  const notes = [
+    application("needs", { company: "株式会社テスト一", waiting_for: "company" }),
+    application("progress", { company: "株式会社テスト二", status: "書類通過" }),
+    application("unknown", { company: "株式会社テスト三" }),
+    application("waiting", { company: "株式会社テスト四", waiting_for: "agent" }),
+    application("paused", { company: "株式会社テスト五", status: "保留" }),
+    application("closed", { company: "株式会社テスト六", status: "不採用（書類選考）" }),
+    reviewedTodo("needs"),
+  ];
+  const [day] = buildAiApplicationDays(notes, TODAY);
+  assert.deepEqual(AI_APPLICATION_BUCKETS, ["needs-user", "progressing", "unknown", "waiting", "paused", "closed"]);
+  assert.equal(day.companyCount, 6);
+  assert.equal(day.positionCount, 6);
+  assert.deepEqual(Object.values(day.bucketCounts), [1, 1, 1, 1, 1, 1]);
+  assert.equal(Object.values(day.bucketCounts).reduce((sum, count) => sum + count, 0), day.companyCount);
+  assert.deepEqual(day.applications.find((item) => item.id === "needs").requiredActions, [notes.at(-1)]);
+  assert.equal(day.companies.find((item) => item.applications[0].id === "waiting").bucket, "waiting");
+});
+
+test("本人动作须精确case_id，不能由公司名、文件路径或泛next_action补出", () => {
+  const own = application("specific", { waiting_for: "company", next_action: "返信と書類提出が必要" });
+  const noId = application("path-only", { case_id: undefined, company: "株式会社別テスト", waiting_for: "self" });
+  const notes = [own, noId,
+    reviewedTodo("specific-other"),
+    reviewedTodo(" specific"),
+    reviewedTodo("missing", { case_id: undefined, company: own.frontmatter.company }),
+    reviewedTodo(noId.path),
+  ];
+  const [day] = buildAiApplicationDays(notes, TODAY);
+  const found = day.applications.find((item) => item.id === "specific");
+  assert.equal(found.bucket, "waiting");
+  assert.deepEqual(found.requiredActions, []);
+  assert.deepEqual(found.reviewActions, []);
+  assert.equal(day.applications.find((item) => item.id === noId.path).bucket, "unknown");
+  assert.equal(day.bucketCounts["needs-user"], 0);
+});
+
+test("未审核老TODO与self是待核对线索，缺字段不能计为本人义务", () => {
+  for (const field of ["action_owner", "action_kind", "action_reviewed_at", "action", "action_reason", "action_source"]) {
+    const job = application("legacy", { waiting_for: "company" });
+    const todo = reviewedTodo("legacy", { [field]: undefined });
+    const [day] = buildAiApplicationDays([job, todo], TODAY);
+    assert.equal(day.applications[0].bucket, "unknown", field);
+    assert.deepEqual(day.applications[0].requiredActions, [], field);
+    assert.deepEqual(day.applications[0].reviewActions, [todo], field);
+  }
+  for (const fields of [
+    { waiting_for: "self" },
+    { application_decision: "await_company_reply" },
+    { next_action: "企業からの依頼に返信する" },
+  ]) {
+    const [day] = buildAiApplicationDays([application("no-action-evidence", fields)], TODAY);
+    assert.equal(day.applications[0].bucket, "unknown");
+    assert.equal(day.bucketCounts["needs-user"], 0);
+  }
+  for (const status of ["書類通過", "面接中", "内定"]) {
+    const [self] = buildAiApplicationDays([application("self", { status, waiting_for: "self" })], TODAY);
+    assert.equal(self.applications[0].bucket, "unknown", `${status} 的self缺证据仍待核`);
+    const old = reviewedTodo("progress", { action_reviewed_at: undefined });
+    const [progress] = buildAiApplicationDays([application("progress", { status, waiting_for: "company" }), old], TODAY);
+    assert.equal(progress.applications[0].bucket, "progressing");
+    assert.deepEqual(progress.applications[0].reviewActions, [old]);
+  }
+});
+
+test("同case_id不同来源的歧义案件不会被随意分配本人动作", () => {
+  const first = application("ambiguous", { waiting_for: "company" });
+  const other = { ...application("ambiguous", { status: "不採用" }), path: "20_求職/テスト/別の案件.md" };
+  const todo = reviewedTodo("ambiguous");
+  const [day] = buildAiApplicationDays([first, other, todo], TODAY);
+  assert.equal(day.positionCount, 1, "保持原有case_id去重口径");
+  assert.equal(day.applications[0].bucket, "unknown");
+  assert.deepEqual(day.applications[0].requiredActions, []);
+  assert.deepEqual(day.applications[0].reviewActions, [todo]);
+});
+
+test("审核日及TODO状态无效时不生成需本人处理，纯投影不改原数据", () => {
+  for (const fields of [
+    { status: "確認済み" }, { status: undefined }, { action_reviewed_at: "2026-08-11" },
+    { action_reviewed_at: "2026-02-30" }, { expires_at: "不明" },
+  ]) {
+    const notes = [application("invalid", { waiting_for: "company" }), reviewedTodo("invalid", fields)];
+    const before = structuredClone(notes);
+    Object.freeze(notes[0].frontmatter); Object.freeze(notes[1].frontmatter); Object.freeze(notes);
+    const [day] = buildAiApplicationDays(notes, TODAY);
+    assert.equal(day.bucketCounts["needs-user"], 0, JSON.stringify(fields));
+    assert.deepEqual(day.applications[0].requiredActions, []);
+    assert.deepEqual(notes, before);
+  }
+});
+
+test("可选、系统、历史、已完、保留及过期TODO不把外部等待升级为本人动作", () => {
+  const nonActions = [
+    { action_kind: "optional" }, { action_kind: "reference" }, { action_kind: "history" },
+    { action_kind: "waiting", action_owner: "company" },
+    { action_owner: "ai" }, { action_owner: "system" }, { action_owner: "agent" }, { action_owner: "platform" },
+    { audience: "system" }, { status: "完了" }, { status: "保留" },
+    { expires_at: "2026-08-09" },
+  ];
+  for (const fields of nonActions) {
+    const [day] = buildAiApplicationDays([
+      application("external", { waiting_for: "company" }), reviewedTodo("external", fields),
+    ], TODAY);
+    assert.equal(day.applications[0].bucket, "waiting", JSON.stringify(fields));
+    assert.deepEqual(day.applications[0].requiredActions, [], JSON.stringify(fields));
+    assert.deepEqual(day.applications[0].reviewActions, [], JSON.stringify(fields));
+  }
+});
+
+test("同日同公司跨职位取优先桶，日期间独立且岗位与TODO均不重复", () => {
+  const kinds = {
+    "needs-user": { status: "応募済", waiting_for: "company" },
+    progressing: { status: "面接中" },
+    unknown: { status: "応募済" },
+    waiting: { status: "応募済", waiting_for: "platform" },
+    paused: { status: "保留" },
+    closed: { status: "不採用" },
+  };
+  for (let first = 0; first < AI_APPLICATION_BUCKETS.length - 1; first += 1) {
+    const preferred = AI_APPLICATION_BUCKETS[first];
+    const lower = AI_APPLICATION_BUCKETS[first + 1];
+    const one = application("one", { company: "株式会社ＴＥＳＴ", ...kinds[preferred] });
+    const two = application("two", { company: "test（東京）", ...kinds[lower] });
+    const action = reviewedTodo("one");
+    const notes = [one, one, two, application("earlier", { company: "test", status: "不採用", applied_on: "2026-08-09" })];
+    if (preferred === "needs-user") notes.push(action, action);
+    const days = buildAiApplicationDays(notes, TODAY);
+    assert.equal(days[0].companies[0].bucket, "closed");
+    const day = days[1];
+    assert.equal(day.companyCount, 1, preferred);
+    assert.equal(day.positionCount, 2, preferred);
+    assert.equal(day.companies[0].key, "test");
+    assert.equal(day.companies[0].bucket, preferred);
+    assert.equal(day.companies[0].applications.length, 2);
+    assert.equal(day.bucketCounts[preferred], 1);
+    assert.equal(Object.values(day.bucketCounts).reduce((sum, count) => sum + count, 0), 1);
+    if (preferred === "needs-user") assert.deepEqual(day.applications.find((item) => item.id === "one").requiredActions, [action]);
+  }
+});
+
+test("后续进展和拒否只改变当前桶，历史申请日与执行者不变", () => {
+  const todo = reviewedTodo("history");
+  for (const [status, expected] of [["応募済", "needs-user"], ["書類通過", "needs-user"], ["保留", "paused"], ["不採用（面談前終了）", "closed"]]) {
+    const note = application("history", { status, applied_on: "2026-08-01", status_updated: TODAY, waiting_for: "self" });
+    const [day] = buildAiApplicationDays([note, todo], TODAY);
+    assert.equal(day.date, "2026-08-01");
+    assert.equal(day.applications[0].bucket, expected);
+    assert.equal(day.applications[0].agent, "Codex");
+    assert.equal(day.companyCount, 1);
+    assert.equal(day.applications[0].note, note);
+    if (["paused", "closed"].includes(expected)) assert.deepEqual(day.applications[0].requiredActions, []);
+  }
+  for (const status of ["書類通過", "面接中", "内定"]) {
+    const [day] = buildAiApplicationDays([application("selection", { status, waiting_for: "company" })], TODAY);
+    assert.equal(day.applications[0].bucket, "progressing", status);
+  }
+});
+
+test("受理凭证不是回复义务，明示等待和旧收据检查不能误增needs-user", () => {
+  const note = application("receipt", { waiting_for: "company", next_action: "応募を受け付けました。ログインしてメッセージを確認できます" });
+  const waiting = reviewedTodo("receipt", { action_owner: "company", action_kind: "waiting", action: "選考結果を待つ" });
+  const receipt = { ...reviewedTodo("receipt", { type: "material" }, "receipt-material"), content: "# 応募受理\n返信先とログイン案内がある通知。" };
+  const [day] = buildAiApplicationDays([note, waiting, receipt], TODAY);
+  assert.equal(day.applications[0].bucket, "waiting");
+  assert.equal(day.bucketCounts["needs-user"], 0);
+  const oldReceiptTask = reviewedTodo("receipt", {
+    action: "受理メールを確認する", action_owner: undefined, action_kind: undefined, action_reviewed_at: undefined,
+  }, "old-receipt-task");
+  const [needsReview] = buildAiApplicationDays([note, oldReceiptTask], TODAY);
+  assert.equal(needsReview.applications[0].bucket, "unknown");
+  assert.equal(needsReview.bucketCounts["needs-user"], 0);
+});
+
+
+test("月内跨日期同公司多岗位只占一段，并保留最高优先级的当前进展", () => {
+  const days = buildAiApplicationDays([
+    application("a", { applied_on: "2026-08-01", status: "不採用" }),
+    application("b", { applied_on: "2026-08-03", status: "面接中" }),
+    application("c", { company: "株式会社ダミー", applied_on: "2026-08-03", status: "応募済", waiting_for: "company" }),
+    application("old", { company: "株式会社サンプル", applied_on: "2026-07-03", status: "不採用" }),
+  ], TODAY);
+  const summary = summarizeAiApplicationDays(days, "2026-08");
+  assert.equal(summary.companyCount, 2);
+  assert.equal(summary.positionCount, 3);
+  assert.equal(summary.bucketCounts.progressing, 1);
+  assert.equal(summary.bucketCounts.waiting, 1);
+  assert.equal(summary.bucketCounts.closed, 0);
+  assert.equal(Object.values(summary.bucketCounts).reduce((a, b) => a + b, 0), summary.companyCount);
+  assert.equal(summarizeAiApplicationDays(days, "2026-09").companyCount, 0);
 });
