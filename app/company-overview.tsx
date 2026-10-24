@@ -125,7 +125,9 @@ function Reviews({ reviews, onOpenWiki, compact = false }: { reviews: CompanyRev
   })}</div>;
 }
 
-export default function CompanyOverviewContent({ context, onOpenWiki, historical = false }: { context: CompanyOverview | null; onOpenWiki: (target: string) => void; historical?: boolean }) {
+export type CompanyOverviewView = "full" | "story" | "reviews";
+
+export default function CompanyOverviewContent({ context, onOpenWiki, historical = false, view = "full", onOpenReviews }: { context: CompanyOverview | null; onOpenWiki: (target: string) => void; historical?: boolean; view?: CompanyOverviewView; onOpenReviews?: () => void }) {
   const prefix = useId().replaceAll(":", "");
   const assessment = context?.assessment;
   const profile = context?.profile;
@@ -134,17 +136,21 @@ export default function CompanyOverviewContent({ context, onOpenWiki, historical
   const axes = companyFitDimensions(criteriaVersion);
   const facts = [...(profile?.facts ?? []), ...(assessment?.contextFacts ?? [])];
   const renderParagraph = (paragraph: NonNullable<typeof companySummary>["paragraphs"][number], index: number) => <p key={index}><Inlines nodes={paragraph} refs={{ onOpenWiki: (target, section) => onOpenWiki(section ? `${target}#${section}` : target) }} /></p>;
-  return <div className="company-overview">
+  const externalSection = <section className="co-external" id={`${prefix}-reviews`} aria-labelledby={`${prefix}-reviews-title`}><header className="co-section-header">{view === "full" && <span>03</span>}<h2 id={`${prefix}-reviews-title`} tabIndex={-1}>外部评价</h2><p>员工的经历 · 对本次面谈的启示</p></header><ReviewSynthesis synthesis={profile?.reviewSynthesis} onOpenWiki={onOpenWiki} /><Reviews reviews={profile?.reviews ?? []} onOpenWiki={onOpenWiki} /></section>;
+  // 独立评价页不带岗位结论与公司故事，来源和统计仍由同一份正本组件展示。
+  if (view === "reviews") return <div className="company-overview co-view-reviews">{externalSection}</div>;
+  const reviewsAction = onOpenReviews ? <button type="button" onClick={onOpenReviews}>查看外部评价 →</button> : <a href={`#${prefix}-reviews`} onClick={(event) => {
+    event.preventDefault();
+    const heading = document.getElementById(`${prefix}-reviews-title`);
+    heading?.focus({ preventScroll: true });
+    document.getElementById(`${prefix}-reviews`)?.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+  }}>查看外部评价 ↓</a>;
+  return <div className={`company-overview${view === "story" ? " co-view-story" : ""}`}>
     <div className="co-dates"><span>资料 <b>{profile?.updatedOn || "尚未整理"}</b></span><span>判断 <b>{assessment?.assessedOn || "尚未评估"}</b>{assessment && <small> · {assessment.aiAuthor}</small>}</span><span className="co-latest">最新画像{historical ? " · 历史面谈正文保持原样" : ""}</span></div>
     {!context && <p className="co-notice">这份准备尚未关联可唯一识别的案件或面谈记录，公司画像待补齐。</p>}
     {!!context?.issues.length && <details className="co-notice"><summary>部分资料暂不可用</summary><ul>{context.issues.map((item) => <li key={item}>{item}</li>)}</ul></details>}
     <section className="co-fit-section" aria-labelledby={`${prefix}-fit`}>
-      <div className="co-fit-main"><div className="co-fit-brief"><header className="co-section-header"><span>01</span><h2 id={`${prefix}-fit`}>先看结论</h2><a href={`#${prefix}-reviews`} onClick={(event) => {
-        event.preventDefault();
-        const heading = document.getElementById(`${prefix}-reviews-title`);
-        heading?.focus({ preventScroll: true });
-        document.getElementById(`${prefix}-reviews`)?.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-      }}>查看外部评价 ↓</a></header><p className="co-summary">{assessment?.summary || "根据岗位原文和你的经历补齐资料后，形成面试前判断。"}</p><div className="co-fit-notes"><section><h3>主要契合点</h3>{assessment?.strengths.length ? <ul>{assessment.strengths.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="co-muted">待补充证据</p>}</section><section><h3>面谈核实</h3>{assessment?.questions.length ? <><ol>{assessment.questions.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ol>{assessment.questions.length > 3 && <details className="co-more-questions"><summary>其他核实事项 · {assessment.questions.length - 3}</summary><ol start={4}>{assessment.questions.slice(3).map((item) => <li key={item}>{item}</li>)}</ol></details>}</> : <p className="co-muted">实际岗位、职责分工与工作条件</p>}</section></div></div>
+      <div className="co-fit-main"><div className="co-fit-brief"><header className="co-section-header"><span>01</span><h2 id={`${prefix}-fit`}>先看结论</h2>{reviewsAction}</header><p className="co-summary">{assessment?.summary || "根据岗位原文和你的经历补齐资料后，形成面试前判断。"}</p><div className="co-fit-notes"><section><h3>主要契合点</h3>{assessment?.strengths.length ? <ul>{assessment.strengths.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="co-muted">待补充证据</p>}</section><section><h3>面谈核实</h3>{assessment?.questions.length ? <><ol>{assessment.questions.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ol>{assessment.questions.length > 3 && <details className="co-more-questions"><summary>其他核实事项 · {assessment.questions.length - 3}</summary><ol start={4}>{assessment.questions.slice(3).map((item) => <li key={item}>{item}</li>)}</ol></details>}</> : <p className="co-muted">实际岗位、职责分工与工作条件</p>}</section></div></div>
         <aside className="co-fit-chart" aria-label="六维契合画像"><h3>{criteriaVersion === 1 ? "与你的契合画像 · 旧口径" : "面试前契合画像"}</h3><CompanyFitRadar label={context?.company ?? "当前公司"} dimensions={assessment?.dimensions ?? []} criteriaVersion={criteriaVersion} detailPrefix={prefix} /></aside>
       </div>
       {criteriaVersion === 1 && <p className="co-notice">这份评价使用旧口径，保留原始维度与判断，待更新后可与面试前画像比较。</p>}
@@ -164,7 +170,7 @@ export default function CompanyOverviewContent({ context, onOpenWiki, historical
         {facts.length ? <dl className="co-fact-grid">{facts.map((fact, index) => <div key={`${fact.id}:${index}`}><dt>{fact.label}</dt><dd><Fact fact={fact} onOpenWiki={onOpenWiki} /></dd></div>)}</dl> : <p className="co-muted">公司规模、业务、岗位条件等资料待整理；已存在的案件和面谈记录仍可查看。</p>}
       </section>
     </div>
-    <section className="co-external" id={`${prefix}-reviews`} aria-labelledby={`${prefix}-reviews-title`}><header className="co-section-header"><span>03</span><h2 id={`${prefix}-reviews-title`} tabIndex={-1}>外部评价</h2><p>员工的经历 · 对本次面谈的启示</p></header><ReviewSynthesis synthesis={profile?.reviewSynthesis} onOpenWiki={onOpenWiki} /><Reviews reviews={profile?.reviews ?? []} onOpenWiki={onOpenWiki} /></section>
+    {view === "full" && externalSection}
   </div>;
 }
 

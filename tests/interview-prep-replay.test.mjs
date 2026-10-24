@@ -240,7 +240,7 @@ test("对照样稿页头标明不是当时的准备稿，倒计时让位", async
   assert.match(html, /class="v2-replay-note">对照样稿：按 2026-09-30 以前能拿到的信息重写/);
   assert.doesNotMatch(html, /v2-countdown/);
   // 样稿落在面谈纵览，对照节在最上面；五章里不混入面试后的事实。
-  assert.match(html, /id="v2-tab-overview"[^>]*aria-selected="true"/);
+  assert.match(html, /id="v2-tab-story"[^>]*aria-selected="true"/);
   assert.match(html, /class="v2-replay-comparison"[^>]*><h2 id="v2-replay-comparison-title">对照：当时实际发生了什么／新稿会改变什么<\/h2>/);
   assert.ok(html.indexOf("v2-replay-comparison") < html.indexOf("按面试前能拿到的信息重写。"), "对照节在纵览正文之前");
 });

@@ -45,8 +45,9 @@ test("日语面试章节与案件菜单保留原始公司、岗位和准备稿�
     companyOverview: null, contextPicker: null, companyAction: null,
   }));
   assert.match(html, /aria-label="面接準備の章"/);
-  assert.match(html, /企業概要/);
-  assert.match(html, /面接の概要/);
+  assert.match(html, /面接ストーリー/);
+  assert.match(html, /外部評価/);
+  assert.match(html, /面接ツール/);
   assert.match(html, /当日の補助資料/);
   assert.match(html, /原始中文正文保留。/);
   assert.match(html, /株式会社テスト/);

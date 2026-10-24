@@ -155,17 +155,17 @@ test("面试当天和前一天默认打开临场卡，底下停在纵览；URL �
     assert.equal(opened.length, 1, today);
     assert.equal(opened[0].presentation, "stage");
     assert.deepEqual(opened[0].sections.map((section) => section.title).slice(0, 2), ["冒頭30秒", "本場の懸念 TOP3 と先回り一言"]);
-    assert.match(html, /id="v2-tab-overview"[^>]*aria-selected="true"/);
+    assert.match(html, /id="v2-tab-story"[^>]*aria-selected="true"/);
   }
   const later = await render({ today: "2026-10-16" });
   assert.equal(later.opened.length, 0);
-  assert.match(later.html, /id="v2-tab-company"[^>]*aria-selected="true"/);
+  assert.match(later.html, /id="v2-tab-story"[^>]*aria-selected="true"/);
   const fromUrl = await render({ today: "2026-10-20", search: "?prepTab=questions" });
   assert.equal(fromUrl.opened.length, 0);
-  assert.match(fromUrl.html, /id="v2-tab-questions"[^>]*aria-selected="true"/);
+  assert.match(fromUrl.html, /id="v2-tab-kit"[^>]*aria-selected="true"/);
   const bare = await render({ today: "2026-10-20", target: parseInterviewPrepDoc(prepNote(STAGE_BODY.replace(/^【あなた】.*\n/gm, "")), []) });
   assert.equal(bare.opened.length, 0);
-  assert.match(bare.html, /id="v2-tab-overview"[^>]*aria-selected="true"/);
+  assert.match(bare.html, /id="v2-tab-story"[^>]*aria-selected="true"/);
 });
 
 test("临场卡里逆質問的预想回答是提示行、不进 ←/→，接话缩进成组；问法与收住仍是主行", async () => {
@@ -206,8 +206,8 @@ test("本场面试页头显示倒计时，临场卡入口只在有台词章节�
   };
   const doc = parseInterviewPrepDoc(note, []);
   assert.ok(doc);
-  // 面试在明天之内默认打开临场卡、底下落在纵览，右栏（含临场卡入口）可见；更远时落在公司总览，没有右栏。
-  for (const [locale, today, label, rail] of [["zh-CN", "2026-10-03", "明天", true], ["ja", "2026-10-04", "今日", true], ["zh-CN", "2026-09-30", "4 天后", false]]) {
+  // 自动打开仍按日期判断；手动入口始终留在三标签旁，便于提前练习。
+  for (const [locale, today, label] of [["zh-CN", "2026-10-03", "明天"], ["ja", "2026-10-04", "今日"], ["zh-CN", "2026-09-30", "4 天后"]]) {
     const { default: Session } = await loadAppModule("app/interview-session-v2.tsx", {
       stubs: { "./ui-locale": { useUiLocale: () => ({ locale, setLocale() {} }) }, "./prep-material-reader": { default: () => null } },
     });
@@ -217,7 +217,7 @@ test("本场面试页头显示倒计时，临场卡入口只在有台词章节�
       companyOverview: null, contextPicker: null, companyAction: null,
     }));
     assert.match(html, new RegExp(`class="v2-countdown [a-z]+">${label}<`));
-    assert.equal(/v2-stage-entry/.test(html), rail);
+    assert.match(html, /class="v2-stage-nav"/);
     assert.match(html, /class="v2-tab-indicator"/);
   }
   // 三章都没有台词时不出入口：点进去只会看到一句空提示。
@@ -230,8 +230,8 @@ test("本场面试页头显示倒计时，临场卡入口只在有台词章节�
     onSelect() {}, onOpen() {}, onOpenWiki() {}, onOpenCard() {}, onOpenAsset() {},
     companyOverview: null, contextPicker: null, companyAction: null,
   }));
-  assert.match(bareHtml, /class="v2-rail"/);
-  assert.doesNotMatch(bareHtml, /v2-stage-entry/);
+  assert.equal((bareHtml.match(/role="tab" /g) ?? []).length, 3);
+  assert.doesNotMatch(bareHtml, /v2-stage-(entry|nav)/);
 });
 
 test("临场卡的阅读层：←/→ 在台词之间跳；打印样式写在本场面试页自己的样式里", async () => {

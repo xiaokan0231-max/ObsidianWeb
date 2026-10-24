@@ -189,6 +189,68 @@ test("未保存外部总结时不从平台均分或正负主题拼出总结，�
   }
 });
 
+function storyAndReviewContext() {
+  const item = context("数据平台岗位");
+  item.summary = { note: { path: "80_AI分析/公司研究.md" }, schemaVersion: 1, assessedOn: "2026-01-03", aiAuthor: "Codex", coveragePeriod: "2025年资料",
+    paragraphs: ["企业业务故事。", "公司故事里原有的员工观察仍完整保留。"].map(prepModel.parseInline), sources: [{ label: "企业业务原文", url: "https://example.com/business" }] };
+  item.profile = { updatedOn: "2026-01-03", facts: [{ id: "business", label: "业务", value: "业务软件开发", asOf: "2026-01-03", scope: "公司公开资料", sources: [{ label: "业务资料", url: "https://example.com/business" }] }],
+    reviewSynthesis: { asOf: "2026-01-03", aiAuthor: "Codex", paragraphs: ["员工评价的总体综合判断。"].map(prepModel.parseInline), coverage: "实读两名工程师，部门未知。", sources: [{ label: "员工原文", url: "https://example.com/reviews/one" }] },
+    reviews: [{ platform: "员工评价平台", url: "https://example.com/reviews", status: "available", score: 3.7, scale: 5, sampleCount: 9, sampleUnit: "名回答者", commentPeriod: "2025年", coverage: "定向阅读工程师个体体验", positive: [], negative: [], readOn: "2026-01-03", limitations: "不代表当前岗位安排", insights: [{ title: "机会与支持需要一起看", kind: "mixed", summary: "员工描述了交流机会和项目差异。", implication: "核对具体配属与资源。", evidence: [{ url: "https://example.com/reviews/one", publishedOn: "2025-12-01", role: "工程师／中途／在职", quote: "相談する機会があります。", paraphrase: "该回答者认为可以找同事讨论。" }] }] }] };
+  return item;
+}
+
+test("故事模式保留公司总结、事实与契合画像，外部评价详情由独立入口承接", () => {
+  const item = storyAndReviewContext();
+  const html = render(components.default, { context: item, view: "story", onOpenWiki() {}, onOpenReviews() {} });
+  assert.match(html, /class="company-overview co-view-story"/);
+  assert.match(html, /数据平台岗位的独立判断/);
+  assert.match(html, /企业业务故事/);
+  assert.match(html, /公司故事里原有的员工观察仍完整保留/);
+  assert.match(html, /业务软件开发/);
+  assert.match(html, /class="co-radar"/);
+  assert.match(html, /<button type="button">查看外部评价 →<\/button>/);
+  assert.doesNotMatch(html, /class="co-external"|class="co-review-synthesis"|class="co-review-platform"|员工评价的总体综合判断|3\.7<small>/);
+  assert.doesNotMatch(html, /href="#[^"]+-reviews"/);
+  const fallback = render(components.default, { context: item, view: "story", onOpenWiki() {} });
+  assert.match(fallback, /href="#[^"]+-reviews">查看外部评价 ↓<\/a>/);
+});
+
+test("独立外部评价模式完整展示总结、平台、主题、员工论据与范围，不混入故事和岗位结论", () => {
+  const html = render(components.default, { context: storyAndReviewContext(), view: "reviews", onOpenWiki() {} });
+  assert.match(html, /class="company-overview co-view-reviews"/);
+  assert.match(html, /<h2 id="[^"]+-reviews-title" tabindex="-1">外部评价<\/h2>/);
+  assert.match(html, /员工评价的总体综合判断/);
+  assert.match(html, /实读两名工程师，部门未知/);
+  assert.match(html, /员工评价平台/);
+  assert.match(html, /3\.7<small> \/ 5/);
+  assert.match(html, /9 名回答者/);
+  assert.match(html, /机会与支持需要一起看/);
+  assert.match(html, /相談する機会があります。/);
+  assert.match(html, /不代表当前岗位安排/);
+  assert.match(html, /总结依据 · 1 项/);
+  assert.doesNotMatch(html, /co-dates|co-fit-section|co-radar|co-company-context|企业业务故事|业务软件开发|数据平台岗位的独立判断|<span>03<\/span>/);
+});
+
+test("默认full兼容完整页面；独立评价模式在未关联或无口碑时保留轻量空态", () => {
+  for (const view of [undefined, "full"]) {
+    const html = render(components.default, { context: storyAndReviewContext(), view, onOpenWiki() {} });
+    assert.match(html, /class="company-overview"/);
+    assert.match(html, /co-fit-section/);
+    assert.match(html, /企业业务故事/);
+    assert.match(html, /业务软件开发/);
+    assert.match(html, /员工评价的总体综合判断/);
+    assert.match(html, /class="co-external"/);
+    assert.match(html, /<span>03<\/span>/);
+    assert.match(html, /href="#[^"]+-reviews">查看外部评价 ↓<\/a>/);
+  }
+  for (const item of [null, context("资料未补齐")]) {
+    const html = render(components.default, { context: item, view: "reviews", onOpenWiki() {} });
+    assert.match(html, /尚未收录可核对的外部评价/);
+    assert.match(html, /co-external/);
+    assert.doesNotMatch(html, /co-fit-section|co-radar|公司总结待整理|co-summary-empty|资料未补齐的独立判断/);
+  }
+});
+
 test("新旧口径混选时保留公司事实，禁止并排雷达和维度分数", () => {
   const first = context("旧岗位", 1), second = context("新岗位", 2);
   const html = render(components.CompanyCompare, { contexts: [first, second], onClose() {}, onDetail() {}, onRemove() {}, onOpenWiki() {}, onEdit() {} });

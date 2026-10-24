@@ -79,6 +79,8 @@
 .co-dimension-detail ul:not(.co-evidence) { padding-left: 17px; color: var(--co-muted); margin-bottom: 10px; }
 .co-footnote { margin: 12px 0 0; color: var(--co-muted); font-size: 11px; }
 .co-external { border-top: 1px solid var(--co-line); padding-top: 20px; scroll-margin-top: 110px; }
+.company-overview.co-view-reviews { padding-top: 0; }
+.co-view-reviews > .co-external { border-top: 0; padding-top: 0; }
 .co-review-synthesis { margin-bottom: 24px; padding: 16px 20px; border-left: 3px solid var(--co-green); background: var(--surface-recessed, var(--paper)); }
 .co-review-synthesis > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 20px; margin-bottom: 10px; }
 .co-review-synthesis h3 { margin: 0; color: var(--co-green); font-size: 13px; font-weight: 650; }
@@ -168,24 +170,24 @@
 .session-v2 .v2-company-layout { display: block; padding-top: 0; }
 .session-v2 .v2-nav > div { gap: 18px; }
 .session-v2 .v2-company-panel { min-width: 0; }
-/* 公司总览的头部只承担定位与切换，把阅读空间留给结论和评论证据。 */
-.session-v2:has(.v2-company-panel) { padding: 20px 28px 48px; }
-.session-v2:has(.v2-company-panel) .v2-header { grid-template-columns: minmax(0,1fr) auto; gap: 10px 24px; }
-.session-v2:has(.v2-company-panel) .v2-kicker { margin-bottom: 6px; }
-.session-v2:has(.v2-company-panel) h1 { font-size: clamp(28px,2.4vw,34px); }
-.session-v2:has(.v2-company-panel) .v2-position { margin-top: 6px; }
+/* 三个标签共用紧凑页头，切换正文时标题与导航保持原位。 */
+.session-v2:has(.v2-nav-three) { padding: 20px 28px 48px; }
+.session-v2:has(.v2-nav-three) .v2-header { grid-template-columns: minmax(0,1fr) auto; gap: 10px 24px; }
+.session-v2:has(.v2-nav-three) .v2-kicker { margin-bottom: 6px; }
+.session-v2:has(.v2-nav-three) h1 { font-size: clamp(28px,2.4vw,34px); }
+.session-v2:has(.v2-nav-three) .v2-position { margin-top: 6px; }
 /* 社名、岗位和日期已在标题与日程行呈现；选择按钮保留操作名，避免再占三行。 */
-.session-v2:has(.v2-company-panel) .v2-switches { display: flex; flex-wrap: wrap; align-items: center; align-content: start; justify-content: flex-end; gap: 7px; max-width: 480px; }
-.session-v2:has(.v2-company-panel) .v2-switches > label { flex-basis: 100%; }
-.session-v2:has(.v2-company-panel) .co-context-trigger:not(.empty) { display: inline-flex; align-items: center; gap: 8px; width: auto; padding: 8px 10px; min-height: 36px; }
-.session-v2:has(.v2-company-panel) .co-context-trigger:not(.empty) .co-context-main,
-.session-v2:has(.v2-company-panel) .co-context-trigger:not(.empty) .co-context-meta { display: none; }
-.session-v2:has(.v2-company-panel) .co-header-actions { gap: 6px; }
-.session-v2:has(.v2-company-panel) .co-header-actions button { min-height: 36px; padding: 7px 10px; font-size: 12px; }
-.session-v2:has(.v2-company-panel) .co-context-trigger-label { white-space: nowrap; }
+.session-v2:has(.v2-nav-three) .v2-switches { display: flex; flex-wrap: wrap; align-items: center; align-content: start; justify-content: flex-end; gap: 7px; max-width: 480px; }
+.session-v2:has(.v2-nav-three) .v2-switches > label { flex-basis: 100%; }
+.session-v2:has(.v2-nav-three) .co-context-trigger:not(.empty) { display: inline-flex; align-items: center; gap: 8px; width: auto; padding: 8px 10px; min-height: 36px; }
+.session-v2:has(.v2-nav-three) .co-context-trigger:not(.empty) .co-context-main,
+.session-v2:has(.v2-nav-three) .co-context-trigger:not(.empty) .co-context-meta { display: none; }
+.session-v2:has(.v2-nav-three) .co-header-actions { gap: 6px; }
+.session-v2:has(.v2-nav-three) .co-header-actions button { min-height: 36px; padding: 7px 10px; font-size: 12px; }
+.session-v2:has(.v2-nav-three) .co-context-trigger-label { white-space: nowrap; }
 
-.session-v2:has(.v2-company-panel) .v2-logistics { padding-bottom: 12px; gap: 8px 16px; font-size: 13px; }
-.session-v2:has(.v2-company-panel) .v2-nav [role="tab"] { padding-top: 12px; padding-bottom: 10px; }
+.session-v2:has(.v2-nav-three) .v2-logistics { padding-bottom: 12px; gap: 8px 16px; font-size: 13px; }
+.session-v2:has(.v2-nav-three) .v2-nav [role="tab"] { padding-top: 12px; padding-bottom: 10px; }
 
 .session-v2 .v2-logistics .co-compare-toggle { margin-left: auto; }
 .session-v2 .v2-logistics .co-compare-toggle + .v2-meeting { margin-left: 0; }

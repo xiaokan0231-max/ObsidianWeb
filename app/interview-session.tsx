@@ -1230,7 +1230,8 @@ function InterviewSession({
     else { const item = series.find((item) => `series:${item.key}` === value); const next = item && selectRelevantInterviewPrepDoc(item.rounds, today); if (next) selectDoc(next); }
   }} />;
   function selectedSeriesKey() { const item = selected ? interviewPrepSeriesForDoc(series, selected) : null; return item ? `series:${item.key}` : ""; }
-  const companyContent = <CompanyOverviewContent context={context} historical={!!selected && ["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today))} onOpenWiki={onOpenWiki} />;
+  const historicalCompany = !!selected && ["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today));
+  const companyContent = <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} />;
   const compareUI = <><CompanyCompareTray contexts={compared} onRemove={removeCompare} onClear={() => { setComparePaths([]); setCompareOpen(false); }} onOpen={() => setCompareOpen(true)} />
     {compareSelectorOpen && <CompanyCompareSelector contexts={contexts} selected={compared} onToggle={(path) => setComparePaths((current) => toggleCompanyComparison(current, path))} onClose={() => setCompareSelectorOpen(false)} onCompare={() => { setCompareSelectorOpen(false); setCompareOpen(true); }} />}
     {compareOpen && compared.length >= 2 && <CompanyCompare contexts={compared} onClose={() => setCompareOpen(false)} onEdit={openCompareSelector} onRemove={removeCompare} onDetail={(item) => { setCompareOpen(false); selectContext(item); window.scrollTo({ top: 0, behavior: "instant" }); }} onOpenWiki={(target) => { setCompareOpen(false); onOpenWiki(target); }} />}</>;
@@ -1337,7 +1338,10 @@ function InterviewSession({
     const shownSources = shown === selected ? externalLinks : mergePrepExternalLinks(sourceDocs.map((doc) => doc === selected ? shown : doc));
     return <><InterviewSessionV2 key={shown.note.path} doc={shown} series={series} selectedSeries={selectedSeries}
       sources={shownSources} today={today} onSelect={selectDoc} onOpen={onOpen} onOpenWiki={onOpenWiki}
-      onOpenCard={onOpenCard} onOpenAsset={onOpenAsset} companyOverview={companyContent} contextPicker={contextPicker} companyAction={companyAction} briefing={digestBand} />{compareUI}</>;
+      onOpenCard={onOpenCard} onOpenAsset={onOpenAsset}
+      companyOverview={(onOpenReviews) => <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} view="story" onOpenReviews={onOpenReviews} />}
+      externalReviews={<CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} view="reviews" />}
+      contextPicker={contextPicker} companyAction={companyAction} briefing={digestBand} />{compareUI}</>;
   }
 
   if (!selected || legacyPrepPath !== selected.note.path) {
