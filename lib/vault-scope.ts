@@ -40,7 +40,7 @@ export function noteInVaultScope(note: Note, scope: VaultScope) {
     return COMMITMENT_TYPES.has(type) || OVERVIEW_REVIEW_TYPES.has(type);
   }
   // 日历冷启动也读取本场评分正本，不加载全库分析报告。
-  if (scope === "actions") return COMMITMENT_TYPES.has(type) || type === "outbound-draft" || type === "interview-answer-review"
+  if (scope === "actions") return COMMITMENT_TYPES.has(type) || type === "outbound-draft" || type === "company" || type === "interview-answer-review"
     || (type === "ai-report" && note.frontmatter.report_kind === "interview-reassessment" && note.frontmatter.report_role === "session");
   if (scope === "jobs") {
     return type === "job-case" || Boolean(note.frontmatter.case_id) || ["ledger", "job-queue", "job-audit", "job_platform_sync", "ai-report"].includes(type);

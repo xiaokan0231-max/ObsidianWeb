@@ -15,6 +15,8 @@ import { buildCalendarWeek, calendarWeekDays, calendarWeekRangeLabel, calendarWe
 import { buildAiApplicationDays, summarizeAiApplicationDays, type AiApplicationDay } from "@/lib/calendar-applications";
 import { calendarConflicts } from "@/lib/calendar-conflicts";
 import { isInterviewEvent, type CalendarInterviewTarget } from "@/lib/calendar-interview";
+import { buildCalendarCompanyRatings, type CalendarCompanyRating } from "@/lib/calendar-company-rating";
+import { CalendarCompanyRatingBadge } from "./calendar-company-rating";
 import { calendarInterviewScore, type CalendarInterviewScore } from "@/lib/calendar-interview-score";
 import { calendarProgress, isCalendarHistoricalProgress, type CalendarProgress } from "@/lib/calendar-progress";
 import { buildCalendarSummary, calendarDayOffset, isCalendarLiveEvent, shiftCalendarDay } from "@/lib/calendar-summary";
@@ -433,6 +435,7 @@ function CalendarView({
   const applicationDays = useMemo(() => buildAiApplicationDays(notes, today), [notes, today]);
   const overviewMonth = calView === "week" ? weekStart.slice(0, 7) : monthKey;
   const monthApplications = useMemo(() => summarizeAiApplicationDays(applicationDays, overviewMonth), [applicationDays, overviewMonth]);
+  const companyRatingByEvent = useMemo(() => buildCalendarCompanyRatings(events, notes, interviewTargets), [events, notes, interviewTargets]);
   const originByEvent = useMemo(() => buildCalendarEventOrigins(events, notes), [events, notes]);
   const applicationsByDate = useMemo(() => new Map(applicationDays.map((day) => [day.date, day])), [applicationDays]);
   const progressByEvent = useMemo(() => new Map(events.map((event) => [
@@ -722,6 +725,7 @@ function CalendarView({
               interviewTargets={interviewTargets}
               scoreByEvent={scoreByEvent}
               originByEvent={originByEvent}
+              companyRatingByEvent={companyRatingByEvent}
               applicationsByDate={applicationsByDate}
               copy={copy}
               dayLabel={dayLabel}
@@ -786,7 +790,7 @@ function CalendarView({
                                   </span>
                                   {event.time && <time className="calendar-event-time" dateTime={`${event.date}T${event.time}+09:00`}>{calendarEventTime(event)}</time>}
                                   <strong>{compactCompany(event.company)}</strong>
-                                  <CalendarOriginBadge origin={originByEvent.get(event.id)} compact locale={locale} />
+                                  <span className="calendar-card-footer"><CalendarOriginBadge origin={originByEvent.get(event.id)} compact locale={locale} /><CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact /></span>
                                   {target && <span className="calendar-interview-destination" aria-hidden="true">{interviewDestination(target, copy, true)} →</span>}
                                 </button>
                               );
@@ -830,6 +834,7 @@ function CalendarView({
               interviewTargets={interviewTargets}
               scoreByEvent={scoreByEvent}
               originByEvent={originByEvent}
+              companyRatingByEvent={companyRatingByEvent}
               onInterview={onInterview}
               action={<button type="button" className="calendar-day-close" onClick={() => setSelectedDay("")} aria-label={copy.closeDay}>×</button>}
             >
@@ -849,6 +854,7 @@ function CalendarView({
             interviewTargets={interviewTargets}
             scoreByEvent={scoreByEvent}
             originByEvent={originByEvent}
+            companyRatingByEvent={companyRatingByEvent}
             nextEventId={summary.next?.event.id}
             onInterview={onInterview}
           />
@@ -865,6 +871,7 @@ function CalendarView({
               interviewTargets={interviewTargets}
               scoreByEvent={scoreByEvent}
               originByEvent={originByEvent}
+              companyRatingByEvent={companyRatingByEvent}
               nextEventId={summary.next?.event.id}
               onInterview={onInterview}
             />
@@ -887,6 +894,7 @@ function CalendarView({
               interviewTargets={interviewTargets}
               scoreByEvent={scoreByEvent}
               originByEvent={originByEvent}
+              companyRatingByEvent={companyRatingByEvent}
               onInterview={onInterview}
             />
           </details>
@@ -918,7 +926,7 @@ function eventStage(event: CalendarEvent, round: CalendarBadge | null, copy: Cal
  */
 function WeekBoard({
   weekStart, dir, label, events, today, nowClock, selectedDay, progressByEvent, conflicts,
-  interviewTargets, scoreByEvent, originByEvent, applicationsByDate, copy, dayLabel, onSelectDay, onShowApplications, applicationDate, onOpenEvent,
+  interviewTargets, scoreByEvent, originByEvent, companyRatingByEvent, applicationsByDate, copy, dayLabel, onSelectDay, onShowApplications, applicationDate, onOpenEvent,
 }: {
   weekStart: string;
   dir: "prev" | "next" | "";
@@ -932,6 +940,7 @@ function WeekBoard({
   interviewTargets: ReadonlyMap<string, CalendarInterviewTarget>;
   scoreByEvent: ReadonlyMap<string, CalendarInterviewScore | null>;
   originByEvent: ReadonlyMap<string, CalendarEventOrigin>;
+  companyRatingByEvent: ReadonlyMap<string, CalendarCompanyRating>;
   applicationsByDate: ReadonlyMap<string, AiApplicationDay>;
   copy: CalendarCopy;
   dayLabel: (key: string) => string;
@@ -976,7 +985,8 @@ function WeekBoard({
           <span className="cw-block-stage">{eventStage(event, round, copy)}</span>
           {scoreInMeta && score}
         </span>
-        <span className="cw-block-title"><strong className="cw-block-company">{compactCompany(event.company)}</strong>{!scoreInMeta && score}</span>
+        <span className="cw-block-title"><strong className="cw-block-company">{compactCompany(event.company)}</strong>{!scoreInMeta && score}{short && <CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact />}</span>
+        {!short && <span className="cw-rating-footer"><CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact /></span>}
         <CalendarOriginBadge origin={originByEvent.get(event.id)} compact />
       </button>
     );
@@ -1072,6 +1082,7 @@ function AgendaGroup({
   interviewTargets,
   scoreByEvent,
   originByEvent,
+  companyRatingByEvent,
   nextEventId,
   onInterview,
 }: {
@@ -1091,6 +1102,7 @@ function AgendaGroup({
   interviewTargets: ReadonlyMap<string, CalendarInterviewTarget>;
   scoreByEvent: ReadonlyMap<string, CalendarInterviewScore | null>;
   originByEvent: ReadonlyMap<string, CalendarEventOrigin>;
+  companyRatingByEvent: ReadonlyMap<string, CalendarCompanyRating>;
   nextEventId?: string;
   onInterview: (event: CalendarEvent) => void;
 }) {
@@ -1131,7 +1143,7 @@ function AgendaGroup({
                     {offset !== null && <span className="agenda-when" data-soon={offset === 0 || offset === 1 ? "" : undefined}>{copy.countdown(offset)}</span>}
                   </span>
                   <strong>{compactCompany(event.company)}</strong>
-                  <CalendarOriginBadge origin={originByEvent.get(event.id)} locale={locale} />
+                  <span className="calendar-card-footer"><CalendarOriginBadge origin={originByEvent.get(event.id)} locale={locale} /><CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} /></span>
                   {target && <span className="calendar-interview-destination" aria-hidden="true">{interviewDestination(target, copy)} →</span>}
                 </span>
                 <span className="calendar-status-dot" aria-hidden="true" />

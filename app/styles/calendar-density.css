@@ -1300,3 +1300,16 @@
 .cw-short .cw-block-title { width: 100%; }
 .cw-block.cw-short .cw-block-company { font-size: 11px; line-height: 14px; }
 .cw-short > .calendar-origin-badge { position: absolute; top: 4px; right: 3px; bottom: auto; }
+
+/* 外部口碑和机会来源共用页脚；星标与百分制的面试表现徽章保持不同外观。 */
+.calendar-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
+.calendar-company-rating { display: inline-flex; flex: 0 0 auto; color: var(--text-secondary); font-size: 11px; font-weight: 600; line-height: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.calendar-rating-platform { color: var(--muted); font-size: 10px; font-weight: 400; }
+.calendar-rating-star { color: var(--gold-text); }
+.calendar-company-rating.compact { font-size: 10px; line-height: 16px; }
+.calendar-event .calendar-card-footer .calendar-company-rating { font-size: 10px; }
+.calendar-agenda .calendar-card-footer { justify-content: flex-start; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
+.cw-rating-footer { position: absolute; left: 5px; bottom: 0; }
+.cw-rating-footer .calendar-company-rating { font-size: 9px; line-height: 12px; }
+.cw-short .cw-block-title .calendar-company-rating { align-self: center; font-size: 9px; line-height: 14px; }
+.calendar-company-rating span { font-size: inherit; }
