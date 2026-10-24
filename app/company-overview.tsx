@@ -86,15 +86,29 @@ function CaseFit({ context }: { context: CompanyOverview }) {
   return <div className="co-case-fit"><strong>Fit {fit.score}</strong> · Band {fit.band} · Gate {HARD_GATE_LABEL[fit.hardGate]}<ul>{JOB_FIT_AXES.map((key) => <li key={key}>{JOB_FIT_SCORE_LABEL[key].label} {fit.scores[key]}/{JOB_FIT_SCORE_LABEL[key].max}</li>)}</ul></div>;
 }
 
-function Reviews({ reviews, onOpenWiki }: { reviews: CompanyReview[]; onOpenWiki: (target: string) => void }) {
+function Reviews({ reviews, onOpenWiki, compact = false }: { reviews: CompanyReview[]; onOpenWiki: (target: string) => void; compact?: boolean }) {
   if (!reviews.length) return <p className="co-muted">未调查 · 尚未收录可核对的外部评价。</p>;
-  return <div className="co-reviews">{reviews.map((review, index) => <article key={`${review.platform}:${index}`}>
-    <header><h4>{review.platform}</h4><span className="co-review-status">{REVIEW_STATUS[review.status]}</span></header>
-    <div className="co-review-meta">{review.score !== null && review.scale !== null ? <strong>{review.score}<small> / {review.scale}</small></strong> : <span>评分未取得</span>}<span>{review.sampleCount === null ? "样本量未取得" : `${review.sampleCount} 条样本`}</span><span>{review.commentPeriod || "评论时间未注明"}</span></div>
-    <p className="co-muted">{review.coverage || "岗位适用范围未注明"}</p>
-    {(review.positive.length > 0 || review.negative.length > 0) && <dl className="co-review-themes"><div><dt>正面主题</dt><dd>{review.positive.join("；") || "暂无有效信息"}</dd></div><div><dt>负面主题</dt><dd>{review.negative.join("；") || "暂无有效信息"}</dd></div></dl>}
-    <details><summary>来源与阅读范围</summary><p>{review.limitations || "平台评价只作为待核对线索。"}</p><p>读取：{review.readOn || "日期未记录"}</p>{review.url && <Evidence items={[{ label: review.platform, url: review.url }]} onOpenWiki={onOpenWiki} />}</details>
-  </article>)}</div>;
+  return <div className={`co-reviews${compact ? " compact" : ""}`}>{reviews.map((review, index) => {
+    const insights = review.insights ?? [];
+    const readings = insights.map((insight, insightIndex) => <section className={`co-review-insight ${insight.kind}`} key={`${insight.title}:${insightIndex}`}>
+      <header className="co-insight-heading"><span>{insight.kind === "positive" ? "值得期待" : insight.kind === "concern" ? "需要留意" : "两面来看"}</span><h4>{insight.title}</h4></header>
+      <div className="co-insight-body"><div className="co-insight-reading"><p>{insight.summary}</p><p className="co-insight-implication"><b>对这次面谈</b>{insight.implication}</p></div>
+        <div className="co-review-evidence">{insight.evidence.map((evidence, evidenceIndex) => <div className="co-review-excerpt" key={`${evidence.url}:${evidenceIndex}`}>
+          <p className="co-review-attribution"><span>{evidence.role}</span><time dateTime={evidence.publishedOn}>{evidence.publishedOn}</time><a href={evidence.url} target="_blank" rel="noopener noreferrer" aria-label={`阅读${evidence.role}于${evidence.publishedOn}发布的评论原文`}>原文 ↗</a></p>
+          {evidence.quote && <blockquote lang="ja" cite={evidence.url}>{evidence.quote}</blockquote>}
+          <p className="co-review-paraphrase"><span>中文释义</span>{evidence.paraphrase}</p>
+        </div>)}</div>
+      </div>
+    </section>);
+    return <article className="co-review-platform" key={`${review.platform}:${index}`}>
+      <div className="co-review-topline"><div><h3>{review.url ? <a href={review.url} target="_blank" rel="noopener noreferrer">{review.platform} ↗</a> : review.platform}</h3><span className="co-review-status">{REVIEW_STATUS[review.status]} · {review.readOn || "日期未记录"} 读取</span></div>
+        <div className="co-review-meta">{review.score !== null && review.scale !== null ? <strong>{review.score}<small> / {review.scale}</small></strong> : <span>评分未取得</span>}<span>{review.sampleCount === null ? "样本量未取得" : `${review.sampleCount} ${review.sampleUnit || "条样本"}`}</span><span>{review.commentPeriod || "评论时间未注明"}</span></div>
+      </div>
+      <p className="co-review-coverage"><b>这些评价来自谁</b>{review.coverage || "岗位适用范围未注明"}</p>
+      {readings.length > 0 ? (compact ? <details className="co-review-readings"><summary>{readings.length} 个主题 · 查看员工原话与面谈启示</summary>{readings}</details> : <div className="co-review-readings">{readings}</div>) : (review.positive.length > 0 || review.negative.length > 0) && <dl className="co-review-themes"><div><dt>正面主题</dt><dd>{review.positive.join("；") || "暂无有效信息"}</dd></div><div><dt>负面主题</dt><dd>{review.negative.join("；") || "暂无有效信息"}</dd></div></dl>}
+      <details className="co-review-limits"><summary>来源与阅读范围</summary><p>{review.limitations || "平台评价只作为待核对线索。"}</p>{review.url && <Evidence items={[{ label: review.platform, url: review.url }]} onOpenWiki={onOpenWiki} />}</details>
+    </article>;
+  })}</div>;
 }
 
 export default function CompanyOverviewContent({ context, onOpenWiki, historical = false }: { context: CompanyOverview | null; onOpenWiki: (target: string) => void; historical?: boolean }) {
@@ -105,27 +119,38 @@ export default function CompanyOverviewContent({ context, onOpenWiki, historical
   const criteriaVersion = assessment?.criteriaVersion ?? 2;
   const axes = companyFitDimensions(criteriaVersion);
   const facts = [...(profile?.facts ?? []), ...(assessment?.contextFacts ?? [])];
+  const renderParagraph = (paragraph: NonNullable<typeof companySummary>["paragraphs"][number], index: number) => <p key={index}><Inlines nodes={paragraph} refs={{ onOpenWiki: (target, section) => onOpenWiki(section ? `${target}#${section}` : target) }} /></p>;
   return <div className="company-overview">
-    <div className="co-dates"><span>公司资料 <b>{profile?.updatedOn || "尚未整理"}</b></span><span>契合评价 <b>{assessment?.assessedOn || "尚未评估"}</b>{assessment && <small> · {assessment.aiAuthor}</small>}</span><span className="co-latest">最新画像{historical ? " · 历史面谈正文保持原样" : ""}</span></div>
+    <div className="co-dates"><span>资料 <b>{profile?.updatedOn || "尚未整理"}</b></span><span>判断 <b>{assessment?.assessedOn || "尚未评估"}</b>{assessment && <small> · {assessment.aiAuthor}</small>}</span><span className="co-latest">最新画像{historical ? " · 历史面谈正文保持原样" : ""}</span></div>
     {!context && <p className="co-notice">这份准备尚未关联可唯一识别的案件或面谈记录，公司画像待补齐。</p>}
     {!!context?.issues.length && <details className="co-notice"><summary>部分资料暂不可用</summary><ul>{context.issues.map((item) => <li key={item}>{item}</li>)}</ul></details>}
-    <section className="co-company-summary" aria-labelledby={`${prefix}-summary`}>
-      <header className="co-section-header"><h2 id={`${prefix}-summary`}>公司总结</h2>{companySummary && <button type="button" onClick={() => onOpenWiki(companySummary.note.path)}>研究笔记 ↗</button>}</header>
-      {companySummary ? <>
-        <p className="co-summary-meta"><span>资料截至 <time dateTime={companySummary.assessedOn}>{companySummary.assessedOn}</time></span><span>覆盖 {companySummary.coveragePeriod}</span><span>{companySummary.aiAuthor}</span></p>
-        <div className="co-summary-prose">{companySummary.paragraphs.map((paragraph, index) => <p key={index}><Inlines nodes={paragraph} refs={{ onOpenWiki: (target, section) => onOpenWiki(section ? `${target}#${section}` : target) }} /></p>)}</div>
-        <details className="co-summary-sources"><summary>研究来源 · {companySummary.sources.length} 项</summary><Evidence items={companySummary.sources} onOpenWiki={onOpenWiki} /></details>
-      </> : <p className="co-muted co-summary-empty">{context?.summaryStatus === "invalid" ? "公司总结暂不可用，请核对研究笔记的引用与内容。" : "公司总结待整理。补齐研究后，将在这里连贯说明公司的现状、发展变化与招聘背景。"}</p>}
+    <section className="co-fit-section" aria-labelledby={`${prefix}-fit`}>
+      <div className="co-fit-main"><div className="co-fit-brief"><header className="co-section-header"><span>01</span><h2 id={`${prefix}-fit`}>先看结论</h2><a href={`#${prefix}-reviews`} onClick={(event) => {
+        event.preventDefault();
+        const heading = document.getElementById(`${prefix}-reviews-title`);
+        heading?.focus({ preventScroll: true });
+        document.getElementById(`${prefix}-reviews`)?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      }}>查看外部评价 ↓</a></header><p className="co-summary">{assessment?.summary || "根据岗位原文和你的经历补齐资料后，形成面试前判断。"}</p><div className="co-fit-notes"><section><h3>主要契合点</h3>{assessment?.strengths.length ? <ul>{assessment.strengths.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="co-muted">待补充证据</p>}</section><section><h3>面谈核实</h3>{assessment?.questions.length ? <><ol>{assessment.questions.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ol>{assessment.questions.length > 3 && <details className="co-more-questions"><summary>其他核实事项 · {assessment.questions.length - 3}</summary><ol start={4}>{assessment.questions.slice(3).map((item) => <li key={item}>{item}</li>)}</ol></details>}</> : <p className="co-muted">实际岗位、职责分工与工作条件</p>}</section></div></div>
+        <aside className="co-fit-chart" aria-label="六维契合画像"><h3>{criteriaVersion === 1 ? "与你的契合画像 · 旧口径" : "面试前契合画像"}</h3><CompanyFitRadar label={context?.company ?? "当前公司"} dimensions={assessment?.dimensions ?? []} criteriaVersion={criteriaVersion} detailPrefix={prefix} /></aside>
+      </div>
+      {criteriaVersion === 1 && <p className="co-notice">这份评价使用旧口径，保留原始维度与判断，待更新后可与面试前画像比较。</p>}
+      <div className="co-dimensions">{axes.map((item) => <Dimension key={item.key} id={`${prefix}-${item.key}`} label={item.label} dimension={assessment?.dimensions.find((dimension) => dimension.key === item.key)} onOpenWiki={onOpenWiki} />)}</div><p className="co-footnote">1 明确不合 → 5 高度契合 · 点开各维度查看依据；平台口碑独立展示，契合度不代表录用概率。</p>
     </section>
-    <section className="co-company-facts" aria-labelledby={`${prefix}-facts`}><header className="co-section-header"><span>01</span><h2 id={`${prefix}-facts`}>公司与岗位</h2>{context?.dossier && <button type="button" onClick={() => onOpenWiki(context.dossier!.path)}>公司卷宗 ↗</button>}</header>
-      {facts.length ? <dl className="co-fact-grid">{facts.map((fact, index) => <div key={`${fact.id}:${index}`}><dt>{fact.label}</dt><dd><Fact fact={fact} onOpenWiki={onOpenWiki} /></dd></div>)}</dl> : <p className="co-muted">公司规模、业务、岗位条件等资料待整理；已存在的案件和面谈记录仍可查看。</p>}
-    </section>
-    <section className="co-fit-section" aria-labelledby={`${prefix}-fit`}><header className="co-section-header"><span>02</span><h2 id={`${prefix}-fit`}>{criteriaVersion === 1 ? "与你的契合画像 · 旧口径" : "面试前契合画像"}</h2><p>1 明确不合 → 5 高度契合</p></header>
-      {criteriaVersion === 1 ? <p className="co-notice">这份评价使用旧口径，保留原始维度与判断，待更新后可与面试前画像比较。</p> : <p className="co-fit-scope">依据当前求人、公开资料与你的已确认经历，判断面试前能看清的契合度。实际权限、协作支持和在留手续另列为「面谈核实」。</p>}
-      <div className="co-fit-main"><CompanyFitRadar label={context?.company ?? "当前公司"} dimensions={assessment?.dimensions ?? []} criteriaVersion={criteriaVersion} detailPrefix={prefix} /><div className="co-fit-brief"><p className="co-summary">{assessment?.summary || "根据岗位原文和你的经历补齐资料后，形成面试前判断。"}</p><div className="co-fit-notes"><section><h3>主要契合点</h3>{assessment?.strengths.length ? <ul>{assessment.strengths.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="co-muted">待补充证据</p>}</section><section><h3>面谈核实</h3>{assessment?.questions.length ? <ul>{assessment.questions.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="co-muted">实际岗位、职责分工与工作条件</p>}</section></div></div></div>
-      <div className="co-dimensions">{axes.map((item) => <Dimension key={item.key} id={`${prefix}-${item.key}`} label={item.label} dimension={assessment?.dimensions.find((dimension) => dimension.key === item.key)} onOpenWiki={onOpenWiki} />)}</div><p className="co-footnote">展开维度查看理由与证据。资料不足仍保留空缺；公司规模、薪资与口碑独立展示，契合度不代表录用概率。</p>
-    </section>
-    <section className="co-external" aria-labelledby={`${prefix}-reviews`}><header className="co-section-header"><span>03</span><h2 id={`${prefix}-reviews`}>外部评价</h2><p>保留各平台原始量尺与样本</p></header><Reviews reviews={profile?.reviews ?? []} onOpenWiki={onOpenWiki} /></section>
+    <div className="co-company-context">
+      <section className="co-company-summary" aria-labelledby={`${prefix}-summary`}>
+        <header className="co-section-header"><span>02</span><h2 id={`${prefix}-summary`}>公司总结</h2>{companySummary && <button type="button" onClick={() => onOpenWiki(companySummary.note.path)}>研究笔记 ↗</button>}</header>
+        {companySummary ? <>
+          <div className="co-summary-prose">{companySummary.paragraphs.slice(0, 1).map(renderParagraph)}</div>
+          {companySummary.paragraphs.length > 1 && <details className="co-summary-continuation"><summary>展开公司故事与招聘背景 <span>＋</span></summary><div className="co-summary-prose">{companySummary.paragraphs.slice(1).map(renderParagraph)}</div></details>}
+          <p className="co-summary-meta"><span>资料截至 <time dateTime={companySummary.assessedOn}>{companySummary.assessedOn}</time></span><span>覆盖 {companySummary.coveragePeriod}</span><span>{companySummary.aiAuthor}</span></p>
+          <details className="co-summary-sources"><summary>研究来源 · {companySummary.sources.length} 项</summary><Evidence items={companySummary.sources} onOpenWiki={onOpenWiki} /></details>
+        </> : <p className="co-muted co-summary-empty">{context?.summaryStatus === "invalid" ? "公司总结暂不可用，请核对研究笔记的引用与内容。" : "公司总结待整理。补齐研究后，将在这里连贯说明公司的现状、发展变化与招聘背景。"}</p>}
+      </section>
+      <section className="co-company-facts" aria-labelledby={`${prefix}-facts`}><header className="co-section-header"><h2 id={`${prefix}-facts`}>公司与岗位</h2>{context?.dossier && <button type="button" onClick={() => onOpenWiki(context.dossier!.path)}>公司卷宗 ↗</button>}</header>
+        {facts.length ? <dl className="co-fact-grid">{facts.map((fact, index) => <div key={`${fact.id}:${index}`}><dt>{fact.label}</dt><dd><Fact fact={fact} onOpenWiki={onOpenWiki} /></dd></div>)}</dl> : <p className="co-muted">公司规模、业务、岗位条件等资料待整理；已存在的案件和面谈记录仍可查看。</p>}
+      </section>
+    </div>
+    <section className="co-external" id={`${prefix}-reviews`} aria-labelledby={`${prefix}-reviews-title`}><header className="co-section-header"><span>03</span><h2 id={`${prefix}-reviews-title`} tabIndex={-1}>外部评价</h2><p>员工的经历 · 对本次面谈的启示</p></header><Reviews reviews={profile?.reviews ?? []} onOpenWiki={onOpenWiki} /></section>
   </div>;
 }
 
@@ -182,7 +207,7 @@ export function CompanyCompare({ contexts, onClose, onDetail, onRemove, onOpenWi
     { label: "案件 v2 採点", render: (context) => <CaseFit context={context} /> },
     ...[...facts].map(([id, label]) => ({ label, render: (context: CompanyOverview) => <Fact fact={[...(context.assessment?.contextFacts ?? []), ...(context.profile?.facts ?? [])].find((fact) => fact.id === id)} onOpenWiki={onOpenWiki} /> })),
     ...(mixedCriteria ? [] : axes.map((dimension) => ({ label: dimension.label, render: (context: CompanyOverview) => <Dimension label={dimension.label} dimension={context.assessment?.dimensions.find((item) => item.key === dimension.key)} onOpenWiki={onOpenWiki} /> }))),
-    { label: "外部评价", render: (context) => <Reviews reviews={context.profile?.reviews ?? []} onOpenWiki={onOpenWiki} /> },
+    { label: "外部评价", render: (context) => <Reviews compact reviews={context.profile?.reviews ?? []} onOpenWiki={onOpenWiki} /> },
     { label: "面谈核实", render: (context) => context.assessment?.questions.length ? <ul>{context.assessment.questions.map((question) => <li key={question}>{question}</li>)}</ul> : "岗位详情与评价待补" },
   ];
   return <div className="job-compare-backdrop co-compare-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} className="co-compare-panel" role="dialog" aria-modal="true" aria-label="公司与岗位并排对比" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>

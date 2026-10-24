@@ -24,6 +24,10 @@ const fact = (id, value, scope = "单体") => ({ id, label: id === "employees" ?
 const review = (overrides = {}) => ({ platform: "评论平台", url: "https://example.com/reviews", status: "available",
   score: 3.5, scale: 5, sample_count: 8, comment_period: "2024～2026年", coverage: "不同部门混合",
   positive: ["团队支持"], negative: ["部门差异"], read_on: "2026-09-19", limitations: "样本有限", ...overrides });
+const reviewInsight = (overrides = {}) => ({ title: "协作机会与项目差异", kind: "mixed",
+  summary: "员工描述了经验交流，也指出项目安排影响学习机会。", implication: "面谈确认首个项目如何安排带教。",
+  evidence: [{ url: "https://example.com/reviews/respondent-1", published_on: "2026-09-18", role: "工程师／在职／中途入社",
+    quote: "チーム内で相談できます。", paraphrase: "该回答者认为团队内能及时请教，但没有说明其他部门的情况。" }], ...overrides });
 
 function fixture() {
   const dossier = note("20_求職/测试/_公司.md", { type: "company", company: "株式会社テスト", company_profile: {
@@ -351,6 +355,80 @@ test("人数不同口径分开保留，口碑保留各平台量尺和受限状�
   assert.equal(entry.profile.reviews[1].status, "restricted");
 });
 
+test("外部评价保留观察、原文与逐条来源，回答者人数和旧样本口径分别显示", () => {
+  const { notes, dossier, context } = fixture();
+  dossier.frontmatter.company_profile.reviews.push(review({ sample_unit: "名回答者", insights: [reviewInsight(), reviewInsight({
+    title: "长期成长仍待核实", kind: "concern", evidence: [{ url: "https://example.com/reviews/respondent-2", published_on: "2026-09-01",
+      role: "营业／已离职", paraphrase: "这名回答者希望岗位分工更明确，属于其个人经历。" }],
+  })] }));
+  assert.deepEqual(validateCompanyOverviewNotes(notes), []);
+  const [legacy, enriched] = resolveCompanyOverview(notes, context).profile.reviews;
+  assert.deepEqual(legacy.insights, []);
+  assert.equal(legacy.sampleUnit, "条样本");
+  assert.equal(enriched.sampleUnit, "名回答者");
+  assert.equal(enriched.sampleCount, legacy.sampleCount);
+  assert.equal(enriched.insights[0].kind, "mixed");
+  assert.equal(enriched.insights[0].implication, "面谈确认首个项目如何安排带教。");
+  assert.deepEqual(enriched.insights[0].evidence[0], {
+    url: "https://example.com/reviews/respondent-1", publishedOn: "2026-09-18", role: "工程师／在职／中途入社",
+    quote: "チーム内で相談できます。", paraphrase: "该回答者认为团队内能及时请教，但没有说明其他部门的情况。",
+  });
+  assert.ok(!Object.hasOwn(enriched.insights[1].evidence[0], "quote"), "只有读到的原文才作为引用展示，转述不会变成引文");
+});
+
+test("坏评论论据只隐藏关联观察，保留有效观察、平台统计和公司事实并报告具体字段", () => {
+  const mutations = [
+    ["title", (i) => { i.title = " "; }],
+    ["summary", (i) => { i.summary = 42; }],
+    ["implication", (i) => { delete i.implication; }],
+    ["kind", (i) => { i.kind = "negative"; }],
+    ["evidence", (i) => { i.evidence = []; }],
+    ["evidence", (i) => { i.evidence = {}; }],
+    ["evidence[0].url", (i) => { i.evidence[0].url = "javascript:alert(1)"; }],
+    ["evidence[0].url", (i) => { i.evidence[0].url = "/reviews/1"; }],
+    ["evidence[0].published_on", (i) => { i.evidence[0].published_on = "2026-02-30"; }],
+    ["evidence[0].published_on", (i) => { delete i.evidence[0].published_on; }],
+    ["evidence[0].role", (i) => { i.evidence[0].role = []; }],
+    ["evidence[0].paraphrase", (i) => { i.evidence[0].paraphrase = ""; }],
+    ["evidence[0].quote", (i) => { i.evidence[0].quote = 7; }],
+    ["evidence[0].quote", (i) => { i.evidence[0].quote = " "; }],
+  ];
+  for (const [field, mutate] of mutations) {
+    const { notes, dossier, context } = fixture();
+    const bad = reviewInsight();
+    mutate(bad);
+    dossier.frontmatter.company_profile.reviews[0].insights = [bad, reviewInsight({ title: "有效观察" })];
+    const entry = resolveCompanyOverview(notes, context);
+    assert.equal(entry.profileStatus, "available", field);
+    assert.equal(entry.profile.facts[0].value, "约100人", field);
+    assert.equal(entry.profile.reviews[0].score, 3.5, field);
+    assert.equal(entry.profile.reviews[0].sampleCount, 8, field);
+    assert.deepEqual(entry.profile.reviews[0].insights.map((i) => i.title), ["有效观察"], field);
+    assert.ok(entry.issues.some((issue) => issue.includes(`company_profile.reviews[0].insights[0].${field}`)), field);
+    assert.ok(validateCompanyOverviewNotes(notes).some((issue) => issue.includes(`.insights[0].${field}`)), field);
+  }
+});
+
+test("可选评论扩展格式错误会提示，未调查或无样本状态不能附带观察", () => {
+  const { notes, dossier, context } = fixture();
+  const current = dossier.frontmatter.company_profile.reviews[0];
+  current.insights = "未整理";
+  current.sample_unit = " ";
+  let entry = resolveCompanyOverview(notes, context);
+  assert.deepEqual(entry.profile.reviews[0].insights, []);
+  assert.equal(entry.profile.reviews[0].sampleUnit, "条样本");
+  assert.match(entry.issues.join("\n"), /insights 必须是评论观察数组/);
+  assert.match(entry.issues.join("\n"), /sample_unit 必须是非空文本/);
+  delete current.sample_unit;
+  for (const status of ["not_researched", "no_samples"]) {
+    Object.assign(current, { status, score: null, scale: null, sample_count: null, positive: [], negative: [], insights: [reviewInsight()] });
+    entry = resolveCompanyOverview(notes, context);
+    assert.equal(entry.profileStatus, "available");
+    assert.deepEqual(entry.profile.reviews[0].insights, []);
+    assert.match(validateCompanyOverviewNotes(notes).join("\n"), /未取得评论样本时不可写评论观察/);
+  }
+});
+
 test("未调查/没找到资料允许无URL，不虚构平台页；不得附加假评分与评论主题", () => {
   for (const status of ["not_researched", "no_samples"]) {
     const { notes, dossier, context } = fixture();
@@ -366,6 +444,8 @@ test("未调查/没找到资料允许无URL，不虚构平台页；不得附加�
 test("vault-check实际读取结构化YAML，兼容两版评价口径且坏数据会阻断", async (t) => {
   const data = fixture();
   const { context, dossier, report, candidate } = data;
+  dossier.frontmatter.company_profile.reviews[0].insights = [reviewInsight()];
+  dossier.frontmatter.company_profile.reviews[0].sample_unit = "名回答者";
   const summary = addCompanySummary(data);
   summary.content = summary.content.replace(/^# .*\n/, "# 公司总结\n");
   context.frontmatter = { type: "todo", company: "株式会社テスト", category: "面接準備", status: "未着手", priority: "medium", audience: "user",
@@ -399,4 +479,11 @@ test("vault-check实际读取结构化YAML，兼容两版评价口径且坏数�
   checked = check();
   assert.notEqual(checked.status, 0);
   assert.match(`${checked.stdout}${checked.stderr}`, /company-summary sources 至少需要一项有效来源/);
+  summary.frontmatter.sources = [source()];
+  await persist(summary);
+  dossier.frontmatter.company_profile.reviews[0].insights[0].evidence[0].published_on = "2026-02-30";
+  await persist(dossier);
+  checked = check();
+  assert.notEqual(checked.status, 0);
+  assert.match(`${checked.stdout}${checked.stderr}`, /insights\[0\]\.evidence\[0\]\.published_on 必须是真实 YYYY-MM-DD 日期/);
 });

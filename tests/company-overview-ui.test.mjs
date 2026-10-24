@@ -12,7 +12,7 @@ const render = (component, props) => renderToStaticMarkup(createElement(componen
 const dimensions = (scores, version = 2) => model.companyFitDimensions(version).map((item, index) => ({ ...item, score: scores[index], rationale: `${item.label}的可核对依据`, evidence: [{ label: "公司原文", url: "https://example.com/evidence" }], unknowns: [] }));
 const context = (title, version = 2) => ({ key: `case:${title}`, kind: "case", note: { path: `${title}.md`, frontmatter: { type: "job-case", company: "株式会社テスト" }, content: "", tags: [], stat: { ctime: 0, mtime: 0, size: 0 } }, company: "株式会社テスト", title, profile: null, assessment: { criteriaVersion: version, assessedOn: "2026-01-02", aiAuthor: "Codex", summary: `${title}的独立判断`, dimensions: dimensions([4, 3, null, 4, null, 3], version), strengths: ["发挥已有经验"], questions: ["实际职责待确认"], contextFacts: [] }, issues: [] });
 
-test("公司总结先于事实卡完整呈现自然段，来源可展开但正文不折叠", () => {
+test("结论优先，公司故事首段可读、余文可展开且全部来源保留", () => {
   const item = context("数据平台岗位");
   item.summary = { note: { path: "80_AI分析/公司研究.md" }, schemaVersion: 1, assessedOn: "2026-09-20", aiAuthor: "Codex", coveragePeriod: "2023～2026年",
     paragraphs: ["公司以**业务软件**为主。", "[技术博客](https://example.com/tech)披露了系统改造。", "管理者表达了提高交付效率的方向。", "据此推测招聘用于补齐能力，实际分工仍待确认。"].map(prepModel.parseInline),
@@ -24,8 +24,11 @@ test("公司总结先于事实卡完整呈现自然段，来源可展开但正�
   assert.match(html, /覆盖 2023～2026年/);
   assert.match(html, /Codex/);
   assert.match(html, />研究笔记 ↗<\/button>/);
-  const prose = html.match(/<div class="co-summary-prose">([\s\S]*?)<\/div>/)?.[1] ?? "";
+  assert.ok(html.indexOf("数据平台岗位的独立判断") < html.indexOf(">公司总结</h2>"));
+  const prose = [...html.matchAll(/<div class="co-summary-prose">([\s\S]*?)<\/div>/g)].map((match) => match[1]).join("");
   assert.equal((prose.match(/<p>/g) ?? []).length, 4);
+  assert.match(html, /<details class="co-summary-continuation"><summary>展开公司故事与招聘背景/);
+  assert.ok(html.indexOf("业务软件") < html.indexOf("co-summary-continuation"), "正文开头无需展开即可阅读");
   assert.match(prose, /<strong><span>业务软件<\/span><\/strong>/);
   assert.match(prose, /href="https:\/\/example.com\/tech"/);
   assert.match(prose, /据此推测招聘用于补齐能力，实际分工仍待确认/);
@@ -85,6 +88,15 @@ test("面试前评分与面谈核实分开，已知六维不会因真实协作�
   assert.doesNotMatch(html, /协作适配：/);
 });
 
+test("面谈核实优先呈现三项，余下问题可展开且保持原顺序", () => {
+  const item = context("数据平台岗位");
+  item.assessment.questions = ["职责范围", "项目安排", "学习支援", "评价机制", "报酬构成"];
+  const html = render(components.default, { context: item, onOpenWiki() {} });
+  assert.match(html, /<ol><li>职责范围<\/li><li>项目安排<\/li><li>学习支援<\/li><\/ol>/);
+  assert.match(html, /<details class="co-more-questions"><summary>其他核实事项 · 2<\/summary><ol start="4"><li>评价机制<\/li><li>报酬构成<\/li><\/ol><\/details>/);
+  assert.match(html, /<h2 id="[^"]+-reviews-title" tabindex="-1">外部评价<\/h2>/);
+});
+
 test("历史口径保留原轴原分数，不用面试前标签重解释", () => {
   const item = context("旧岗位", 1);
   item.assessment.dimensions = dimensions([4, 3, 2, 5, 1, 3], 1);
@@ -116,6 +128,25 @@ test("同公司不同岗位保持分列，比较使用原始平台量尺与独�
   assert.match(html, /12 条样本/);
   assert.match(html, /样本范围有限/);
   assert.doesNotMatch(html, /応募优先度|job-compare-rating/);
+});
+
+test("评价保留原话、中文解释、员工来源及岗位启示，比较中可展开阅读", () => {
+  const item = context("数据平台岗位");
+  item.profile = { updatedOn: "2026-01-03", facts: [], reviews: [{ platform: "员工评价平台", url: "https://example.com/reviews", status: "available", score: 3.8, scale: 5, sampleCount: 20, sampleUnit: "名回答者", commentPeriod: "2025～2026年", coverage: "内部营业员工，不能外推客户项目", positive: ["旧主题摘要"], negative: [], limitations: "抽读两名员工，不代表全部回答者", readOn: "2026-01-03", insights: [{ title: "自主性与支援要一起看", kind: "mixed", summary: "一名员工描述了自主决定的空间，也提到支援因项目而异。", implication: "确认首个项目如何分配，以及遇到问题时的支援负责人。", evidence: [{ url: "https://example.com/reviews/one", publishedOn: "2026-01-02", role: "营业／在职／中途入社", quote: "相談しやすい環境です。", paraphrase: "这名员工认为日常沟通比较方便。" }, { url: "https://example.com/reviews/two", publishedOn: "2025-12-03", role: "营业／已离职", paraphrase: "另一名员工的体验取决于所在项目。" }] }] }] };
+  const html = render(components.default, { context: item, onOpenWiki() {} });
+  assert.match(html, /20 名回答者/);
+  assert.match(html, /内部营业员工，不能外推客户项目/);
+  assert.match(html, /<blockquote lang="ja" cite="https:\/\/example.com\/reviews\/one">相談しやすい環境です。<\/blockquote>/);
+  assert.match(html, /营业／在职／中途入社/);
+  assert.match(html, /<time dateTime="2026-01-02">/);
+  assert.match(html, /这名员工认为日常沟通比较方便/);
+  assert.match(html, /确认首个项目如何分配/);
+  assert.match(html, /href="https:\/\/example.com\/reviews\/two"/);
+  assert.doesNotMatch(html, /旧主题摘要/, "完整主题取代短摘要，避免重复");
+  assert.equal((html.match(/<blockquote /g) ?? []).length, 1, "没有原句的来源只显示释义，不伪装成引述");
+  const compared = render(components.CompanyCompare, { contexts: [item, context("另一个岗位")], onClose() {}, onDetail() {}, onRemove() {}, onOpenWiki() {} });
+  assert.match(compared, /<details class="co-review-readings"><summary>1 个主题/);
+  assert.match(compared, /相談しやすい環境です。/);
 });
 
 test("新旧口径混选时保留公司事实，禁止并排雷达和维度分数", () => {
