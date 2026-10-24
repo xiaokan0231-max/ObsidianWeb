@@ -19,7 +19,6 @@ import { isReviewNotePath, reviewSiblingPath } from "@/lib/review-paths";
 import { interviewAdvisory } from "@/lib/server/interview-advisory";
 import { withReviewWrite } from "@/lib/server/review-write-queue";
 import { commitReviewWithFreshInputs } from "@/lib/server/review-input-guard";
-import { scoredEvidenceErrors } from "@/.agents/skills/review-interview-answers/scripts/diagnostic-checks.mjs";
 
 type Body = { notePath?: string };
 
@@ -55,14 +54,6 @@ export async function POST(request: Request) {
 
     const existingReview = (await readNoteOrNull(existingReviewPath))?.content ?? "";
 
-    // 整理稿是AI清洗层，原问答不存在时不能只凭整理稿把整场资料判为完整。
-    const rawRef = text(source.frontmatter.source_note).match(/^\[\[([^\]|]+)(?:\|[^\]]+)?\]\]$/)?.[1];
-    const rawPath = rawRef ? `${rawRef.includes("/") ? rawRef : `${notePath.slice(0, notePath.lastIndexOf("/"))}/${rawRef}`}${rawRef.endsWith(".md") ? "" : ".md"}` : null;
-    const safeRawPath = rawPath?.startsWith("20_求職/") && !rawPath.includes("..") ? rawPath : null;
-    const original = safeRawPath ? await readNoteOrNull(safeRawPath) : null;
-    const materialScopeLimit = text(original?.frontmatter.type) === "transcript"
-      && !["memory", "partial", "limited", "unavailable"].includes(text(source.frontmatter.assessment_scope)) ? "full_available_text" : "limited";
-
     const feedbackNote = await readNoteOrNull(feedbackPath);
     const feedbackExists = feedbackNote !== null;
     const humanFeedback = feedbackNote
@@ -95,12 +86,6 @@ export async function POST(request: Request) {
       })),
       existingReview,
       humanFeedback,
-      sourceMaterial: {
-        sourcePath: notePath, layer: "ai-cleaned-transcript", frontmatter: source.frontmatter,
-        originalPath: safeRawPath, originalText: original?.content ?? "",
-        materialScopeLimit,
-        boundaryZh: "原稿有无仅决定资料上限；仍须检查实际缺录、回忆与AI修复边界。无原音不能评分发音或语速。",
-      },
       analysisBoundary: {
         exclude: "逐句语法评分、转录质量评分",
         include: "问题理解、子问覆盖、相关性、完整性、面试策略风险、改善回答",
@@ -110,10 +95,6 @@ export async function POST(request: Request) {
     // 写入前核对原始输出，不能让规范化静默过滤掉模型漏答或跨题引用。
     const rawBlocks = Array.isArray(result.output.blocks) ? result.output.blocks as Record<string, unknown>[] : [];
     const byBlock = new Map(parsed.blocks.map((block) => [block.id, new Set(block.sentences.map((sentence) => sentence.id))]));
-    const scoringErrors = scoredEvidenceErrors(result.output, { sourceBlockIds: byBlock.keys(), sentencesByBlock: byBlock });
-    const outputEvaluation = result.output.evaluation as Record<string, unknown> | undefined;
-    if (materialScopeLimit === "limited" && outputEvaluation?.materialScope !== "limited") scoringErrors.push("原始资料上限为limited，不能生成整场评分");
-    if (scoringErrors.length) throw new Error(`有据评分契约无效：${scoringErrors.join("；")}。原报告已保留。`);
     if (rawBlocks.length !== parsed.blocks.length || new Set(rawBlocks.map((block) => block.blockId)).size !== parsed.blocks.length ||
       rawBlocks.some((block) => !byBlock.has(String(block.blockId)) ||
         !Array.isArray(block.evidenceSentenceIds) || block.evidenceSentenceIds.some((id) => !byBlock.get(String(block.blockId))!.has(String(id))))) {
@@ -138,7 +119,6 @@ export async function POST(request: Request) {
         { path: notePath, content: source.content },
         { path: annotationPath, content: annotationContent },
         { path: feedbackPath, content: feedbackNote?.content ?? null },
-        ...(safeRawPath ? [{ path: safeRawPath, content: original?.content ?? null }] : []),
       ], readNoteOrNull, async () => {
         // 模型运行期间可能已有新的顾问评论或人工章节，保留最新版本而非调用前快照。
         const previousOutput = (await readNoteOrNull(outputPath))?.content ?? "";

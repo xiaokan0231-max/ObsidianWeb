@@ -27,6 +27,18 @@ const walk = (value) => !value || typeof value !== "object" ? [] : Array.isArray
 const text = (value) => value == null || typeof value === "boolean" ? "" : typeof value !== "object" ? String(value) : Array.isArray(value) ? value.map(text).join("") : text(value.props?.children);
 const find = (tree, predicate) => { const item = walk(tree).find(predicate); assert.ok(item); return item; };
 const button = (tree, label) => find(tree, (item) => item.type === "button" && (text(item.props.children) === label || item.props["aria-label"] === label));
+const historyControl = (html) => {
+  const control = html.match(/<button\b[^>]*aria-controls="calendar-historical-explanation"[^>]*>[\s\S]*?<\/button>/)?.[0];
+  assert.ok(control, "历史说明保留独立展开入口");
+  return control;
+};
+function assertHistoryCount(html, count, total, locale = "zh-CN") {
+  const control = historyControl(html);
+  const label = locale === "ja" ? `現在の状態がない過去の予定 ${count} / ${total} 件 · 期間を問わず` : `无当前状态的历史场次 ${count} / ${total} 场 · 不限月份`;
+  assert.ok(control.includes(`aria-label="${label}"`), "短标题仍通过完整无障碍名称交代计数对象和范围");
+  assert.ok(control.includes(`<strong>${count}</strong>`));
+  assert.ok(control.includes(locale === "ja" ? `<small>/ ${total} 件 · 期間を問わず</small>` : `<small>/ ${total} 场 · 不限月份</small>`));
+}
 async function interactive() {
   let cursor = 0, refCursor = 0;
   const states = [], refs = [], opened = [], openedNotes = [], reviewed = [];
@@ -49,27 +61,26 @@ test("旧复盘保留当轮结果：四条不採用关闭，其他历史中性�
   assert.equal(cards.filter((card) => card.includes("status-neutral")).length, 2);
   assert.equal(cards.filter((card) => card.includes("status-unknown")).length, 0);
   assert.match(cards[0], /当轮未通过/); assert.match(cards[0], /当轮历史结果，不代替当前案件状态/);
-  // 改动理由（本人要求的文案修正）：数字格标签写清计数对象，单位写「不限月份」并给出与全部已发生场次的关系，
-  // 不再用面板名「历史状态说明」和「全部历史」，免得把 9 读成历史总数；计数口径不变。
-  assert.match(html, /<span>无当前状态的历史场次<\/span><strong>9<\/strong><small>\/ 9 场 · 不限月份<\/small>/);
+  // 短标题节省首屏宽度；完整可访问名称仍明确子集与全部已发生场次的关系。
+  assertHistoryCount(html, 9, 9);
   assert.match(html, /日程状态图例/); assert.match(html, />历史记录<\/button>/);
   assert.doesNotMatch(html, /资料待核对|calendar-legend-item status-unknown|calendar-association-conflicts/);
   assert.doesNotMatch(html, /calendar-historical-explanation" id=/, "说明列表默认收起");
 });
 
-test("全量历史统计不随月周切换偷换口径，不覆盖未来七天与AI代投", async () => {
+test("历史入口跨月周仍保持全量口径，未来安排与月度投递各自独立", async () => {
   for (const search of ["?month=2026-07", "?month=2026-08", "?calview=week&calweek=2026-07-06"]) {
     const html = await render({ search });
-    // 改动理由同上：只换标签与单位文案，数字仍是 9。
-    assert.match(html, /<span>无当前状态的历史场次<\/span><strong>9<\/strong><small>\/ 9 场 · 不限月份<\/small>/);
-    assert.match(html, /<span>未来 7 天场次<\/span><strong>0<\/strong>/);
-    assert.match(html, /今天 AI 代投/);
+    assertHistoryCount(html, 9, 9);
+    assert.match(html, /<h2>未来 7 天<\/h2><span>0<\/span>/);
+    assert.match(html, /class="calendar-month-applications"/);
+    assert.match(html, /当前月份暂无已确认的 AI 代投/);
+    assert.doesNotMatch(html, /calendar-next-hero|今天 AI 代投|未来 7 天场次/);
     assert.doesNotMatch(html, /资料待核对|status-unknown/);
   }
   const loading = await render({ loading: true });
-  // 改动理由：右栏「最近记录」改为显示真实总数（本夹具恰好 9 场），原来的 /<strong>9<\/strong>/ 会误中它；
-  // 这里要验的是历史数字格在加载中不出数，所以收窄到这一格。
-  assert.match(loading, /aria-busy="true"/); assert.doesNotMatch(loading, /无当前状态的历史场次<\/span><strong>/);
+  assert.match(loading, /aria-busy="true"/);
+  assert.doesNotMatch(historyControl(loading), /<strong>/, "加载中不提前给出历史计数");
 });
 
 test("历史说明可展开九场理由与精确原始来源，打开记录不新增操作", async () => {
@@ -88,7 +99,8 @@ test("历史说明可展开九场理由与精确原始来源，打开记录不�
   assert.match(html, /当轮通过/); assert.match(html, /面谈已完成/); assert.match(html, /当轮结果已记录/); assert.doesNotMatch(html, /旧準備作業|テスト担当|999|翌日の返信で終了を記録/);
   const sourceLabel = `${historyNotes[0].frontmatter.date} · ${historyNotes[0].frontmatter.company} · 查看原始记录`;
   button(content, sourceLabel).props.onClick();
-  button(content, `${historyNotes[0].frontmatter.date} · ${historyNotes[0].frontmatter.company} · 面试复盘`).props.onClick();
+  const links = find(content, (item) => typeof item.type === "function" && item.type.name === "CalendarInterviewLinks" && item.props.targets?.review?.sourcePath === historyEvents[0].note.path);
+  links.props.onNavigate("review");
   assert.deepEqual(ui.opened, [historyNotes[0].path]); assert.deepEqual(ui.reviewed, [historyEvents[0].id]);
   button(content, `${historyNotes[5].frontmatter.date} · ${historyNotes[5].frontmatter.company} · 查看原始记录`).props.onClick();
   assert.equal(ui.openedNotes.at(-1).frontmatter.result, sensitiveResult, "原始记录完整保留，只有主动打开才交给阅读器");
@@ -101,8 +113,7 @@ test("只有明确关联冲突保留警示及来源说明，不计入历史说�
   const two = note("案件二", { type: "job-case", case_id: "ambiguous", status: "応募済" });
   const conflicting = note("冲突复盘", { case_id: "ambiguous", result: "通過" });
   const html = await render({ notes: [...historyNotes, one, two, conflicting], events: [...historyEvents, event(conflicting)] });
-  // 改动理由同上：标签换成计数对象，冲突场次仍不计入。
-  assert.match(html, /<span>无当前状态的历史场次<\/span><strong>9<\/strong><small>\/ 10 场 · 不限月份<\/small>/);
+  assertHistoryCount(html, 9, 10);
   assert.match(html, /calendar-legend-item status-unknown/);
   assert.match(html, /<details class="calendar-association-conflicts"><summary>关联冲突 1 场<\/summary>/);
   assert.match(html, /明确的关联冲突/); assert.match(html, /不计为本人待办/);
@@ -112,8 +123,8 @@ test("只有明确关联冲突保留警示及来源说明，不计入历史说�
 
 test("日语历史说明区分当轮结果和当前状态，自由文本仅通过主动打开来源查看", async () => {
   const html = await render({ locale: "ja" });
-  // 改动理由同上：「過去の状態の説明」只留作展开面板标题，默认收起时首屏显示计数对象与「期間を問わず」。
-  assert.match(html, /予定の状態の凡例/); assert.match(html, /<span>現在の状態がない過去の予定<\/span><strong>9<\/strong><small>\/ 9 件 · 期間を問わず<\/small>/);
+  assert.match(html, /予定の状態の凡例/);
+  assertHistoryCount(html, 9, 9, "ja");
   assert.doesNotMatch(html, /全履歴|過去の全予定/);
   assert.match(html, /当該回は不採用/); assert.match(html, /面談実施済み/); assert.match(html, /現在の選考状況は推測しません/); assert.doesNotMatch(html, /旧準備作業|テスト担当|999|翌日の返信で終了を記録/);
   assert.doesNotMatch(html, /資料の確認が必要|资料待核对|当轮未通过|关联冲突/);
@@ -132,14 +143,13 @@ test("同日已有复盘及已结束旧预约不列入未来安排，日历事�
   const completed = note("已复盘", { date: today, result: "通過", company: "株式会社テスト既実施" });
   const closed = note("已结束预约", { type: "job-case", case_id: "closed", date: "2026-10-06", status: "不採用", company: "株式会社テスト終了" });
   const html = await render({ search: "?month=2026-10", notes: [completed, closed], events: [event(completed, { phase: "upcoming" }), event(closed, { phase: "upcoming" })] });
-  assert.match(html, /<span>未来 7 天场次<\/span><strong>0<\/strong>/);
-  assert.match(html, /<span>下一场<\/span><strong>暂无<\/strong>/);
+  assert.match(html, /<h2>未来 7 天<\/h2><span>0<\/span>/);
+  assert.doesNotMatch(html, /data-next=""/);
   assert.match(html, /calendar-event upcoming kind-event status-neutral/);
   assert.match(html, /calendar-event upcoming kind-event status-closed/);
   const start = html.indexOf("<h2>未来 7 天</h2>"); assert.ok(start > 0);
   const upcoming = html.slice(start, html.indexOf("</section>", start));
   assert.match(upcoming, /未来七天没有已确认的安排/);
   assert.doesNotMatch(upcoming, /株式会社テスト既実施|株式会社テスト終了/);
-  // 改动理由同上；同日已有复盘的场次已发生，计入分母。
-  assert.match(html, /<span>无当前状态的历史场次<\/span><strong>1<\/strong><small>\/ 1 场 · 不限月份<\/small>/);
+  assertHistoryCount(html, 1, 1);
 });

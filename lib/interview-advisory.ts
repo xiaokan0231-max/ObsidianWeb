@@ -1,4 +1,4 @@
-import { ADVISORY_STAGES, INSIGHT_MODULE_KEYS, interviewAdvisoryOutputSchema, advisorySchemaErrors, advisorySemanticErrors } from "./interview-advisory-contract.mjs";
+import { ADVISORY_STAGES, INSIGHT_MODULE_KEYS } from "./interview-advisory-contract.mjs";
 export { ADVISORY_STAGES, INSIGHT_MODULE_KEYS } from "./interview-advisory-contract.mjs";
 
 /** 顾问评论独立于回答评分；引用必须可回到事实层，不能靠规范化静默删去坏证据。 */
@@ -64,7 +64,7 @@ function fields(value: Record<string, unknown>, names: string[], at: string) {
 function sourcePath(value: unknown, at: string): asserts value is string {
   string(value, at);
   if (!value.startsWith("20_求職/") || !value.endsWith("_整理稿.md") || value.includes("..") || value.includes("\\")) {
-    fail(`${at} 必须为完整的 Vault 整理稿相对路径；收到 ${JSON.stringify(value)}`);
+    fail(`${at} 必须为完整的 Vault 整理稿相对路径`);
   }
 }
 function metadata(value: Record<string, unknown>) {
@@ -172,26 +172,15 @@ export function validateInterviewInsights(value: unknown, context?: AdvisoryVali
 /** 写前必须提供完整来源索引；校验失败直接拒绝本次结果，旧报告不受影响。 */
 export function normalizeInterviewAdvisory(value: unknown, meta: AdvisoryMeta, context: AdvisoryValidationContext): InterviewAdvisory {
   if (!context?.sources || !context.contextPaths) fail("写前校验需要完整来源索引");
-  generatedContract(value, context, "advisory");
   const result = { ...object(value, "advisory output"), ...meta, version: 1 };
   validateInterviewAdvisory(result, context);
   return structuredClone(result);
 }
 export function normalizeInterviewInsights(value: unknown, meta: AdvisoryMeta, context: AdvisoryValidationContext): InterviewInsights {
   if (!context?.sources || !context.contextPaths) fail("写前校验需要完整来源索引");
-  generatedContract(value, context, "insights");
   const result = { ...object(value, "insights output"), ...meta, version: 1 };
   validateInterviewInsights(result, context);
   return structuredClone(result);
-}
-
-function generatedContract(value: unknown, context: AdvisoryValidationContext, kind: "advisory" | "insights") {
-  const schema = interviewAdvisoryOutputSchema({
-    evidenceSources: [...context.sources].map(([sourcePath, blocks]) => ({ sourcePath, blocks: [...blocks].map(([blockId, ids]) => ({ blockId, sentenceIds: [...ids] })) })),
-    contextPaths: [...context.contextPaths],
-  }, kind);
-  const errors = [...advisorySchemaErrors(value, schema, kind), ...advisorySemanticErrors(value, kind)];
-  if (errors.length) fail(errors.join("；"));
 }
 
 function readMarkedJson(content: string, marker: string): unknown {

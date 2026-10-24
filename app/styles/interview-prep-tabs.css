@@ -1,0 +1,127 @@
+/* 三个阅读层级以卡片区分；旧版的下划线和目录指示条保持各自作用域。 */
+.session-v2 .v2-nav.v2-nav-three {
+  gap: 14px;
+  padding: 9px 0 12px;
+  border-top-color: transparent;
+  border-bottom-color: var(--v2-line);
+  box-shadow: 0 9px 15px -15px color-mix(in oklab, var(--shadow-color) 30%, transparent);
+}
+
+.session-v2 .v2-nav-three > .v2-tablist {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 1 1 auto;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.session-v2 .v2-nav-three .v2-prep-tab {
+  --prep-tab-tone: var(--interactive);
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 65px;
+  padding: 10px 13px;
+  border: 1px solid var(--v2-line);
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--surface-raised-solid), color-mix(in oklab, var(--surface-sunken) 35%, var(--surface-raised-solid)));
+  color: var(--text-secondary);
+  text-align: left;
+  font-weight: 500;
+  isolation: isolate;
+  transition: border-color 160ms ease-out, background-color 160ms ease-out, box-shadow 160ms ease-out, color 160ms ease-out, transform 160ms ease-out;
+}
+
+.session-v2 .v2-nav-three .v2-prep-tab[data-section="reviews"] { --prep-tab-tone: var(--gold-text); }
+.session-v2 .v2-nav-three .v2-prep-tab[data-section="kit"] { --prep-tab-tone: var(--info); }
+
+.session-v2 .v2-nav-three .v2-prep-tab::before {
+  content: "";
+  position: absolute;
+  inset: 0 13px auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--highlight) 42%, transparent), transparent);
+  pointer-events: none;
+}
+
+.session-v2 .v2-nav-three .v2-prep-tab:hover {
+  border-color: color-mix(in oklab, var(--prep-tab-tone) 45%, var(--v2-line));
+  color: var(--ink);
+  box-shadow: 0 3px 9px color-mix(in oklab, var(--shadow-color) 7%, transparent);
+  transform: translateY(-1px);
+}
+
+.session-v2 .v2-nav.v2-nav-three .v2-prep-tab[aria-selected="true"] {
+  border-color: color-mix(in oklab, var(--prep-tab-tone) 55%, var(--v2-line));
+  background: linear-gradient(115deg, color-mix(in oklab, var(--prep-tab-tone) 11%, var(--surface-raised-solid)), color-mix(in oklab, var(--prep-tab-tone) 3%, var(--surface-raised-solid)));
+  color: var(--prep-tab-tone);
+  box-shadow: 0 4px 13px color-mix(in oklab, var(--shadow-color) 9%, transparent), inset 0 1px 0 color-mix(in oklab, var(--highlight) 20%, transparent);
+  font-weight: 650;
+}
+
+.session-v2 .v2-nav-three .v2-prep-tab[aria-selected="true"]::before {
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--prep-tab-tone) 68%, var(--highlight)), transparent);
+}
+
+.session-v2 .v2-nav-three .v2-prep-tab:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  z-index: 1;
+}
+
+.session-v2 .v2-nav-three .v2-tab-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid color-mix(in oklab, var(--prep-tab-tone) 17%, var(--v2-line));
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--prep-tab-tone) 6%, var(--surface-raised-solid));
+  color: var(--prep-tab-tone);
+  font-style: normal;
+  transition: background-color 160ms ease-out, border-color 160ms ease-out;
+}
+
+.session-v2 .v2-nav-three .v2-tab-icon svg { width: 17px; height: 17px; }
+.session-v2 .v2-nav-three [aria-selected="true"] .v2-tab-icon {
+  border-color: color-mix(in oklab, var(--prep-tab-tone) 36%, var(--v2-line));
+  background: color-mix(in oklab, var(--prep-tab-tone) 12%, var(--surface-raised-solid));
+}
+.session-v2 .v2-nav-three .v2-tab-copy { display: grid; gap: 4px; min-width: 0; }
+.session-v2 .v2-nav-three .v2-tab-label { font-size: 15px; line-height: 1.25; letter-spacing: .015em; white-space: nowrap; }
+.session-v2 .v2-nav-three .v2-tab-caption { color: var(--v2-muted); font-size: 13px; font-weight: 400; line-height: 1.3; white-space: nowrap; }
+.session-v2 .v2-nav-three .v2-tab-index { align-self: start; margin-top: 1px; color: var(--v2-muted); font-size: 13px; font-weight: 500; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.session-v2 .v2-nav-three [aria-selected="true"] .v2-tab-index { color: var(--prep-tab-tone); }
+.session-v2 .v2-nav-three > .v2-tablist > .v2-tab-indicator { display: none; }
+.session-v2 .v2-nav-three > .v2-nav-utilities { display: grid; flex: 0 0 auto; gap: 2px; }
+.session-v2 .v2-nav-utilities button { padding: 5px 8px; border: 0; background: transparent; color: var(--v2-muted); font-size: 13px; text-align: left; }
+.session-v2 .v2-nav-utilities .v2-stage-nav { color: var(--v2-accent); font-weight: 650; }
+.session-v2 .v2-nav-utilities button:hover { color: var(--ink); background: var(--surface-sunken); border-radius: 4px; }
+
+/* 合并后的正文仍有就近跳转，避免把三个章节再次变成三套主标签。 */
+.session-v2 .v2-story-jumps,
+.session-v2 .v2-kit-jumps { display: flex; align-items: center; gap: 6px; padding: 12px 0; margin: 0 0 8px; }
+.session-v2 .v2-story-jumps a,
+.session-v2 .v2-kit-jumps button { display: inline-flex; padding: 6px 12px; border: 1px solid transparent; border-radius: 5px; color: var(--v2-muted); background: transparent; font-size: 13px; line-height: 1.5; text-decoration: none; }
+.session-v2 .v2-story-jumps a:hover,
+.session-v2 .v2-kit-jumps button:hover { color: var(--v2-accent); background: var(--surface-sunken); }
+.session-v2 .v2-kit-jumps button[aria-current] { border-color: var(--v2-line); background: var(--success-wash); color: var(--v2-accent); font-weight: 650; }
+.session-v2 :is(#v2-panel, #v2-company-story, .v2-story-overview, .v2-kit-section) { scroll-margin-top: calc(var(--chrome-top, 76px) + 110px); }
+.session-v2 .v2-story-overview { max-width: 920px; margin-top: 26px; padding-top: 24px; border-top: 1px solid var(--v2-line); }
+.session-v2 .v2-story-jumps + .v2-story-overview { margin-top: 0; border-top: 0; padding-top: 12px; }
+.session-v2 .v2-story-overview + #v2-company-story { margin-top: 28px; }
+.session-v2 .v2-kit-section + .v2-kit-section { margin-top: 34px; padding-top: 28px; border-top: 1px solid var(--v2-line); }
+.session-v2 .v2-kit-section > .v2-section-head { margin-bottom: 18px; }
+.session-v2 .v2-reviews-panel { padding-top: 18px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .session-v2 .v2-nav-three .v2-prep-tab,
+  .session-v2 .v2-nav-three .v2-tab-icon { transition: none; }
+  .session-v2 .v2-nav-three .v2-prep-tab:hover { transform: none; }
+  .session-v2:has(.v2-nav-three) #v2-panel { animation: none; }
+}

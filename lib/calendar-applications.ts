@@ -138,3 +138,15 @@ export function buildAiApplicationDays(notes: Note[], today = tokyoParts().date)
     };
   }).sort((left, right) => left.date.localeCompare(right.date));
 }
+
+/** 月概况跨申请日按公司去重；同公司多岗位沿用日详情的优先级，不能把每日公司数相加。 */
+export function summarizeAiApplicationDays(days: readonly AiApplicationDay[], month: string) {
+  const applications = [...new Map(days.filter(day => day.date.startsWith(`${month}-`))
+    .flatMap(day => day.applications).map(application => [application.id, application])).values()];
+  const companies = groupApplicationCompanies(applications);
+  const bucketCounts: Record<AiApplicationBucket, number> = {
+    "needs-user": 0, progressing: 0, unknown: 0, waiting: 0, paused: 0, closed: 0,
+  };
+  for (const company of companies) bucketCounts[company.bucket] += 1;
+  return { companyCount: companies.length, positionCount: applications.length, bucketCounts };
+}

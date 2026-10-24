@@ -22,7 +22,7 @@ const zh = {
   reviewDescription: "证据、关联案件或责任归属尚待核实，暂不计入当前动作。",
   waitingDescription: "下一步由对方推进，保留等待记录。", systemDescription: "由 AI 或系统推进的事项，单独查看。",
   optionalDescription: "可自行选择是否考虑，未列为当前必要动作。", historyDescription: "保留已处理与不再处理的记录，两者分开标明。",
-  reviewNotice: "条记录仍待核实", openReview: "查看待核实记录", reviewNotCurrent: "待核实不等于你必须马上处理，也不计入上方数字。",
+  reviewNotice: "条记录仍待核实", openReview: "查看待核实记录", reviewNotCurrent: "待核实记录单独保留，不计入当前事项。",
   emptyCurrent: "目前已核实的资料中，没有列入当前列表的本人动作。", emptyCurrentReview: "仍有待核实记录，不能据此认定全部事项已经确认。",
   emptyOther: "本分类暂无记录。", unavailableCompany: "公司未注明", unavailablePosition: "岗位未注明",
   why: "为什么需要处理", whyMissing: "依据尚未注明，请查看原始记录。", due: "官方期限", noDue: "未提供明确期限",
@@ -60,7 +60,7 @@ const ja: typeof zh = {
   reviewDescription: "根拠、関連案件、対応者などが未確認のため、現在の対応件数には含めていません。",
   waitingDescription: "次は相手が進める事項です。待機中の記録を残します。", systemDescription: "AI またはシステムが進める事項を別に表示します。",
   optionalDescription: "検討するかどうかは任意です。現在必要な対応には含めていません。", historyDescription: "対応済みと対応中止の記録を、区別して残します。",
-  reviewNotice: "件の記録に確認が必要です", openReview: "未確認の記録を見る", reviewNotCurrent: "未確認は即時対応の指示ではありません。上の件数には含めていません。",
+  reviewNotice: "件の記録に確認が必要です", openReview: "未確認の記録を見る", reviewNotCurrent: "未確認の記録は分けて保存し、現在の対応事項には含めません。",
   emptyCurrent: "確認済みの資料では、現在の本人対応に分類された事項はありません。", emptyCurrentReview: "未確認の記録が残っているため、すべて確認済みとは限りません。",
   emptyOther: "この分類には記録がありません。", unavailableCompany: "会社の記載なし", unavailablePosition: "職種の記載なし",
   why: "対応が必要な理由", whyMissing: "根拠の記載がありません。元の記録をご確認ください。", due: "先方が指定した期限", noDue: "明確な期限の記載なし",
@@ -95,6 +95,7 @@ type Props = {
   fetchedAt: number | null;
   onOpen: (note: Note) => void;
   onNoteWritten: (note: Note) => void;
+  embedded?: boolean;
 };
 
 function safeExternalHref(value: string) {
@@ -339,7 +340,7 @@ export function UserActionListRow({ item, category, today, copy, onSelect }: {
   </li>;
 }
 
-export default function UserActionsView({ notes, today, loading, fetchedAt, onOpen, onNoteWritten }: Props) {
+export default function UserActionsView({ notes, today, loading, fetchedAt, onOpen, onNoteWritten, embedded = false }: Props) {
   const { locale } = useUiLocale();
   const copy = locale === "ja" ? ja : zh;
   const groups = useMemo(() => buildUserActions(notes, today), [notes, today]);
@@ -420,15 +421,15 @@ export default function UserActionsView({ notes, today, loading, fetchedAt, onOp
   };
 
   return (
-    <section className="user-actions-view" aria-label={copy.title}>
+    <section className={`user-actions-view${embedded ? " user-actions-view-embedded" : ""}`} aria-label={copy.title}>
       <header className="user-actions-header">
-        <div><span className="user-actions-kicker">{copy.kicker}</span><h1>{copy.title}</h1>
+        <div>{!embedded && <><span className="user-actions-kicker">{copy.kicker}</span><h1>{copy.title}</h1></>}
           <details className="user-actions-data-scope"><summary>{copy.dataScope}</summary><p>{copy.introduction}</p>
           <div className="user-actions-freshness">{loaded ? <>{copy.freshness}：<time dateTime={new Date(fetchedAt!).toISOString()}>{new Intl.DateTimeFormat(locale, { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(fetchedAt!)} JST</time></> : copy.notLoaded}</div>
           <div className="user-actions-freshness">{copy.coverage}</div>
           </details>
         </div>
-        <div className="user-actions-count" data-tone={loaded && groups.current.length ? "action" : "neutral"} aria-label={copy.currentCount}><strong>{loaded ? groups.current.length : "—"}</strong><span>{copy.currentCount}</span></div>
+        {!embedded && <div className="user-actions-count" data-tone={loaded && groups.current.length ? "action" : "neutral"} aria-label={copy.currentCount}><strong>{loaded ? groups.current.length : "—"}</strong><span>{copy.currentCount}</span></div>}
       </header>
       {message && <p role="status">{message}</p>}
       {loading && <p role="status">{loaded ? copy.refreshing : copy.loading}</p>}

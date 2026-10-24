@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 const commandIndex = args.indexOf("exec");
@@ -9,9 +9,6 @@ const event = {
   hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
   hasCodexApiKey: Boolean(process.env.CODEX_API_KEY),
 };
-if (commandIndex >= 0 && args.includes("--output-schema")) {
-  event.outputSchema = JSON.parse(readFileSync(args[args.indexOf("--output-schema") + 1], "utf8"));
-}
 
 if (process.env.FAKE_CODEX_LOG) {
   appendFileSync(process.env.FAKE_CODEX_LOG, `${JSON.stringify(event)}\n`);
@@ -47,3 +44,4 @@ if (commandIndex >= 0) {
 
 process.stderr.write(`Unsupported fake Codex args: ${args.join(" ")}\n`);
 process.exit(2);
+

@@ -37,6 +37,20 @@ export type CompanyFact = {
   scope: string;
   sources: CompanyEvidence[];
 };
+export type CompanyReviewEvidence = {
+  url: string;
+  publishedOn: string;
+  role: string;
+  quote?: string;
+  paraphrase: string;
+};
+export type CompanyReviewInsight = {
+  title: string;
+  kind: "positive" | "concern" | "mixed";
+  summary: string;
+  implication: string;
+  evidence: CompanyReviewEvidence[];
+};
 export type CompanyReview = {
   platform: string;
   url: string;
@@ -44,18 +58,28 @@ export type CompanyReview = {
   score: number | null;
   scale: number | null;
   sampleCount: number | null;
+  sampleUnit: string;
   commentPeriod: string;
   coverage: string;
   positive: string[];
   negative: string[];
   readOn: string;
   limitations: string;
+  insights: CompanyReviewInsight[];
+};
+export type CompanyReviewSynthesis = {
+  asOf: string;
+  aiAuthor: string;
+  paragraphs: PrepInline[][];
+  coverage: string;
+  sources: CompanyEvidence[];
 };
 export type CompanyProfile = {
   version: 1;
   updatedOn: string;
   facts: CompanyFact[];
   reviews: CompanyReview[];
+  reviewSynthesis?: CompanyReviewSynthesis | null;
 };
 export type CompanySummary = {
   note: Note;
@@ -216,13 +240,13 @@ function facts(value: unknown, field: string, issues: string[], notes: Note[]): 
   });
 }
 
-function summaryInlineIssues(nodes: PrepInline[], notes: Note[], issues: string[]) {
+function summaryInlineIssues(nodes: PrepInline[], notes: Note[], issues: string[], field = "company-summary") {
   for (const node of nodes) {
     if (node.kind === "link") {
-      if (!validUrl(node.href)) issues.push("company-summary 正文链接必须是完整 http(s) 地址");
-      summaryInlineIssues(node.children, notes, issues);
-    } else if (node.kind === "strong") summaryInlineIssues(node.children, notes, issues);
-    else if (node.kind === "ref") explicitReference(notes, `[[${node.target}]]`, "company-summary 正文引用", issues);
+      if (!validUrl(node.href)) issues.push(`${field} 正文链接必须是完整 http(s) 地址`);
+      summaryInlineIssues(node.children, notes, issues, field);
+    } else if (node.kind === "strong") summaryInlineIssues(node.children, notes, issues, field);
+    else if (node.kind === "ref") explicitReference(notes, `[[${node.target}]]`, `${field} 正文引用`, issues);
   }
 }
 
@@ -284,8 +308,80 @@ function summaryForDossier(dossier: Note, notes: Note[]): Parsed<CompanySummary>
   return { value: issues.length ? null : value, status: issues.length ? "invalid" : "available", issues };
 }
 
+function reviewInsights(value: unknown, field: string, issues: string[]): CompanyReviewInsight[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    issues.push(`${field} 必须是评论观察数组（无内容使用 []）`);
+    return [];
+  }
+  return value.flatMap((item, index) => {
+    const insight = object(item);
+    const name = `${field}[${index}]`;
+    const before = issues.length;
+    const requiredText = (value: unknown, field: string) => {
+      if (typeof value !== "string" || !text(value)) issues.push(`${field} 必须是非空文本`);
+      return text(value);
+    };
+    const title = requiredText(insight?.title, `${name}.title`);
+    const kind = text(insight?.kind) as CompanyReviewInsight["kind"];
+    if (!["positive", "concern", "mixed"].includes(kind)) issues.push(`${name}.kind 必须为 positive / concern / mixed`);
+    const summary = requiredText(insight?.summary, `${name}.summary`);
+    const implication = requiredText(insight?.implication, `${name}.implication`);
+    const evidence: CompanyReviewEvidence[] = [];
+    if (!Array.isArray(insight?.evidence) || !insight.evidence.length) {
+      issues.push(`${name}.evidence 至少需要一条可核对的评论来源`);
+    } else insight.evidence.forEach((item, sourceIndex) => {
+      const source = object(item);
+      const sourceName = `${name}.evidence[${sourceIndex}]`;
+      const url = text(source?.url);
+      if (!validUrl(url)) issues.push(`${sourceName}.url 必须是完整 http(s) 地址`);
+      const publishedOn = date(source?.published_on);
+      if (!publishedOn) issues.push(`${sourceName}.published_on 必须是真实 YYYY-MM-DD 日期`);
+      const role = requiredText(source?.role, `${sourceName}.role`);
+      const paraphrase = requiredText(source?.paraphrase, `${sourceName}.paraphrase`);
+      const quote = source?.quote === undefined ? undefined : requiredText(source.quote, `${sourceName}.quote`);
+      evidence.push({ url, publishedOn, role, paraphrase, ...(quote === undefined ? {} : { quote }) });
+    });
+    // 一条观察的论据不完整时不展示其结论；其他有效观察与平台统计仍可阅读。
+    return issues.length === before ? [{ title, kind, summary, implication, evidence }] : [];
+  });
+}
+
+function reviewSynthesis(value: unknown, issues: string[], notes: Note[]): CompanyReviewSynthesis | null {
+  if (value === undefined) return null;
+  const field = "company_profile.review_synthesis";
+  const synthesis = object(value);
+  if (!synthesis) {
+    issues.push(`${field} 必须是结构化对象`);
+    return null;
+  }
+  const before = issues.length;
+  const asOf = date(synthesis.as_of);
+  const aiAuthor = text(synthesis.ai_author);
+  const coverage = text(synthesis.coverage);
+  if (!asOf) issues.push(`${field}.as_of 必须是真实 YYYY-MM-DD 日期`);
+  if (typeof synthesis.ai_author !== "string" || !aiAuthor || /^(ai|人工智能|unknown|不明|未记录)$/i.test(aiAuthor)) issues.push(`${field}.ai_author 必须有具体署名`);
+  if (typeof synthesis.coverage !== "string" || !coverage) issues.push(`${field}.coverage 必须是非空文本`);
+  const rawParagraphs = strings(synthesis.paragraphs, `${field}.paragraphs`, issues);
+  if (!rawParagraphs.length) issues.push(`${field}.paragraphs 至少需要一个自然段`);
+  const paragraphs = rawParagraphs.map((paragraph, index) => {
+    const paragraphField = `${field}.paragraphs[${index}]`;
+    const blocks = parseBlocks(paragraph);
+    if (blocks.length !== 1 || blocks[0].kind !== "paragraph" || /!\[/.test(paragraph)) issues.push(`${paragraphField} 只支持一个自然段，可使用 Markdown 加粗与链接`);
+    const inline = parseInline(paragraph.replace(/\s*\n\s*/g, " "));
+    if (!prepInlineText(inline).trim()) issues.push(`${paragraphField} 不可含空段落`);
+    summaryInlineIssues(inline, notes, issues, paragraphField);
+    return inline;
+  });
+  const sources = evidence(synthesis.sources, `${field}.sources`, issues, notes);
+  if (!sources.length) issues.push(`${field}.sources 至少需要一项有效来源`);
+  // 总结是独立解读层；坏引用只关闭这一层，已核对的原始评价仍须保留。
+  return issues.length === before ? { asOf, aiAuthor, paragraphs, coverage, sources } : null;
+}
+
 function parseProfile(note: Note, notes: Note[]): Parsed<CompanyProfile> {
   const issues: string[] = [];
+  const detailIssues: string[] = [];
   const profile = object(note.frontmatter.company_profile);
   if (!profile) return { value: null, issues: ["company_profile 必须是结构化对象"] };
   if (getType(note) !== "company") issues.push("company_profile 只能保存在 type: company 卷宗");
@@ -304,6 +400,11 @@ function parseProfile(note: Note, notes: Note[]): Parsed<CompanyProfile> {
     const score = review?.score ?? null;
     const scale = review?.scale ?? null;
     const sampleCount = review?.sample_count ?? null;
+    let sampleUnit = "条样本";
+    if (review?.sample_unit !== undefined) {
+      if (typeof review.sample_unit !== "string" || !text(review.sample_unit)) detailIssues.push(`${name}.sample_unit 必须是非空文本`);
+      else sampleUnit = text(review.sample_unit);
+    }
     const readOn = date(review?.read_on);
     const commentPeriod = text(review?.comment_period);
     const coverage = text(review?.coverage);
@@ -324,10 +425,17 @@ function parseProfile(note: Note, notes: Note[]): Parsed<CompanyProfile> {
     const positive = strings(review?.positive, `${name}.positive`, issues);
     const negative = strings(review?.negative, `${name}.negative`, issues);
     if (["not_researched", "no_samples"].includes(status) && (positive.length || negative.length)) issues.push(`${name} 未取得评论样本时不可写评价主题`);
+    let insights = reviewInsights(review?.insights, `${name}.insights`, detailIssues);
+    if (["not_researched", "no_samples"].includes(status) && insights.length) {
+      detailIssues.push(`${name}.insights 未取得评论样本时不可写评论观察`);
+      insights = [];
+    }
     reviews.push({ platform, url, status, score: score as number | null, scale: scale as number | null,
-      sampleCount: sampleCount as number | null, commentPeriod, coverage, positive, negative, readOn, limitations });
+      sampleCount: sampleCount as number | null, sampleUnit, commentPeriod, coverage, positive, negative, readOn, limitations, insights });
   });
-  return { value: issues.length ? null : { version: 1, updatedOn, facts: profileFacts, reviews }, issues };
+  const synthesis = reviewSynthesis(profile.review_synthesis, detailIssues, notes);
+  // 可选的原文与解读校验失败不抹掉已经核对的平台统计、公司事实；CLI 仍报告具体字段。
+  return { value: issues.length ? null : { version: 1, updatedOn, facts: profileFacts, reviews, reviewSynthesis: synthesis }, issues: [...issues, ...detailIssues] };
 }
 
 function isMeeting(note: Note) {

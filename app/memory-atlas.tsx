@@ -18,8 +18,6 @@ import InterviewSharedAsset from "./interview-shared-asset";
 import { isTypingTarget } from "@/lib/keyboard";
 import type { JobsInitialFilters } from "./jobs-view";
 import CalendarView from "./calendar-view";
-import "./styles/user-actions.css";
-import { buildUserActions } from "@/lib/user-actions";
 import CalendarInterviewState from "./calendar-interview-state";
 import NoteDrawer from "./note-drawer";
 import SceneNoteReader from "./scene-note-reader";
@@ -37,6 +35,7 @@ import {
   MOBILE_PRIMARY_NAV_IDS,
   getNavigation,
   getSecondaryNavigation,
+  navigationView,
   TOP_BAR_SECTION_IDS,
   type NavIconName,
 } from "./navigation";
@@ -67,7 +66,7 @@ import {
   type GroupKey,
 } from "@/lib/memory-atlas-data";
 import { scopesToReloadAfterStats, vaultScopeForView } from "@/lib/vault-scope";
-import { resolveCalendarInterview, type CalendarInterviewTarget } from "@/lib/calendar-interview";
+import { resolveCalendarInterview, resolveCalendarInterviewDestinations, resolveCalendarInterviewRequest, type CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { calendarProgress } from "@/lib/calendar-progress";
 import { buildCalendarSummary } from "@/lib/calendar-summary";
 import { tokyoParts } from "@/lib/dojo/utils";
@@ -91,9 +90,10 @@ import {
 
 // 业务页首次进入时再加载；组件身份固定，笔记刷新和 URL 更新不能重建页面状态。
 // 加载器与预取共用一份：侧栏悬停／聚焦时先拉 chunk，切换时 lazy 当场读到模块，转场的新快照里不是骨架。
+const PROGRESS_MODULE = createPreloadable(() => import("./progress-workspace"));
 const VIEW_MODULES = {
-  activity: createPreloadable(() => import("./recent-progress-view")),
-  actions: createPreloadable(() => import("./user-actions-view")),
+  activity: PROGRESS_MODULE,
+  actions: PROGRESS_MODULE,
   review: createPreloadable(() => import("./interview-review")),
   insights: createPreloadable(() => import("./interview-insights")),
   practice: createPreloadable(() => import("./interview-practice")),
@@ -121,8 +121,7 @@ const GraphView = lazy(VIEW_MODULES.graph.load);
 const LibraryView = lazy(VIEW_MODULES.library.load);
 const SettingsView = lazy(VIEW_MODULES.settings.load);
 const TimelineView = lazy(VIEW_MODULES.timeline.load);
-const UserActionsView = lazy(VIEW_MODULES.actions.load);
-const RecentProgressView = lazy(VIEW_MODULES.activity.load);
+const ProgressWorkspace = lazy(PROGRESS_MODULE.load);
 
 /** 日历是外壳的静态依赖，不在表里；其余页面按需预取，失败留给页面自己的错误边界。 */
 function viewModule(view: AppView) {
@@ -539,7 +538,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const activityReady = readyScopes.has("all") || readyScopes.has("activity");
   const activityError = vaultState.errors.get("activity") ?? vaultState.errors.get("all") ?? "";
   const activityFetchedAt = vaultState.checkedAt.get("activity") ?? vaultState.checkedAt.get("all") ?? null;
-  const userActions = useMemo(() => buildUserActions(notes, calendarToday), [notes, calendarToday]);
+  const actionsFetchedAt = vaultState.checkedAt.get("actions") ?? vaultState.checkedAt.get("all") ?? null;
 
   // 浏览器后退／前进回到某一页时要回到的纵向位置。
   const pendingScrollRestore = useRef<number | null>(null);
@@ -929,12 +928,6 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     void loadVault({ scope });
   }, [loadVault, view, vaultReader]);
 
-  // 固定本人行动入口不能借别的页面已加载来宣称“0件”；按需取同一份行动数据。
-  useEffect(() => {
-    if (vaultReader.getState().readyScopes.has("all") || vaultReader.getState().readyScopes.has("actions")) return;
-    void loadVault({ scope: "actions" });
-  }, [loadVault, vaultReader]);
-
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -1106,25 +1099,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const calendarInterview = useMemo(() => {
     const requested = calendarInterviewFromSearch(view, interviewRouteSearch);
     if (!requested) return null;
-    const source = notes.find((note) => note.path === requested.sourcePath);
-    if (!source) return { ...requested, path: null };
-    const event = calendarEvents.find((item) =>
-      item.date === requested.date && item.note.path === requested.sourcePath,
-    );
-    // 日历只加载行动资料；到面试页加载完整资料后重新匹配，不能把先前的空结果冻结。
-    const resolved = resolveCalendarInterview({
-      id: event?.id ?? requested.sourcePath,
-      note: source,
-      kind: "event",
-      company: requested.company,
-      date: requested.date,
-      time: requested.time || event?.time || "",
-      label: requested.label,
-      phase: requested.date < calendarToday ? "past" : "upcoming",
-      caseId: requested.caseId,
-      prepPath: "",
-    }, notes);
-    return resolved ?? { ...requested, path: null };
+    // 完整资料加载后只补齐所选材料，不能把“准备”改成自动判定的“复盘”。
+    return resolveCalendarInterviewRequest(requested, notes, calendarEvents, calendarToday);
   }, [view, interviewRouteSearch, notes, calendarEvents, calendarToday]);
   const interviewParams = new URLSearchParams(interviewRouteSearch);
   const reviewInitialKey = calendarInterview?.path ?? interviewParams.get("review");
@@ -1274,11 +1250,11 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     navigateToView("jobs", params, true, () => setJobsInitialFilters(filters ?? null));
   }, [navigateToView]);
 
-  const openCalendarInterview = useCallback((commitment: Commitment) => {
-    const target = calendarInterviewTargets.get(commitment.id);
+  const openCalendarInterview = useCallback((commitment: Commitment, view?: CalendarInterviewTarget["view"]) => {
+    const target = view ? resolveCalendarInterviewDestinations(commitment, notes)[view] : calendarInterviewTargets.get(commitment.id);
     if (target) navigateToView(target.view, calendarInterviewSearch(target));
     else openNote(commitment.note);
-  }, [calendarInterviewTargets, navigateToView, openNote]);
+  }, [calendarInterviewTargets, notes, navigateToView, openNote]);
 
   // 顶栏「最近安排」直达那场面试的准备页；认不出对应面试的日程才退回日历。
   const openNextEvent = useCallback(() => {
@@ -1350,16 +1326,6 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     interviewNavigation.current = interviewNavigationKey("review", params.toString());
   }, []);
 
-  useEffect(() => {
-    if (!calendarInterview || !interviewScopeReady || calendarInterview.view === view) return;
-    // 当天的新整理稿可能只在进入面试页后才加载；补齐完成证据后更新同一个历史入口。
-    const params = calendarInterviewSearch(calendarInterview);
-    window.history.replaceState(
-      { ...(window.history.state ?? {}), __echoAppView: calendarInterview.view }, "",
-      appViewHref(calendarInterview.view, params),
-    );
-    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
-  }, [calendarInterview, interviewScopeReady, view]);
 
   useEffect(() => {
     if (view !== "library" && view !== "graph") return;
@@ -1386,8 +1352,9 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const secondaryPlacement = TOP_BAR_SECTION_IDS.has(activeNavigation.id)
     ? "bar"
     : "rail";
+  const activeNavigationView = navigationView(view);
   const activeSecondaryLabel =
-    secondaryNavigation.find((item) => item.id === view)?.label ?? "";
+    secondaryNavigation.find((item) => item.id === activeNavigationView)?.label ?? "";
   useEffect(() => {
     document.title = `${activeSecondaryLabel || activeNavigation.label} · ${branding.name}`;
   }, [activeNavigation.label, activeSecondaryLabel, branding.name]);
@@ -1462,12 +1429,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                     {subItems.map((sub) => (
                       <a
                         key={sub.id}
-                        className={view === sub.id ? "active" : ""}
+                        className={activeNavigationView === sub.id ? "active" : ""}
                         href={appViewHref(sub.id)}
                         onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(sub.id); } }}
                         onPointerEnter={() => preloadView(sub.id)}
                         onFocus={() => preloadView(sub.id)}
-                        aria-current={view === sub.id ? "page" : undefined}
+                        aria-current={activeNavigationView === sub.id ? "page" : undefined}
                         data-label={sub.label}
                       >
                         <span className="nav-glyph" aria-hidden="true">{sub.glyph}</span>
@@ -1516,21 +1483,9 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
             {activeSecondaryLabel && <small>{activeSecondaryLabel}</small>}
           </div>
 
-          <a
-            className="user-actions-entry"
-            href={appViewHref("actions")}
-            aria-current={view === "actions" ? "page" : undefined}
-            onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView("actions"); } }}
-            onPointerEnter={() => preloadView("actions")}
-            onFocus={() => preloadView("actions")}
-          >
-            <strong>{locale === "ja" ? "あなたの対応が必要" : "需要你处理"}</strong>
-            <span>{actionsReady ? userActions.current.length : "…"}</span>
-          </a>
-
           {/* 当前面试页已经有“本场”倒计时；再放全局下一场会让两家公司同时争夺上下文。 */}
-          {/* 日历首页自己有下一场的大卡，顶栏不再重复一条。 */}
-          {nextEvent && view !== "session" && view !== "calendar" && (
+          {/* 日历负责近期日程；进展工作区的顶栏也留给当前位置。 */}
+          {nextEvent && !["session", "calendar", "activity", "actions"].includes(view) && (
             <button
               className="topbar-next"
               onClick={openNextEvent}
@@ -1602,12 +1557,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   {secondaryNavigation.map((item) => (
                     <a
                       key={item.id}
-                      className={view === item.id ? "active" : ""}
+                      className={activeNavigationView === item.id ? "active" : ""}
                       href={appViewHref(item.id)}
                       onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView(item.id); } }}
                       onPointerEnter={() => preloadView(item.id)}
                       onFocus={() => preloadView(item.id)}
-                      aria-current={view === item.id ? "page" : undefined}
+                      aria-current={activeNavigationView === item.id ? "page" : undefined}
                     >
                       <i aria-hidden="true">{item.glyph}</i>
                       <span>
@@ -1639,7 +1594,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   onVaultChanged={loadVault}
                   onNoteWritten={patchNote}
                   initialSelectedKey={reviewInitialKey}
-                  initialPanel={interviewParams.get("panel") === "advisory" ? "advisory" : interviewParams.get("panel") === "quality" ? "quality" : "source"}
+                  initialPanel={interviewParams.get("panel") === "source" ? "source" : interviewParams.get("panel") === "quality" ? "quality" : "advisory"}
                   initialBlockId={interviewParams.get("block")}
                   initialSentenceId={interviewParams.get("sentence")}
                   onOpenEvidence={openReviewEvidence}
@@ -1745,24 +1700,19 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   onInterview={openCalendarInterview}
                 />
               )}
-              {view === "actions" && (
-                <UserActionsView
+              {(view === "actions" || view === "activity") && (
+                <ProgressWorkspace
                   notes={notes}
                   today={calendarToday}
-                  loading={!scopeReady}
-                  fetchedAt={fetchedAt}
+                  view={view}
+                  actionsLoading={!actionsReady}
+                  activityLoading={!activityReady && !activityError}
+                  actionsFetchedAt={actionsFetchedAt}
+                  activityFetchedAt={activityFetchedAt}
+                  activityError={activityError}
+                  onNavigate={navigateToView}
                   onOpen={openNote}
                   onNoteWritten={patchNote}
-                />
-              )}
-              {view === "activity" && (
-                <RecentProgressView
-                  notes={notes}
-                  today={calendarToday}
-                  loading={!activityReady && !activityError}
-                  error={activityError}
-                  fetchedAt={activityFetchedAt}
-                  onOpenSource={(path) => { const note = notes.find((item) => item.path === path); if (note) openNote(note); }}
                 />
               )}
               {view === "timeline" && (

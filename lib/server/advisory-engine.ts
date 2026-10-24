@@ -8,8 +8,6 @@ import {
   mergeAdvisoryIntoReview, normalizeInterviewAdvisory, normalizeInterviewInsights,
   parseInterviewInsights, mergeInterviewInsights,
 } from "../interview-advisory.ts";
-import type { AdvisoryMeta, AdvisoryValidationContext } from "../interview-advisory.ts";
-import { interviewAdvisoryOutputSchema, advisorySchemaErrors, advisorySemanticErrors } from "../interview-advisory-contract.mjs";
 import { parseInterviewAnswerReview } from "../review-deep.ts";
 import { parseReviewFeedback, uniqueReviewFeedback } from "../review-feedback.ts";
 import { isReviewNotePath, reviewSiblingPath } from "../review-paths.ts";
@@ -21,10 +19,9 @@ type Dependencies = {
   readAll: () => Promise<Note[]>;
   read: (path: string) => Promise<Note | null>;
   write: (path: string, content: string) => Promise<unknown>;
-  invoke: (task: Task, payload: Record<string, unknown>) => Promise<{ output: Record<string, unknown>; model: string; diagnosticPath?: string }>;
+  invoke: (task: Task, payload: Record<string, unknown>) => Promise<{ output: Record<string, unknown>; model: string }>;
 };
-type RejectedAttempt = { model: string; receivedAt: string; output: Record<string, unknown>; issues: string[]; diagnosticPath?: string };
-type Failure = { fingerprint: string; message: string; attemptedAt: string; diagnostics?: RejectedAttempt[] };
+type Failure = { fingerprint: string; message: string; attemptedAt: string };
 type FailureState = Record<string, Failure>;
 export type AdvisoryCoverage = {
   sourcePath: string; company: string; date: string; round: string;
@@ -55,44 +52,6 @@ export function createAdvisoryEngine(deps: Dependencies) {
       const content = `---\ntype: interview-advisory-state\nlayer: machine-state\n---\n# 面试顾问分析更新状态\n\n> 仅记录失败与重试依据；正文分析始终保存在各自报告中。\n\n${STATE_MARKER}\n\`\`\`json\n${JSON.stringify(current, null, 2)}\n\`\`\`\n`;
       await deps.write(ADVISORY_STATE_PATH, content);
     });
-  }
-
-  async function generateValidated<T>(task: Task, payload: Record<string, unknown>, context: AdvisoryValidationContext,
-    fingerprint: string, normalize: (value: unknown, meta: AdvisoryMeta, context: AdvisoryValidationContext) => T,
-    isFresh: () => Promise<boolean>, diagnostics: RejectedAttempt[]): Promise<T> {
-    const kind = task === "review_interview_insights" ? "insights" : "advisory";
-    const generationContract = {
-      evidenceSources: [...context.sources].map(([sourcePath, blocks]) => ({ sourcePath,
-        blocks: [...blocks].map(([blockId, sentences]) => ({ blockId, sentenceIds: [...sentences] })) })),
-      contextPaths: [...context.contextPaths],
-    };
-    const schema = interviewAdvisoryOutputSchema(generationContract, kind);
-    let nextPayload: Record<string, unknown> = { ...payload, generationContract };
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const result = await deps.invoke(task, nextPayload);
-      const receivedAt = new Date().toISOString();
-      const issues = [...advisorySchemaErrors(result.output, schema, kind), ...advisorySemanticErrors(result.output, kind)];
-      // 修复必须保留有依据的具体分析，不能用清空全部条目规避校验。
-      if (attempt && kind === "advisory") {
-        const count = (value: Record<string, unknown>) => ["observations", "answerOptions", "nextSteps"].reduce((sum, key) => sum + (value && Array.isArray(value[key]) ? value[key].length : 0), 0);
-        if (count(diagnostics[0].output) > 0 && count(result.output) === 0) issues.push("修复结果清空了全部具体分析；请逐条回查并保留有依据的观察、表达和建议，不能用空数组规避校验。");
-      }
-      try {
-        if (issues.length) throw new Error(`顾问复盘数据无效：${issues.join("；")}`);
-        return normalize(result.output, { generatedAt: receivedAt, model: result.model, sourceFingerprint: fingerprint }, context);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        if (!message.startsWith("顾问复盘数据无效：")) throw error;
-        if (!issues.length) issues.push(message);
-        diagnostics.push({ model: result.model, receivedAt, output: structuredClone(result.output), issues: [...issues], ...(result.diagnosticPath ? { diagnosticPath: result.diagnosticPath } : {}) });
-        if (attempt === 1) throw error;
-        if (!await isFresh()) throw new Error("生成期间依据已更新，请按最新材料重新分析；旧报告已保留。");
-        // 一次恢复反馈全部结构与配对错误，旧输出仅为拒收诊断，不升级为证据。
-        nextPayload = { ...payload, generationContract, generationRepair: { validationError: message,
-          validationErrors: [...issues], rejectedOutput: result.output } };
-      }
-    }
-    throw new Error("顾问分析未完成；旧报告已保留。");
   }
 
   async function collect() {
@@ -183,14 +142,14 @@ export function createAdvisoryEngine(deps: Dependencies) {
       if (entry.status === "ready" && !force) return { ok: true, skipped: true, report: input.review!.advisory!, path: reviewSiblingPath(sourcePath, "answerReview") };
       if (entry.lastError && !force) throw new Error(`${entry.lastError} 请点击重试。`);
       active.set(sourcePath, { stage: "advisory", sourcePath });
-      const diagnostics: RejectedAttempt[] = [];
       try {
-        const advisory = await generateValidated("review_interview_advisory", {
-          ...input.payload, previousAdvisory: input.review?.advisory ?? null,
-        }, advisoryValidationContext([input]), entry.fingerprint, normalizeInterviewAdvisory, async () => {
-          const fresh = buildAdvisoryInput(await deps.readAll(), sourcePath);
-          return !fresh.reason && await advisoryFingerprint(fresh.payload) === entry.fingerprint;
-        }, diagnostics);
+        const result = await deps.invoke("review_interview_advisory", {
+          ...input.payload,
+          previousAdvisory: input.review?.advisory ?? null,
+        });
+        const advisory = normalizeInterviewAdvisory(result.output, {
+          generatedAt: new Date().toISOString(), model: result.model, sourceFingerprint: entry.fingerprint,
+        }, advisoryValidationContext([input]));
         // 长任务期间本人可能补充了事实；过时的判断绝不能覆盖刚更新的材料。
         const fresh = buildAdvisoryInput(await deps.readAll(), sourcePath);
         if (fresh.reason || await advisoryFingerprint(fresh.payload) !== entry.fingerprint) {
@@ -213,7 +172,7 @@ export function createAdvisoryEngine(deps: Dependencies) {
         return { ok: true, skipped: false, report: advisory, path: outputPath };
       } catch (error) {
         const message = error instanceof Error ? error.message : "顾问分析生成失败。";
-        await recordFailure(sourcePath, { fingerprint: entry.fingerprint, message, attemptedAt: new Date().toISOString(), diagnostics });
+        await recordFailure(sourcePath, { fingerprint: entry.fingerprint, message, attemptedAt: new Date().toISOString() });
         throw error;
       } finally { active.delete(sourcePath); }
     });
@@ -253,15 +212,17 @@ export function createAdvisoryEngine(deps: Dependencies) {
     if (current.insightsStatus === "ready" && !options.force) return { ok: true, done: true, skipped: true, ...await state() };
     if (current.error && !options.force) throw new Error(`${current.error} 请点击重试。`);
     active.set(INSIGHTS_PATH, { stage: "insights", sourcePath: INSIGHTS_PATH });
-    const diagnostics: RejectedAttempt[] = [];
     try {
-      const report = await generateValidated("review_interview_insights", current.payload, {
-        // 只允许引用模型实际见过的问答，不能猜中未提供的原句就算证据成立。
+      const result = await deps.invoke("review_interview_insights", current.payload);
+      const report = normalizeInterviewInsights(result.output, {
+        generatedAt: new Date().toISOString(), model: result.model, sourceFingerprint: current.fingerprint,
+      }, {
+        // 引用必须来自模型实际见过的问答，不能凭ID猜中未提供的原句就算证据成立。
         sources: new Map(current.payload.interviews.map((input) => [input.sourcePath,
           new Map(input.blocks.map((block) => [block.id, new Set(block.sentences.map((sentence) => sentence.id))])),
         ])),
         contextPaths: new Set(current.payload.contextNotes.map((note) => note.path)),
-      }, current.fingerprint, normalizeInterviewInsights, async () => (await collect()).fingerprint === current.fingerprint, diagnostics);
+      });
       const fresh = await collect();
       if (fresh.fingerprint !== current.fingerprint) throw new Error("生成期间横向分析的依据已更新，请重试；旧报告已保留。");
       const latestReport = await deps.read(INSIGHTS_PATH);
@@ -275,7 +236,7 @@ export function createAdvisoryEngine(deps: Dependencies) {
       return { ok: true, done: true, path: INSIGHTS_PATH, ...await state() };
     } catch (error) {
       await recordFailure(INSIGHTS_PATH, { fingerprint: current.fingerprint,
-        message: error instanceof Error ? error.message : "横向分析生成失败。", attemptedAt: new Date().toISOString(), diagnostics });
+        message: error instanceof Error ? error.message : "横向分析生成失败。", attemptedAt: new Date().toISOString() });
       throw error;
     } finally { active.delete(INSIGHTS_PATH); }
   }

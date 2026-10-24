@@ -27,7 +27,9 @@ test('month, week and agenda display full/local labels with accessible event act
   assert.match(html,/aria-label="2026-09-10[^\"]*60分 · 面试复盘/);
   assert.match(html,/aria-label="2026-09-11[^\"]*局部85分 · 面试复盘/);
   if (search.includes('month')) {
-    assert.match(html, /<span class="calendar-event-heading">[\s\S]*?<span class="calendar-interview-score"[^>]*>60分<\/span><span class="calendar-status-dot" aria-hidden="true"><\/span><\/span>/);
+    const cards = [...html.matchAll(/<button[^>]*class="calendar-event [^>]*>[\s\S]*?<\/button>/g)].map(x=>x[0]);
+    assert.ok(cards.some(card => /data-kind="overall"[^>]*data-compact="true"[^>]*title="60分"[^>]*>60<\/span>/.test(card)));
+    assert.ok(cards.some(card => /data-kind="local"[^>]*data-compact="true"[^>]*title="局部85分"[^>]*>85<\/span>/.test(card)));
     assert.doesNotMatch(html, /<button[^>]*class="calendar-event [^>]*><span class="calendar-status-dot"/);
   }
   const unscored=[...html.matchAll(/<button[^>]*aria-label="2026-09-12[^\"]*"[^>]*>[\s\S]*?<\/button>/g)].map(x=>x[0]);

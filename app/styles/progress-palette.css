@@ -1,0 +1,73 @@
+/* 只为进展页换底色，切换到其他页面时自动回到应用原有主题。 */
+.app-shell:has(.recent-progress-view) {
+  --paper: var(--observatory-paper);
+  --paper-deep: var(--observatory-deep);
+  --surface-sunken: var(--observatory-deep);
+  --surface: var(--observatory-surface);
+  --surface-raised: var(--observatory-raised);
+  --surface-raised-solid: var(--observatory-raised);
+  --surface-overlay: var(--observatory-overlay);
+  --surface-soft: color-mix(in oklab, var(--observatory-overlay) 55%, transparent);
+  --ink: var(--observatory-ink);
+  --text-primary: var(--observatory-ink);
+  --text-secondary: var(--observatory-muted);
+  --muted: var(--observatory-muted);
+  --text-tertiary: var(--observatory-tertiary);
+  --text-display: var(--observatory-ink);
+  --line: var(--observatory-line);
+  --line-strong: var(--observatory-line-strong);
+  --line-soft: color-mix(in oklab, var(--observatory-line) 65%, transparent);
+  --green: var(--observatory-blue);
+  --progress-positive: var(--observatory-cyan);
+  --progress-positive-line: color-mix(in oklab, var(--observatory-cyan) 32%, var(--line));
+  --progress-positive-wash: color-mix(in oklab, var(--observatory-cyan) 9%, var(--surface));
+  background: radial-gradient(ellipse at 75% 0, color-mix(in oklab, var(--observatory-violet) 7%, transparent), transparent 48%), var(--paper);
+}
+.momentum-dashboard {
+  --signal-cyan: var(--observatory-cyan);
+  --signal-advancing: var(--observatory-cyan);
+  --signal-applied: var(--observatory-blue);
+  --signal-held: var(--observatory-amber);
+  --signal-rejected: var(--observatory-rose);
+  --momentum-rejected: var(--signal-rejected);
+}
+.momentum-summary { border-color: color-mix(in oklab, var(--observatory-blue) 25%, var(--line)); background: linear-gradient(115deg, color-mix(in oklab, var(--observatory-blue) 12%, var(--surface)), color-mix(in oklab, var(--observatory-violet) 8%, var(--surface)) 50%, var(--surface)); box-shadow: 0 12px 42px color-mix(in oklab, var(--observatory-deep) 40%, transparent); }
+.momentum-intro > span { color: var(--observatory-blue); }
+.momentum-intro h2 { color: var(--ink); }
+.momentum-metrics { gap: 10px; }
+.recent-progress-view .momentum-metric { --metric-color: var(--observatory-blue); position: relative; overflow: hidden; padding: 15px 16px 12px; border: 1px solid color-mix(in oklab, var(--metric-color) 27%, var(--line)); border-radius: 10px; background: linear-gradient(145deg, color-mix(in oklab, var(--metric-color) 14%, var(--surface)), color-mix(in oklab, var(--metric-color) 3%, var(--surface))); }
+.recent-progress-view .momentum-metric[data-metric="advancing"] { --metric-color: var(--observatory-cyan); }
+.recent-progress-view .momentum-metric[data-metric="waiting"] { --metric-color: var(--observatory-violet); }
+.recent-progress-view .momentum-metric[data-metric="rejected"] { --metric-color: var(--observatory-rose); }
+.momentum-metric::before { content: ""; position: absolute; top: 0; left: 12%; right: 12%; height: 1px; background: linear-gradient(90deg, transparent, var(--metric-color), transparent); }
+.recent-progress-view .momentum-metric:hover { border-color: var(--metric-color); background: color-mix(in oklab, var(--metric-color) 17%, var(--surface)); }
+.momentum-metric .momentum-metric-title > span, .momentum-metric .momentum-metric-value strong, .momentum-metric[data-metric="advancing"] .momentum-metric-value strong { color: var(--metric-color); text-shadow: 0 0 24px color-mix(in oklab, var(--metric-color) 18%, transparent); }
+.recent-progress-view .momentum-metric[data-metric] .signal-metric-spark polyline { stroke: var(--metric-color); opacity: .95; filter: drop-shadow(0 0 4px color-mix(in oklab, var(--metric-color) 32%, transparent)); }
+.momentum-panel { --panel-accent: var(--observatory-blue); border-color: color-mix(in oklab, var(--panel-accent) 22%, var(--line)); background: radial-gradient(ellipse at 100% 0, color-mix(in oklab, var(--panel-accent) 14%, transparent), transparent 62%), var(--surface); box-shadow: 0 8px 30px color-mix(in oklab, var(--observatory-deep) 24%, transparent); }
+.momentum-distribution { --panel-accent: var(--observatory-violet); }
+.signal-flow { --panel-accent: var(--observatory-blue); }
+.signal-heatmap { --panel-accent: var(--observatory-amber); }
+.signal-constellation { --panel-accent: var(--observatory-violet); background: radial-gradient(ellipse at 33% 55%, color-mix(in oklab, var(--observatory-violet) 12%, transparent), transparent 60%), radial-gradient(ellipse at 90% 0, color-mix(in oklab, var(--observatory-blue) 12%, transparent), transparent 50%), var(--surface); }
+.momentum-panel:hover { border-color: color-mix(in oklab, var(--panel-accent) 60%, var(--line)); box-shadow: 0 0 28px color-mix(in oklab, var(--panel-accent) 8%, transparent); }
+.momentum-panel .signal-eyebrow { color: var(--panel-accent); }
+.momentum-panel-number { color: color-mix(in oklab, var(--panel-accent) 65%, var(--muted)); }
+.momentum-ring::before { background: radial-gradient(circle, color-mix(in oklab, var(--observatory-violet) 17%, transparent), transparent 72%); }
+.momentum-ring::after { border-color: color-mix(in oklab, var(--observatory-violet) 40%, transparent); }
+.momentum-ring-segment[data-segment="rejected"] { filter: none; }
+.momentum-bar-fill { border-top-color: var(--observatory-blue); background: linear-gradient(180deg, color-mix(in oklab, var(--observatory-blue) 80%, transparent), color-mix(in oklab, var(--observatory-violet) 20%, transparent)); }
+.momentum-bar:hover .momentum-bar-fill, .momentum-bar[aria-pressed="true"] .momentum-bar-fill { border-top-color: var(--observatory-amber); background: linear-gradient(180deg, color-mix(in oklab, var(--observatory-amber) 75%, transparent), color-mix(in oklab, var(--observatory-amber) 17%, transparent)); box-shadow: 0 0 18px color-mix(in oklab, var(--observatory-amber) 25%, transparent); }
+.signal-aurora i { opacity: .2; background: var(--observatory-blue); }
+.signal-aurora i:nth-child(2) { background: var(--observatory-violet); }
+.signal-aurora i:nth-child(3) { background: var(--observatory-rose); }
+.signal-heatmap-summary > strong { color: var(--observatory-amber); }
+.signal-heatmap-summary svg { stroke: var(--observatory-amber); }
+.signal-calendar-day[data-level="1"], .signal-heatmap-legend [data-level="1"] { --cell-color: color-mix(in oklab, var(--observatory-blue) 32%, var(--surface)); }
+.signal-calendar-day[data-level="2"], .signal-heatmap-legend [data-level="2"] { --cell-color: color-mix(in oklab, var(--observatory-violet) 58%, var(--surface)); }
+.signal-calendar-day[data-level="3"], .signal-heatmap-legend [data-level="3"] { --cell-color: color-mix(in oklab, var(--observatory-rose) 83%, var(--surface)); }
+.signal-calendar-day[data-level="4"], .signal-heatmap-legend [data-level="4"] { --cell-color: var(--observatory-amber); }
+.recent-progress-view .signal-calendar-day[data-in-range="true"] { border-color: color-mix(in oklab, var(--observatory-blue) 65%, var(--line)); }
+.signal-star[data-segment="rejected"] .signal-star-core { filter: none; }
+.signal-star[data-segment="rejected"] .signal-star-halo { opacity: .06; }
+.momentum-action-strip { border-color: color-mix(in oklab, var(--observatory-blue) 23%, var(--line)); background: color-mix(in oklab, var(--observatory-blue) 6%, var(--surface)); }
+.momentum-action-strip[data-has-actions="true"] { border-color: color-mix(in oklab, var(--observatory-amber) 40%, var(--line)); background: color-mix(in oklab, var(--observatory-amber) 9%, var(--surface)); }
+.momentum-action-strip[data-has-actions="true"] .momentum-action-icon { color: var(--observatory-amber); border-color: color-mix(in oklab, var(--observatory-amber) 50%, var(--line)); }

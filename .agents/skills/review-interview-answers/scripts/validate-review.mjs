@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 
-import { diagnosticLedgerErrors, evidenceEvaluationErrors, scoredEvidenceErrors } from "./diagnostic-checks.mjs";
-import { computeAssessmentScores } from "./assessment-scoring.mjs";
-
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { validateInterviewAdvisory, validateInterviewInsights } from "./interview-advisory.ts";
@@ -31,20 +28,19 @@ const RELEVANCE = new Set(REVIEW_RELEVANCE_VALUES);
 const QUALITY = new Set(REVIEW_QUALITY_VALUES);
 
 function usage() {
-  console.error("Usage: node validate-review.mjs --review <review.md|review.json|-> [--source <整理稿.md>] [--vault <vault root>] [--method v2|v3]");
+  console.error("Usage: node validate-review.mjs --review <review.md|review.json|-> [--source <整理稿.md>] [--vault <vault root>]");
 }
 
 function parseArgs(argv) {
   const args = {};
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
-    if (key !== "--review" && key !== "--source" && key !== "--vault" && key !== "--method") throw new Error(`Unknown argument: ${key}`);
+    if (key !== "--review" && key !== "--source" && key !== "--vault") throw new Error(`Unknown argument: ${key}`);
     const value = argv[index + 1];
     if (!value) throw new Error(`Missing value for ${key}`);
     args[key.slice(2)] = value;
     index += 1;
   }
-  if (args.method && !["v2", "v3"].includes(args.method)) throw new Error("--method must be v2 or v3");
   return args;
 }
 
@@ -158,29 +154,23 @@ async function main() {
     fail("review must be a JSON object");
   }
 
-  const evidenceMode = review?.evaluationMode === "evidence";
-  const scoredMode = review?.evaluationMode === "scored_evidence";
-  if (args.method === "v3" && !scoredMode) fail("--method v3 requires scored_evidence");
-  if (args.method === "v2" && scoredMode) fail("--method v2 cannot validate a v3 scoring report");
-  if (evidenceMode) errors.push(...evidenceEvaluationErrors(review));
-  if (scoredMode) errors.push(...scoredEvidenceErrors(review, { sourceBlockIds: sourceQuestions?.keys(), sentencesByBlock: sourceQuestions, allowComputedScores: true }));
   const dimensionScores = [];
   const deductionRefs = [];
-  for (const key of scoredMode && review?.evaluation?.materialScope === "limited" && !review.dimensions ? [] : DIMENSIONS) {
+  for (const key of DIMENSIONS) {
     const item = review?.dimensions?.[key];
     if (!item || typeof item !== "object") {
       fail(`dimensions.${key} is missing`);
       continue;
     }
-    if (!evidenceMode && !scoredMode && (typeof item.score !== "number" || !Number.isFinite(item.score) || item.score < 0 || item.score > 100)) {
+    if (typeof item.score !== "number" || !Number.isFinite(item.score) || item.score < 0 || item.score > 100) {
       fail(`dimensions.${key}.score must be a number from 0 to 100`);
-    } else if (!evidenceMode && !scoredMode) {
+    } else {
       dimensionScores.push(item.score);
     }
     if (typeof item.rationaleZh !== "string" || !item.rationaleZh.trim()) {
       fail(`dimensions.${key}.rationaleZh is empty`);
     }
-    if (!isStringArray(item.evidenceBlockIds) || ((!evidenceMode && !scoredMode) || item.level !== "not_assessed") && item.evidenceBlockIds.length === 0) {
+    if (!isStringArray(item.evidenceBlockIds) || item.evidenceBlockIds.length === 0) {
       fail(`dimensions.${key}.evidenceBlockIds must contain qNN evidence`);
     }
 
@@ -218,7 +208,7 @@ async function main() {
         fail(`${prefix}.points must be an integer`);
       } else {
         lost += entry.points;
-        if (band && !(scoredMode && entry.recovery === "repaired" && entry.points === 0) && (entry.points < band.min || entry.points > band.max)) {
+        if (band && (entry.points < band.min || entry.points > band.max)) {
           fail(`${prefix}.points ${entry.points} is outside the ${entry.severity} band ${band.min}–${band.max}`);
         }
       }
@@ -237,16 +227,16 @@ async function main() {
       deductionRefs.push({ prefix, blockId: entry.blockId, sentenceIds: entry.evidenceSentenceIds });
     }
     const expected = Math.max(0, 100 - lost);
-    if (!evidenceMode && !scoredMode && typeof item.score === "number" && item.score !== expected) {
+    if (typeof item.score === "number" && item.score !== expected) {
       fail(`dimensions.${key}.score ${item.score} does not equal 100 − ${lost} = ${expected}`);
     }
   }
 
-  const computedOverallScore = scoredMode ? computeAssessmentScores(review).overallScore : dimensionScores.length === DIMENSIONS.length
+  const computedOverallScore = dimensionScores.length === DIMENSIONS.length
     ? Math.round(dimensionScores.reduce((total, score) => total + score, 0) / DIMENSIONS.length)
     : null;
   if (
-    !scoredMode && computedOverallScore !== null &&
+    computedOverallScore !== null &&
     review.overallScore !== undefined &&
     review.overallScore !== computedOverallScore
   ) {
@@ -343,8 +333,6 @@ async function main() {
     fail("overviewZh must be a non-empty string when present");
   }
   if (blockIds.size === 0) warnings.push("review contains no blocks");
-
-  if (args.method === "v2") errors.push(...diagnosticLedgerErrors(review));
 
   const result = {
     ok: errors.length === 0,

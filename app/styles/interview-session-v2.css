@@ -50,6 +50,11 @@
 .session-v2 .v2-body .prep-doc-say { display: block; padding: 24px 26px; border: 0; border-left: 3px solid var(--v2-accent); border-radius: 0; background: var(--success-wash); font-size: 1.125rem; line-height: 2.2; color: var(--green-deep); }
 .session-v2 .v2-body .prep-doc-say > span { display: inline; margin: 0; padding: 0; background: transparent; color: inherit; font-size: inherit; vertical-align: baseline; }
 .session-v2 .v2-body .prep-doc-say > span:first-child { display: block; color: var(--v2-accent); font-size: .8125rem; font-weight: 500; letter-spacing: .08em; margin-bottom: 8px; }
+/* 逆質問的「预想回答→接话」：预想回答是提示，淡色小字；紧跟其后的接话缩进，与它成组。 */
+.session-v2 .v2-body .prep-doc-say.interviewer { padding: 10px 18px; border-left-color: var(--v2-line); background: transparent; color: var(--v2-muted); font-size: .9375rem; line-height: 1.9; }
+.session-v2 .v2-body .prep-doc-say.interviewer > span:first-child { color: var(--v2-muted); margin-bottom: 4px; }
+.session-v2 .v2-body .reader-block-anchor:has(> .prep-doc-say.interviewer) > .prep-doc-say { margin-bottom: 6px; }
+.session-v2 .v2-body .reader-block-anchor:has(> .prep-doc-say.interviewer) + .reader-block-anchor > .prep-doc-say.you { margin-left: 28px; padding-block: 16px; font-size: 1rem; }
 .session-v2 .v2-body .prep-doc-note { border: 0; border-radius: 0; background: transparent; padding: 0; color: var(--v2-muted); font-size: .9375rem; }
 .session-v2 .v2-body .prep-doc-note.warn { padding: 10px 14px; background: var(--warning-wash-soft); color: var(--warning-strong); }
 .session-v2 .v2-body .prep-doc-list { padding-left: 1.4em; font-size: inherit; }
@@ -90,6 +95,11 @@
   .session-v2 .v2-tab-number { display: none; }
 }
 /* 页头倒计时：今天/明天朱橙并放大，三天内描边提醒，更远的只是一枚安静的标签。 */
+/* 对照样稿：页头标明不是当时的准备稿，免得把重写稿当成历史记录读。 */
+.session-v2 .v2-replay-badge { display: inline-flex; align-items: center; padding: 1px 9px; border: 1px solid var(--warning-line); border-radius: var(--radius-pill); color: var(--warning-strong); font-size: .8125rem; font-weight: 600; line-height: 1.6; }
+.session-v2 .v2-replay-note { grid-column: 1 / -1; margin: 0; padding: 8px 14px; border-left: 2px solid var(--warning-line); background: var(--warning-wash-soft); color: var(--warning-strong); font-size: .875rem; line-height: 1.7; }
+.session-v2 .v2-replay-comparison { margin: 0 0 36px; padding: 20px 24px 4px; border: 1px solid var(--warning-line); border-left-width: 3px; background: var(--warning-wash-soft); }
+.session-v2 .v2-replay-comparison > h2 { margin: 0 0 14px; font-size: 1.0625rem; color: var(--warning-strong); }
 .session-v2 .v2-countdown { display: inline-flex; align-items: center; padding: 1px 9px; border: 1px solid var(--v2-line); border-radius: var(--radius-pill); color: var(--v2-muted); font-size: .8125rem; font-weight: 600; line-height: 1.6; }
 /* 朱橙作小字/填充底要走 interactive 那一对：--brand 本色对纸面、对白字都不到 4.5:1。 */
 .session-v2 .v2-countdown.near { border-color: var(--brand-line); color: var(--interactive); }

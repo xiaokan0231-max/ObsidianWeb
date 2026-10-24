@@ -32,7 +32,7 @@ test("全库搜索使用当前菜单语言，原始笔记标题和正文仍原�
   assert.match(japanese, /aria-label="検索を閉じる"/);
   assert.match(japanese, /クイック検索/);
   assert.match(japanese, /進行中の選考/);
-  assert.match(japanese, /<strong>今回の面接<\/strong>/);
+  assert.match(japanese, /<strong>面接準備<\/strong>/);
   assert.match(japanese, /<strong>求人・応募先<\/strong>/);
   assert.doesNotMatch(japanese, /快捷查询|进行中的选考|搜索关键词/);
   for (const html of [chinese, japanese]) {

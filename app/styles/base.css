@@ -83,6 +83,26 @@
   --info: #3f5f8f;
   --info-wash: #e8edf4;
   --info-line: #b0bccd;
+  /* 观测图表的发光色独立于正文状态色，亮色主题保持可读对比度。 */
+  --viz-cyan: #087f83;
+  --viz-blue: #4267cf;
+  --viz-violet: #8758b5;
+  /* 进展观测台独立配色；仅在该页面映射到基础色，其他页面保留原主题。 */
+  --observatory-paper: #edf2fc;
+  --observatory-deep: #e4ebf8;
+  --observatory-surface: #f8faff;
+  --observatory-raised: #ffffff;
+  --observatory-overlay: #eaf0fc;
+  --observatory-ink: #203052;
+  --observatory-muted: #536684;
+  --observatory-tertiary: #536684;
+  --observatory-line: #cfdaed;
+  --observatory-line-strong: #b2c3df;
+  --observatory-blue: #315dce;
+  --observatory-cyan: #0b7c85;
+  --observatory-violet: #7843b3;
+  --observatory-amber: #95601b;
+  --observatory-rose: #aa4e6e;
 
   --green: #2f6b59;
   --green-deep: #203a33;
@@ -252,6 +272,24 @@
   --info: #93b6e8;
   --info-wash: color-mix(in oklab, var(--info) 16%, var(--surface));
   --info-line: #465b6c;
+  --viz-cyan: #66ead9;
+  --viz-blue: #83aaff;
+  --viz-violet: #bd9bff;
+  --observatory-paper: #0b1022;
+  --observatory-deep: #070c19;
+  --observatory-surface: #111c34;
+  --observatory-raised: #182744;
+  --observatory-overlay: #1d3152;
+  --observatory-ink: #eef3ff;
+  --observatory-muted: #a8b7d1;
+  --observatory-tertiary: #8e9fbd;
+  --observatory-line: #283d61;
+  --observatory-line-strong: #3d557b;
+  --observatory-blue: #74a1ff;
+  --observatory-cyan: #4ce1dc;
+  --observatory-violet: #bd96ff;
+  --observatory-amber: #efc16d;
+  --observatory-rose: #d592a9;
 
   --green: #6fb994;
   --green-deep: #cfe3d8;

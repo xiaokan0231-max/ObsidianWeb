@@ -92,13 +92,14 @@ test("根及总览入口重定向日历并保留笔记定位", async () => {
   }
 });
 
-test("本人行动页有固定入口，中日文首屏均可到达", async () => {
-  for (const [cookie, label] of [["", "需要你处理"], ["career-room-locale=ja", "あなたの対応が必要"]]) {
+test("事项记录与进展共用一个导航入口，中日文首屏均可到达", async () => {
+  for (const [cookie, label] of [["", "最近进展"], ["career-room-locale=ja", "最近の進展"]]) {
     const response = await render("/actions?note=test.md", "GET", cookie);
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.match(html, new RegExp(label));
-    assert.match(html, /href="\/actions"/);
+    assert.match(html, /href="\/activity"/);
+    assert.doesNotMatch(html, /class="user-actions-entry"/);
     assert.doesNotMatch(html, /0 件待办/);
   }
 });

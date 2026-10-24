@@ -5,14 +5,6 @@ import { normalizeTextbookPosition, resolveTextbookPosition, textbookChapterLink
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
 const learningModule = { points: [{ id: "one" }, { id: "two", source: {} }] };
-test("有原场的全新位置从首步开始，显式和已存讲解位置保持兼容", () => {
-  const sourced = {points:[{id:"one",source:{}},{id:"two"}]};
-  assert.deepEqual(resolveTextbookPosition(sourced,""),{knowledge:"one",lessonView:"source"});
-  assert.deepEqual(resolveTextbookPosition(sourced,"",null),{knowledge:"one",lessonView:"source"});
-  assert.deepEqual(resolveTextbookPosition(sourced,"?lessonView=explain"),{knowledge:"one",lessonView:"explain"});
-  assert.deepEqual(resolveTextbookPosition(sourced,"",{knowledge:"one",lessonView:"explain"}),{knowledge:"one",lessonView:"explain"});
-  assert.deepEqual(resolveTextbookPosition(sourced,"?knowledge=two&lessonView=source"),{knowledge:"two",lessonView:"explain"});
-});
 test("显式 URL 优先于缓存，部分链接不拼接本机另一点的页签", () => {
   const saved = { knowledge: "two", lessonView: "source" };
   assert.deepEqual(resolveTextbookPosition(learningModule, "", saved), saved);

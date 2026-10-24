@@ -13,9 +13,6 @@
   gap: 26px;
   padding-bottom: 72px;
 }
-.rv-reader-page { gap: 12px; }
-.rv-reader-page > :is(.rv-reader-tools, .rv-assessment-disclosure) { margin-bottom: 0; }
-.rv-reader-page > .rv-section-tabs { margin-top: 6px; margin-bottom: 0; }
 
 .review-view [lang="ja"] {
   font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", var(--font-geist-sans), sans-serif;
@@ -33,15 +30,15 @@
 .rv-answer-trends > header h2 { margin: 2px 0 0; font-family: "Songti SC", serif; font-size: 18px; }
 .rv-answer-trends > header p { max-width: 600px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
 .rv-trend-empty { margin: 0; padding: 12px 14px; background: var(--paper); color: var(--muted); font-size: 13px; }
-.rv-trend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 7px; }
+.rv-trend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(225px, 1fr)); gap: 7px; }
 .rv-trend-grid > button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; padding: 9px 11px; border: 1px solid var(--line-soft); background: var(--brand-wash); color: var(--ink); cursor: pointer; text-align: left; transition: border-color 150ms ease, transform 150ms ease, background 150ms ease; }
 .rv-trend-grid > button:hover { transform: translateY(-1px); border-color: var(--brand-line); background: var(--surface); }
 .rv-trend-mark { width: 5px; height: 31px; background: var(--orange); }
 .rv-trend-copy { min-width: 0; }
-.rv-trend-copy > span { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
-.rv-trend-copy strong { font-size: 13px; line-height: 1.5; }
+.rv-trend-copy > span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.rv-trend-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .rv-trend-copy small { color: var(--danger); font-family: var(--font-geist-mono), monospace; font-size: 11px; white-space: nowrap; }
-.rv-trend-copy em { display: block; margin-top: 4px; color: var(--muted); font-style: normal; font-size: 12px; line-height: 1.6; }
+.rv-trend-copy em { display: block; overflow: hidden; margin-top: 3px; color: var(--muted); font-style: normal; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .rv-trend-count { color: var(--danger); font-family: var(--font-geist-mono), monospace; font-size: 11px; white-space: nowrap; }
 .rv-trend-count i { margin-left: 3px; font-style: normal; }
 
@@ -81,27 +78,21 @@
  * 分数环：外圈按分数走一段 conic，内层用卡面色挖空。--score 由 ScoreRing 写在 style 上；
  * 没有分数时不写，整圈只剩淡色底环，和「—」一起说「还没复盘」。
  */
-/* 标签放在环外，长中文标签不能挤进分数圆圈。 */
 .rv-card-score {
   --ring: var(--line-strong);
   --ring-face: var(--surface);
-  display: flex;
+  width: 56px;
+  height: 56px;
+  display: grid;
   flex: 0 0 auto;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  min-width: 64px;
+  place-content: center;
+  justify-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side, var(--ring-face) 84%, transparent 86% 100%),
+    conic-gradient(var(--ring) calc(var(--score, 0) * 1%), color-mix(in oklab, var(--ring) 16%, transparent) 0);
   transition: scale var(--dur-fast) var(--ease-spring);
 }
-.rv-card-score b {
-  display: grid;
-  place-items: center;
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, var(--ring-face) 84%, transparent 86% 100%), conic-gradient(var(--ring) calc(var(--score, 0) * 1%), color-mix(in oklab, var(--ring) 16%, transparent) 0);
-}
-.rv-card-score small { max-width: 90px; margin: 0; text-align: center; line-height: 1.4; }
 .rv-card-score.high { --ring: var(--green); color: var(--green); }
 .rv-card-score.mid { --ring: var(--gold); color: var(--gold-text); }
 .rv-card-score.low { --ring: var(--danger); color: var(--danger); }
@@ -111,7 +102,6 @@
 .rv-result { padding: 3px 9px; background: var(--paper-deep); color: var(--text-secondary); font-size: 11px; }
 .rv-result.bad { background: var(--danger-wash); color: var(--danger-strong); }
 .rv-card-insight { display: -webkit-box; min-height: 43px; overflow: hidden; margin: 12px 0 10px; color: var(--text-secondary); font-size: 13px; line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.rv-card-next { display: -webkit-box; overflow: hidden; margin: 0 0 12px; color: var(--muted); font-size: 12px; line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .rv-card-progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-bottom: 11px; }
 .rv-card-progress > span { height: 4px; overflow: hidden; background: var(--paper-deep); }
 .rv-card-progress i { display: block; height: 100%; background: var(--green); }
@@ -159,36 +149,17 @@
 .rv-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 22px; }
 .rv-back { padding: 8px 14px; background: var(--surface-sunken); border: 0; font-size: 11px; cursor: pointer; }
 .rv-back:hover { background: var(--paper-deep); }
-.rv-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.rv-title { flex: 1; min-width: 200px; }
 .rv-title h1 { margin: 0; font-family: "Songti SC", serif; font-size: clamp(24px, 3vw, 34px); letter-spacing: -0.02em; }
 .rv-title span { color: var(--muted); font-size: 12px; }
 
-.rv-mode-wrap { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; min-width: 0; }
-.rv-reader-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 12px; }
-.rv-reader-tools > span { font-size: 12px; color: var(--muted); }
-.rv-reader-tools[hidden], .rv-mode-wrap[hidden] { display: none; }
-.rv-source-tools { margin-bottom: 16px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
-.rv-source-tools > summary { padding: 10px 14px; color: var(--muted); cursor: pointer; font-size: 12px; }
-.rv-source-tools .rv-stats { margin: 0; border: 0; }
-.rv-source-tools .rv-stage { margin: 0; }
-.review-view :is(button, summary):focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.rv-mode-wrap { display: flex; align-items: stretch; gap: 8px; }
 .rv-mode-novel { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 112px; padding: 8px 14px; border: 1px solid var(--surface-inverse-soft); background: var(--surface-inverse-soft); box-shadow: var(--inverse-ring); color: var(--text-on-inverse); font-size: 13px; cursor: pointer; }
 .rv-mode-novel small { color: var(--text-on-inverse-muted); font-size: 11px; }
 .rv-mode-novel:hover { background: var(--surface-inverse); }
-.rv-title-links { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: 12px; vertical-align: baseline; }
+.rv-title-links { display: inline-flex; gap: 6px; margin-left: 12px; vertical-align: baseline; }
 .rv-title-links button { padding: 2px 8px; border: 1px solid var(--line); background: transparent; color: var(--interactive); font-size: 12px; cursor: pointer; }
 .rv-title-links button:hover { border-color: var(--interactive); background: var(--surface); }
-.rv-title-links .rv-company-entry { padding: 2px 8px; border: 1px solid var(--line); color: var(--interactive); font-size: 12px; text-decoration: none; }
-.rv-company-entry:hover { border-color: var(--interactive); background: var(--surface); }
-.rv-company-entry:focus-visible { outline: 2px solid var(--interactive); outline-offset: 3px; }
-.rv-company-unavailable { font-size: 12px; color: var(--ink-muted); }
-.rv-company-backdrop { position: fixed; inset: 0; z-index: 95; background: rgb(0 0 0 / 35%); display: grid; place-items: center; padding: 24px; }
-.rv-company-panel { width: min(1100px, 100%); max-height: calc(100dvh - 48px); background: var(--paper); border: 1px solid var(--line); box-shadow: 0 16px 60px rgb(0 0 0 / 20%); display: flex; flex-direction: column; min-height: 200px; text-align: left; }
-.rv-company-panel > header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 16px 24px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
-.rv-company-panel > header h2 { margin: 0; font-size: 20px; overflow-wrap: anywhere; }
-.rv-company-panel > header button { padding: 6px 12px; flex-shrink: 0; font-size: 13px; }
-.rv-company-body { padding: 24px; overflow: auto; overscroll-behavior: contain; min-height: 0; font-size: 14px; }
-@media (max-width: 820px) { .rv-company-backdrop { padding: 12px; } .rv-company-panel { max-height: calc(100dvh - 24px); } .rv-company-panel > header, .rv-company-body { padding: 16px; } }
 .rv-mode { display: flex; border: 1px solid var(--line); background: var(--surface); }
 .rv-mode button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 96px; padding: 8px 14px; border: 0; background: transparent; font-size: 13px; cursor: pointer; }
 .rv-mode button small { color: var(--muted); font-size: 11px; }
@@ -289,11 +260,6 @@
 .rv-review-introduction h2 { margin: 0 0 14px; color: var(--text-on-inverse); font-family: "Songti SC", serif; font-size: 22px; }
 .rv-review-introduction p { max-width: 860px; margin: 0 0 14px; color: color-mix(in oklab, var(--highlight) 82%, transparent); font-size: 14px; line-height: 1.9; white-space: pre-line; }
 .rv-review-introduction p:last-child { margin-bottom: 0; }
-/* 折叠控件不继承浅色页面的正文色，文字、标记和焦点都使用卡片的前景色。 */
-.rv-review-introduction > details > summary { color: var(--text-on-inverse); cursor: pointer; }
-.rv-review-introduction > details > summary::marker,
-.rv-review-introduction > details > summary::-webkit-details-marker { color: currentColor; }
-.rv-review-introduction > details > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
 .rv-deep-report > header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 18px; padding-bottom: 22px; border-bottom: 1px solid color-mix(in oklab, var(--highlight) 12%, transparent); }
 .rv-deep-score { display: flex; align-items: baseline; gap: 4px; padding-right: 18px; border-right: 1px solid color-mix(in oklab, var(--highlight) 16%, transparent); }
 .rv-deep-score strong { font-family: var(--font-geist-mono), monospace; font-size: 36px; font-weight: 500; }
@@ -508,17 +474,16 @@
 
 .rv-reading-bar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 8px;
+  margin-bottom: -18px;
 }
 .rv-reading-bar p { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; margin: 0; color: var(--muted); font-size: 11px; }
 .rv-reading-bar p strong { color: var(--ink); font-family: var(--font-geist-mono), monospace; font-size: 17px; font-weight: 500; }
 .rv-reading-bar p i { margin: 0 3px; font-style: normal; }
 .rv-reading-bar p em { margin-left: 7px; padding: 3px 8px; background: var(--success-wash); color: var(--green); font-style: normal; font-size: 11px; }
-.rv-reading-bar > div { display: flex; flex-wrap: wrap; flex: 0 1 auto; gap: 6px; }
+.rv-reading-bar > div { display: flex; flex: 0 0 auto; gap: 6px; }
 .rv-reading-bar button { padding: 5px 10px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
 .rv-reading-bar button:hover { border-color: var(--ink); color: var(--ink); }
 .rv-reading-bar .rv-enter-novel { border-color: var(--ink); background: var(--surface-inverse-soft); color: var(--text-on-inverse); }
@@ -689,25 +654,25 @@
 /* ---- 一览：按公司的轮次线 ----
  * 每个 li 定宽，连接线画在 li 自己的 ::after 上，从本节点的环右缘连到下一个节点的环左缘。 */
 /* 多列网格：每家公司一张紧凑卡，轮次多的横跨两列。整行一张时单轮公司右侧大半是空的（本人明确不要大片空白）。 */
-/* 轮次按行阅读；120px 的竖向节点无法承载问题和下一步。 */
-.rv-company-lines { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr)); gap: 14px; align-items: start; }
-.rv-company-line { min-width: 0; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
-.rv-company-line > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; margin-bottom: 12px; }
-.rv-company-line > header h3 { margin: 0; overflow-wrap: anywhere; font-family: var(--font-serif); font-size: 18px; line-height: 1.4; }
-.rv-company-line > header span { color: var(--muted); font-size: 11px; }
-.rv-company-line ol { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.rv-company-line li { min-width: 0; }
-.rv-company-line li > button { display: flex; width: 100%; align-items: flex-start; gap: 16px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--paper); color: var(--ink); cursor: pointer; text-align: left; }
-.rv-company-line li > button:hover { background: var(--surface); border-color: var(--green); }
-.rv-company-round { display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: flex-start; gap: 5px; }
-.rv-company-round strong { font-size: 14px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
-.rv-company-round > small { color: var(--muted); font-size: 11px; line-height: 1.5; }
-.rv-company-summary { color: var(--text-secondary); font-size: 13px; line-height: 1.65; }
-.rv-company-summary > :is(span, small) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.rv-company-summary small { margin-top: 4px; color: var(--muted); font-size: 12px; }
-.rv-company-open { color: var(--green); font-size: 12px; }
-.rv-company-outcome { padding: 5px 12px; }
-.rv-company-outcome .rv-result { display: inline-block; white-space: normal; line-height: 1.6; font-size: 12px; }
+.rv-company-lines { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; align-items: start; }
+.rv-company-line { min-width: 0; padding: 14px 16px 12px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); animation: rise-in var(--dur-base) var(--ease-out); }
+.rv-company-line.wide { grid-column: span 2; }
+/* 只放得下一列时 span 2 会硬撑出第二条轨道。 */
+@media (max-width: 760px) { .rv-company-line.wide { grid-column: auto; } }
+.rv-company-line > header { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.rv-company-line > header h3 { overflow: hidden; margin: 0; font-family: var(--font-serif); font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
+.rv-company-line > header span { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.rv-company-line ol { display: flex; align-items: flex-start; margin: 0; padding: 0 0 4px; overflow-x: auto; list-style: none; scrollbar-width: thin; }
+.rv-company-line li { position: relative; flex: 0 0 120px; display: flex; justify-content: center; }
+.rv-company-line li:not(:last-child)::after { content: ""; position: absolute; top: 28px; left: calc(50% + 34px); width: calc(100% - 68px); height: 2px; background: var(--line-strong); }
+.rv-company-line li > button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0 4px; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
+.rv-company-line li > button:hover .rv-card-score { scale: 1.06; }
+.rv-company-line li > button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.rv-company-round { display: flex; flex-direction: column; align-items: center; gap: 1px; max-width: 112px; }
+.rv-company-round strong { overflow: hidden; max-width: 100%; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.rv-company-round small { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.rv-company-outcome { align-items: flex-start; padding-top: 16px; }
+.rv-company-outcome .rv-result { font-size: 12px; }
 
 @media (max-width: 900px) {
   .rv-trend-detail-hero { grid-template-columns: auto minmax(0, 1fr); }
@@ -767,36 +732,3 @@
   .rv-reading-bar { align-items: flex-start; }
   .rv-reading-bar > div { flex-direction: column; }
 }
-
-/* 一览先选场次；共通模式和报告作为次级阅读。 */
-.rv-index-page { gap: 18px; }
-.rv-index-heading h1 { margin: 0; font-family: var(--font-serif); font-size: 28px; }
-.rv-index-heading p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
-.rv-index-patterns { border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
-.rv-index-patterns > summary { padding: 14px 18px; color: var(--green); font-size: 14px; cursor: pointer; }
-.rv-index-patterns .rv-answer-trends { border: 0; }
-.rv-mode button.active { background: var(--green); }
-.rv-mode-novel { border-color: var(--line); background: var(--surface); color: var(--green); box-shadow: none; }
-.rv-mode-novel small { color: var(--muted); }
-.rv-mode-novel:hover { background: var(--success-wash); }
-
-@media (max-width: 640px) {
-  /* 桌面窄窗放大后，给语言切换留空间；同步详情仍可从状态按钮查看。 */
-  .app-shell:has(.review-view) .topbar { gap: 8px; }
-  .app-shell:has(.review-view) .mobile-brand strong,
-  .app-shell:has(.review-view) .topbar-source-copy { display: none; }
-  .app-shell:has(.review-view) .user-actions-entry { padding-inline: 8px; }
-}
-
-@media (max-width: 820px) {
-  /* 固定底栏上方留足空白，最后一句及末尾操作也能完整滚到可见区。 */
-  .view-container:has(.review-view) { padding-bottom: 120px; }
-}
-.rv-index-page > .rv-insights-entry { margin-bottom: 0; }
-.rv-index-page .rv-reassessment-copy ol { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; padding: 0; list-style: none; }
-.rv-index-page .rv-reassessment-copy li { padding: 12px; background: var(--paper); border: 1px solid var(--line-soft); font-size: 13px; line-height: 1.65; }
-.rv-index-page .rv-reassessment-copy li p { margin: 6px 0; }
-.rv-index-page .rv-reassessment-copy li details { margin-top: 8px; color: var(--muted); }
-.rv-index-page .rv-reassessment-copy li summary { cursor: pointer; }
-
-.rv-company-line .rv-company-summary em { display: inline-block; margin-bottom: 3px; color: var(--danger-strong); font-style: normal; font-size: 11px; }

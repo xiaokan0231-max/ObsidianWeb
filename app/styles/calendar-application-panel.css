@@ -39,3 +39,28 @@
 .calendar-application-preview > strong { display: block; margin: 6px 0 10px; font-size: 14px; }
 .calendar-application-preview > div { display: flex; flex-wrap: wrap; gap: 5px 12px; font-size: 12px; }
 .calendar-application-preview p, .calendar-application-preview small { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+
+/* 与场次来源分开用色：这里只表达申请公司当前进展，不能把推进中画成成功率。 */
+.application-progress {
+  --application-progress-color: var(--muted);
+  display: flex; flex-direction: column; gap: 6px; width: 100%; min-width: 0;
+}
+.application-progress [data-bucket="needs-user"] { --application-progress-color: var(--warning); }
+.application-progress [data-bucket="progressing"] { --application-progress-color: var(--success); }
+.application-progress [data-bucket="unknown"] { --application-progress-color: #8a9394; }
+.application-progress [data-bucket="waiting"] { --application-progress-color: #91a7b3; }
+.application-progress [data-bucket="paused"] { --application-progress-color: #a49aaf; }
+.application-progress [data-bucket="closed"] { --application-progress-color: #d77f6d; }
+.application-progress-track {
+  display: flex; width: 100%; height: 7px; overflow: hidden; border-radius: 3px;
+  background: color-mix(in oklab, var(--muted) 14%, transparent);
+}
+.application-progress-segment { display: block; height: 100%; flex-shrink: 0; background: var(--application-progress-color); }
+.application-progress-segment + .application-progress-segment { border-left: 1px solid var(--surface); }
+.application-progress-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 11px; color: var(--text-secondary); font-size: 11px; line-height: 1.25; }
+.application-progress-legend > span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.application-progress-legend i { flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--application-progress-color); }
+.application-progress-legend b { color: var(--ink); font-size: inherit; font-weight: 600; font-variant-numeric: tabular-nums; }
+.application-progress-legend-counts { gap: 3px 9px; font-size: 10px; }
+.calendar-ai-applications:has(.calendar-ai-graphic) { width: 100%; padding: 7px 8px 6px; border-radius: 7px; text-align: left; }
+.calendar-ai-graphic { display: block; flex-basis: 100%; width: 100%; margin-top: 4px; }

@@ -71,6 +71,37 @@ test("悬停和键盘聚焦等300ms后显示纯文本预览，离开或点击取
   h.props({ expanded: false }); trigger().props.onFocus(); h.cleanup(); h.advance(300); assert.equal(h.html().includes('role="tooltip"'), false);
 });
 
+test("公司进展条按互斥公司数绘制，隐藏零桶，精简图例仍保留完整无障碍语义", async () => {
+  const bucketCounts = { "needs-user": 0, progressing: 0, unknown: 0, waiting: 1, paused: 0, closed: 7 };
+  const h = await harness("ApplicationProgressBar", { bucketCounts, legend: "counts" });
+  const tree = h.view();
+  assert.equal(tree.props.role, "img");
+  assert.equal(tree.props["aria-label"], "当前进展（公司数）：等待对方 1 · 已结束 7");
+  const segments = walk(tree).filter(node => node.props?.className === "application-progress-segment");
+  assert.deepEqual(segments.map(node => [node.props["data-bucket"], node.props.style.width]), [["waiting", "12.5%"], ["closed", "87.5%"]]);
+  const legend = find(tree, node => node.props?.className === "application-progress-legend application-progress-legend-counts");
+  assert.equal(legend.props["aria-hidden"], "true");
+  assert.equal(text(legend), "17");
+  h.props({ legend: "labels" });
+  assert.equal(text(find(h.view(), node => node.props?.className === "application-progress-legend application-progress-legend-labels")), "等待对方1已结束7");
+  h.props({ legend: "none", bucketCounts: Object.fromEntries(AI_APPLICATION_BUCKETS.map(bucket => [bucket, 0])) });
+  assert.equal(walk(h.view()).filter(node => node.props?.className === "application-progress-segment").length, 0);
+  assert.equal(h.html().includes("NaN"), false);
+});
+
+test("日卡图形使用公司桶，不把同公司的多个岗位重复计算；按钮完整朗读进展", async () => {
+  const day = fixture();
+  const h = await harness("CalendarApplicationTrigger", { day, expanded: false, className: "calendar-ai-applications", label: "6 家公司 · 28 个岗位", children: "代投 6家", showCounts: true, onOpen() {} });
+  const trigger = find(h.view(), node => node.type === "button");
+  assert.ok(trigger.props["aria-label"].includes("6 家公司 · 28 个岗位"));
+  for (const value of ["待我处理 1", "推进中 1", "待核对 1", "等待对方 1", "暂缓 1", "已结束 1"]) assert.ok(trigger.props["aria-label"].includes(value), value);
+  const graphic = find(h.view(), node => node.props?.className === "calendar-ai-graphic");
+  assert.equal(graphic.props["aria-hidden"], "true");
+  assert.equal(graphic.props.children.props.bucketCounts, day.bucketCounts);
+  assert.equal(graphic.props.children.props.legend, "counts");
+  assert.equal(h.html().includes("calendar-ai-counts"), false);
+});
+
 test("固定非模态面板完整呈现23岗位公司组、六互斥公司筛选、原状态/下一步与真实读取时间", async () => {
   const { default: Panel } = await loadAppModule("app/calendar-application-panel.tsx");
   const html = renderToStaticMarkup(React.createElement(Panel, { day: fixture(), date: "2026-08-10", fetchedAt: Date.parse("2026-08-10T02:34:00Z"), onClose() {}, onOpen() {}, onOpenCompany() {} }));

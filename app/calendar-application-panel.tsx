@@ -12,7 +12,7 @@ const COPY = {
     title: (date: string) => `${date}代投 · 当前进展`, close: "关闭申请详情", all: "全部", search: "搜索公司、岗位或下一步", empty: "没有符合筛选的记录。", clear: "清空搜索",
     buckets: { "needs-user": "待我处理", progressing: "推进中", unknown: "待核对", waiting: "等待对方", paused: "暂缓", closed: "已结束" },
     counts: (companies: string, positions: string) => `${companies} 家公司 · ${positions} 个岗位`,
-    open: "打开当日申请详情", preview: "当日申请概览", filters: "按公司当前进展筛选", results: "筛选结果", recorded: "依据已记录状态；站内未实时核验。",
+    open: "打开当日申请详情", preview: "当日申请概览", progressCounts: "当前进展（公司数）", filters: "按公司当前进展筛选", results: "筛选结果", recorded: "依据已记录状态；站内未实时核验。",
     fetched: "资料读取", noFetched: "读取时间未提供", missing: "未记录", noPosition: "岗位未记载", status: "原始状态", next: "记录的下一步", source: "查看来源记录", company: "查看公司", required: "关联待办", review: "关联待办待核对", submitted: (agent: string) => `由 ${agent} 提交`,
     groups: "同一公司按优先级归入一个分类；岗位原始状态分别保留。", hint: "点击固定详情，移开指针不会关闭。", unavailable: "这一天的申请记录已不在当前材料中。",
   },
@@ -20,7 +20,7 @@ const COPY = {
     title: (date: string) => `${date}の代行応募 · 現在の進捗`, close: "応募の詳細を閉じる", all: "すべて", search: "会社・職種・次の対応を検索", empty: "条件に一致する記録はありません。", clear: "検索をクリア",
     buckets: { "needs-user": "対応が必要", progressing: "選考進行中", unknown: "要確認", waiting: "返信待ち", paused: "保留", closed: "終了" },
     counts: (companies: string, positions: string) => `${companies} 社 · ${positions} 求人`,
-    open: "この日の応募詳細を開く", preview: "この日の応募概要", filters: "会社の現在の進捗で絞り込む", results: "絞り込み結果", recorded: "記録済みの状況に基づきます。応募サイトの状況はリアルタイムに確認していません。",
+    open: "この日の応募詳細を開く", preview: "この日の応募概要", progressCounts: "現在の進捗（会社数）", filters: "会社の現在の進捗で絞り込む", results: "絞り込み結果", recorded: "記録済みの状況に基づきます。応募サイトの状況はリアルタイムに確認していません。",
     fetched: "資料の読み込み", noFetched: "読み込み時刻は未提供", missing: "記録なし", noPosition: "職種未記載", status: "記録された状況", next: "記録された次の対応", source: "出典の記録を見る", company: "会社を見る", required: "関連する対応事項", review: "関連する対応事項の確認が必要", submitted: (agent: string) => `${agent} が提出`,
     groups: "同じ会社は優先順に一つの分類へ集約し、各求人の元の状況はそのまま表示します。", hint: "クリックすると詳細を固定表示します。ポインターを離しても閉じません。", unavailable: "この日の応募記録は現在の資料に含まれていません。",
   },
@@ -28,9 +28,38 @@ const COPY = {
 
 export type OpenApplicationDay = (day: AiApplicationDay, trigger: HTMLButtonElement) => void;
 
+type ApplicationProgressCounts = Record<AiApplicationBucket, number>;
+const progressDescription = (counts: ApplicationProgressCounts, locale: keyof typeof COPY) => {
+  const number = new Intl.NumberFormat(locale);
+  return AI_APPLICATION_BUCKETS.filter(bucket => counts[bucket] > 0).map(bucket => `${COPY[locale].buckets[bucket]} ${number.format(counts[bucket])}`).join(" · ");
+};
+
+/** 只投影已经按公司互斥归类的桶，不在视图里按岗位重新计算进度。 */
+export function ApplicationProgressBar({ bucketCounts, legend = "none", className = "", id }: {
+  bucketCounts: ApplicationProgressCounts; legend?: "none" | "counts" | "labels"; className?: string; id?: string;
+}) {
+  const { locale } = useUiLocale();
+  const copy = COPY[locale];
+  const buckets = AI_APPLICATION_BUCKETS.filter(bucket => bucketCounts[bucket] > 0);
+  const total = buckets.reduce((sum, bucket) => sum + bucketCounts[bucket], 0);
+  const number = (value: number) => new Intl.NumberFormat(locale).format(value);
+  const description = progressDescription(bucketCounts, locale);
+  return <span id={id} className={`application-progress ${className}`.trim()} role="img" aria-label={`${copy.progressCounts}${description ? `：${description}` : "：0"}`}>
+    <span className="application-progress-track" aria-hidden="true">
+      {buckets.map(bucket => <span key={bucket} className="application-progress-segment" data-bucket={bucket}
+        style={{ width: `${bucketCounts[bucket] / total * 100}%` }} title={`${copy.buckets[bucket]} ${number(bucketCounts[bucket])}`} />)}
+    </span>
+    {legend !== "none" && <span className={`application-progress-legend application-progress-legend-${legend}`} aria-hidden="true">
+      {buckets.map(bucket => <span key={bucket} data-bucket={bucket} title={`${copy.buckets[bucket]} ${number(bucketCounts[bucket])}`}>
+        <i />{legend === "labels" && <span>{copy.buckets[bucket]}</span>}<b>{number(bucketCounts[bucket])}</b>
+      </span>)}
+    </span>}
+  </span>;
+}
+
 /** 月格・週見出し・当日概要を同じ操作にする。プレビューには操作を置かない。 */
-export function CalendarApplicationTrigger({ day, expanded, onOpen, className, children, label }: {
-  day: AiApplicationDay; expanded: boolean; onOpen: OpenApplicationDay; className: string; children: ReactNode; label: string;
+export function CalendarApplicationTrigger({ day, expanded, onOpen, className, children, label, showCounts = false }: {
+  day: AiApplicationDay; expanded: boolean; onOpen: OpenApplicationDay; className: string; children: ReactNode; label: string; showCounts?: boolean;
 }) {
   const { locale } = useUiLocale();
   const copy = COPY[locale];
@@ -51,12 +80,15 @@ export function CalendarApplicationTrigger({ day, expanded, onOpen, className, c
   useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current); }, []);
   const previewId = `application-preview-${day.date}-${className.replace(/\W/g, "-")}`;
   return <>
-    <button ref={button} type="button" className={className} data-ai-date={day.date} data-heat={Math.min(day.companyCount, 4)} aria-label={label}
+    <button ref={button} type="button" className={className} data-ai-date={day.date} data-heat={Math.min(day.companyCount, 4)} aria-label={showCounts ? `${label}；${progressDescription(day.bucketCounts, locale)}` : label}
       aria-expanded={expanded} aria-controls={expanded ? "calendar-application-panel" : undefined} aria-describedby={preview ? previewId : undefined}
       onPointerEnter={schedule} onPointerLeave={cancel} onFocus={schedule} onBlur={cancel}
       onKeyDown={event => { if (event.key === "Escape") { cancel(); event.stopPropagation(); } }}
       onClick={event => { cancel(); onOpen(day, event.currentTarget); }}>
       {children}
+      {showCounts && <span className="calendar-ai-graphic" aria-hidden="true">
+        <ApplicationProgressBar bucketCounts={day.bucketCounts} legend="counts" />
+      </span>}
     </button>
     {preview && !expanded && createPortal(<div className="calendar-application-preview" role="tooltip" id={previewId} style={preview} lang={locale}>
       <small>{copy.preview} · {day.date} JST</small><strong>{copy.counts(number(day.companyCount), number(day.positionCount))}</strong>

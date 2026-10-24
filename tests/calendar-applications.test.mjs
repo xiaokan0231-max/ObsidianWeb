@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AI_APPLICATION_BUCKETS, buildAiApplicationDays } from "../lib/calendar-applications.ts";
+import { AI_APPLICATION_BUCKETS, buildAiApplicationDays, summarizeAiApplicationDays } from "../lib/calendar-applications.ts";
 import { buildCalendarEvents, buildCommitments, countdownLabel } from "../lib/memory-atlas-data.ts";
 import { resolveCalendarInterview } from "../lib/calendar-interview.ts";
 import { tokyoParts } from "../lib/dojo/utils.ts";
@@ -314,4 +314,22 @@ test("受理凭证不是回复义务，明示等待和旧收据检查不能误�
   const [needsReview] = buildAiApplicationDays([note, oldReceiptTask], TODAY);
   assert.equal(needsReview.applications[0].bucket, "unknown");
   assert.equal(needsReview.bucketCounts["needs-user"], 0);
+});
+
+
+test("月内跨日期同公司多岗位只占一段，并保留最高优先级的当前进展", () => {
+  const days = buildAiApplicationDays([
+    application("a", { applied_on: "2026-08-01", status: "不採用" }),
+    application("b", { applied_on: "2026-08-03", status: "面接中" }),
+    application("c", { company: "株式会社ダミー", applied_on: "2026-08-03", status: "応募済", waiting_for: "company" }),
+    application("old", { company: "株式会社サンプル", applied_on: "2026-07-03", status: "不採用" }),
+  ], TODAY);
+  const summary = summarizeAiApplicationDays(days, "2026-08");
+  assert.equal(summary.companyCount, 2);
+  assert.equal(summary.positionCount, 3);
+  assert.equal(summary.bucketCounts.progressing, 1);
+  assert.equal(summary.bucketCounts.waiting, 1);
+  assert.equal(summary.bucketCounts.closed, 0);
+  assert.equal(Object.values(summary.bucketCounts).reduce((a, b) => a + b, 0), summary.companyCount);
+  assert.equal(summarizeAiApplicationDays(days, "2026-09").companyCount, 0);
 });

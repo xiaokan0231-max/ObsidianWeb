@@ -51,7 +51,6 @@ async function bridgeFetch(path: string, init: RequestInit) {
     error?: string;
     output?: unknown;
     model?: string;
-    diagnosticPath?: string;
   };
   if (!response.ok) {
     throw new Error(result.error || `Codex Bridge 返回 ${response.status}`);
@@ -99,6 +98,5 @@ export async function invokeCodex<T>(
   return {
     output: result.output as T,
     model: result.model ?? "unknown",
-    ...(typeof result.diagnosticPath === "string" ? { diagnosticPath: result.diagnosticPath } : {}),
   };
 }

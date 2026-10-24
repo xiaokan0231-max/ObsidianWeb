@@ -67,19 +67,21 @@ test("评分：没有路径锚点的 source_note 兜底分支仍核对公司名"
   assert.match(source, /if \(!report \|\| !sameDateRound\(report, event\)\) return null;/);
 });
 
-// ── 2. 历史数字格：写清计数对象，单位不再自称「全部历史」 ──
-test("历史数字格标签写计数对象并给出与已发生场次的关系，面板名只留作标题", () => {
+// ── 2. 历史紧凑入口：完整名称仍保留计数对象与不限月份的范围 ──
+test("历史入口短标题仍明确计数对象及与已发生场次的关系", () => {
   const notes = [1, 2, 3].map((index) => note(`20_求職/テスト/review-${index}.md`, { type: "review", company: "株式会社テスト", date: `2026-08-0${index}`, round: "一次面接", result: "通過" }));
   const events = notes.map((source, index) => simpleEvent(`past-${index}`, { note: source, date: source.frontmatter.date, label: "第一次面试", phase: "past" }));
   // 一场已关联、仍在等回复的已发生场次：计入分母，不计入这一格。
   const job = note("20_求職/テスト/案件.md", { type: "job-case", case_id: "case", company: "株式会社テスト", status: "面接中", waiting_for: "company" });
   events.push(simpleEvent("linked", { note: job, caseId: "case", date: "2026-08-05", phase: "past" }));
   const zhHtml = render(zh, { notes: [...notes, job], events });
-  assert.match(zhHtml, /<span>无当前状态的历史场次<\/span><strong>3<\/strong><small>\/ 4 场 · 不限月份<\/small>/);
+  assert.match(zhHtml, /aria-label="无当前状态的历史场次 3 \/ 4 场 · 不限月份"/);
+  assert.match(zhHtml, /<span>历史状态说明<\/span><strong>3<\/strong><small>\/ 4 场 · 不限月份<\/small>/);
   assert.match(zhHtml, /title="查看无当前状态的历史场次及原始来源"/);
-  assert.doesNotMatch(zhHtml, /全部历史|<span>历史状态说明<\/span>/);
+  assert.doesNotMatch(zhHtml, /全部历史/);
   const jaHtml = render(ja, { notes: [...notes, job], events });
-  assert.match(jaHtml, /<span>現在の状態がない過去の予定<\/span><strong>3<\/strong><small>\/ 4 件 · 期間を問わず<\/small>/);
+  assert.match(jaHtml, /aria-label="現在の状態がない過去の予定 3 \/ 4 件 · 期間を問わず"/);
+  assert.match(jaHtml, /<span>過去の状態の説明<\/span><strong>3<\/strong><small>\/ 4 件 · 期間を問わず<\/small>/);
   assert.doesNotMatch(jaHtml, /全履歴|過去の全予定/);
 });
 
@@ -133,9 +135,11 @@ test("当天已面完的场次在侧栏从「未来 7 天」移到「最近记�
     return target ? [[event.id, target]] : [];
   }));
   const html = render(zh, { notes, events, interviewTargets });
-  assert.match(html, /<span>未来 7 天场次<\/span><strong>1<\/strong>/);
-  assert.match(html, /<span>下一场<\/span><strong>今天<\/strong><small>株式会社サンプル<\/small>/);
   const upcoming = section(html, "<h2>未来 7 天</h2>");
+  assert.match(upcoming, /<h2>未来 7 天<\/h2><span>1<\/span>/);
+  assert.match(upcoming, /data-next=""/);
+  assert.match(upcoming, /下一场/);
+  assert.match(upcoming, /今天/);
   assert.match(upcoming, /株式会社サンプル/);
   assert.doesNotMatch(upcoming, /株式会社テスト/);
   const history = section(html, "<h2>历史事实</h2>");
@@ -264,17 +268,27 @@ test("日文界面的议程与卡片说明不再露出中文轮次名", () => {
 });
 
 // ── 8. 月格卡片用短文案，右栏保留完整文案 ──
-test("日文月格卡片的去向写「振り返り →」，右栏议程和 aria-label 仍是「面接の振り返り」", () => {
+test("日文月格与议程各有独立的准备和复盘链接", () => {
   const event = simpleEvent("reviewed", { label: "第一次面试", phase: "past", date: "2026-08-07" });
   const interviewTargets = new Map([[event.id, { view: "review", path: "study.md", sourcePath: event.note.path, company: event.company, date: event.date, label: event.label, caseId: "" }]]);
   const html = render(ja, { events: [event], interviewTargets });
-  const card = html.match(/<button\b[^>]*class="calendar-event [^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
-  assert.match(card, /<span class="calendar-interview-destination" aria-hidden="true">振り返り →<\/span>/);
-  assert.match(card, /aria-label="[^"]*面接の振り返り"/);
-  const history = section(html, "<h2>過去の記録</h2>");
-  assert.match(history, /<span class="calendar-interview-destination" aria-hidden="true">面接の振り返り →<\/span>/);
+  const compactLinks = html.match(/<span class="calendar-interview-links compact icon-actions">([\s\S]*?)<\/span>/)?.[1] ?? "";
+  const links = [...compactLinks.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)].map((match) => match[0]);
+  assert.equal(links.length, 2);
+  for (const [index, view, label] of [[0, "session", "面接準備"], [1, "review", "面接の振り返り"]]) {
+    assert.match(links[index], new RegExp(`data-view="${view}"`));
+    assert.match(links[index], new RegExp(`aria-label="[^"]*${label}"`));
+    assert.match(links[index], /<svg[^>]*aria-hidden="true"/);
+    assert.equal(links[index].replace(/<[^>]+>/g, ""), "", "月格入口使用图标，完整名称供提示与读屏使用");
+  }
+  assert.match(html, /class="calendar-interview-links">[\s\S]*?面接準備/);
+  assert.match(html, /class="calendar-interview-links">[\s\S]*?面接の振り返り/);
+  assert.match(html, /aria-label="[^"]*面接準備"/);
+  assert.match(html, /href="\/interview\?[^"]*date=2026-08-07/);
+  assert.match(html, /href="\/interview\/review\?[^"]*date=2026-08-07/);
   const zhHtml = render(zh, { events: [event], interviewTargets });
-  assert.match(zhHtml, /class="calendar-interview-destination" aria-hidden="true">面试复盘 →<\/span>/);
+  assert.match(zhHtml, /面试准备/);
+  assert.match(zhHtml, /面试复盘/);
 });
 
 // ── 布局与样式：状态点、分数徽章、周视图 meta 行、已结束色、工具栏、代投记号 ──
@@ -324,11 +338,11 @@ const renderWith = async (search, fixtures) => {
   return renderToStaticMarkup(createElement(view.default, { today: "2026-09-13", notes, events, interviewTargets, onOpen() {}, onInterview() {} }));
 };
 
-test("月格：有分数时阶段文字让位（CSS 隐藏），类型仍留在按钮的 title 与 aria-label 里", async () => {
-  assert.match(ruleOf(".calendar-event-heading:has(.calendar-interview-score) .calendar-event-stage"), /display: none/);
+test("月格：表现分使用数字短标，完整分数和面试类型仍留在提示与读屏说明里", async () => {
   const html = await renderWith("?month=2026-09", [scoredStudy("m1", "2026-09-10", "10:00", "11:00")]);
   const card = html.match(/<button\b[^>]*class="calendar-event [^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
-  assert.match(card, /<span class="calendar-event-stage">面试<\/span><span class="calendar-interview-score"[^>]*>85分<\/span><span class="calendar-status-dot"/);
+  assert.match(card, /class="calendar-round-badge round-numbered"[^>]*>1<\/span>/);
+  assert.match(card, /class="calendar-interview-score"[^>]*data-kind="overall"[^>]*data-compact="true"[^>]*title="85分"[^>]*>85<\/span>/);
   assert.match(card, /aria-label="2026-09-10 · 10:00–11:00 · JST · 株式会社テストm1 · 第一次面试 · [^"]*85分/);
   assert.match(card, /title="2026-09-10 · 10:00–11:00 · JST · 株式会社テストm1 · 第一次面试 · /);
 });
@@ -346,7 +360,7 @@ test("周视图：分数排进 meta 行末、公司名独占标题行；带结�
   assert.match(scored, /data-ranged=""/);
   assert.match(scored, /aria-label="2026-09-08 · 10:00–11:00 · JST/, "起止时刻仍完整写在说明里");
   assert.match(scored, /<span class="cw-block-meta"><time class="cw-block-time" dateTime="2026-09-08T10:00\+09:00">10:00<\/time><span class="calendar-round-badge[^"]*"[^>]*>1<\/span><span class="cw-block-stage">面试<\/span><span class="calendar-interview-score"[^>]*>85分<\/span><\/span>/);
-  assert.match(scored, /<span class="cw-block-title"><strong class="cw-block-company">株式会社テストw1<\/strong><\/span>/);
+  assert.match(scored, /<span class="cw-block-title"><strong class="cw-block-company">テストw1<\/strong><\/span>/);
 
   // 短场次也把分数排进 meta 行（上行时刻＋轮次＋分数、下行公司名整宽），只写开始时刻。
   // 改写理由：原两列布局把公司名挤到约 56px，时刻与徽标缩到 8–9px。

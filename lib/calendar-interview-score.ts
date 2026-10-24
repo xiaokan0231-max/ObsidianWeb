@@ -2,7 +2,7 @@ import { isInterviewEvent, type CalendarInterviewTarget } from "./calendar-inter
 import type { CalendarEvent } from "./memory-atlas-data.ts";
 import { companyIdentity, getString, getType, type Note } from "./notes.ts";
 import { interviewRound } from "./interview-round.ts";
-import { interviewEvidenceScores } from "./interview-trends.mjs";
+import { interviewEvidenceScores } from "./interview-evidence-scores.ts";
 import { parseInterviewAnswerReview } from "./review-deep.ts";
 
 export type CalendarInterviewScore = { kind: "overall" | "local"; scores: number[] };
@@ -65,7 +65,7 @@ export function calendarInterviewScore(event: CalendarEvent, target: CalendarInt
   });
   const report = latest(candidates);
   const review = report ? parseInterviewAnswerReview(report.content) : null;
-  if (review?.evaluationMode !== "scored_evidence") return null;
   const scores = interviewEvidenceScores({ review });
+  if (!scores.scored) return null;
   return scoreLabel(scores.overall, scores.assessed.map(key => scores.dimensions[key]));
 }

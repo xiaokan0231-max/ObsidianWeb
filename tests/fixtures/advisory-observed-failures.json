@@ -1,9 +1,0 @@
-{
-  "provenance": "实际服务报错文字；旧任务未保存完整输出，以下不是完整模型输出",
-  "fullOutputAvailable": false,
-  "observedErrors": [
-    "顾问复盘数据无效：observations[6] 缺少逐句证据",
-    "顾问复盘数据无效：observations[6].sourcePath 必须为完整的 Vault 整理稿相对路径",
-    "顾问复盘数据无效：advisory.blockId 必须为 qNN"
-  ]
-}

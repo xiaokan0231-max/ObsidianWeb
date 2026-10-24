@@ -4,15 +4,20 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSPr
 import { type Note } from "@/lib/notes";
 import { type UiLocale } from "@/lib/ui-locale";
 import { useUiLocale } from "./ui-locale";
-import CalendarApplicationPanel, { CalendarApplicationTrigger, type OpenApplicationDay } from "./calendar-application-panel";
+import CalendarApplicationPanel, { CalendarApplicationTrigger, ApplicationProgressBar, type OpenApplicationDay } from "./calendar-application-panel";
+import { buildCalendarEventOrigins, type CalendarEventOrigin } from "@/lib/calendar-event-origin";
+import { CalendarOriginBadge, CalendarOriginLegend } from "./calendar-origin-badge";
 import { CountUp } from "./count-up";
 import { enumCodec, useUrlState, type UrlStateCodec } from "./use-url-state";
 import { isTypingTarget } from "@/lib/keyboard";
 import { calendarMonthDays } from "@/lib/calendar-month";
 import { buildCalendarWeek, calendarWeekDays, calendarWeekRangeLabel, calendarWeekStart, jstClock, minutesLabel, stepWeekSelection } from "@/lib/calendar-week";
-import { buildAiApplicationDays, type AiApplicationDay } from "@/lib/calendar-applications";
+import { buildAiApplicationDays, summarizeAiApplicationDays, type AiApplicationDay } from "@/lib/calendar-applications";
 import { calendarConflicts } from "@/lib/calendar-conflicts";
-import { isInterviewEvent, type CalendarInterviewTarget } from "@/lib/calendar-interview";
+import { isInterviewEvent, resolveCalendarInterviewDestinations, type CalendarInterviewDestinations, type CalendarInterviewTarget } from "@/lib/calendar-interview";
+import { buildCalendarCompanyRatings, type CalendarCompanyRating } from "@/lib/calendar-company-rating";
+import { CalendarCompanyRatingBadge } from "./calendar-company-rating";
+import { CalendarInterviewLinks } from "./calendar-interview-links";
 import { calendarInterviewScore, type CalendarInterviewScore } from "@/lib/calendar-interview-score";
 import { calendarProgress, isCalendarHistoricalProgress, type CalendarProgress } from "@/lib/calendar-progress";
 import { buildCalendarSummary, calendarDayOffset, isCalendarLiveEvent, shiftCalendarDay } from "@/lib/calendar-summary";
@@ -122,6 +127,8 @@ const calendarZh = {
   applicationRecordLabel: (date: string, company: string, position: string, agent: string) => `${date} JST · ${company} · ${position} · 由 ${agent} 提交 · 查看申请记录`,
   applicationsLoading: "正在读取申请记录…",
   applicationsEmpty: "今天暂无已确认的 AI 代投。",
+  monthApplicationsEmpty: "当前月份暂无已确认的 AI 代投。",
+  calendarGuide: "图例",
   viewSwitch: "日历视图",
   viewMonth: "月",
   viewWeek: "周",
@@ -206,6 +213,8 @@ const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
     applicationNoPosition: "職種未記載", applicationSubmission: (agent) => `${agent} が提出`, applicationRecord: "記録を見る",
     applicationRecordLabel: (date, company, position, agent) => `${date} JST · ${company} · ${position} · ${agent} が提出 · 応募記録を見る`,
     applicationsLoading: "応募記録を読み込み中…", applicationsEmpty: "今日の確認済みAI代行応募はありません。",
+    monthApplicationsEmpty: "対象月に確認済みのAI代行応募はありません。",
+    calendarGuide: "凡例",
     viewSwitch: "カレンダーの表示", viewMonth: "月", viewWeek: "週",
     previousWeek: "前の週", nextWeek: "次の週", thisWeek: "今週",
     allDay: "終日", allDayHint: "時刻の記載がなく、時間帯を占めません",
@@ -302,11 +311,11 @@ function scoreText(score: CalendarInterviewScore | null | undefined, copy: Calen
   return score.kind === "overall" ? copy.score(points) : copy.localScore(points);
 }
 
-function InterviewScoreBadge({ score, copy }: { score?: CalendarInterviewScore | null; copy: CalendarCopy }) {
+function InterviewScoreBadge({ score, copy, compact = false }: { score?: CalendarInterviewScore | null; copy: CalendarCopy; compact?: boolean }) {
   if (!score) return null;
   const band = score.kind === "local" ? "local" : score.scores[0] < 65 ? "attention" : "standard";
   // 标签属于原生面试按钮，整块支持触控、Enter和Space，不另塞嵌套按钮。
-  return <span className="calendar-interview-score" data-kind={score.kind} data-band={band} aria-hidden="true">{scoreText(score, copy)}</span>;
+  return <span className="calendar-interview-score" data-kind={score.kind} data-band={band} data-compact={compact || undefined} title={scoreText(score, copy)} aria-hidden="true">{compact ? score.scores.join("/") : scoreText(score, copy)}</span>;
 }
 
 function eventActionLabel(event: CalendarEvent, progress: CalendarProgress, copy: CalendarCopy, target?: CalendarInterviewTarget, conflict = false, score?: CalendarInterviewScore | null) {
@@ -316,13 +325,14 @@ function eventActionLabel(event: CalendarEvent, progress: CalendarProgress, copy
   return `${context} · ${progressLabel(progress, copy)}：${copy.progressDetail(progress)} · ${score ? `${scoreText(score, copy)} · ` : ""}${target ? interviewDestination(target, copy) : copy.source}${conflict ? ` · ${copy.conflict}` : ""}`;
 }
 
-export function CalendarRecordExplanationList({ events, progressByEvent, interviewTargets, copy, onOpen, onInterview }: {
+export function CalendarRecordExplanationList({ events, progressByEvent, interviewTargets, interviewDestinations, copy, onOpen, onInterview }: {
   events: CalendarEvent[];
   progressByEvent: ReadonlyMap<string, CalendarProgress>;
   interviewTargets: ReadonlyMap<string, CalendarInterviewTarget>;
+  interviewDestinations?: ReadonlyMap<string, CalendarInterviewDestinations>;
   copy: CalendarCopy;
   onOpen: (note: Note) => void;
-  onInterview: (event: CalendarEvent) => void;
+  onInterview: (event: CalendarEvent, view?: CalendarInterviewTarget["view"]) => void;
 }) {
   return <ul className="calendar-record-explanations">{events.map((event) => {
     const progress = progressByEvent.get(event.id)!;
@@ -330,7 +340,7 @@ export function CalendarRecordExplanationList({ events, progressByEvent, intervi
     return <li key={event.id} className={`calendar-record-explanation status-${progress.tone}`}>
       <div className="calendar-record-explanation-heading"><time dateTime={event.date}>{event.date}</time><strong>{event.company}</strong><span>{progressLabel(progress, copy)}</span></div>
       <p>{copy.progressDetail(progress)}</p>
-      <div className="calendar-record-explanation-links">{target?.view === "review" && <button type="button" onClick={() => onInterview(event)} aria-label={`${event.date} · ${event.company} · ${copy.review}`}>{copy.review} →</button>}
+      <div className="calendar-record-explanation-links">{interviewDestinations ? <CalendarInterviewLinks targets={interviewDestinations.get(event.id)} onNavigate={(view) => onInterview(event, view)} /> : target?.view === "review" && <button type="button" onClick={() => onInterview(event)} aria-label={`${event.date} · ${event.company} · ${copy.review}`}>{copy.review} →</button>}
         <button type="button" onClick={() => onOpen(event.note)} aria-label={`${event.date} · ${event.company} · ${copy.source}`}>{copy.source}</button>
       </div>
     </li>;
@@ -361,7 +371,7 @@ function CalendarView({
   notes: Note[];
   onOpen: (note: Note) => void;
   interviewTargets: ReadonlyMap<string, CalendarInterviewTarget>;
-  onInterview: (event: CalendarEvent) => void;
+  onInterview: (event: CalendarEvent, view?: CalendarInterviewTarget["view"]) => void;
   loading?: boolean;
   fetchedAt?: number | null;
   onOpenCompany?: (company: string, contextNote: Note) => void;
@@ -425,6 +435,11 @@ function CalendarView({
     return map;
   }, [events]);
   const applicationDays = useMemo(() => buildAiApplicationDays(notes, today), [notes, today]);
+  const overviewMonth = calView === "week" ? weekStart.slice(0, 7) : monthKey;
+  const monthApplications = useMemo(() => summarizeAiApplicationDays(applicationDays, overviewMonth), [applicationDays, overviewMonth]);
+  const interviewDestinations = useMemo(() => new Map(events.map(event => [event.id, resolveCalendarInterviewDestinations(event, notes)])), [events, notes]);
+  const companyRatingByEvent = useMemo(() => buildCalendarCompanyRatings(events, notes, interviewTargets), [events, notes, interviewTargets]);
+  const originByEvent = useMemo(() => buildCalendarEventOrigins(events, notes), [events, notes]);
   const applicationsByDate = useMemo(() => new Map(applicationDays.map((day) => [day.date, day])), [applicationDays]);
   const progressByEvent = useMemo(() => new Map(events.map((event) => [
     event.id, calendarProgress(event, notes, interviewTargets.get(event.id)),
@@ -616,47 +631,41 @@ function CalendarView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const nextProgress = summary.next ? progressByEvent.get(summary.next.event.id) : undefined;
   const weekLabel = calendarWeekRangeLabel(weekStart, today.slice(0, 4));
 
   return (
     <section className="calendar-view" ref={sectionRef} data-focus-tone={focusTone || undefined}>
       <h1 className="sr-only">{copy.calendar}</h1>
-      <div className="calendar-stat page-stat-strip module-stat-strip" role="group" aria-label={copy.stats} aria-busy={loading || undefined}>
-        <div className="calendar-stat-tile">
-          <span>{copy.statWeek}</span>
-          {loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : <CountUp as="strong" value={summary.weekCount} />}
+      <div className="calendar-pulse" role="region" aria-label={copy.stats} aria-busy={loading || undefined}>
+        <div className="calendar-month-applications">
+          <div className="calendar-month-metric"><span>{copy.statMonthAi}<time>{overviewMonth}</time></span>
+            {loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : <div><CountUp as="strong" value={monthApplications.companyCount} /><span>{copy.applicationCompanyUnit}</span>
+              {monthApplications.positionCount !== monthApplications.companyCount && <small> · {copy.applicationPositionCount(monthApplications.positionCount)}</small>}
+            </div>}
+          </div>
+          <div className="calendar-month-graphic">
+            {loading ? <p className="calendar-month-empty">{copy.applicationsLoading}</p> : monthApplications.companyCount
+              ? <ApplicationProgressBar bucketCounts={monthApplications.bucketCounts} legend="labels" />
+              : <p className="calendar-month-empty">{copy.monthApplicationsEmpty}</p>}
+          </div>
         </div>
-        <div className="calendar-stat-tile calendar-stat-next" data-urgent={summary.next && summary.next.days <= 1 ? "" : undefined}>
-          <span>{copy.nextUp}</span>
-          {loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : summary.next ? (
-            <>
-              <strong>{copy.countdown(summary.next.days)}</strong>
-              <small>{summary.next.event.company}</small>
-            </>
-          ) : <strong>{copy.nextNone}</strong>}
-        </div>
-        <button type="button" className="calendar-stat-tile status-waiting" aria-pressed={focusTone === "waiting"} title={copy.focusTone(copy.progress.waiting)} disabled={loading} onClick={() => toggleFocusTone("waiting")}>
-          <span>{copy.statWaiting}</span>{loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : <CountUp as="strong" value={summary.waitingCount} />}
-        </button>
-        <button type="button" className="calendar-stat-tile status-neutral" aria-expanded={historyExplanationOpen} aria-controls="calendar-historical-explanation" title={copy.historicalOpen} disabled={loading} onClick={() => setHistoryExplanationOpen((open) => !open)}>
-          <span>{copy.statHistoricalCount}</span>{loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : <><CountUp as="strong" value={summary.historicalCount} /><small>{copy.historicalScope(recent.length)}</small></>}
-        </button>
-        <div className="calendar-stat-tile">
-          <span>{copy.statMonthAi}</span>
-          {loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : (
-            <><CountUp as="strong" value={summary.monthAiCompanies} /><small>{copy.applicationCompanyUnit}</small></>
-          )}
+        <div className="calendar-pulse-actions">
+          <button type="button" className="calendar-pulse-action status-waiting" aria-pressed={focusTone === "waiting"} title={copy.focusTone(copy.progress.waiting)} disabled={loading} onClick={() => toggleFocusTone("waiting")}>
+            <i className="calendar-status-dot" aria-hidden="true" /><span>{copy.statWaiting}</span>{!loading && <CountUp as="strong" value={summary.waitingCount} />}
+          </button>
+          <button type="button" className="calendar-pulse-action status-neutral" aria-label={`${copy.statHistoricalCount} ${summary.historicalCount} ${copy.historicalScope(recent.length)}`} aria-expanded={historyExplanationOpen} aria-controls="calendar-historical-explanation" title={copy.historicalOpen} disabled={loading} onClick={() => setHistoryExplanationOpen((open) => !open)}>
+            <span>{copy.statHistorical}</span>{!loading && <><CountUp as="strong" value={summary.historicalCount} /><small>{copy.historicalScope(recent.length)}</small></>}
+          </button>
         </div>
       </div>
       {historyExplanationOpen && <section className="calendar-historical-explanation" id="calendar-historical-explanation" aria-label={copy.statHistorical}>
         <header><div><h2>{copy.statHistorical}</h2><p>{copy.historicalScopeExplanation}</p></div><button type="button" onClick={() => setHistoryExplanationOpen(false)} aria-label={copy.historicalClose}>×</button></header>
         <p className="calendar-history-meaning">{copy.historicalExplanation}</p>
-        {historicalEvents.length ? <CalendarRecordExplanationList events={historicalEvents} progressByEvent={progressByEvent} interviewTargets={interviewTargets} copy={copy} onOpen={onOpen} onInterview={onInterview} /> : <p className="agenda-empty">{copy.historicalEmpty}</p>}
+        {historicalEvents.length ? <CalendarRecordExplanationList events={historicalEvents} progressByEvent={progressByEvent} interviewTargets={interviewTargets} interviewDestinations={interviewDestinations} copy={copy} onOpen={onOpen} onInterview={onInterview} /> : <p className="agenda-empty">{copy.historicalEmpty}</p>}
       </section>}
       {!loading && associationConflicts.length > 0 && <details className="calendar-association-conflicts">
         <summary>{copy.associationConflicts(associationConflicts.length)}</summary><p>{copy.associationExplanation}</p>
-        <CalendarRecordExplanationList events={associationConflicts} progressByEvent={progressByEvent} interviewTargets={interviewTargets} copy={copy} onOpen={onOpen} onInterview={onInterview} />
+        <CalendarRecordExplanationList events={associationConflicts} progressByEvent={progressByEvent} interviewTargets={interviewTargets} interviewDestinations={interviewDestinations} copy={copy} onOpen={onOpen} onInterview={onInterview} />
       </details>}
       <div className="calendar-layout">
         <div className="calendar-board">
@@ -667,16 +676,6 @@ function CalendarView({
                 : <span className="calendar-month-label" key={monthKey} data-dir={monthDir || undefined}>{monthLabel}</span>}
               <small className="calendar-timezone">{copy.timezone}</small>
             </h2>
-            <ul className="calendar-legend calendar-progress-legend" aria-label={copy.progressLegend}>
-              {(Object.keys(copy.progress) as ProgressTone[]).filter((tone) => tone !== "unknown" || associationConflicts.length > 0).map((tone) => (
-                <li className={`calendar-legend-item status-${tone}`} key={tone}>
-                  <button type="button" aria-pressed={focusTone === tone} title={copy.focusTone(copy.progress[tone])} onClick={() => toggleFocusTone(tone)}>
-                    <i className="calendar-status-dot" aria-hidden="true" />
-                    {copy.progress[tone]}
-                  </button>
-                </li>
-              ))}
-            </ul>
             <div className="calendar-tools">
               <div className="cw-switch" role="group" aria-label={copy.viewSwitch}>
                 {([["month", copy.viewMonth], ["week", copy.viewWeek]] as const).map(([mode, label]) => (
@@ -699,6 +698,21 @@ function CalendarView({
               )}
             </div>
           </div>
+          <div className="calendar-visual-guide">
+            <CalendarOriginLegend locale={locale} />
+            <details className="calendar-status-guide"><summary>{copy.calendarGuide} · {copy.progressLegend}</summary>
+            <ul className="calendar-legend calendar-progress-legend" aria-label={copy.progressLegend}>
+              {(Object.keys(copy.progress) as ProgressTone[]).filter((tone) => tone !== "unknown" || associationConflicts.length > 0).map((tone) => (
+                <li className={`calendar-legend-item status-${tone}`} key={tone}>
+                  <button type="button" aria-pressed={focusTone === tone} title={copy.focusTone(copy.progress[tone])} onClick={() => toggleFocusTone(tone)}>
+                    <i className="calendar-status-dot" aria-hidden="true" />
+                    {copy.progress[tone]}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            </details>
+          </div>
           {calView === "week" ? (
             <WeekBoard
               key={weekStart}
@@ -713,6 +727,9 @@ function CalendarView({
               conflicts={conflicts}
               interviewTargets={interviewTargets}
               scoreByEvent={scoreByEvent}
+              originByEvent={originByEvent}
+              companyRatingByEvent={companyRatingByEvent}
+              interviewDestinations={interviewDestinations}
               applicationsByDate={applicationsByDate}
               copy={copy}
               dayLabel={dayLabel}
@@ -720,6 +737,7 @@ function CalendarView({
               onShowApplications={openApplications}
               applicationDate={applicationDate}
               onOpenEvent={openEvent}
+              onInterview={onInterview}
             />
           ) : (
           <div className="calendar-grid-scroll">
@@ -762,23 +780,24 @@ function CalendarView({
                                 : round.kind === "casual" || round.kind === "agent" ? copy.meeting : copy.interview;
                               const actionLabel = eventActionLabel(event, progress, copy, target, conflict, scoreByEvent.get(event.id));
                               return (
-                                <button
+                                <div className="calendar-event-item" key={event.id}><button
                                   className={`calendar-event ${event.phase} kind-${event.kind} status-${progress.tone}${conflict ? " conflict" : ""}`}
-                                  key={event.id}
                                   onClick={() => openEvent(event)}
                                   title={actionLabel}
                                   aria-label={actionLabel}
                                 >
                                   <span className="calendar-event-heading">
+                                    {event.time ? <time className="calendar-event-time" dateTime={`${event.date}T${event.time}+09:00`}>{event.time}</time> : <span className="calendar-event-stage">{stage}</span>}
                                     {round && <RoundBadge round={round} />}
-                                    <span className="calendar-event-stage">{stage}</span>
-                                    <InterviewScoreBadge score={scoreByEvent.get(event.id)} copy={copy} />
                                     <span className="calendar-status-dot" aria-hidden="true" />
                                   </span>
-                                  {event.time && <time className="calendar-event-time" dateTime={`${event.date}T${event.time}+09:00`}>{calendarEventTime(event)}</time>}
-                                  <strong>{event.company}</strong>
-                                  {target && <span className="calendar-interview-destination" aria-hidden="true">{interviewDestination(target, copy, true)} →</span>}
-                                </button>
+                                  <strong>{compactCompany(event.company)}</strong>
+                                  <span className="calendar-month-signals">
+                                    <CalendarOriginBadge origin={originByEvent.get(event.id)} compact locale={locale} className="calendar-origin-label" />
+                                    <InterviewScoreBadge score={scoreByEvent.get(event.id)} copy={copy} compact />
+                                    <CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact />
+                                  </span>
+                                </button><CalendarInterviewLinks targets={interviewDestinations.get(event.id)} compact icons onNavigate={(view) => onInterview(event, view)} /></div>
                               );
                             })}
                             {dayEvents.length > 3 && (
@@ -788,10 +807,10 @@ function CalendarView({
                             )}
                           </div>
                           {applications && (
-                            <CalendarApplicationTrigger day={applications} expanded={applicationDate === applications.date} onOpen={openApplications} className="calendar-ai-applications"
+                            <CalendarApplicationTrigger day={applications} expanded={applicationDate === applications.date} onOpen={openApplications} className="calendar-ai-applications" showCounts
                               label={copy.applicationDayLabel(day.key, applications.companyCount, applications.positionCount)}>
                               <strong>{copy.aiShort} {applications.companyCount}{copy.applicationCompanyShort}</strong>
-                              <small>{copy.applicationPositionCount(applications.positionCount)}</small>
+                              {applications.positionCount !== applications.companyCount && <small>{copy.applicationPositionCount(applications.positionCount)}</small>}
                             </CalendarApplicationTrigger>
                           )}
                         </div>
@@ -806,18 +825,6 @@ function CalendarView({
         </div>
 
         <aside className="calendar-agenda">
-          {summary.next && nextProgress && (
-            <NextHero
-              event={summary.next.event}
-              days={summary.next.days}
-              progress={nextProgress}
-              target={interviewTargets.get(summary.next.event.id)}
-              copy={copy}
-              locale={locale}
-              onOpen={onOpen}
-              onInterview={onInterview}
-            />
-          )}
           {selectedDay && (
             <AgendaGroup
               className="calendar-day-detail"
@@ -831,6 +838,9 @@ function CalendarView({
               onOpen={onOpen}
               interviewTargets={interviewTargets}
               scoreByEvent={scoreByEvent}
+              originByEvent={originByEvent}
+              companyRatingByEvent={companyRatingByEvent}
+              interviewDestinations={interviewDestinations}
               onInterview={onInterview}
               action={<button type="button" className="calendar-day-close" onClick={() => setSelectedDay("")} aria-label={copy.closeDay}>×</button>}
             >
@@ -849,6 +859,10 @@ function CalendarView({
             onOpen={onOpen}
             interviewTargets={interviewTargets}
             scoreByEvent={scoreByEvent}
+            originByEvent={originByEvent}
+            companyRatingByEvent={companyRatingByEvent}
+            interviewDestinations={interviewDestinations}
+            nextEventId={summary.next?.event.id}
             onInterview={onInterview}
           />
           {upcomingLater.length > 0 && (
@@ -863,22 +877,13 @@ function CalendarView({
               onOpen={onOpen}
               interviewTargets={interviewTargets}
               scoreByEvent={scoreByEvent}
+              originByEvent={originByEvent}
+              companyRatingByEvent={companyRatingByEvent}
+              interviewDestinations={interviewDestinations}
+              nextEventId={summary.next?.event.id}
               onInterview={onInterview}
             />
           )}
-          <section className="calendar-application-summary" aria-label={copy.aiApplicationsToday}>
-            <h2>{copy.aiApplicationsToday}</h2>
-            <time dateTime={today}>{today} · JST</time>
-            {loading ? <p className="agenda-empty">{copy.applicationsLoading}</p> : (
-              <>
-                <p className="calendar-application-count"><CountUp as="strong" value={applicationsByDate.get(today)?.companyCount ?? 0} /> {copy.applicationCompanyUnit} · {copy.applicationPositionCount(applicationsByDate.get(today)?.positionCount ?? 0)}</p>
-                {applicationsByDate.has(today)
-                  ? <CalendarApplicationTrigger day={applicationsByDate.get(today)!} expanded={applicationDate === today} onOpen={openApplications} className="calendar-application-open"
-                    label={copy.applicationDayLabel(today, applicationsByDate.get(today)!.companyCount, applicationsByDate.get(today)!.positionCount)}>{copy.applicationRecord} →</CalendarApplicationTrigger>
-                  : <p className="agenda-empty">{copy.applicationsEmpty}</p>}
-              </>
-            )}
-          </section>
           <details className="calendar-history">
             <summary>
               <span>{copy.recent}</span>
@@ -896,6 +901,9 @@ function CalendarView({
               onOpen={onOpen}
               interviewTargets={interviewTargets}
               scoreByEvent={scoreByEvent}
+              originByEvent={originByEvent}
+              companyRatingByEvent={companyRatingByEvent}
+              interviewDestinations={interviewDestinations}
               onInterview={onInterview}
             />
           </details>
@@ -907,9 +915,10 @@ function CalendarView({
   );
 }
 
-/** 30 分钟的短块只有一行给公司名：去掉法人格（株式会社 等）省出 4 个字；全称仍在按钮的 title 与 aria-label 里。 */
+/** 日历卡片只显示公司简称，完整名称保留在按钮提示和读屏说明中。 */
 function compactCompany(name: string) {
-  return name.replace(/^(株式会社|有限会社|合同会社)\s*|\s*(株式会社|有限会社|合同会社)$/gu, "").trim() || name;
+  const trimmed = name.trim();
+  return trimmed.replace(/^(株式会社|有限会社|合同会社)\s*|\s*(株式会社|有限会社|合同会社)$/gu, "").trim() || trimmed;
 }
 
 function eventStage(event: CalendarEvent, round: CalendarBadge | null, copy: CalendarCopy) {
@@ -926,7 +935,7 @@ function eventStage(event: CalendarEvent, round: CalendarBadge | null, copy: Cal
  */
 function WeekBoard({
   weekStart, dir, label, events, today, nowClock, selectedDay, progressByEvent, conflicts,
-  interviewTargets, scoreByEvent, applicationsByDate, copy, dayLabel, onSelectDay, onShowApplications, applicationDate, onOpenEvent,
+  interviewTargets, scoreByEvent, originByEvent, companyRatingByEvent, interviewDestinations, onInterview, applicationsByDate, copy, dayLabel, onSelectDay, onShowApplications, applicationDate, onOpenEvent,
 }: {
   weekStart: string;
   dir: "prev" | "next" | "";
@@ -939,6 +948,9 @@ function WeekBoard({
   conflicts: ReadonlySet<string>;
   interviewTargets: ReadonlyMap<string, CalendarInterviewTarget>;
   scoreByEvent: ReadonlyMap<string, CalendarInterviewScore | null>;
+  originByEvent: ReadonlyMap<string, CalendarEventOrigin>;
+  companyRatingByEvent: ReadonlyMap<string, CalendarCompanyRating>;
+  interviewDestinations: ReadonlyMap<string, CalendarInterviewDestinations>;
   applicationsByDate: ReadonlyMap<string, AiApplicationDay>;
   copy: CalendarCopy;
   dayLabel: (key: string) => string;
@@ -946,6 +958,7 @@ function WeekBoard({
   onShowApplications: OpenApplicationDay;
   applicationDate: string;
   onOpenEvent: (event: CalendarEvent) => void;
+  onInterview: (event: CalendarEvent, view?: CalendarInterviewTarget["view"]) => void;
 }) {
   const week = useMemo(() => buildCalendarWeek(weekStart, events), [weekStart, events]);
   const { start, end } = week.range;
@@ -967,24 +980,24 @@ function WeekBoard({
     const scoreInMeta = Boolean(scoreByEvent.get(event.id));
     const score = <InterviewScoreBadge score={scoreByEvent.get(event.id)} copy={copy} />;
     return (
-      <button
+      <div className={`cw-event-shell${className.includes("cw-block") ? " timed" : ""}`} key={event.id} style={style}><button
         type="button"
         className={`${className} ${event.phase} status-${progress.tone}${conflict ? " conflict" : ""}`}
-        key={event.id}
-        style={style}
         onClick={() => onOpenEvent(event)}
         title={actionLabel}
         aria-label={actionLabel}
         data-ranged={event.time && event.endTime ? "" : undefined}
       >
         <span className="cw-block-meta">
-          {event.time && <time className="cw-block-time" dateTime={`${event.date}T${event.time}+09:00`}>{scoreInMeta ? event.time : calendarEventTime(event)}</time>}
+          {event.time && <time className="cw-block-time" dateTime={`${event.date}T${event.time}+09:00`}>{scoreInMeta || short ? event.time : calendarEventTime(event)}</time>}
           {round && <RoundBadge round={round} />}
           <span className="cw-block-stage">{eventStage(event, round, copy)}</span>
           {scoreInMeta && score}
         </span>
-        <span className="cw-block-title"><strong className="cw-block-company">{short ? compactCompany(event.company) : event.company}</strong>{!scoreInMeta && score}</span>
-      </button>
+        <span className="cw-block-title"><strong className="cw-block-company">{compactCompany(event.company)}</strong>{!scoreInMeta && score}{short && <CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact />}</span>
+        {!short && <span className="cw-rating-footer"><CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact /></span>}
+        <CalendarOriginBadge origin={originByEvent.get(event.id)} compact />
+      </button><CalendarInterviewLinks targets={interviewDestinations.get(event.id)} compact onNavigate={(view) => onInterview(event, view)} /></div>
     );
   };
   return (
@@ -1062,51 +1075,6 @@ function WeekBoard({
   );
 }
 
-function NextHero({ event, days, progress, target, copy, locale, onOpen, onInterview }: {
-  event: CalendarEvent;
-  days: number;
-  progress: CalendarProgress;
-  target?: CalendarInterviewTarget;
-  copy: CalendarCopy;
-  locale: UiLocale;
-  onOpen: (note: Note) => void;
-  onInterview: (event: CalendarEvent) => void;
-}) {
-  const round = eventRoundBadge(event, copy);
-  const date = new Intl.DateTimeFormat(locale, { month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Tokyo" })
-    .format(new Date(`${event.date}T00:00:00+09:00`));
-  const when = event.time ? `${date} · ${calendarEventTime(event)} JST` : `${date} · JST`;
-  return (
-    <section className="calendar-next-hero" aria-label={copy.nextUp} data-urgent={days <= 1 ? "" : undefined}>
-      <div className="calendar-next-head">
-        <span className="calendar-next-kicker">{copy.nextUp}</span>
-        <span className="calendar-next-countdown">{copy.countdown(days)}</span>
-      </div>
-      <strong className="calendar-next-company">{event.company}</strong>
-      <div className="calendar-next-meta">
-        {round && <RoundBadge round={round} />}
-        <span>{copy.eventLabel(event.label)}</span>
-      </div>
-      <time className="calendar-next-when" dateTime={event.time ? `${event.date}T${event.time}+09:00` : event.date}>{when}</time>
-      <div className="calendar-next-actions">
-        <button
-          type="button"
-          className="calendar-next-primary"
-          onClick={() => target ? onInterview(event) : onOpen(event.note)}
-          aria-label={eventActionLabel(event, progress, copy, target)}
-        >
-          {target ? interviewDestination(target, copy) : copy.source} <span aria-hidden="true">→</span>
-        </button>
-        {target && (
-          <button type="button" className="calendar-next-source" onClick={() => onOpen(event.note)}>
-            {copy.source}
-          </button>
-        )}
-      </div>
-    </section>
-  );
-}
-
 function AgendaGroup({
   title,
   empty,
@@ -1122,6 +1090,10 @@ function AgendaGroup({
   onOpen,
   interviewTargets,
   scoreByEvent,
+  originByEvent,
+  companyRatingByEvent,
+  interviewDestinations,
+  nextEventId,
   onInterview,
 }: {
   title: string;
@@ -1139,7 +1111,11 @@ function AgendaGroup({
   onOpen: (note: Note) => void;
   interviewTargets: ReadonlyMap<string, CalendarInterviewTarget>;
   scoreByEvent: ReadonlyMap<string, CalendarInterviewScore | null>;
-  onInterview: (event: CalendarEvent) => void;
+  originByEvent: ReadonlyMap<string, CalendarEventOrigin>;
+  companyRatingByEvent: ReadonlyMap<string, CalendarCompanyRating>;
+  interviewDestinations: ReadonlyMap<string, CalendarInterviewDestinations>;
+  nextEventId?: string;
+  onInterview: (event: CalendarEvent, view?: CalendarInterviewTarget["view"]) => void;
 }) {
   const { locale } = useUiLocale();
   const copy = CALENDAR_COPY[locale];
@@ -1158,7 +1134,7 @@ function AgendaGroup({
           const actionLabel = eventActionLabel(event, progress, copy, target, conflict, scoreByEvent.get(event.id));
           const offset = calendarDayOffset(today, event.date);
           return (
-            <div className={`agenda-item ${event.phase} kind-${event.kind} status-${progress.tone}${conflict ? " conflict" : ""}`} key={event.id}>
+            <div className={`agenda-item ${event.phase} kind-${event.kind} status-${progress.tone}${conflict ? " conflict" : ""}`} key={event.id} data-next={event.id === nextEventId ? "" : undefined}>
               <button
                 className="agenda-main"
                 onClick={() => target ? onInterview(event) : onOpen(event.note)}
@@ -1171,16 +1147,18 @@ function AgendaGroup({
                 </time>
                 <span className="agenda-copy">
                   <span className="agenda-event-meta">
+                    {event.id === nextEventId && <span className="agenda-next-label">{copy.nextUp}</span>}
                     {round && <RoundBadge round={round} />}
                     <InterviewScoreBadge score={scoreByEvent.get(event.id)} copy={copy} />
                     <small>{event.time ? `${calendarEventTime(event)} · ${copy.eventLabel(event.label)}` : copy.eventLabel(event.label)}</small>
                     {offset !== null && <span className="agenda-when" data-soon={offset === 0 || offset === 1 ? "" : undefined}>{copy.countdown(offset)}</span>}
                   </span>
-                  <strong>{event.company}</strong>
-                  {target && <span className="calendar-interview-destination" aria-hidden="true">{interviewDestination(target, copy)} →</span>}
+                  <strong>{compactCompany(event.company)}</strong>
+                  <span className="calendar-card-footer"><CalendarOriginBadge origin={originByEvent.get(event.id)} locale={locale} /><CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} /></span>
                 </span>
                 <span className="calendar-status-dot" aria-hidden="true" />
               </button>
+              <CalendarInterviewLinks targets={interviewDestinations.get(event.id)} onNavigate={(view) => onInterview(event, view)} />
               {detailed && (
                 <p className="agenda-progress-detail">
                   <b>{progressLabel(progress, copy)}</b>{copy.progressDetail(progress)}

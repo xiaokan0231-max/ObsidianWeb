@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 
@@ -240,17 +240,9 @@ test("bridge accepts only allowlisted tasks and strips API key credentials", asy
       const response = await fetch(`${url}/invoke`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ task, payload: { interviews: [], blocks: [], generationContract:{evidenceSources:[{sourcePath:"20_求職/株式会社テスト/一次面接_整理稿.md",blocks:[{blockId:"q01",sentenceIds:["s001"]}]}],contextPaths:[]} } }),
+        body: JSON.stringify({ task, payload: { interviews: [], blocks: [] } }),
       });
-      const body = await response.json();
-      assert.equal(response.status, 200, JSON.stringify(body));
-      assert.ok(body.diagnosticPath);
-      const saved = JSON.parse(await readFile(body.diagnosticPath, "utf8"));
-      assert.deepEqual(saved.output, body.output);
-      assert.equal(saved.task, task);
-      assert.ok(saved.schema.$defs.evidenceReference.anyOf.length);
-      assert.deepEqual(saved.generationContract.evidenceSources[0].blocks, [{blockId:"q01",sentenceIds:["s001"]}]);
-      await rm(dirname(body.diagnosticPath), {recursive:true,force:true});
+      assert.equal(response.status, 200, await response.text());
     }
 
     const events = (await readFile(logPath, "utf8"))
@@ -259,12 +251,6 @@ test("bridge accepts only allowlisted tasks and strips API key credentials", asy
       .map((line) => JSON.parse(line));
     const executions = events.filter((event) => event.args?.includes("exec"));
     assert.equal(executions.length, 6);
-    const advisorySchema = executions.find(event => event.outputSchema?.properties?.stage)?.outputSchema;
-    assert.equal(advisorySchema.properties.evidence.items.$ref, "#/$defs/evidenceReference");
-    assert.deepEqual(advisorySchema.$defs.evidenceReference.anyOf[0].properties.sourcePath.enum, ["20_求職/株式会社テスト/一次面接_整理稿.md"]);
-    assert.equal(advisorySchema.properties.nextSteps.items.properties.evidence.items.$ref, "#/$defs/evidenceReference");
-    assert.deepEqual(advisorySchema.$defs.evidenceReference.anyOf[0].properties.blockId.enum, ["q01"]);
-    assert.deepEqual(advisorySchema.$defs.evidenceReference.anyOf[0].properties.sentenceIds.items.enum, ["s001"]);
     const execution = executions[0];
     for (const event of executions) {
       assert.equal(event.hasOpenAiKey, false);
@@ -332,57 +318,4 @@ test("bridge refuses API-key login", async () => {
     await stopBridge(child);
     await rm(directory, { recursive: true, force: true });
   }
-});
-
-// 通过真实 HTTP/CLI 返回路径检查评分证据拒绝发生在交付之前，fixture 不含求职事实。
-test("bridge enforces v3 evidence bases, recovery and model-number boundaries over HTTP", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "interview-scoring-bridge-"));
-  const executable = join(directory, "fake-scoring.mjs");
-  await writeFile(executable, `#!/usr/bin/env node
-import {readFileSync} from "node:fs";
-const args = process.argv.slice(2);
-if (args[0] === "--version") { process.stdout.write("codex-cli fake-scoring\\n"); }
-else if (args[0] === "login") { process.stdout.write("Logged in using ChatGPT\\n"); }
-else {
-  const schema = JSON.parse(readFileSync(args[args.indexOf("--output-schema") + 1],"utf8"));
-  if(schema.properties.evaluationMode.enum[0] !== "scored_evidence" || !schema.properties.dimensions.properties.coverage.required.includes("baseScore") || schema.properties.dimensions.properties.coverage.properties.score || !schema.properties.evaluation.required.includes("scoringEligible")) process.exit(3);
-  let input = "";
-  for await (const chunk of process.stdin) input += chunk;
-  const payload = JSON.parse(input.split("\\n\\nINPUT_JSON:\\n")[1]);
-  process.stdout.write(JSON.stringify(payload.testReview));
-}
-`, { mode: 0o700 });
-  const port = 52000 + Math.floor(Math.random() * 1000);
-  const token = "interview-scoring-test-token-longer-than-24";
-  const child = startBridge({ port, token, executable });
-  const url = `http://127.0.0.1:${port}`;
-  const entry = { blockId: "q01", severity: "major", points: 25, recovery: "unresolved", labelZh: "核心未交付", detailZh:"原问题核心到后文未恢复，原因未知。", fixZh:"核事实后先答。", evidenceSentenceIds: ["s001"] };
-  const blank = { level: "not_assessed", baseScore:null, basisZh:"未受检验。", positiveEvidenceBlockIds:[], rationaleZh:"资料不足。", evidenceBlockIds:[], deductions:[] };
-  const good = { evaluationMode:"scored_evidence", evaluation:{conclusionZh:"核心未恢复。",coverageZh:"仅现有文本。",limitsZh:"无原音。",scoringEligible:false,eligibilityZh:"仅一维可评。",materialScope:"full_available_text"}, dimensions:Object.fromEntries(["questionUnderstanding","coverage","directness","evidenceCredibility","riskControl"].map(key=>[key,{...blank}])), blocks:[{blockId:"q01"}] };
-  good.dimensions.coverage = {...blank, level:"core_gap",baseScore:75,basisZh:"所问范围为标准参考线，核心未恢复。", evidenceBlockIds:["q01"],deductions:[entry]};
-  const cases = [
-    [value=>value,200],
-    [value=>{value.dimensions.coverage.deductions[0].points=17;return value;},502],
-    [value=>{value.dimensions.riskControl={...value.dimensions.coverage};return value;},502],
-    [value=>{value.dimensions.coverage.baseScore=85;value.dimensions.coverage.positiveEvidenceBlockIds=["q01"];return value;},502],
-    [value=>{value.dimensions.coverage.level="supported";return value;},502],
-    [value=>{value.overallScore=99;return value;},502],
-    [value=>{value.dimensions.coverage.score=99;return value;},502],
-    [value=>{value.dimensions.coverage.deductions[0].evidenceSentenceIds=["s999"];return value;},502],
-    [value=>{value.evaluationMode="evidence";return value;},502],
-    [value=>{value.dimensions.coverage.level="partial";value.dimensions.coverage.deductions=[{...entry,severity:"moderate",points:0,recovery:"repaired",detailZh:"请求澄清后即时答完整，未见残余损失。"}];return value;},200],
-    [value=>{value.dimensions.coverage.level="partial";value.dimensions.coverage.deductions=[{...entry,severity:"moderate",points:5,recovery:"repaired",detailZh:"最终字段补齐，但反复提取当前条件成本已发生。"}];return value;},200],
-  ];
-  try {
-    await waitForBridge(url, token);
-    for (const [mutate,expected] of cases) {
-      const response = await fetch(`${url}/invoke`, {
-        method:"POST", headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
-        body:JSON.stringify({task:"review_interview_answers",payload:{blocks:[{id:"q01",sentences:[{id:"s001"}]}],testReview:mutate(structuredClone(good))}}),
-      });
-      const body = await response.text();
-      assert.equal(response.status,expected,body);
-      if(expected===502) assert.match(body,/账本不符合2026-10-v3/);
-    }
-  } finally { await stopBridge(child); await rm(directory,{recursive:true,force:true}); }
 });

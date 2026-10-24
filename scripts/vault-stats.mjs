@@ -9,6 +9,8 @@
 // CSV に既にある会社は 2) 側を無視する（二重計上を避ける）。
 
 import { readFile, stat, writeFile } from "node:fs/promises";
+import { relative } from "node:path";
+import { load as loadYaml, JSON_SCHEMA } from "js-yaml";
 import {
   APPLIED_LEDGER,
   CHANNEL_REQUIRED_FROM,
@@ -38,6 +40,8 @@ import {
   renderInterviewTrends,
   reviewTrendEntry,
 } from "../lib/interview-trends.mjs";
+import { resolveInterviewOutcomes } from "../lib/interview-outcome.ts";
+import { reviewSourcePath } from "../lib/review-paths.ts";
 import {
   buildStatsPayload,
   buildTimeline,
@@ -392,11 +396,29 @@ try {
   process.exit(1);
 }
 const reviewEntries = [];
+// 每场的选考结果要按 Web 同一套归属规则从 job-case／面谈 TODO 解析，这几类笔记和复盘本身都需要 Obsidian 同口径的 YAML：
+// 简易 parseFrontmatter 会把带引号的值连引号一起读进来，「"不採用（…）"」就认不出是不採用，表里的轮次也会带着引号。
+const YAML_TYPES = new Set(["interview-answer-review", "transcript-study", "interview-prep", "job-case", "todo"]);
+const sessionNotes = [];
 for (const path of await listMarkdownFiles(JOB_CASE_ROOT)) {
   const content = await readFile(path, "utf8");
-  const fm = parseFrontmatter(content);
-  if (fm.type !== "interview-answer-review") continue;
-  reviewEntries.push(reviewTrendEntry(path, fm, content));
+  const simple = parseFrontmatter(content);
+  if (!YAML_TYPES.has(String(simple.type ?? "").replace(/^["']|["']$/g, ""))) continue;
+  let fm = simple;
+  try {
+    const parsed = loadYaml(content.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "", { schema: JSON_SCHEMA });
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) fm = parsed;
+  } catch {
+    // YAML 坏掉由 vault:check 报；这里退回简易解析，不让统计整体失败。
+  }
+  // 场次键用 vault 相对路径：与 Web 同形，生成笔记里也不会出现本机绝对路径。
+  if (fm.type === "interview-answer-review") reviewEntries.push(reviewTrendEntry(relative(VAULT, path), fm, content));
+  else sessionNotes.push({ path: relative(VAULT, path), frontmatter: fm, content, tags: [], stat: { ctime: 0, mtime: 0, size: content.length } });
+}
+const outcomes = resolveInterviewOutcomes(sessionNotes);
+for (const entry of reviewEntries) {
+  const study = reviewSourcePath(`${entry.key}_回答品質復盤.md`, "answerReview");
+  entry.outcome = (study && outcomes.get(study)) ?? null;
 }
 const trendsBlock = renderInterviewTrends(buildInterviewTrends(reviewEntries, cardCoverage));
 

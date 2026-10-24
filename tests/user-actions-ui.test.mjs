@@ -111,7 +111,7 @@ test("默认主列表只有已审核本人必要动作，待核显眼而不加�
   const html = await render(mixed());
   assert.match(html, /aria-label="当前已确认的本人动作"><strong>1<\/strong>/);
   assert.match(html, /1 条记录仍待核实/);
-  assert.match(html, /待核实不等于你必须马上处理/);
+  assert.match(html, /待核实记录单独保留，不计入当前事项/);
   assert.match(html, /data-action-category="current"/);
   assert.equal((html.match(/class="user-action-list-row"/g) || []).length, 1);
   assert.equal(html.includes("user-action-card"), false);

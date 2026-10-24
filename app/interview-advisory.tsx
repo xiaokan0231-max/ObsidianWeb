@@ -12,7 +12,6 @@ import { appViewHref, reviewEvidenceSearch } from "./app-route";
 import { ADVISORY_STAGE_LABELS } from "./interview-insights-state";
 import { useInterviewAdvisorySync } from "./interview-advisory-sync";
 import { useUiLocale } from "./ui-locale";
-import { advisoryFailureMessage, advisoryRetryLabel } from "@/lib/advisory-recovery";
 
 type FeedbackTarget = { type: "advisory" | "insight"; id: string; revision: string; snapshot: string };
 type EvidenceProps = { notes: Note[]; onOpenEvidence: (ref: AdvisoryEvidenceRef) => void };
@@ -139,7 +138,6 @@ export function AdvisoryReportPanel({ report, notes, notePath, onOpenEvidence, o
   report: InterviewAdvisory; notePath: string; onFeedbackSaved: (note?: Note) => void | Promise<void>;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const { locale } = useUiLocale();
   const feedback = (id: string, snapshot: unknown) => <AdvisoryFeedback key={`${report.generatedAt}:${id}`} notePath={notePath} notes={notes}
     target={{ type: "advisory", id, revision: report.generatedAt, snapshot: JSON.stringify(snapshot) }} onSaved={onFeedbackSaved} />;
   const toc = [
@@ -149,15 +147,11 @@ export function AdvisoryReportPanel({ report, notes, notePath, onOpenEvidence, o
     ...(report.nextSteps.length > 0 ? [{ id: "ia-sec-next", label: "值得准备与确认的事" }] : []),
   ];
   return <div className="ia-report" ref={rootRef}><div className="ia-report-main">
-    <section className="ia-recommendation ia-next-summary"><h2>{locale === "ja" ? "次にすること" : "接下来怎么做"}</h2>
-      <AdvisoryParagraphs text={report.recommendationZh.split(/\n\s*\n/)[0]} />
-      {report.nextSteps.length > 0 && <a href="#ia-sec-next">{locale === "ja" ? "準備・確認リストを見る →" : "查看准备与确认清单 →"}</a>}
-    </section>
     <section className="ia-overview" id="ia-sec-overview"><span className="ia-eyebrow">{ADVISORY_STAGE_LABELS[report.stage] || "面谈"} · 综合判断</span>
       <h2>这场面谈，双方谈到了哪一步</h2><AdvisoryParagraphs text={report.commentaryZh} />
       <div className="ia-fit"><h3>双方的匹配</h3><AdvisoryParagraphs text={report.fitZh} /></div>
-      <details className="ia-recommendation"><summary>{locale === "ja" ? "準備のアドバイスを詳しく見る" : "更多准备建议"}</summary><AdvisoryParagraphs text={report.recommendationZh} />
-        {report.changeConditionsZh && <><h4>什么情况会改变这个判断</h4><AdvisoryParagraphs text={report.changeConditionsZh} /></>}</details>
+      <div className="ia-recommendation"><h3>目前建议</h3><AdvisoryParagraphs text={report.recommendationZh} />
+        {report.changeConditionsZh && <><h4>什么情况会改变这个判断</h4><AdvisoryParagraphs text={report.changeConditionsZh} /></>}</div>
       <AdvisoryEvidence evidence={report.evidence} contextPaths={report.contextPaths} notes={notes} onOpenEvidence={onOpenEvidence} />
     </section>
     {report.observations.length > 0 && <section className="ia-section" id="ia-sec-observations"><header><span className="ia-eyebrow">对方原话与互动</span><h2>值得读懂的细节</h2></header>
@@ -178,7 +172,7 @@ export function AdvisoryReportPanel({ report, notes, notePath, onOpenEvidence, o
       {report.nextSteps.map((item) => <article className="ia-next" key={item.id}><h3>{item.titleZh}</h3><AdvisoryParagraphs text={item.detailZh} />
         <p className="ia-trigger">适用时机：{item.triggerZh}</p><AdvisoryEvidence {...item} notes={notes} onOpenEvidence={onOpenEvidence} />{feedback(item.id, item)}</article>)}
     </section>}
-    <p className="ia-report-meta">更新于 {report.generatedAt.replace("T", " ").slice(0, 16)}</p>
+    <p className="ia-report-meta">分析更新于 {report.generatedAt.replace("T", " ").slice(0, 16)} · {report.model}</p>
   </div><AdvisoryToc entries={toc} rootRef={rootRef} /></div>;
 }
 
@@ -209,11 +203,11 @@ export default function InterviewAdvisory({ report: initialReport, notes, notePa
   };
   const failure = error || loaded?.lastError || sync.error || sync.state?.error;
   return <div className="ia-view">
-    <div className="ia-actions"><p>{busy || sync.busy || sync.state?.active ? "正在更新，已有内容仍可阅读。" : loaded?.status === "stale" ? "原文有更新，下面的评价尚未更新。" : loaded?.status === "blocked" ? "原文还有需要确认的地方，可在原文阅读中查看。" : report ? "先看这次机会和下一步，再按需要查看原话。" : "还没有这场面谈的解读，可以先阅读原文。"}</p>
+    <div className="ia-actions"><p>{busy || sync.busy || sync.state?.active ? "正在更新分析，已有内容仍可阅读。" : loaded?.status === "stale" ? "材料有更新，下面保留上一版分析。" : loaded?.status === "blocked" ? loaded.reason || "完成原文裁定后可生成分析。" : report ? "结合企业原话、你的意向和后续条件阅读这场面谈。" : "顾问分析会在证据裁定完成后自动补齐。"}</p>
       <button type="button" onClick={onOpenInsights}>跨面试横向对照 →</button>
-      <button type="button" disabled={busy || sync.busy || loaded?.status === "blocked"} onClick={() => void generate()}>{busy ? "更新中…" : failure ? advisoryRetryLabel(failure) : report ? "更新解读" : "获取面谈解读"}</button>
+      <button type="button" disabled={busy || sync.busy || loaded?.status === "blocked"} onClick={() => void generate()}>{busy ? "分析中…" : failure ? "重试分析" : report ? "重新分析" : "生成顾问分析"}</button>
     </div>
-    {failure && <div className="ia-error" role="alert"><p>{advisoryFailureMessage(failure)}</p><details><summary>查看失败详情</summary><p>{failure}</p></details></div>}
+    {failure && <p className="ia-error" role="alert">{failure}</p>}
     {report ? <AdvisoryReportPanel report={report} notes={notes} notePath={notePath} onOpenEvidence={onOpenEvidence} onFeedbackSaved={async (note) => {
       if (note && onNoteWritten) onNoteWritten(note); else await onVaultChanged();
       void sync.synchronize();

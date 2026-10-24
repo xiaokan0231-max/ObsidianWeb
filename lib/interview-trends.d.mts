@@ -25,17 +25,6 @@ export type TrendEntry = {
   date: string;
   round: string;
   review: InterviewAnswerReview | null;
-  reassessment?: { frontmatter: Record<string, unknown> } | Record<string, unknown> | null;
-};
-
-export function interviewEvidenceScores(entry: Pick<TrendEntry, "review" | "reassessment"> | { review?: InterviewAnswerReview | null; reassessment?: TrendEntry["reassessment"] }): {
-  scored: boolean;
-  reassessed: boolean;
-  dimensions: Record<ReviewDimensionKey, number | null>;
-  assessed: ReviewDimensionKey[];
-  overall: number | null;
-  historical: number | null;
-  methodVersion: string;
 };
 
 export function reviewTrendEntry(
@@ -53,9 +42,7 @@ export type TrendInterview = {
   company: string;
   date: string;
   round: string;
-  overall: number | null;
-  historicalOverall: number | null;
-  scoreMethod: "scored_evidence" | "historical";
+  overall: number;
   dimensions: Record<ReviewDimensionKey, number | null>;
   priorityBlocks: {
     blockId: string;
@@ -87,7 +74,6 @@ export type TrendTag = {
 
 export type InterviewTrends = {
   interviews: TrendInterview[];
-  scoreMethod: "scored_evidence" | "historical";
   dimensionAverages: Record<ReviewDimensionKey, number | null>;
   weakestDimension: ReviewDimensionKey | null;
   tags: TrendTag[];

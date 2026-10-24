@@ -36,25 +36,20 @@
 .textbook-pagination p { margin: 0; font-size: 13px; line-height: 1.8; color: var(--muted); }
 .textbook-return { display: flex; align-items: center; gap: 18px; }
 .textbook-return > span { color: var(--muted); font-size: 13px; }
-.textbook-chapter:has(.learning-module) { padding: 24px; background: var(--surface); }
-.textbook-chapter:has(.learning-module) .textbook-chapter-heading h2 { font-family: inherit; font-size: 24px; font-weight: 650; margin-bottom: 18px; }
-.learning-module { max-width: 920px; margin-inline: auto; font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans CJK SC", sans-serif; }
+.textbook-chapter:has(.learning-module) { padding: 28px; background: var(--surface); }
+.textbook-chapter:has(.learning-module) .textbook-chapter-heading h2 { font-family: inherit; font-size: 27px; font-weight: 650; margin-bottom: 24px; }
+.learning-module { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans CJK SC", sans-serif; }
 .learning-overview-title h3 { margin: 0 0 8px; font-size: 16px; font-weight: 650; }
 .learning-overview-title p { margin: 0 0 17px; color: var(--muted); font-size: 13px; line-height: 1.7; }
 .learning-point-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.learning-point-grid > button { position: relative; min-width: 0; display: grid; align-content: start; gap: 4px; padding: 10px 13px; text-align: left; border: 1px solid var(--line); border-left-width: 3px; border-radius: 6px; background: var(--surface-overlay); color: var(--ink); cursor: pointer; }
+.learning-point-grid > button { position: relative; min-width: 0; display: grid; gap: 7px; padding: 16px 15px; text-align: left; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--surface-overlay); color: var(--ink); cursor: pointer; }
 .learning-point-grid > button:hover { background: var(--surface); border-color: var(--success-line); }
-.learning-point-grid > button[aria-pressed="true"] { border-color: var(--green); background: var(--success-wash); }
+.learning-point-grid > button[aria-pressed="true"] { border-color: var(--green); background: var(--success-wash); box-shadow: inset 0 0 0 1px var(--green); }
 .learning-point-number { color: var(--text-faint); font-size: 10px; letter-spacing: .08em; }
-.learning-point-grid > button:has(.learning-point-number) { grid-template-columns: 20px minmax(0, 1fr); column-gap: 8px; }
-.learning-point-grid > button:has(.learning-point-number) > :not(.learning-point-number) { grid-column: 2; }
-.learning-point-grid .learning-point-number { grid-column: 1; grid-row: 1; padding-top: 3px; }
-.learning-point-grid strong { font-size: 13px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
-.learning-point-grid button > span[lang="ja"] { color: var(--text-tertiary); font-size: 12px; line-height: 1.6; }
-.learning-point-origin { font-size: 11px; color: var(--text-tertiary); }
-.learning-focus { margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-overlay); overflow: hidden; scroll-margin-top: 88px; }
-.learning-focus:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
-.learning-focus > header { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 18px 22px 14px; }
+.learning-point-grid strong { font-size: 18px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.learning-point-grid button > span:last-child { color: var(--text-tertiary); font-size: 12px; line-height: 1.6; }
+.learning-focus { margin-top: 22px; border: 1px solid var(--line-cool); border-radius: 11px; background: var(--surface-overlay); overflow: hidden; }
+.learning-focus > header { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 22px 24px 18px; }
 .learning-focus header small { color: var(--text-faint); font-size: 11px; }
 .learning-focus h3 { font-family: inherit; margin: 7px 0 0; font-size: 19px; font-weight: 650; line-height: 1.5; }
 .learning-mode-label { color: var(--text-faint); font-size: 11px; white-space: nowrap; }
@@ -62,16 +57,16 @@
 .learning-tabs button { padding: 12px 0; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--text-tertiary); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
 .learning-tabs button[aria-selected="true"] { color: var(--success); border-color: var(--green); font-weight: 650; }
 .learning-tabs button:focus-visible, .learning-point-grid button:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
-.learning-panel { padding: 20px 22px; min-height: 0; outline-offset: -4px; }
+.learning-panel { padding: 24px; min-height: 310px; outline-offset: -4px; }
 .learning-rule { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; padding: 16px 18px; border-radius: 7px; background: var(--success-wash); }
-.learning-rule strong { font-size: 20px; line-height: 1.5; color: var(--success); font-weight: 600; }
+.learning-rule strong { font-size: 23px; line-height: 1.5; color: var(--success); font-weight: 600; }
 .learning-rule span { font-size: 13px; color: var(--text-tertiary); }
-.learning-why { margin: 17px 0; }
+.learning-why { margin: 21px 0; }
 .learning-why h4 { font-family: inherit; margin: 0 0 9px; font-size: 13px; color: var(--muted); }
-.learning-why p, .learning-source-explanation { margin: 8px 0; font-size: 14px; line-height: 1.75; }
+.learning-why p, .learning-source-explanation { margin: 8px 0; font-size: 14px; line-height: 1.9; }
 .learning-inline-example { padding: 15px 18px; border-left: 3px solid var(--line-strong); background: var(--surface); }
 .learning-inline-example small, .learning-natural small, .learning-revision small, .learning-example-origin > small { font-size: 10px; color: var(--text-faint); }
-.learning-inline-example p, .learning-sentence { margin: 8px 0; font-size: 19px; line-height: 1.7; }
+.learning-inline-example p, .learning-sentence { margin: 8px 0; font-size: 18px; line-height: 1.7; }
 .learning-inline-example > span { font-size: 12px; line-height: 1.7; color: var(--text-tertiary); }
 .learning-caution { display: flex; align-items: baseline; gap: 10px; margin: 18px 0 0; font-size: 12px; line-height: 1.8; color: var(--text-tertiary); }
 .learning-caution b, .learning-contrast-note b { flex-shrink: 0; font-size: 10px; font-weight: 500; border-radius: 4px; background: var(--paper); padding: 2px 6px; color: var(--gold-text); }
@@ -90,62 +85,16 @@
 .learning-contrast + .learning-contrast { margin-top: 20px; }
 .learning-contrast-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .learning-contrast-pair > div { border: 1px solid var(--line-soft); border-radius: 8px; padding: 17px; background: var(--surface); }
-.learning-contrast-pair > div:last-child { background: var(--surface); border-color: var(--line-soft); }
+.learning-contrast-pair > div:last-child { background: var(--success-wash); border-color: var(--line-soft); }
 .learning-contrast-pair small { color: var(--text-faint); font-size: 10px; }
-.learning-contrast-pair p { font-size: 18px; line-height: 1.7; margin: 10px 0; overflow-wrap: anywhere; }
+.learning-contrast-pair p { font-size: 19px; line-height: 1.7; margin: 10px 0; overflow-wrap: anywhere; }
 .learning-contrast-pair span { font-size: 12px; line-height: 1.75; color: var(--text-tertiary); }
-.learning-contrast-note { display: flex; gap: 10px; align-items: baseline; margin: 15px 0 0; padding: 12px 14px; background: var(--paper); border-radius: 6px; font-size: 13px; line-height: 1.8; }
-.learning-step-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; padding: 0 22px; }
-.learning-step-tabs button { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 13px 5px; font-size: 12px; }
-.learning-step-number { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; background: var(--paper); color: var(--text-faint); font-size: 10px; }
-.learning-step-tabs button[aria-selected="true"] .learning-step-number { background: var(--green); color: var(--surface); }
-.learning-step-intro { display: flex; align-items: center; gap: 12px; margin-bottom: 17px; color: var(--text-tertiary); font-size: 13px; }
-.learning-step-intro small { color: var(--text-faint); font-size: 11px; }
-.learning-source-preview { margin: 0 22px 22px; padding: 17px 18px 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
-.learning-teaching-start { margin: 0 22px 22px; padding: 15px 18px; background: var(--surface); border-left: 3px solid var(--line-strong); }
-.learning-teaching-start small { color: var(--text-faint); font-size: 11px; }
-.learning-teaching-start p { margin: 9px 0 0; font-size: 13px; line-height: 1.8; }
-.learning-teaching-start p[lang="ja"] { font-size: 17px; }
-.learning-source-preview-heading { display: flex; flex-wrap: wrap; gap: 9px 16px; align-items: baseline; margin-bottom: 13px; }
-.learning-source-preview-heading strong { font-size: 13px; font-weight: 600; }
-.learning-source-preview-heading span { color: var(--muted); font-size: 11px; }
-.learning-source-summary { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 7px 12px; margin: 0 0 14px; font-size: 13px; line-height: 1.8; }
-.learning-source-summary dt { color: var(--muted); font-size: 11px; }
-.learning-source-summary dd { margin: 0; }
-.learning-source-revisit > summary, .learning-source-reason > summary { cursor: pointer; color: var(--green); font-size: 12px; line-height: 1.8; }
-.learning-source-revisit[open] > summary { margin-bottom: 13px; }
-.learning-source-reliability { font-size: 12px; line-height: 1.8; margin: 12px 0 0; color: var(--text-tertiary); }
-.learning-source-quick-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 17px; }
-.learning-source-quick-pair > div { min-width: 0; padding: 0 12px 0 0; }
-.learning-source-quick-pair > div + div { border-left: 1px solid var(--line-soft); padding: 0 0 0 17px; }
-.learning-source-quick-pair small { color: var(--text-faint); font-size: 10px; }
-.learning-source-quick-pair p { margin: 6px 0 0; font-size: 19px; line-height: 1.75; overflow-wrap: anywhere; white-space: pre-wrap; }
-.learning-source-basis { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 5px 9px; margin: 14px 0 0; font-size: 11px; line-height: 1.8; }
-.learning-source-basis dt { color: var(--text-faint); }
-.learning-source-basis dd { color: var(--text-tertiary); margin: 0; }
-.learning-source-preview .learning-evidence { margin-top: 10px; padding-top: 10px; font-size: 11px; }
-.learning-section-label { margin: 0 0 9px; font-size: 13px; font-weight: 600; color: var(--muted); }
-.learning-extra-reasons { margin-top: 14px; padding-top: 11px; border-top: 1px solid var(--line-soft); }
-.learning-extra-reasons summary, .learning-collocation-details summary, .learning-inline-example summary, .learning-natural summary, .learning-recap > summary { cursor: pointer; color: var(--green); font-size: 12px; line-height: 1.8; }
-.learning-collocation-details { margin: 13px 0; }
-.learning-inline-example { margin-top: 13px; }
-.learning-natural summary { font-size: 13px; }
-.learning-card-position { display: flex; align-items: baseline; gap: 16px; justify-content: space-between; margin-bottom: 16px; }
-.learning-card-position strong { font-size: 13px; font-weight: 600; }
-.learning-card-position span { font-size: 11px; color: var(--muted); }
-.learning-card-nav, .learning-step-nav { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 20px; }
-.learning-card-nav button, .learning-step-nav button, .learning-reveal-example { border: 1px solid var(--line); border-radius: 5px; padding: 9px 13px; background: var(--surface); color: var(--green); font-size: 12px; line-height: 1.5; cursor: pointer; }
-.learning-card-nav button:disabled, .learning-step-nav button:disabled { opacity: .4; cursor: default; }
-.learning-card-nav button:focus-visible, .learning-step-nav button:focus-visible, .learning-reveal-example:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
-.learning-step-nav { border-top: 1px solid var(--line-soft); padding-top: 18px; margin-top: 24px; }
-.learning-step-nav span { color: var(--text-faint); font-size: 11px; }
-.learning-example-instruction { margin: 0 0 15px; color: var(--text-faint); font-size: 12px; line-height: 1.9; }
-.learning-example-card { padding: 20px; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 8px; }
-.learning-example-card > small { color: var(--text-faint); font-size: 11px; }
-.learning-example-chinese { margin: 10px 0 19px; font-size: 17px; line-height: 1.9; }
-.learning-example-japanese { margin-top: 18px; padding: 16px 0 0; border-top: 1px solid var(--line-soft); font-size: 20px; line-height: 1.9; white-space: pre-wrap; }
-.learning-recap > summary { font-weight: 600; }
-.learning-recap[open] > summary { margin-bottom: 13px; }
+.learning-contrast-note { display: flex; gap: 10px; align-items: baseline; margin: 12px 0 0; font-size: 13px; line-height: 1.8; }
+.learning-examples > p { margin: 0 0 15px; color: var(--text-faint); font-size: 12px; }
+.learning-examples section { display: flex; gap: 15px; padding: 15px 0; border-bottom: 1px solid var(--line-soft); }
+.learning-examples section small { padding-top: 6px; color: var(--text-disabled); font-size: 11px; }
+.learning-examples section p { margin: 0 0 5px; font-size: 18px; line-height: 1.7; }
+.learning-examples section span { color: var(--text-tertiary); font-size: 12px; line-height: 1.75; }
 .learning-point-nav { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--line-soft); background: var(--surface-raised-solid); }
 .learning-point-nav span { font-size: 11px; color: var(--text-faint); }
 .learning-point-nav button { color: var(--green); background: transparent; border: 0; padding: 5px 0; font-size: 12px; cursor: pointer; text-align: left; }
@@ -170,61 +119,6 @@
 .textbook-prose .reader-markdown-table :is(th, td) { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line-soft); line-height: 1.8; vertical-align: top; overflow-wrap: anywhere; }
 .textbook-prose .reader-markdown-table th { background: var(--success-wash); font-weight: 600; }
 .textbook-prose .reader-markdown-table tr:last-child td { border-bottom: 0; }
-/* 知识点入口常驻，当前任务独占卡片；长文和证据继续按需展开。 */
-.textbook-heading-module { margin-bottom: 18px; }
-.textbook-heading-module h1 { margin: 5px 0; font-size: 16px; line-height: 1.5; }
-.textbook-heading-module p { font-size: 12px; }
-.learning-overview { padding: 0; }
-.learning-overview-title > small { color: var(--green); font-size: 11px; font-weight: 600; }
-.learning-overview-title p { max-width: 72ch; margin: 7px 0 14px; font-size: 13px; line-height: 1.7; }
-.learning-overview-more > summary { color: var(--green); font-size: 12px; line-height: 1.7; cursor: pointer; }
-.learning-point-picker { margin-top: 14px; }
-.learning-point-picker > :is(small, p) { display: block; margin: 0 0 8px; color: var(--text-tertiary); font-size: 12px; line-height: 1.6; }
-.learning-point-picker > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; cursor: pointer; font-size: 12px; }
-.learning-point-picker > summary > span { color: var(--green); }
-.learning-point-picker > summary strong { font-size: 12px; font-weight: 500; }
-.learning-point-picker > summary small { margin-left: auto; color: var(--text-faint); font-size: 11px; }
-.learning-point-picker .learning-point-grid { margin-top: 8px; }
-/* 摘要是证据边界或学习关系，不用成功/错误色预先给表达定性。 */
-.learning-point-brief { margin: 0 22px 17px; padding: 13px 15px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--surface); }
-.learning-point-brief > small { display: block; color: var(--text-tertiary); font-size: 12px; font-weight: 600; line-height: 1.6; }
-.learning-point-brief dl { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 7px 12px; margin: 8px 0 0; align-items: baseline; }
-.learning-point-brief dt { color: var(--text-tertiary); font-size: 13px; line-height: 1.7; }
-.learning-point-brief dd { min-width: 0; margin: 0; color: var(--ink); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
-.learning-point-brief dd[lang="ja"] { font-size: 19px; }
-.learning-point-brief > p { margin: 9px 0 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.65; }
-.learning-evidence-label { display: flex; gap: 10px; align-items: baseline; margin: 0 24px 17px; font-size: 11px; line-height: 1.7; }
-.learning-evidence-label > span { flex-shrink: 0; color: var(--text-faint); }
-.learning-evidence-label strong { font-weight: 400; color: var(--text-tertiary); }
-.learning-source-drawer { margin-bottom: 19px; }
-.learning-source-drawer > summary { color: var(--green); font-size: 11px; cursor: pointer; }
-.learning-panel .learning-source-preview { margin: 0 0 15px; }
-.learning-source-drawer .learning-source-preview { margin-top: 13px; }
-.learning-takeaway { margin-top: 25px; padding: 17px 19px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--success-wash); }
-.learning-takeaway h4 { margin: 0 0 10px; color: var(--green); font-size: 12px; }
-.learning-takeaway strong { font-size: 16px; line-height: 1.8; font-weight: 600; }
-.learning-takeaway p { margin: 8px 0; font-size: 12px; line-height: 1.9; }
-.learning-takeaway button { border: 0; padding: 6px 0; background: transparent; color: var(--green); cursor: pointer; font-size: 12px; }
-.learning-contrast-prompt { margin: 0 0 18px; padding: 16px 18px; background: var(--paper); border-radius: 8px; }
-.learning-contrast-prompt small { color: var(--text-faint); font-size: 11px; }
-.learning-contrast-prompt p { margin: 8px 0 0; font-size: 17px; line-height: 1.8; }
-.learning-contrast-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.learning-contrast-options > button { display: grid; gap: 10px; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); text-align: left; cursor: pointer; color: var(--ink); min-width: 0; }
-.learning-contrast-options > button[aria-pressed="true"] { border-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
-.learning-contrast-options > button:hover:not(:disabled) { border-color: var(--green); background: var(--paper); }
-.learning-contrast-options > button:disabled { opacity: 1; cursor: default; }
-.learning-contrast-options b { color: var(--text-faint); font-size: 11px; }
-.learning-contrast-options span[lang="ja"] { font-size: 19px; line-height: 1.8; overflow-wrap: anywhere; }
-.learning-contrast-options .learning-option-meaning { font-size: 12px; line-height: 1.8; color: var(--text-tertiary); }
-.learning-contrast-explanation { margin-top: 17px; }
-.learning-contrast-feedback { color: var(--text-tertiary); font-size: 12px; line-height: 1.8; }
-.learning-contrast-feedback p { margin: 5px 0; }
-.learning-card-actions { justify-content: flex-start; }
-.learning-example-japanese > small { display: block; color: var(--text-faint); font-size: 11px; }
-.learning-example-japanese > p { margin: 8px 0 0; }
-.learning-card-empty { color: var(--text-tertiary); font-size: 13px; }
-.learning-contrast-options button:focus-visible, .learning-takeaway button:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
-.learning-point-nav button:focus-visible, .learning-module summary:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 3px; }
 @media (max-width: 900px) {
   .textbook-layout { grid-template-columns: 210px minmax(0, 1fr); gap: 16px; }
   .textbook-heading { align-items: start; flex-direction: column; gap: 15px; }

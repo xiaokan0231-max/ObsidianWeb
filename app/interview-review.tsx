@@ -33,7 +33,6 @@ import {
   hasDeductionLedger,
   parseInterviewAnswerReview,
   REVIEW_DIMENSION_META,
-  renderEvidenceEvaluation,
   type AnswerStrategyTag,
   type InterviewAnswerReview,
   type ReviewDeduction,
@@ -48,22 +47,18 @@ import {
 } from "@/lib/review-feedback";
 // タグのラベルも「何場で癖とみなすか」の判定も、vault の 面接傾向_横断 を生成する側と
 // 同じものを使う。二重に持つと Web の表示と generated ノートが黙って割れる
-import { STRATEGY_TREND_META, isRepeatedAcrossInterviews, interviewEvidenceScores } from "@/lib/interview-trends.mjs";
+import { STRATEGY_TREND_META, isRepeatedAcrossInterviews } from "@/lib/interview-trends.mjs";
 import {
   groupReviewsByCompany,
   historicalDimensionAverages,
   reviewScoreBand,
-  reviewDisplayScore,
   reviewScoreTimeline,
   type DimensionAverages,
   type ReviewScorePoint,
   type ReviewVisualEntry,
 } from "@/lib/review-visual";
-import MarkdownDocument from "./markdown-document";
 import { CountUp } from "./count-up";
-import { InterviewReassessmentEntry, assessmentIssueCopy, findInterviewReassessment } from "./interview-reassessment-entry";
 import { RadarChart, type RadarSeries } from "./radar-chart";
-import ReviewCompanyAnalysis from "./review-company-analysis";
 
 // 面接復盤：整理稿（派生層）を読む・批注（事実層）へ追記する、の2操作だけを持つ。
 // 整理稿の中身をここで書き換える経路は意図的に存在しない（唯一writer表を参照）。
@@ -169,61 +164,6 @@ const FILTER_LABELS: { id: Filter; label: string; shortcut: string }[] = [
 
 // 这一轮新加的界面文案。共用的菜单词表（lib/ui-menu-labels）照旧兜底，这里只放本页独有的。
 const REVIEW_COPY_JA: Record<string, string> = {
-  "下一步": "次にすること",
-  "查看原文与评价": "原文・評価を見る",
-  "新版有据评分": "根拠付きスコア",
-  "局部评分 · 无总分": "一部のみ評価",
-  "旧分 · 不同口径": "以前のスコア",
-  "面试复盘": "面接の振り返り",
-  "选择一场面试，阅读原文或查看评价。": "面接を選んで、原文や評価を確認できます。",
-  "跨面试回答趋势": "複数の面接に共通する課題",
-  "查看反复出现的问题": "繰り返す課題を見る",
-  "跨面试重点": "複数の面接から次の準備へ",
-  "查看完整建议与依据": "提案と根拠を詳しく見る",
-  "查看证据 →": "根拠を見る →",
-  "重评总索引 →": "評価の一覧 →",
-  "跨场行动建议 →": "次の準備・練習 →",
-  "把不同公司的面谈放在一起看": "企業ごとの面談を比較する",
-  "进入横向对照 →": "面談を比較する →",
-
-  "查看之前的面谈导读": "以前の面談のまとめを見る",
-  "面试评价": "面接の評価",
-  "这场面试的表现": "今回の面接での回答",
-  "各项表现": "項目別の評価",
-  "问题理解": "質問の理解",
-  "覆盖完整度": "回答の網羅性",
-  "直接性": "答えの明確さ",
-  "证据可信度": "根拠の確かさ",
-  "风险控制": "リスクへの配慮",
-  "暂无法判断": "まだ判断できません",
-  "现有材料不足以给整场评分；可以查看具体回答。": "全体の採点に必要な資料が足りません。個々の回答は確認できます。",
-  "分数反映这场有记录的回答，结合下面的具体内容一起看。": "スコアは記録のある回答についての評価です。具体的な内容と合わせて確認してください。",
-  "值得改进的地方": "改善したい回答",
-  "建议": "提案",
-  "优先改进": "先に取り組む",
-  "下次可以这样做": "次回に試すこと",
-  "查看这段原文 →": "この場面の原文を見る →",
-  "这次评价没有列出需要优先纠正的回答。后续准备与确认事项可以在全文理解中查看。": "優先して直す回答は挙げられていません。次の準備や確認事項は「全文を理解する」で確認できます。",
-  "看看下一步怎么准备 →": "次の準備を確認する →",
-  "完整评价 →": "評価の全文 →",
-  "跨场练习建议 →": "複数の面接から練習を考える →",
-  "查看评价依据": "評価の根拠を見る",
-  "分数怎么算的": "スコアの計算方法",
-  "查看之前的评价 ↗": "以前の評価を見る ↗",
-  "哪些内容暂时不能判断": "まだ判断できないこと",
-  "查看具体表现与下一步建议": "具体的な回答と次の準備を確認",
-  "查看评价与建议": "評価・提案を見る",
-  "原文阅读": "原文を読む",
-  "全文理解": "全文を理解する",
-  "回答评价": "回答を評価する",
-  "有据评分": "根拠付きスコア",
-  "评分与主要问题": "スコア・主な課題を確認",
-  "收起详情，返回阅读": "詳細を閉じて読む",
-  "批注与筛选": "注釈・絞り込み",
-  "句": "文",
-  "待裁定点": "確認待ち",
-  "材料与诊断见新版报告": "資料と評価は新しいレポートへ",
-  "未评估": "未評価",
   "准备稿 ↗": "準備資料 ↗",
   "原笔记 ↗": "元のノート ↗",
   "译文": "訳文",
@@ -338,26 +278,12 @@ async function postReviewWrite<T extends WriteResponse = WriteResponse>(
   }
 }
 
-/** 旧导读只供历史核对，默认收起，避免与上方新版诊断混成同一份评价。 */
-export function ReviewIntroduction({ review, hidden = false }: { review: InterviewAnswerReview; hidden?: boolean }) {
-  const historical = review.evaluationMode !== "evidence" && String(review.evaluationMode) !== "scored_evidence";
-  const paragraphs = review.overviewZh?.split(/\n\s*\n/).filter(Boolean)
-    .map((paragraph, index) => <p key={index}>{paragraph}</p>);
-  return <section className="rv-review-introduction" aria-label={historical ? "旧版综合导读（历史）" : "综合导读"} hidden={hidden}>
-    <h2>{historical ? "旧版综合导读（历史）" : "综合导读"}</h2>
-    {historical ? <>
-      <p>这是原有报告的历史内容，保留原文供核对，不作为上方新版证据评价。</p>
-      <details><summary>展开旧版导读</summary>{paragraphs}</details>
-    </> : paragraphs}
-  </section>;
-}
-
 function InterviewReview({
   notes,
   onVaultChanged,
   onNoteWritten,
   initialSelectedKey = null,
-  initialPanel = "source",
+  initialPanel = "advisory",
   initialBlockId = null,
   initialSentenceId = null,
   onOpenEvidence,
@@ -389,13 +315,12 @@ function InterviewReview({
   const docs = useMemo(() => buildDocs(notes), [notes]);
   // 雷达的「历史平均」描边：与 vault 的 面接傾向_横断 同一套平均算法，只是去掉了本场。
   const trendEntries = useMemo(
-    () => docs.map((item) => ({ key: item.key, company: item.company, date: item.date, round: item.round, review: item.deepReview, reassessment: findInterviewReassessment(notes, item.note.path) })),
-    [docs, notes],
+    () => docs.map((item) => ({ key: item.key, company: item.company, date: item.date, round: item.round, review: item.deepReview })),
+    [docs],
   );
 
   const [selectedKey, setSelectedKey] = useState<string | null>(initialSelectedKey);
   const [panel, setPanel] = useState<"advisory" | "quality" | "source">(initialPanel);
-  const [assessmentOpen, setAssessmentOpen] = useState(initialPanel === "quality");
   const savedMode = useSyncExternalStore(subscribeMode, readMode, () => "study" as Mode);
   const [modeOverride, setModeOverride] = useState<"compare" | null>(initialPanel === "source" && initialBlockId ? "compare" : null);
   const mode = modeOverride ?? savedMode;
@@ -440,18 +365,9 @@ function InterviewReview({
   const [writeAlerts, setWriteAlerts] = useState<Record<string, WriteAlert>>({});
   const inFlightAnnotations = useRef(new Set<string>());
 
-  const sourceScrollTop = useRef(0);
-  const panelScrollTops = useRef<Record<string, number>>({});
-
   const switchMode = (next: Mode) => {
     setModeOverride(null);
-    if (next === "novel" && mode !== "novel") {
-      previousMode.current = mode;
-      sourceScrollTop.current = window.scrollY;
-    }
-    if (mode === "novel" && next !== "novel") {
-      window.requestAnimationFrame(() => restoreWindowScroll(sourceScrollTop.current));
-    }
+    if (next === "novel" && mode !== "novel") previousMode.current = mode;
     window.localStorage.setItem(MODE_KEY, next);
     window.dispatchEvent(new Event(MODE_EVENT));
   };
@@ -751,8 +667,6 @@ function InterviewReview({
     return (
       <>
         <ReviewIndex
-          notes={notes}
-          onOpenNote={onOpenNote}
           loading={loading}
           docs={docs}
           trendEntries={trendEntries}
@@ -768,8 +682,7 @@ function InterviewReview({
             setErrOpen(new Set());
             setRawOpen(new Set());
             focusDeepReview(reviewBlockId ?? null);
-            setPanel(reviewBlockId ? "quality" : "source");
-            setAssessmentOpen(Boolean(reviewBlockId));
+            setPanel(reviewBlockId ? "quality" : "advisory");
             if (reviewBlockId) switchMode("study");
             resetAnnotationDraft();
             listScrollTop.current = window.scrollY;
@@ -886,7 +799,6 @@ function InterviewReview({
       return;
     }
     setPanel("source");
-    setAssessmentOpen(false);
     switchMode("compare");
     setFilter("all");
     setPatternFilter(null);
@@ -915,7 +827,7 @@ function InterviewReview({
   );
 
   return (
-    <div className="review-view rv-reader-page">
+    <div className="review-view">
       <header className="rv-toolbar">
         <button
           className="rv-back"
@@ -924,9 +836,8 @@ function InterviewReview({
         <div className="rv-title">
           <h1>{doc.company}</h1>
           <span>{doc.round} · {doc.date}{doc.result ? ` · ${doc.result}` : ""}</span>
-          {(
+          {(onOpenSession || onOpenNote) && (
             <span className="rv-title-links">
-              <ReviewCompanyAnalysis notes={notes} source={doc.note} company={doc.company} filter={filter} pattern={patternParam} />
               {onOpenSession && (
                 <button
                   type="button"
@@ -937,23 +848,6 @@ function InterviewReview({
             </span>
           )}
         </div>
-
-      </header>
-
-      <nav className="rv-section-tabs" aria-label={t("面试复盘内容")}>
-        {([['source', '原文阅读'], ['advisory', '全文理解'], ['quality', '回答评价']] as const).map(([value, label]) => <button type="button" key={value}
-          aria-pressed={panel === value} onClick={() => {
-            panelScrollTops.current[panel] = window.scrollY;
-            setPanel(value);
-            setAssessmentOpen(value === "quality");
-            if (value === "quality") setDeepOpen(true);
-            if (value === "source" && mode === "novel") switchMode("study");
-            window.requestAnimationFrame(() => restoreWindowScroll(panelScrollTops.current[value] ?? 0));
-          }}>{t(label)}</button>)}
-        <button type="button" className="rv-cross-link" onClick={onOpenInsights}>{t("横向对照 ↗")}</button>
-      </nav>
-      <div className="rv-reader-tools" hidden={panel !== "source"}>
-        <span>{t("阅读模式")}</span>
         <div className="rv-mode-wrap" hidden={panel !== "source"}>
           <div className="rv-mode" role="tablist" aria-label={t("阅读模式")}>
             <button
@@ -977,25 +871,24 @@ function InterviewReview({
             onClick={() => switchMode("novel")}
           >{t("全文阅读")}<small>{t("中文 / 日本語")}</small></button>
         </div>
-      </div>
-      <InterviewReassessmentEntry notes={notes} sourcePath={doc.note.path} onOpenNote={onOpenNote} t={t}
-        expanded={assessmentOpen} onExpandedChange={setAssessmentOpen} onOpenEvidence={onOpenEvidence}
-        onOpenUnderstanding={() => { setPanel("advisory"); setAssessmentOpen(false); window.scrollTo({ top: 0 }); }} onClose={() => {
-          if (panel === "quality") {
-            setPanel("source");
-            window.requestAnimationFrame(() => restoreWindowScroll(panelScrollTops.current.source ?? 0));
-          }
-        }} />
+      </header>
 
-      {doc.deepReview?.overviewZh && panel === "advisory" && <details className="rv-previous-introduction"><summary>{t("查看之前的面谈导读")}</summary><ReviewIntroduction review={doc.deepReview} /></details>}
+      <nav className="rv-section-tabs" aria-label={t("面试复盘内容")}>
+        {([['advisory', '顾问解读'], ['quality', '回答质量'], ['source', '原文与语言']] as const).map(([value, label]) => <button type="button" key={value}
+          aria-pressed={panel === value} onClick={() => { setPanel(value); if (value === "quality") setDeepOpen(true); if (value === "source" && mode === "novel") switchMode("study"); }}>{t(label)}</button>)}
+        <button type="button" className="rv-cross-link" onClick={onOpenInsights}>{t("横向对照 ↗")}</button>
+      </nav>
+
+      {doc.deepReview?.overviewZh && <section className="rv-review-introduction" aria-label="综合导读" hidden={panel === "source"}>
+        <h2>综合导读</h2>
+        {doc.deepReview.overviewZh.split(/\n\s*\n/).filter(Boolean).map((paragraph, index) => <p key={index}>{paragraph}</p>)}
+      </section>}
 
       <div className="rv-panel" hidden={panel !== "advisory"}><InterviewAdvisory key={doc.key} report={doc.deepReview?.advisory} notes={notes} notePath={doc.note.path}
         onOpenEvidence={onOpenEvidence} onVaultChanged={onVaultChanged} onNoteWritten={onNoteWritten} onOpenInsights={onOpenInsights} /></div>
 
       <div className="rv-panel" hidden={panel !== "source"}>
 
-      <details className="rv-source-tools">
-      <summary>{t("批注与筛选")} · {doc.stats.sentenceTotal} {t("句")} · {unresolvedDecisionTasks.length} {t("待裁定点")}</summary>
       <section className="rv-stats">
         <div className="rv-counts">
           <div><strong>{doc.stats.sentenceTotal}</strong><span>文</span></div>
@@ -1070,17 +963,16 @@ function InterviewReview({
         </button>
       </section>
 
-      </details>
       </div>
       <div className="rv-panel" hidden={panel !== "quality"}>
-      {!findInterviewReassessment(notes, doc.note.path) && <section className={`rv-deep-stage ${unresolvedDecisionTasks.length > 0 ? "locked" : "ready"}`}>
+      <section className={`rv-deep-stage ${unresolvedDecisionTasks.length > 0 ? "locked" : "ready"}`}>
         <div className="rv-deep-stage-copy">
           <span>第二阶段 · 回答质量</span>
           <h2>
             {unresolvedDecisionTasks.length > 0
               ? "完成证据裁定后解锁"
               : doc.deepReview
-                ? reviewDisplayScore({ key: doc.key, company: doc.company, date: doc.date, round: doc.round, review: doc.deepReview }).score === null ? "回答评价 · 无整场总分" : `${String(doc.deepReview.evaluationMode) === "scored_evidence" ? "新版有据评分" : "旧版整体评价（不同口径）"} ${Math.round(doc.deepReview.overallScore as number)} / 100`
+                ? `整体评价 ${Math.round(doc.deepReview.overallScore)} / 100`
                 : "可以生成深度复盘了"}
           </h2>
           <p>
@@ -1106,7 +998,7 @@ function InterviewReview({
                   : "生成深度复盘 →"}
           </button>
         </div>
-        {doc.deepReview?.dimensions && doc.deepReview.evaluationMode !== "evidence" && (
+        {doc.deepReview?.dimensions && (
           <section
             className={`rv-score-glance${qualityReveal.active ? " rv-reveal" : ""}`}
             aria-label="五维评分概览"
@@ -1114,8 +1006,8 @@ function InterviewReview({
             <header>
               <strong>五维评分</strong>
               <span>
-                {String(doc.deepReview.evaluationMode) === "scored_evidence" ? "有据参考线 75 / 85 / 95，减去具体事件并应用上限；未评估不计分" : hasDeductionLedger(doc.deepReview.dimensions)
-                  ? "历史旧口径：每维从 100 起扣 · 不与新版比较能力涨跌"
+                {hasDeductionLedger(doc.deepReview.dimensions)
+                  ? "每维都从 100 起扣 · 点开任意一维看扣在哪一题"
                   : "各占 20% · 旧格式报告没有扣分明细，重新生成后可见"}
               </span>
             </header>
@@ -1128,7 +1020,7 @@ function InterviewReview({
             <div>
               {(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).map((key, index) => {
                 const dimension = doc.deepReview?.dimensions?.[key];
-                const score = dimension?.level !== "not_assessed" && typeof dimension?.score === "number" && Number.isFinite(dimension.score) ? Math.round(dimension.score) : null;
+                const score = Math.round(dimension?.score ?? 0);
                 const band = reviewScoreBand(score);
                 const deductions = dimension?.deductions;
                 const top = (deductions ?? []).slice(0, 2);
@@ -1137,7 +1029,7 @@ function InterviewReview({
                     <button
                       type="button"
                       disabled={!deductions}
-                      aria-label={`${REVIEW_DIMENSION_META[key].label} ${score === null ? "未评估" : `${score} 分`}，查看扣分明细`}
+                      aria-label={`${REVIEW_DIMENSION_META[key].label} ${score} 分，查看扣分明细`}
                       onClick={() => {
                         setDeepOpen(true);
                         setDeepFocusDimension(key);
@@ -1145,13 +1037,13 @@ function InterviewReview({
                     >
                       <div>
                         <span>{REVIEW_DIMENSION_META[key].label}</span>
-                        {score === null ? <strong>未评估</strong> : <CountUp key={qualityReveal.round} as="strong" value={score} />}
+                        <CountUp key={qualityReveal.round} as="strong" value={score} />
                       </div>
                       <i className="rv-dimension-track" aria-hidden="true">
-                        <em className={band} style={{ width: `${score ?? 0}%`, "--rv-index": index } as CSSProperties} />
+                        <em className={band} style={{ width: `${score}%`, "--rv-index": index } as CSSProperties} />
                       </i>
                       {deductions && (deductions.length === 0 ? (
-                        <p className="rv-glance-clean">没有独立扣分；分数仍由证据参考线与上限决定</p>
+                        <p className="rv-glance-clean">没有找到扣分点</p>
                       ) : (
                         <ul className="rv-glance-deductions">
                           {top.map((item, index) => (
@@ -1173,9 +1065,9 @@ function InterviewReview({
             </div>
           </section>
         )}
-      </section>}
+      </section>
 
-      {doc.deepReview && !findInterviewReassessment(notes, doc.note.path) && deepOpen && (
+      {doc.deepReview && deepOpen && (
         <DeepReviewPanel
           review={doc.deepReview}
           queuedBlockIds={doc.practiceBlockIds}
@@ -1209,6 +1101,7 @@ function InterviewReview({
         </p>
         {!focused && visibleBlocks.length > 0 && (
           <div>
+                <button className="rv-enter-novel" onClick={() => switchMode("novel")}>{t("全文阅读 · 中文 / 日本語")}</button>
                 <button onClick={() => setOpenBlocks(new Set(visibleBlockIds))}>{t("展开全部")}</button>
                 <button onClick={() => setOpenBlocks(new Set())}>{t("收起全部")}</button>
           </div>
@@ -1398,7 +1291,7 @@ function FiveDimensionRadar({
     id: "current",
     label: t("本场"),
     values: keys.map((key) => {
-      const score = review.dimensions?.[key]?.level === "not_assessed" ? null : review.dimensions?.[key]?.score;
+      const score = review.dimensions?.[key]?.score;
       return typeof score === "number" ? Math.round(score) : null;
     }),
     tone: "primary",
@@ -1437,7 +1330,6 @@ function DeductionRow({
         <em title={DEDUCTION_SEVERITY_META[item.severity].hintZh}>
           {DEDUCTION_SEVERITY_META[item.severity].label}
         </em>
-        {item.recovery && <em>{({ unresolved: "未恢复", partial: "部分恢复", repaired: "已恢复", unknown: "恢复未知" })[item.recovery]}</em>}
         {dimensionLabel && <u>{dimensionLabel}</u>}
         {item.blockId && (
           <button type="button" onClick={() => onBlockClick(item.blockId)}>
@@ -1464,7 +1356,7 @@ function DeductionRow({
   );
 }
 
-export function DeepReviewPanel({
+function DeepReviewPanel({
   review,
   queuedBlockIds,
   practiceBusy,
@@ -1509,11 +1401,6 @@ export function DeepReviewPanel({
     setLastFocusDimension(focusDimension);
     if (focusDimension) setDeductionView("dimension");
   }
-  const evidenceMode = review.evaluationMode === "evidence";
-  const scoredMode = String(review.evaluationMode) === "scored_evidence";
-  const displayScore = reviewDisplayScore({ key: "", company: "", date: "", round: "", review });
-  const scoring = review.scoring;
-  const evidenceScores = interviewEvidenceScores({ review });
   const ledger = hasDeductionLedger(review.dimensions);
   const flatDeductions = allDeductions(review.dimensions);
   const lostPoints = flatDeductions.reduce((total, item) => total + item.points, 0);
@@ -1557,10 +1444,10 @@ export function DeepReviewPanel({
   return (
     <section className="rv-deep-report">
       <header>
-        {!evidenceMode && <div className="rv-deep-score">
-          {displayScore.score === null ? <strong>—</strong> : <CountUp key={revealRound} as="strong" value={Math.round(displayScore.score)} />}
-          <span>{scoredMode ? displayScore.score === null ? "未评估整场总分" : "/ 100（新版有据评分）" : "/ 100（历史旧口径）"}</span>
-        </div>}
+        <div className="rv-deep-score">
+          <CountUp key={revealRound} as="strong" value={Math.round(review.overallScore)} />
+          <span>/ 100</span>
+        </div>
         <div>
           <span>ANSWER QUALITY REVIEW</span>
           <h2>整场回答评价</h2>
@@ -1568,10 +1455,7 @@ export function DeepReviewPanel({
         </div>
         <small>{review.model} · {review.generatedAt.slice(0, 10)}</small>
       </header>
-      {scoredMode && <section className="rv-score-source" aria-label="新版评分来源"><p>{scoring?.formulaZh || "已评估维度从有据参考线75 / 85 / 95减去事件25 / 5 / 2；缺证不计分。"}</p>{scoring?.cap != null && <p>未恢复的严重问题触发总分上限：{scoring.cap}。</p>}</section>}
-      {!evidenceMode && !scoredMode && <p>历史旧分采用不同口径，不与新版解读为能力涨跌。</p>}
-      {evidenceMode && <section aria-label="有据评价"><MarkdownDocument content={renderEvidenceEvaluation(review)} onWikiLink={() => {}} /></section>}
-      {review.dimensions && !evidenceMode && !ledger && (
+      {review.dimensions && !ledger && (
         <section className="rv-score-source" aria-label="总分来源">
           <header>
             <h3>总分来源</h3>
@@ -1586,11 +1470,11 @@ export function DeepReviewPanel({
               return (
                 <article key={key}>
                   <span>{REVIEW_DIMENSION_META[key].label}</span>
-                  <strong>{evidenceScores.dimensions[key] === null && scoredMode ? "未评估" : dimension?.level !== "not_assessed" && typeof dimension?.score === "number" ? Math.round(dimension.score) : "未评估"}</strong>
+                  <strong>{Math.round(dimension?.score ?? 0)}</strong>
                   <i className="rv-dimension-track" aria-hidden="true">
                     <em
-                      className={reviewScoreBand(dimension?.level === "not_assessed" ? null : dimension?.score)}
-                      style={{ width: `${Math.round(dimension?.level === "not_assessed" ? 0 : dimension?.score ?? 0)}%` }}
+                      className={reviewScoreBand(dimension?.score ?? 0)}
+                      style={{ width: `${Math.round(dimension?.score ?? 0)}%` }}
                     />
                   </i>
                   <p>{dimension?.rationaleZh}</p>
@@ -1613,13 +1497,14 @@ export function DeepReviewPanel({
         </section>
       )}
 
-      {review.dimensions && !evidenceMode && ledger && (
+      {review.dimensions && ledger && (
         <section className="rv-ledger" aria-label="扣分明细">
           <header>
             <div>
               <h3>扣分明细</h3>
               <p>
-                {scoredMode ? "有据参考线75 / 85 / 95，减去具体事件25 / 5 / 2并应用上限；没有扣分不等于满分，缺证维度未评估。" : "历史旧口径从100起扣，保留原账本；不与新版比较能力涨跌。"}
+                每一维都从 100 分开始。只有能指到具体问题、具体句子的失分才扣得动分——
+                看不到扣分项，就说明这一维没有被扣。
               </p>
             </div>
             <div className="rv-ledger-total">
@@ -1644,29 +1529,26 @@ export function DeepReviewPanel({
             <div className="rv-ledger-dimensions">
               {(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).map((key) => {
                 const dimension = review.dimensions?.[key];
-                const score = dimension?.level !== "not_assessed" && typeof dimension?.score === "number" && Number.isFinite(dimension.score) ? Math.round(dimension.score) : null;
+                const score = Math.round(dimension?.score ?? 0);
                 const deductions = dimension?.deductions ?? [];
-                const basis = dimension as typeof dimension & { baseScore?: number | null; basisZh?: string; positiveEvidenceBlockIds?: string[] };
                 return (
                   <article key={key} id={`rv-dimension-${key}`}>
                     <header>
                       <h4>{REVIEW_DIMENSION_META[key].label}</h4>
                       <p className="rv-ledger-formula">
-                        {/* 上限可能低于扣分后的结果，不能把它写成不成立的等式。 */}
-                        {score !== null && deductions.length > 0 && (
+                        {/* 减分为零时不写「100 = 100」这种废式子，满分自己会说话 */}
+                        {deductions.length > 0 && (
                           <>
-                            <span>{scoredMode ? basis?.baseScore ?? "参考线" : 100}</span>
+                            <span>100</span>
                             {deductions.map((item, index) => (
                               <em key={`${item.blockId}-${index}`}>−{item.points}</em>
                             ))}
-                            <i>{scoredMode && typeof basis?.baseScore === "number" && basis.baseScore - deductions.reduce((total, item) => total + item.points, 0) !== score ? "→ 上限后" : "="}</i>
+                            <i>=</i>
                           </>
                         )}
-                        <strong>{score === null ? "未评估" : score}</strong>
+                        <strong>{score}</strong>
                       </p>
                     </header>
-                    {scoredMode && basis?.basisZh && <p className="rv-ledger-rationale">{basis.basisZh}</p>}
-                    {scoredMode && basis?.positiveEvidenceBlockIds?.length ? <p>正面依据：{basis.positiveEvidenceBlockIds.map((blockId) => <button key={blockId} type="button" onClick={() => jumpToReviewBlock(blockId)}>{blockId}</button>)}</p> : null}
                     {deductions.length > 0 ? (
                       <ol className="rv-deduction-list">
                         {deductions.map((item, index) => (
@@ -1679,7 +1561,7 @@ export function DeepReviewPanel({
                         ))}
                       </ol>
                     ) : (
-                      <p className="rv-ledger-clean">{score === null ? "本维未评估；缺证不补成0或100。" : scoredMode ? "没有独立扣分；本维仍按正面证据参考线与上限评分。" : "历史账本未记扣分，不能据此证明未检验能力。"}</p>
+                      <p className="rv-ledger-clean">这一维没有找到可举证的扣分点，保持满分。</p>
                     )}
                     {dimension?.rationaleZh && (
                       <p className="rv-ledger-rationale">{dimension.rationaleZh}</p>
@@ -2001,9 +1883,7 @@ function ReviewCompanyTimeline({
   docs,
   onSelect,
   t,
-  notes,
 }: {
-  notes: Note[];
   docs: ReviewDoc[];
   onSelect: (key: string) => void;
   t: (label: string) => string;
@@ -2012,28 +1892,22 @@ function ReviewCompanyTimeline({
   return (
     <div className="rv-company-lines">
       {groups.map((group) => (
-        <section key={group.company} className="rv-company-line">
+        // 轮次多的公司横跨两列，一两轮的公司并排放：单轮也占满整行时右侧大半是空的。
+        <section key={group.company} className={`rv-company-line${group.rounds.length + (group.outcome ? 1 : 0) >= 3 ? " wide" : ""}`}>
           <header>
             <h3>{group.company}</h3>
             <span>{group.rounds.length} {t("轮")} · {group.latestDate}</span>
           </header>
           <ol>
             {group.rounds.map((item) => {
-              const reassessment = findInterviewReassessment(notes, item.note.path);
-              const display = reviewDisplayScore({ ...item, review: item.deepReview, reassessment });
-              const score = display.score;
+              const score = item.deepReview ? Math.round(item.deepReview.overallScore) : null;
               return (
                 <li key={item.key}>
                   <button type="button" onClick={() => onSelect(item.key)}>
-                    <ScoreRing score={score} label={t(display.label)} />
+                    <ScoreRing score={score} label={score === null ? t("未复盘") : ""} />
                     <span className="rv-company-round">
                       <strong>{item.round || "—"}</strong>
                       <small>{item.date}</small>
-                      {reassessment && Array.isArray(reassessment.frontmatter.priority_issues) && (() => {
-                        const copy = assessmentIssueCopy(getString(reassessment.frontmatter.priority_issues[0]));
-                        return <span className="rv-company-summary">{getString(reassessment.frontmatter.priority_issues[0]).startsWith("严重") && <em>{t("优先改进")}</em>}<span>{copy.observation.split(/[。；]/)[0]}</span>{copy.action && <small>{t("下一步")}：{copy.action.split(/[。；]/)[0]}</small>}</span>;
-                      })()}
-                      <span className="rv-company-open">{t("查看原文与评价")} →</span>
                     </span>
                   </button>
                 </li>
@@ -2052,16 +1926,12 @@ function ReviewCompanyTimeline({
 }
 
 function ReviewIndex({
-  notes,
-  onOpenNote,
   docs,
   trendEntries,
   onSelect,
   onOpenInsights,
   loading = false,
 }: {
-  notes: Note[];
-  onOpenNote?: (note: Note) => void;
   docs: ReviewDoc[];
   trendEntries: ReviewVisualEntry[];
   onSelect: (key: string, reviewBlockId?: string) => void;
@@ -2071,9 +1941,7 @@ function ReviewIndex({
 }) {
   const t = useReviewCopy();
   const group = useSyncExternalStore(subscribeMode, readIndexGroup, () => "company" as IndexGroup);
-  const hasNewScoring = trendEntries.some((entry) => entry.reassessment ? (entry.reassessment as Note).frontmatter?.evaluation_mode === "scored_evidence" : String(entry.review?.evaluationMode) === "scored_evidence");
-  const scorePoints = useMemo(() => hasNewScoring ? reviewScoreTimeline(trendEntries) : [], [trendEntries, hasNewScoring]);
-  const historicalScorePoints = useMemo(() => reviewScoreTimeline(trendEntries.filter((entry) => String(entry.review?.evaluationMode) !== "scored_evidence").map((entry) => ({ ...entry, reassessment: null }))), [trendEntries]);
+  const scorePoints = useMemo(() => reviewScoreTimeline(trendEntries), [trendEntries]);
   const [selectedTrend, setSelectedTrend] = useState<AnswerStrategyTag | null>(null);
   const aggregate = useMemo(() => {
     const patterns = new Map<string, number>();
@@ -2191,81 +2059,9 @@ function ReviewIndex({
   }
 
   return (
-    <div className="review-view rv-index-page">
-      <header className="rv-index-heading"><h1>{t("面试复盘")}</h1><p>{t("选择一场面试，阅读原文或查看评价。")}</p></header>
-      {docs.length === 0 && loading ? (
-        <ScopeLoading label="整理稿与复盘" />
-      ) : docs.length === 0 ? (
-        <div className="rv-empty">
-          <h2>还没有整理稿</h2>
-          <p>
-            把面试逐字稿交给 Claude 按 <code>_整理稿スペック</code> 生成
-            <code>YYYY-MM-DD_〈回〉_整理稿.md</code> 后，这里会自动出现。
-          </p>
-        </div>
-      ) : (
-        <>
-        <div className="rv-index-switch" role="group" aria-label={t("复盘一览排列方式")}>
-          <button type="button" aria-pressed={group === "company"} onClick={() => saveIndexGroup("company")}>{t("按公司")}</button>
-          <button type="button" aria-pressed={group === "all"} onClick={() => saveIndexGroup("all")}>{t("全部场次")}</button>
-        </div>
-        {group === "company" ? (
-          <ReviewCompanyTimeline notes={notes} docs={docs} onSelect={(key) => onSelect(key)} t={t} />
-        ) : (
-        <div className="rv-cards">
-          {docs.map((doc) => {
-            const open = doc.annotations.filter((item) => item.status === "open").length;
-            const unresolvedTasks = doc.decisionTasks.filter((item) => !item.resolvedBy);
-            const unresolvedSentences = new Set(unresolvedTasks.map((item) => item.sentenceId)).size;
-            const completedTasks = doc.decisionTasks.length - unresolvedTasks.length;
-            const completion = doc.decisionTasks.length
-              ? Math.round((completedTasks / doc.decisionTasks.length) * 100)
-              : 100;
-            const reassessment = findInterviewReassessment(notes, doc.note.path);
-            const display = reviewDisplayScore({ ...doc, review: doc.deepReview, reassessment });
-            const priorityIssue = Array.isArray(reassessment?.frontmatter.priority_issues)
-              ? getString(reassessment.frontmatter.priority_issues[0]) : "";
-            const issueCopy = priorityIssue ? assessmentIssueCopy(priorityIssue) : null;
-            const score = display.score;
-            const scoreBand = reviewScoreBand(score);
-            return (
-              <button key={doc.key} className={`rv-card band-${scoreBand}`} onClick={() => onSelect(doc.key)}>
-                <header>
-                  <div>
-                    <span className="rv-card-date">{doc.date}</span>
-                    <h3>{doc.company}</h3>
-                  </div>
-                  <ScoreRing score={score} label={t(display.label)} />
-                </header>
-                <div className="rv-card-meta">
-                  <span>{doc.round}</span>
-                  {doc.result && <span className={`rv-result ${doc.result === "不採用" ? "bad" : ""}`}>{doc.result}</span>}
-                </div>
-                <p className="rv-card-insight">
-                  {issueCopy ? issueCopy.observation.split(/[。；]/)[0] : getString(reassessment?.frontmatter.diagnostic_conclusion).split(/[。；]/)[0] || doc.deepReview?.evaluation?.conclusionZh || doc.deepReview?.weaknesses[0] || (unresolvedTasks.length > 0
-                    ? `还有 ${unresolvedTasks.length} 个证据裁定点，完成后才能生成深度复盘。`
-                    : "证据裁定已完成，可以生成回答质量复盘。")}
-                </p>
-                {issueCopy?.action && <p className="rv-card-next">{t("下一步")}：{issueCopy.action.split(/[。；]/)[0]}</p>}
-                <div className="rv-card-progress">
-                  <span><i style={{ width: `${completion}%` }} /></span>
-                  <small>裁定 {completedTasks} / {doc.decisionTasks.length}</small>
-                </div>
-                <dl>
-                  <div><dt>文</dt><dd>{doc.stats.sentenceTotal}</dd></div>
-                  <div><dt>我的错误</dt><dd className="warn">{doc.stats.learnerErrors}</dd></div>
-                  <div><dt>待裁定</dt><dd className="pending">{unresolvedSentences}句 · {unresolvedTasks.length}点</dd></div>
-                  <div><dt>批注</dt><dd>{annotationCountLabel(open, doc.annotations.length)}</dd></div>
-                </dl>
-                <span className="rv-card-open">打开复盘 <i aria-hidden="true">→</i></span>
-              </button>
-            );
-          })}
-        </div>
-        )}
-        </>
-      )}
-      {docs.length > 0 && <details className="rv-index-patterns"><summary>{t("跨面试回答趋势")} · {t("查看反复出现的问题")}</summary>
+    <div className="review-view">
+      <section className="rv-insights-entry"><div><h2>把不同公司的面谈放在一起看</h2><p>从企业关注、双方匹配和实际推进条件里，找到下一阶段的方向。</p></div><button type="button" onClick={onOpenInsights}>进入横向对照 →</button></section>
+      {scorePoints.length >= 2 && <ReviewScoreTrend points={scorePoints} onSelect={(key) => onSelect(key)} t={t} />}
       {aggregate.length > 0 && (
         <section className="rv-agg" aria-label="跨面试错误型摘要">
           <span>跨面试错误型 TOP</span>
@@ -2310,11 +2106,72 @@ function ReviewIndex({
         </section>
       )}
 
-      </details>}
-      <InterviewReassessmentEntry notes={notes} onOpenNote={onOpenNote} t={t} />
-      <section className="rv-insights-entry"><div><h2>{t("把不同公司的面谈放在一起看")}</h2><p>从企业关注、双方匹配和实际推进条件里，找到下一阶段的方向。</p></div><button type="button" onClick={onOpenInsights}>{t("进入横向对照 →")}</button></section>
-      {scorePoints.length >= 2 && <section aria-label="新版有据评分趋势"><p>仅比较新版同口径有据评分；分数变化不直接表示能力涨跌。</p><ReviewScoreTrend points={scorePoints} onSelect={(key) => onSelect(key)} t={t} /></section>}
-      {historicalScorePoints.length >= 2 && <details><summary>旧评分历史（不同口径，不能比较能力涨跌）</summary><ReviewScoreTrend points={historicalScorePoints} onSelect={(key) => onSelect(key)} t={t} /></details>}
+      {docs.length === 0 && loading ? (
+        <ScopeLoading label="整理稿与复盘" />
+      ) : docs.length === 0 ? (
+        <div className="rv-empty">
+          <h2>还没有整理稿</h2>
+          <p>
+            把面试逐字稿交给 Claude 按 <code>_整理稿スペック</code> 生成
+            <code>YYYY-MM-DD_〈回〉_整理稿.md</code> 后，这里会自动出现。
+          </p>
+        </div>
+      ) : (
+        <>
+        <div className="rv-index-switch" role="group" aria-label={t("复盘一览排列方式")}>
+          <button type="button" aria-pressed={group === "company"} onClick={() => saveIndexGroup("company")}>{t("按公司")}</button>
+          <button type="button" aria-pressed={group === "all"} onClick={() => saveIndexGroup("all")}>{t("全部场次")}</button>
+        </div>
+        {group === "company" ? (
+          <ReviewCompanyTimeline docs={docs} onSelect={(key) => onSelect(key)} t={t} />
+        ) : (
+        <div className="rv-cards">
+          {docs.map((doc) => {
+            const open = doc.annotations.filter((item) => item.status === "open").length;
+            const unresolvedTasks = doc.decisionTasks.filter((item) => !item.resolvedBy);
+            const unresolvedSentences = new Set(unresolvedTasks.map((item) => item.sentenceId)).size;
+            const completedTasks = doc.decisionTasks.length - unresolvedTasks.length;
+            const completion = doc.decisionTasks.length
+              ? Math.round((completedTasks / doc.decisionTasks.length) * 100)
+              : 100;
+            const score = doc.deepReview ? Math.round(doc.deepReview.overallScore) : null;
+            const scoreBand = reviewScoreBand(score);
+            return (
+              <button key={doc.key} className={`rv-card band-${scoreBand}`} onClick={() => onSelect(doc.key)}>
+                <header>
+                  <div>
+                    <span className="rv-card-date">{doc.date}</span>
+                    <h3>{doc.company}</h3>
+                  </div>
+                  <ScoreRing score={score} label={score === null ? t("未复盘") : "回答分"} />
+                </header>
+                <div className="rv-card-meta">
+                  <span>{doc.round}</span>
+                  {doc.result && <span className={`rv-result ${doc.result === "不採用" ? "bad" : ""}`}>{doc.result}</span>}
+                </div>
+                <p className="rv-card-insight">
+                  {doc.deepReview?.weaknesses[0] ?? (unresolvedTasks.length > 0
+                    ? `还有 ${unresolvedTasks.length} 个证据裁定点，完成后才能生成深度复盘。`
+                    : "证据裁定已完成，可以生成回答质量复盘。")}
+                </p>
+                <div className="rv-card-progress">
+                  <span><i style={{ width: `${completion}%` }} /></span>
+                  <small>裁定 {completedTasks} / {doc.decisionTasks.length}</small>
+                </div>
+                <dl>
+                  <div><dt>文</dt><dd>{doc.stats.sentenceTotal}</dd></div>
+                  <div><dt>我的错误</dt><dd className="warn">{doc.stats.learnerErrors}</dd></div>
+                  <div><dt>待裁定</dt><dd className="pending">{unresolvedSentences}句 · {unresolvedTasks.length}点</dd></div>
+                  <div><dt>批注</dt><dd>{annotationCountLabel(open, doc.annotations.length)}</dd></div>
+                </dl>
+                <span className="rv-card-open">打开复盘 <i aria-hidden="true">→</i></span>
+              </button>
+            );
+          })}
+        </div>
+        )}
+        </>
+      )}
     </div>
   );
 }

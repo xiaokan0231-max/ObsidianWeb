@@ -11,6 +11,7 @@ import {
   getNavigation,
   getSecondaryNavigation,
   getPageCommands,
+  navigationView,
 } from "../app/navigation.ts";
 
 // 新增一页时只改了 app-route 而忘了导航表或 ⌘K，这页就只能靠手敲 URL 进去。
@@ -18,7 +19,7 @@ import {
 test("⌘K 页面命令对每个视图恰好一条", () => {
   const views = PAGE_COMMANDS.map((command) => command.view);
   assert.equal(new Set(views).size, views.length, "没有重复的视图");
-  assert.deepEqual([...views].sort(), [...APP_VIEWS].sort());
+  assert.deepEqual([...views].sort(), [...new Set(APP_VIEWS.map(navigationView))].sort());
 });
 
 test("切换为日语只改变文言，导航归属、视图覆盖和默认入口不变", () => {
@@ -54,14 +55,18 @@ test("切换为日语只改变文言，导航归属、视图覆盖和默认入�
   }
 });
 
-test("日历是导航首项，本人行动有常驻入口且旧总览不复活", () => {
+test("高频日历与面试优先，事项并入最近进展而不增加入口", () => {
   const calendar = NAVIGATION.find((item) => item.target === "calendar");
   assert.ok(calendar);
   assert.equal(NAVIGATION[0], calendar);
   assert.equal(calendar.label, "日历");
   assert.deepEqual(calendar.views, ["calendar", "actions", "activity"]);
-  assert.deepEqual((SECONDARY_NAVIGATION[calendar.id] ?? []).map(item => item.id), ["calendar", "actions", "activity"]);
-  assert.ok(PAGE_COMMANDS.some(command => command.view === "actions" && command.label === "需要你处理"));
+  assert.deepEqual((SECONDARY_NAVIGATION[calendar.id] ?? []).map(item => item.id), ["calendar", "activity"]);
+  assert.equal(PAGE_COMMANDS.some(command => command.view === "actions"), false);
+  assert.equal(navigationView("actions"), "activity");
+  assert.deepEqual(NAVIGATION.map(item => item.id), ["actions", "interview", "training", "career", "resources", "settings"]);
+  assert.deepEqual(SECONDARY_NAVIGATION.interview.map(item => item.id), ["session", "review", "insights", "practice", "prep"]);
+  assert.equal(SECONDARY_NAVIGATION.interview[0].label, "面试准备");
   assert.ok(PAGE_COMMANDS.some(command => command.view === "activity" && command.label === "最近进展"));
   assert.equal(TOP_BAR_SECTION_IDS.has(calendar.id), false);
   assert.deepEqual(DEFAULT_PAGE_COMMAND_VIEWS, ["calendar", "session", "jobs"]);
@@ -81,13 +86,13 @@ test("每个视图都有一个真正能点到的入口", () => {
     if (secondary.length === 0) linked.add(item.target);
     for (const sub of secondary) linked.add(sub.id);
   }
-  for (const view of APP_VIEWS) assert.ok(linked.has(view), `${view} 在侧栏里没有链接，只能手敲 URL 进去`);
+  for (const view of APP_VIEWS) assert.ok(linked.has(navigationView(view)), `${view} 在侧栏里没有链接，只能手敲 URL 进去`);
   for (const item of NAVIGATION) {
     assert.ok(item.views.includes(item.target), `${item.id} 的 target 属于自己的分区`);
     const secondary = SECONDARY_NAVIGATION[item.id] ?? [];
     // 有二级项的分区：views 里每一页都要有自己的二级项，否则它在侧栏没有入口、⌘K 里还会顶着分区名出现第二次。
     if (secondary.length > 0) {
-      for (const view of item.views) assert.ok(secondary.some((sub) => sub.id === view), `${item.id} 分区的 ${view} 没有二级导航项`);
+      for (const view of item.views) assert.ok(secondary.some((sub) => sub.id === navigationView(view)), `${item.id} 分区的 ${view} 没有二级导航项`);
     }
   }
 });

@@ -5,10 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
-/*
- * 日历首页的作战态势条、下一场、冲突与日语进展说明。
- * 逐字锁定的旧结构（class 顺序、AI 代投 <details>、今天 AI 代投）在 calendar-view-ui.test.mjs。
- */
+// 日历概况只负责投递与记录入口；未来安排在右侧完整显示一次。
 const zh = await loadAppModule("app/calendar-view.tsx", { globals: { window: { location: { search: "?month=2026-08" } } } });
 const ja = await loadAppModule("app/calendar-view.tsx", {
   stubs: { "./ui-locale": { useUiLocale: () => ({ locale: "ja", setLocale() {} }) } },
@@ -24,16 +21,18 @@ const render = (module, props) => renderToStaticMarkup(createElement(module.defa
   today: "2026-08-10", notes: [], events: [], interviewTargets: new Map(), onOpen() {}, onInterview() {}, ...props,
 }));
 
-test("态势条在加载中只画骨架，不先显示 0", () => {
+test("投递概况加载时说明正在读取，不先显示零或空态", () => {
   const html = render(zh, { loading: true });
-  const strip = html.match(/<div class="calendar-stat page-stat-strip module-stat-strip"[\s\S]*?<div class="calendar-layout">/)?.[0] ?? "";
-  assert.ok(strip, "态势条在月格上方");
+  const strip = html.match(/<div class="calendar-pulse"[\s\S]*?<div class="calendar-layout">/)?.[0] ?? "";
+  assert.ok(strip, "月度概况在月格上方");
+  assert.match(strip, /role="region"/);
   assert.match(strip, /aria-busy="true"/);
-  assert.match(strip, /calendar-stat-skeleton/);
+  assert.match(strip, /正在读取申请记录/);
   assert.doesNotMatch(strip, /<strong>0<\/strong>/);
+  assert.doesNotMatch(strip, /当前月份暂无已确认的 AI 代投/);
 });
 
-test("态势条与下一场卡：倒计时、案件去重、主按钮进入本场安排", () => {
+test("下一场只在未来议程显示一次，等待案件仍按案件去重", () => {
   const waiting = note("20_求職/テスト/案件.md", { type: "job-case", case_id: "case", status: "面接中", waiting_for: "company" });
   const events = [
     event("past-1", { date: "2026-08-03", phase: "past", caseId: "case", note: waiting }),
@@ -44,15 +43,27 @@ test("态势条与下一场卡：倒计时、案件去重、主按钮进入本�
     notes: [waiting], events,
     interviewTargets: new Map([["next", { view: "session", path: "prep.md", company: "株式会社ダミー", date: "2026-08-11", label: "最终面试", sourcePath: "next.md", caseId: "" }]]),
   });
-  assert.match(html, /<span>未来 7 天场次<\/span><strong>1<\/strong>/);
   assert.match(html, /<span>等回复案件<\/span><strong>1<\/strong>/, "同一案件两场等待只算一次");
-  const hero = html.match(/<section class="calendar-next-hero"[\s\S]*?<\/section>/)?.[0] ?? "";
-  assert.match(hero, /data-urgent=""/);
-  assert.match(hero, /<span class="calendar-next-countdown">明天<\/span>/);
-  assert.match(hero, /<strong class="calendar-next-company">株式会社ダミー<\/strong>/);
-  assert.match(hero, /round-final/);
-  assert.match(hero, /查看安排 <span aria-hidden="true">→<\/span>/);
-  assert.doesNotMatch(hero, /class="agenda-item /);
+  const aside = html.slice(html.indexOf('<aside class="calendar-agenda">'), html.indexOf("</aside>"));
+  assert.match(aside, /<h2>未来 7 天<\/h2><span>1<\/span>/);
+  assert.match(aside, /<[^>]+class="agenda-item [^>]+data-next=""/);
+  assert.match(aside, /下一场/);
+  assert.match(aside, /明天/);
+  assert.match(aside, /round-final/);
+  assert.match(aside, /查看安排/);
+  assert.equal((aside.match(/<strong>ダミー<\/strong>/g) ?? []).length, 1, "下一场不再重复为独立大卡");
+  assert.doesNotMatch(html, /calendar-next-hero|未来 7 天场次/);
+});
+
+test("下一场超过七天时保留在稍后安排，不重复挤进未来七天", () => {
+  const html = render(zh, { events: [event("later", { date: "2026-08-20", company: "株式会社ダミー" })] });
+  const aside = html.slice(html.indexOf('<aside class="calendar-agenda">'), html.indexOf("</aside>"));
+  const upcomingStart = aside.indexOf("<h2>未来 7 天</h2>");
+  const upcoming = aside.slice(upcomingStart, aside.indexOf("</section>", upcomingStart));
+  assert.match(upcoming, /未来七天没有已确认的安排/);
+  assert.doesNotMatch(upcoming, /株式会社ダミー|data-next/);
+  assert.match(aside, /<[^>]+class="agenda-item [^>]+data-next=""/);
+  assert.equal((aside.match(/<strong>ダミー<\/strong>/g) ?? []).length, 1);
 });
 
 test("同日重叠的场次追加 conflict 类与读屏说明，已结束的旧预约不参与", () => {
@@ -86,7 +97,7 @@ test("日语界面按 code 翻译进展说明，原始等待标签保留", () =>
     notes: [waiting], events: [event("past", { date: "2026-08-09", phase: "past", caseId: "case", note: waiting })],
   });
   assert.match(html, /返信待ち：予定は過ぎ、この案件はエージェントからの返信待ちです：面談後の結果。/);
-  assert.match(html, /今後 7 日間の予定/);
+  assert.match(html, /<h2>今後 7 日間<\/h2>/);
   assert.match(html, /今月のAI代行応募/);
   assert.doesNotMatch(html, /日程已过|等待中介|当前案件|未来 7 天|下一场|时间冲突|另有/);
 });

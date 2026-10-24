@@ -18,28 +18,6 @@ const STAGE_COPY_JA: Record<string, string> = {
   "这一轮准备稿里还没有写成台词的内容。": "この回の準備資料には、まだ台詞として書かれた内容がありません。",
 };
 
-/**
- * 临场卡只留「要说出口的话」：say 台词，加上它紧邻的那个小标题（不然一串台词分不清是哪一问的）。
- * 背景、分析、资料一概不要——面试前最后几分钟只看要说的。
- * 一个标题下没有台词时连标题一起丢，免得卡上出现一排空标题。
- */
-export function stageCardBlocks(blocks: PrepBlock[]): PrepBlock[] {
-  const kept: PrepBlock[] = [];
-  let heading: PrepBlock | null = null;
-  for (const block of blocks) {
-    if (block.kind === "heading") {
-      heading = block;
-    } else if (block.kind === "say") {
-      if (heading) {
-        kept.push(heading);
-        heading = null;
-      }
-      kept.push(block);
-    }
-  }
-  return kept;
-}
-
 export default function PrepMaterialReader({ documentKey, title, sections, intro = [], notice, prepVersion = 1, presentation = "page", onClose, onOpenWiki, onOpenCard }: {
   documentKey: string;
   title: string;
@@ -47,7 +25,10 @@ export default function PrepMaterialReader({ documentKey, title, sections, intro
   intro?: PrepBlock[];
   notice?: string;
   prepVersion?: 1 | 2;
-  /** stage：临场卡。只留台词与紧邻标题、放大字号，←/→ 在台词之间跳。 */
+  /**
+   * stage：临场卡。放大台词字号，←/→ 在台词之间跳。卡上留哪些块由调用方定（lib/interview-prep-v2 的
+   * prepV2StageSections）：除了台词，冒頭的朗读节链接和当日お礼也要上卡，阅读层不再二次筛。
+   */
   presentation?: "page" | "stage";
   onClose: () => void;
   onOpenWiki: (target: string, section?: string) => void;
@@ -57,9 +38,7 @@ export default function PrepMaterialReader({ documentKey, title, sections, intro
   const { locale } = useUiLocale();
   const st = (label: string, n?: number) =>
     (locale === "ja" ? STAGE_COPY_JA[label] ?? label : label).replace("{n}", String(n ?? ""));
-  const shown = useMemo(() => stage
-    ? sections.map((section) => ({ ...section, blocks: stageCardBlocks(section.blocks) })).filter((section) => section.blocks.length > 0)
-    : sections, [sections, stage]);
+  const shown = useMemo(() => stage ? sections.filter((section) => section.blocks.length > 0) : sections, [sections, stage]);
   const headings = useMemo(() => shown.map((section, index) => ({ id: `reader-prep-${index}`, text: headingPlainText(section.title) })), [shown]);
   const refs = {
     onOpenWiki: (target: string, section?: string) => { onClose(); onOpenWiki(target, section); },
@@ -75,11 +54,20 @@ export default function PrepMaterialReader({ documentKey, title, sections, intro
       <header data-reading-anchor={headings[index].id}><span className="nr-chapter-number">{String(index + 1).padStart(2, "0")}</span><h2>{headings[index].text}</h2></header>
       {stage
         // 每句台词各包一层锚点：阅读层按 data-stage-line 在台词之间跳，位置记忆按 data-reading-anchor 复原。
-        ? section.blocks.map((block, blockIndex) => block.kind === "say"
-          ? <div key={blockIndex} className="reader-stage-line" data-stage-line data-reading-anchor={`${headings[index].id}-line-${blockIndex}`}>
-            <Blocks blocks={[block]} refs={refs} idPrefix={`${headings[index].id}-line-${blockIndex}`} />
-          </div>
-          : <Blocks key={blockIndex} blocks={[block]} refs={refs} idPrefix={`${headings[index].id}-h-${blockIndex}`} />)
+        // 【面接官】是逆質問的预想回答，只作提示、不进 ←/→；紧跟其后的【あなた】是接话，缩进与它成组，
+        // 免得问法、预想回答、接话连成一长串同样大小的台词。
+        ? section.blocks.map((block, blockIndex) => {
+          const anchor = `${headings[index].id}-line-${blockIndex}`;
+          if (block.kind !== "say") return <Blocks key={blockIndex} blocks={[block]} refs={refs} idPrefix={`${headings[index].id}-h-${blockIndex}`} />;
+          if (block.speaker === "interviewer") return <div key={blockIndex} className="reader-stage-cue" data-reading-anchor={anchor}>
+            <Blocks blocks={[block]} refs={refs} idPrefix={anchor} />
+          </div>;
+          const previous = section.blocks[blockIndex - 1];
+          const reply = previous?.kind === "say" && previous.speaker === "interviewer";
+          return <div key={blockIndex} className={`reader-stage-line${reply ? " reader-stage-reply" : ""}`} data-stage-line data-reading-anchor={anchor}>
+            <Blocks blocks={[block]} refs={refs} idPrefix={anchor} />
+          </div>;
+        })
         : <Blocks blocks={section.blocks} refs={refs} idPrefix={`reader-prep-${index}`} />}
     </section>)}
   </ReadingMode>;

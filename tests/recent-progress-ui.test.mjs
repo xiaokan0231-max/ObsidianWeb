@@ -15,7 +15,7 @@ const work = note("20_求職/_記録/内部作業ログ.md", { type: "applicatio
 const draft = note("20_求職/_応募書類/下書き.md", { type: "outbound-draft", company: "株式会社サンプル", status: "saved", date: "2026-10-01" }, "秘密のメール草稿");
 const notes = [job, todo, work, draft];
 const props = { notes, today, loading: false, fetchedAt, onOpenSource() {} };
-const walk = (value) => !value || typeof value !== "object" ? [] : Array.isArray(value) ? value.flatMap(walk) : [value, ...walk(value.props?.children), ...(typeof value.type === "function" && ["ProgressOverview", "ProgressListRow"].includes(value.type.name) ? walk(value.type(value.props)) : [])];
+const walk = (value) => !value || typeof value !== "object" ? [] : Array.isArray(value) ? value.flatMap(walk) : [value, ...walk(value.props?.children), ...(typeof value.type === "function" && ["ProgressOverview", "ProgressListRow", "ProgressDashboard", "ProgressDistribution", "ProgressFlow", "ProgressHeatmap", "ProgressConstellation"].includes(value.type.name) ? walk(value.type(value.props)) : [])];
 const text = (value) => value == null || typeof value === "boolean" ? "" : typeof value !== "object" ? String(value) : Array.isArray(value) ? value.map(text).join("") : text(value.props?.children);
 const find = (tree, predicate) => { const node = walk(tree).find(predicate); assert.ok(node); return node; };
 const button = (tree, label) => find(tree, (node) => node.type === "button" && text(node.props.children) === label);
@@ -49,7 +49,7 @@ async function interactive(search = "", pathname = "/activity", inputNotes = not
     back() { if (index === 0) return; index--; locate(stack[index].url); for (const fn of listeners.get("popstate") || []) fn(); },
   };
   const viewModule = await loadAppModule("app/recent-progress-view.tsx", { stubs: {
-    react: { useMemo: (fn) => fn(), useState(initial) { const slot = cursor++; if (!(slot in states)) states[slot] = typeof initial === "function" ? initial() : initial; return [states[slot], (next) => { states[slot] = typeof next === "function" ? next(states[slot]) : next; }]; },
+    react: { useLayoutEffect() {}, useMemo: (fn) => fn(), useState(initial) { const slot = cursor++; if (!(slot in states)) states[slot] = typeof initial === "function" ? initial() : initial; return [states[slot], (next) => { states[slot] = typeof next === "function" ? next(states[slot]) : next; }]; },
       useRef(initial) { const slot = refCursor++; return refs[slot] ??= { current: initial }; },
       useEffect(fn, deps) { const slot = effectCursor++; if (!effects[slot] || deps.some((value, i) => !Object.is(value, effects[slot].deps[i]))) { effects[slot]?.cleanup?.(); effects[slot] = { deps }; pending.push(() => { effects[slot].cleanup = fn(); }); } },
     }, "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) },
@@ -172,13 +172,14 @@ const oldAction = note("20_求職/_TODO/以前から必要.md", { ...todo.frontm
 const overviewNotes = [job, todo, oldAction, work, draft, rejectOne, rejectTwo, rejectThree, advanceOne, advanceTwo, oldAdvance];
 const groupToggle = (tree, key) => find(tree, (node) => node.type === "button" && node.props["aria-controls"] === `progress-${key}-records`);
 
-test("概览首屏只展示有限的必要动作和推进，未采用按公司合并收起", async () => {
+test("概览以星图覆盖案件，必要动作和推进限制明细数量，未采用列表默认收起", async () => {
   const html = await render({ notes: overviewNotes });
   assert.match(html, /data-progress-view="overview"/);
   assert.match(html, /当前需要你处理/); assert.match(html, /不受时间范围限制/); assert.match(html, /已确认的推进/);
   assert.equal((html.match(/class="recent-progress-row recent-progress-row-compact"/g) || []).length, 3);
   assert.match(html, /未采用<strong>2 家公司/);
-  assert.doesNotMatch(html, /株式会社架空アルファ|株式会社架空ベータ|開発第一職|開発第二職/);
+  assert.match(html, /aria-label="机会星图"/);
+  assert.doesNotMatch(html, /class="recent-progress-companies"/);
   assert.match(html, /各组公司数不可相加/); assert.doesNotMatch(html, /面试失败/);
   assert.match(html, /aria-expanded="false" aria-controls="progress-rejected-records"/);
   assert.match(html, /aria-expanded="false" aria-controls="progress-waiting-records"/);
@@ -251,4 +252,75 @@ test("资料待核只链接审核分类，状态颜色保持语义且无需颜�
   assert.match(html, /已申请/); assert.match(html, /书类通过/); assert.match(html, /未采用/);
   const ja = await render({ notes: overviewNotes, locale: "ja" });
   assert.match(ja, /期間の指定に関係なく表示/); assert.match(ja, /応募・保留の記録/); assert.match(ja, /各社数は合計できません/);
+});
+
+
+test("仪表盘图表筛选可刷新还原，返回详情保留选择与唯一行焦点", async () => {
+  const ui = await interactive("", "/activity", overviewNotes);
+  const chartBar = find(ui.view(), (node) => node.type === "button" && node.props.className === "momentum-bar" && node.props["aria-label"].startsWith("10/5 ·"));
+  chartBar.props.onClick();
+  assert.equal(new URLSearchParams(ui.window.location.search).get("activityChart"), "day:2026-10-05");
+  let tree = ui.view();
+  let html = renderToStaticMarkup(tree);
+  assert.match(html, /aria-label="企业动态明细"/);
+  const ids = [...html.matchAll(/ id="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(ids).size, ids.length, "图表明细与推进卡片使用不同锚点");
+  const row = find(tree, (node) => node.type === "a" && node.props.id?.endsWith("-chart"));
+  row.props.onClick(clickEvent({ currentTarget: { id: row.props.id } }));
+  tree = ui.view();
+  button(tree, "← 返回进展列表").props.onClick();
+  tree = ui.view();
+  assert.equal(ui.focus.at(-1), row.props.id);
+  assert.equal(new URLSearchParams(ui.window.location.search).get("activityChart"), "day:2026-10-05");
+  const refreshed = await render({ notes: overviewNotes, search: ui.window.location.search });
+  assert.match(refreshed, /aria-label="企业动态明细"/);
+  const rejected = find(tree, (node) => node.type === "button" && node.props["data-segment"] === "rejected");
+  rejected.props.onClick();
+  tree = ui.view();
+  assert.equal(new URLSearchParams(ui.window.location.search).get("activityChart"), "segment:rejected");
+  html = renderToStaticMarkup(tree);
+  assert.match(html, /開発第一職/); assert.match(html, /開発第二職/);
+  assert.doesNotMatch(html, /aria-label="企业动态明细"/);
+  button(tree, "近 30 天").props.onClick();
+  assert.equal(new URLSearchParams(ui.window.location.search).get("activityChart"), null);
+});
+
+test("图表日期深链拒绝非法日期，两种语言的仪表盘都有独立文案", async () => {
+  const { recentProgressRoute, recentProgressHref } = await loadAppModule("app/recent-progress-view.tsx");
+  for (const value of ["day:2026-02-30", "segment:wrong", "anything"]) assert.equal(recentProgressRoute(`?activityChart=${value}`).chart, undefined);
+  const route = recentProgressRoute("?activityRange=30d&activityChart=segment:advancing");
+  assert.equal(recentProgressRoute(new URL(recentProgressHref(null, "all", route), "https://example.test").search).chart, route.chart);
+  const ja = await render({ notes: overviewNotes, locale: "ja" });
+  assert.match(ja, /期間内の案件内訳/); assert.match(ja, /棒をクリックして会社を確認/);
+  assert.doesNotMatch(ja, /企业动态趋势|本期案件分布|有动态的公司|清除选择/);
+});
+
+test("五种图表共享案件，热力图可查看窗口外历史，星点选择可刷新还原", async () => {
+  const html = await render({ notes: overviewNotes });
+  for (const title of ["企业动态趋势", "本期案件分布", "案件流向", "记录活跃度", "机会星图"]) assert.ok(html.includes(title));
+  const ui = await interactive("", "/activity", overviewNotes);
+  const day = find(ui.view(), (node) => node.type === "button" && node.props.className === "signal-calendar-day" && node.props["aria-label"] === "2026-09-15 · 1 家公司");
+  day.props.onClick();
+  assert.equal(new URLSearchParams(ui.window.location.search).get("activityChart"), "heat:2026-09-15");
+  assert.match(renderToStaticMarkup(ui.view()), /id="momentum-chart-detail"/);
+  assert.match(renderToStaticMarkup(ui.view()), /株式会社架空イプシロン/);
+  const star = find(ui.view(), (node) => node.type === "g" && node.props.className === "signal-star");
+  star.props.onClick();
+  const selection = new URLSearchParams(ui.window.location.search).get("activityChart");
+  assert.match(selection, /^case:progress_/);
+  const refreshed = await render({ notes: overviewNotes, search: ui.window.location.search });
+  assert.match(refreshed, /id="momentum-chart-detail"/);
+  assert.equal((refreshed.match(/class="signal-star"/g) || []).length, 6);
+});
+
+test("流向可以用键盘选择分类，日语图表没有混入中文标题", async () => {
+  const ui = await interactive("", "/activity", overviewNotes);
+  const target = find(ui.view(), (node) => node.type === "g" && node.props.className === "signal-flow-target" && node.props["aria-label"].startsWith("未采用"));
+  let prevented = false;
+  target.props.onKeyDown({ key: "Enter", preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(new URLSearchParams(ui.window.location.search).get("activityChart"), "segment:rejected");
+  const ja = await render({ notes: overviewNotes, locale: "ja" });
+  assert.match(ja, /機会の星図/); assert.match(ja, /記録のアクティビティ/);
+  assert.doesNotMatch(ja, /机会星图|案件流向|记录活跃度|记录信号|有记录的日期/);
 });

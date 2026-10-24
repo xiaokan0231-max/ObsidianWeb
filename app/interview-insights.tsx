@@ -1,7 +1,5 @@
 "use client";
 
-import { advisoryFailureMessage } from "@/lib/advisory-recovery";
-
 import { useMemo, useState } from "react";
 import type { AdvisoryEvidenceRef, InterviewInsights as InsightsReport } from "@/lib/interview-advisory";
 import type { Note } from "@/lib/notes";
@@ -43,7 +41,7 @@ export function InsightsCoverage({ coverage, selected, onSelect, onOpen }: {
         <label><input type="checkbox" checked={selected.has(item.sourcePath)} onChange={() => onSelect(item.sourcePath)} aria-label={`对照 ${company} ${item.date} ${item.round}`} />
           <span><b>{item.date || "日期未定"} · {item.round || "轮次未定"}</b><small>{ADVISORY_STAGE_LABELS[item.stage ?? ""] || "阶段待分析"}</small></span></label>
         <span className={`ii-status ${item.status}`}>{STATUS_LABELS[item.status]}</span><button type="button" onClick={() => onOpen(item.sourcePath)}>本场复盘 ↗</button>
-        {(item.reason || item.lastError) && <p>{item.lastError ? advisoryFailureMessage(item.lastError) : item.reason}</p>}
+        {(item.reason || item.lastError) && <p>{item.lastError || item.reason}</p>}
       </li>)}
     </ul></section>)}
   </div>;
@@ -102,7 +100,7 @@ export default function InterviewInsights({ notes, onOpenEvidence, onOpenReview,
       <div className="ii-hero-actions"><span role="status">{active ? `正在更新${active.sourcePath ? `：${active.sourcePath.split("/").at(-1)?.replace(/\.md$/, "")}` : "横向分析"}` : sync.busy ? "正在更新分析…" : coverage.length ? `已记录 ${coverage.length} 场面谈` : "正在读取面谈材料…"}</span>
         <button type="button" disabled={sync.busy || Boolean(active)} onClick={() => void sync.synchronize(needsRetry)}>{needsRetry ? ui("重试更新") : ui("检查并更新")}</button></div>
     </header>
-    {error && <p className="ia-error" role="alert">{advisoryFailureMessage(error)} 已生成的内容仍然保留。</p>}
+    {error && <p className="ia-error" role="alert">{error} 已生成的内容仍然保留。</p>}
     {failedSources.length > 0 && <p className="ia-error" role="status">有 {failedSources.length} 场分析更新失败，原因列在对照范围中。其他场次可以继续阅读，点击重试更新可重新处理失败场次。</p>}
     {sync.state?.report && sync.state.insightsStatus !== "ready" && <p className="ii-filter-note" role="status">依据已有变化，下面保留上一版横向分析，完成更新后替换。</p>}
     <section className="ii-scope"><header><h2>对照范围</h2><p>同一公司多轮可以一起查看；未完成裁定的场次会显示原因。可用场次纳入生成材料，具体发现按主题选择证据，并非每场都在横向结论中被引用。</p></header>

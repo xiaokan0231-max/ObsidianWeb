@@ -7,10 +7,13 @@ import {
   extractPrepKillMap,
   extractPrepTalentMap,
   findInterviewPrepDocs,
+  findInterviewPrepReplay,
   groupPrepSections,
+  INTERVIEW_PREP_REPLAY_TYPE,
   prepBlockText,
   prepInlineText,
   prepSectionNumber,
+  prepWikiTarget,
   shortLabel,
   type InterviewPrepDoc,
   type PrepBlock,
@@ -30,7 +33,7 @@ import {
   calendarCompanyIdentity,
   countdownLabel,
 } from "@/lib/memory-atlas-data";
-import { formatDate, getString, getType, type Note } from "@/lib/notes";
+import { formatDate, getString, getType, noteBasename, type Note } from "@/lib/notes";
 import { REVIEW_DIMENSION_META } from "@/lib/review-deep";
 import { OPEN_NOTE_LABEL } from "@/lib/ui-labels";
 import {
@@ -56,7 +59,15 @@ import { isTypingTarget, PrepSearchBox, useSlashFocus } from "./prep-search";
 import { menuLabel } from "@/lib/ui-menu-labels";
 import { useUiLocale } from "./ui-locale";
 
+/** `?prep=` 直接指向对照样稿时，返回它的原稿笔记名：页面选中原稿并打开对照视图，刷新也停在样稿上。 */
+function replayTargetOf(notes: Note[], path: string) {
+  const note = path ? notes.find((item) => item.path === path && getType(item) === INTERVIEW_PREP_REPLAY_TYPE) : null;
+  return note ? prepWikiTarget(getString(note.frontmatter.replay_of)) : "";
+}
+
 const LEGACY_SESSION_MENU_JA: Record<string, string> = {
+  "对照样稿": "対照稿",
+  "回到原稿": "元の準備稿へ",
   "公司与面谈视图": "企業と面談の表示",
   "面谈准备": "面談準備",
   "公司对比": "企業比較",
@@ -1139,7 +1150,9 @@ function InterviewSession({
   const docContexts = useMemo(() => new Map(docs.map((doc) => [doc.note.path, resolveCompanyOverviewFrom(contexts, notes, doc.note)])), [contexts, docs, notes]);
   const pickerGroups = useMemo(() => buildContextPickerGroups({ contexts, series, docs, docContexts, today }), [contexts, series, docs, docContexts, today]);
   const [selection, setSelection] = useState<{ prepPath: string | null; contextPath: string | null }>(() => {
-    const exact = initialPath ? docs.find((doc) => doc.note.path === initialPath) ?? null : null;
+    const replayTarget = replayTargetOf(notes, initialPath);
+    const exact = initialPath ? docs.find((doc) => doc.note.path === initialPath
+      || (replayTarget !== "" && [noteBasename(doc.note.path), doc.note.path.replace(/\.md$/, "")].includes(replayTarget))) ?? null : null;
     if (exact) return { prepPath: exact.note.path, contextPath: docContexts.get(exact.note.path)?.note.path ?? null };
     const context = initialContextPath ? resolveCompanyOverview(notes, initialContextPath) : null;
     if (context) {
@@ -1156,6 +1169,10 @@ function InterviewSession({
     return { prepPath: next?.note.path ?? null, contextPath: next ? docContexts.get(next.note.path)?.note.path ?? null : companyContext?.note.path ?? null };
   });
   const selected = docs.find((doc) => doc.note.path === selection.prepPath) ?? null;
+  // 对照样稿挂在原稿这一轮上：不进轮次列表，只在页头给一个切换。
+  const replay = useMemo(() => (selected ? findInterviewPrepReplay(notes, selected) : null), [notes, selected]);
+  const [viewReplay, setViewReplay] = useState(() => replayTargetOf(notes, initialPath) !== "");
+  const showingReplay = viewReplay && replay !== null;
   const context = selected ? docContexts.get(selected.note.path) ?? null : contexts.find((item) => item.note.path === selection.contextPath) ?? null;
   // 头部「准备稿 N 轮」说的是这个案件／面谈名下的全部轮次——日历判定本场无稿时它们仍然存在，只是不借来当本场的稿。
   const contextRounds = useMemo(() => (context ? docs.filter((doc) => docContexts.get(doc.note.path)?.key === context.key) : []), [context, docs, docContexts]);
@@ -1172,6 +1189,7 @@ function InterviewSession({
     const nextContext = docContexts.get(doc.note.path) ?? null;
     setSelection({ prepPath: doc.note.path, contextPath: nextContext?.note.path ?? null });
     setLegacyPrepPath(null);
+    setViewReplay(false);
     if (nextContext && onContextChange) onContextChange(doc.company, nextContext.note.path, doc.note.path);
     else onSelectionChange?.(doc.company, doc.note.path);
   };
@@ -1180,6 +1198,7 @@ function InterviewSession({
     const next = calendarContext?.key === nextContext.key ? null : selectRelevantInterviewPrepDoc(docs.filter((doc) => docContexts.get(doc.note.path)?.key === nextContext.key), today);
     setSelection({ prepPath: next?.note.path ?? null, contextPath: nextContext.note.path });
     setLegacyPrepPath(null);
+    setViewReplay(false);
     onContextChange?.(nextContext.company, nextContext.note.path, next?.note.path ?? "");
   };
   const removeCompare = (path: string) => {
@@ -1191,7 +1210,16 @@ function InterviewSession({
     if (!compared.length && context) setComparePaths([context.note.path]);
     setCompareSelectorOpen(true);
   };
-  const companyAction = <div className="co-header-actions"><button type="button" className="co-compare-entry" onClick={openCompareSelector}>{ui("公司对比")}<span aria-hidden="true">{compared.length ? ` ${compared.length} / 3` : " ↗"}</span></button><CompanyCompareButton context={context} compared={!!context && compared.some((item) => item.key === context.key)} full={compared.length >= COMPANY_COMPARE_LIMIT} onToggle={() => {
+  // 地址栏的 prep 指向正在看的稿：刷新、分享时停在原稿或对照样稿上。
+  const toggleReplay = () => {
+    if (!selected || !replay) return;
+    const prepPath = showingReplay ? selected.note.path : replay.note.path;
+    setViewReplay(!showingReplay);
+    const docContext = docContexts.get(selected.note.path) ?? null;
+    if (docContext && onContextChange) onContextChange(selected.company, docContext.note.path, prepPath);
+    else onSelectionChange?.(selected.company, prepPath);
+  };
+  const companyAction = <div className="co-header-actions">{replay && <button type="button" className="co-replay-entry" aria-pressed={showingReplay} onClick={toggleReplay}>{ui(showingReplay ? "回到原稿" : "对照样稿")}</button>}<button type="button" className="co-compare-entry" onClick={openCompareSelector}>{ui("公司对比")}<span aria-hidden="true">{compared.length ? ` ${compared.length} / 3` : " ↗"}</span></button><CompanyCompareButton context={context} compared={!!context && compared.some((item) => item.key === context.key)} full={compared.length >= COMPANY_COMPARE_LIMIT} onToggle={() => {
     if (!context) return;
     if (compared.some((item) => item.key === context.key)) removeCompare(context.note.path);
     else setComparePaths((current) => toggleCompanyComparison(current, context.note.path));
@@ -1202,7 +1230,8 @@ function InterviewSession({
     else { const item = series.find((item) => `series:${item.key}` === value); const next = item && selectRelevantInterviewPrepDoc(item.rounds, today); if (next) selectDoc(next); }
   }} />;
   function selectedSeriesKey() { const item = selected ? interviewPrepSeriesForDoc(series, selected) : null; return item ? `series:${item.key}` : ""; }
-  const companyContent = <CompanyOverviewContent context={context} historical={!!selected && ["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today))} onOpenWiki={onOpenWiki} />;
+  const historicalCompany = !!selected && ["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today));
+  const companyContent = <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} />;
   const compareUI = <><CompanyCompareTray contexts={compared} onRemove={removeCompare} onClear={() => { setComparePaths([]); setCompareOpen(false); }} onOpen={() => setCompareOpen(true)} />
     {compareSelectorOpen && <CompanyCompareSelector contexts={contexts} selected={compared} onToggle={(path) => setComparePaths((current) => toggleCompanyComparison(current, path))} onClose={() => setCompareSelectorOpen(false)} onCompare={() => { setCompareSelectorOpen(false); setCompareOpen(true); }} />}
     {compareOpen && compared.length >= 2 && <CompanyCompare contexts={compared} onClose={() => setCompareOpen(false)} onEdit={openCompareSelector} onRemove={removeCompare} onDetail={(item) => { setCompareOpen(false); selectContext(item); window.scrollTo({ top: 0, behavior: "instant" }); }} onOpenWiki={(target) => { setCompareOpen(false); onOpenWiki(target); }} />}</>;
@@ -1303,10 +1332,16 @@ function InterviewSession({
     </details>
   );
 
-  if (selected?.prepVersion === 2) {
-    return <><InterviewSessionV2 key={selected.note.path} doc={selected} series={series} selectedSeries={selectedSeries}
-      sources={externalLinks} today={today} onSelect={selectDoc} onOpen={onOpen} onOpenWiki={onOpenWiki}
-      onOpenCard={onOpenCard} onOpenAsset={onOpenAsset} companyOverview={companyContent} contextPicker={contextPicker} companyAction={companyAction} briefing={digestBand} />{compareUI}</>;
+  // 对照样稿一律是 v2：原稿是旧版时也用新版页面显示样稿，页头的切换回到原稿的旧版布局。
+  if (selected && (selected.prepVersion === 2 || showingReplay)) {
+    const shown = showingReplay && replay ? replay : selected;
+    const shownSources = shown === selected ? externalLinks : mergePrepExternalLinks(sourceDocs.map((doc) => doc === selected ? shown : doc));
+    return <><InterviewSessionV2 key={shown.note.path} doc={shown} series={series} selectedSeries={selectedSeries}
+      sources={shownSources} today={today} onSelect={selectDoc} onOpen={onOpen} onOpenWiki={onOpenWiki}
+      onOpenCard={onOpenCard} onOpenAsset={onOpenAsset}
+      companyOverview={(onOpenReviews) => <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} view="story" onOpenReviews={onOpenReviews} />}
+      externalReviews={<CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} view="reviews" />}
+      contextPicker={contextPicker} companyAction={companyAction} briefing={digestBand} />{compareUI}</>;
   }
 
   if (!selected || legacyPrepPath !== selected.note.path) {
