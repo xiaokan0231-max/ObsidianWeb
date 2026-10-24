@@ -13,7 +13,8 @@
 .progress-workspace .recent-progress-range-dates { flex: 1; }
 .progress-workspace .recent-progress-embedded-toggle { min-height: 28px; padding: 3px 0 3px 10px; border: 0; background: transparent; color: var(--muted); white-space: nowrap; }
 .progress-workspace .recent-progress-embedded-toggle:hover { background: transparent; color: var(--ink); }
-.progress-workspace .recent-progress-scope-bar { margin-top: -2px; }
+.progress-workspace .recent-progress-scope-bar { order: 3; margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+.progress-workspace .recent-progress-priority > header { margin-bottom: 14px; }
 .recent-progress-current-clear { display: flex; align-items: center; gap: 7px; margin: 0 0 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .recent-progress-current-clear > span { color: var(--green); font-size: 13px; }
 .recent-progress-priorities.recent-progress-priorities-single { grid-template-columns: minmax(0, 1fr); }

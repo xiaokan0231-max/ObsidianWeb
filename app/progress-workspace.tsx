@@ -45,7 +45,7 @@ export default function ProgressWorkspace({ notes, today, view, actionsLoading, 
 
   return <section className="progress-workspace" aria-labelledby="progress-workspace-title">
     <header className="progress-workspace-header">
-      <div><h1 id="progress-workspace-title">{ja ? "最近の進展" : "最近进展"}</h1><p>{ja ? "選考の動きと、必要な対応をひとつの場所に。" : "企业动态与待处理事项，放在一起看。"}</p></div>
+      <div><h1 id="progress-workspace-title">{ja ? "最近の進展" : "最近进展"}</h1><p>{ja ? "機会の変化と、あなたの次の一歩。" : "机会的变化，和你的下一步。"}</p></div>
       <nav className="progress-workspace-tabs" aria-label={ja ? "進展と事項の記録" : "进展与事项记录"}>
         {tabs.map((tab) => <a key={tab.view} href={`/${tab.view}`} aria-current={view === tab.view ? "page" : undefined} onClick={(event) => navigate(event, tab.view)}>{tab.title}{tab.view === "actions" && actionsLoaded && currentCount > 0 && <span className="progress-workspace-action-count" aria-label={ja ? `現在の本人対応 ${currentCount} 件` : `当前本人动作 ${currentCount} 项`}>{currentCount}</span>}</a>)}
       </nav>

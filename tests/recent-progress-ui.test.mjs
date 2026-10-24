@@ -15,7 +15,7 @@ const work = note("20_求職/_記録/内部作業ログ.md", { type: "applicatio
 const draft = note("20_求職/_応募書類/下書き.md", { type: "outbound-draft", company: "株式会社サンプル", status: "saved", date: "2026-10-01" }, "秘密のメール草稿");
 const notes = [job, todo, work, draft];
 const props = { notes, today, loading: false, fetchedAt, onOpenSource() {} };
-const walk = (value) => !value || typeof value !== "object" ? [] : Array.isArray(value) ? value.flatMap(walk) : [value, ...walk(value.props?.children), ...(typeof value.type === "function" && ["ProgressOverview", "ProgressListRow"].includes(value.type.name) ? walk(value.type(value.props)) : [])];
+const walk = (value) => !value || typeof value !== "object" ? [] : Array.isArray(value) ? value.flatMap(walk) : [value, ...walk(value.props?.children), ...(typeof value.type === "function" && ["ProgressOverview", "ProgressListRow", "ProgressDashboard", "ProgressDistribution"].includes(value.type.name) ? walk(value.type(value.props)) : [])];
 const text = (value) => value == null || typeof value === "boolean" ? "" : typeof value !== "object" ? String(value) : Array.isArray(value) ? value.map(text).join("") : text(value.props?.children);
 const find = (tree, predicate) => { const node = walk(tree).find(predicate); assert.ok(node); return node; };
 const button = (tree, label) => find(tree, (node) => node.type === "button" && text(node.props.children) === label);
@@ -251,4 +251,45 @@ test("资料待核只链接审核分类，状态颜色保持语义且无需颜�
   assert.match(html, /已申请/); assert.match(html, /书类通过/); assert.match(html, /未采用/);
   const ja = await render({ notes: overviewNotes, locale: "ja" });
   assert.match(ja, /期間の指定に関係なく表示/); assert.match(ja, /応募・保留の記録/); assert.match(ja, /各社数は合計できません/);
+});
+
+
+test("仪表盘图表筛选可刷新还原，返回详情保留选择与唯一行焦点", async () => {
+  const ui = await interactive("", "/activity", overviewNotes);
+  const chartBar = find(ui.view(), (node) => node.type === "button" && node.props.className === "momentum-bar" && node.props["aria-label"].startsWith("10/5 ·"));
+  chartBar.props.onClick();
+  assert.equal(new URLSearchParams(ui.window.location.search).get("activityChart"), "day:2026-10-05");
+  let tree = ui.view();
+  let html = renderToStaticMarkup(tree);
+  assert.match(html, /aria-label="企业动态明细"/);
+  const ids = [...html.matchAll(/ id="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(ids).size, ids.length, "图表明细与推进卡片使用不同锚点");
+  const row = find(tree, (node) => node.type === "a" && node.props.id?.endsWith("-chart"));
+  row.props.onClick(clickEvent({ currentTarget: { id: row.props.id } }));
+  tree = ui.view();
+  button(tree, "← 返回进展列表").props.onClick();
+  tree = ui.view();
+  assert.equal(ui.focus.at(-1), row.props.id);
+  assert.equal(new URLSearchParams(ui.window.location.search).get("activityChart"), "day:2026-10-05");
+  const refreshed = await render({ notes: overviewNotes, search: ui.window.location.search });
+  assert.match(refreshed, /aria-label="企业动态明细"/);
+  const rejected = find(tree, (node) => node.type === "button" && node.props["data-segment"] === "rejected");
+  rejected.props.onClick();
+  tree = ui.view();
+  assert.equal(new URLSearchParams(ui.window.location.search).get("activityChart"), "segment:rejected");
+  html = renderToStaticMarkup(tree);
+  assert.match(html, /開発第一職/); assert.match(html, /開発第二職/);
+  assert.doesNotMatch(html, /aria-label="企业动态明细"/);
+  button(tree, "近 30 天").props.onClick();
+  assert.equal(new URLSearchParams(ui.window.location.search).get("activityChart"), null);
+});
+
+test("图表日期深链拒绝非法日期，两种语言的仪表盘都有独立文案", async () => {
+  const { recentProgressRoute, recentProgressHref } = await loadAppModule("app/recent-progress-view.tsx");
+  for (const value of ["day:2026-02-30", "segment:wrong", "anything"]) assert.equal(recentProgressRoute(`?activityChart=${value}`).chart, undefined);
+  const route = recentProgressRoute("?activityRange=30d&activityChart=segment:advancing");
+  assert.equal(recentProgressRoute(new URL(recentProgressHref(null, "all", route), "https://example.test").search).chart, route.chart);
+  const ja = await render({ notes: overviewNotes, locale: "ja" });
+  assert.match(ja, /期間内の案件内訳/); assert.match(ja, /棒をクリックして会社を確認/);
+  assert.doesNotMatch(ja, /企业动态趋势|本期案件分布|有动态的公司|清除选择/);
 });

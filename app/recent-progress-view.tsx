@@ -4,8 +4,11 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { type Note } from "@/lib/notes";
 import { buildRecentProgress, type RecentProgressEntry } from "@/lib/recent-progress";
 import { buildRecentProgressOverview, progressTone } from "@/lib/recent-progress-overview";
+import { PROGRESS_SEGMENTS } from "@/lib/recent-progress-dashboard";
+import { validActionDate } from "@/lib/todo-action-schema";
 import { useUiLocale } from "./ui-locale";
 import { URL_CHANGE_EVENT } from "./use-url-state";
+import ProgressDashboard from "./progress-dashboard";
 import "./styles/recent-progress.css";
 import "./styles/progress-tones.css";
 
@@ -14,8 +17,8 @@ export type RecentProgressCategory = typeof categories[number];
 type ProgressRange = "7d" | "30d" | "all";
 type ProgressView = "overview" | "timeline";
 const openGroups = ["current", "advancing", "rejected", "waiting", "work", "scope", "sources"] as const;
-export type RecentProgressRoute = { category: RecentProgressCategory; id: string | null; range: ProgressRange; view: ProgressView; open: string[] };
-type ListPosition = { route: RecentProgressRoute; id: string; scrollY: number };
+export type RecentProgressRoute = { category: RecentProgressCategory; id: string | null; range: ProgressRange; view: ProgressView; open: string[]; chart?: string };
+type ListPosition = { route: RecentProgressRoute; id: string; scrollY: number; anchorId?: string };
 
 export const progressZh = {
   title: "最近进展", kicker: "进展与记录", introduction: "回看企业动态、已记录的处理与仍在阻碍的事项。",
@@ -63,13 +66,16 @@ export function recentProgressRoute(search = ""): RecentProgressRoute {
   const category = categories.includes(raw as RecentProgressCategory) ? raw as RecentProgressCategory : "all";
   const range = params.get("activityRange");
   const view = params.get("activityView");
+  const chart = params.get("activityChart");
+  const validChart = chart?.startsWith("day:") ? validActionDate(chart.slice(4)) : chart === "group:waiting" || PROGRESS_SEGMENTS.some((key) => chart === `segment:${key}`);
   return { category, id: params.get("update") || null, range: range === "30d" || range === "all" ? range : "7d",
     // 旧分类深链继续进入原来的日期列表，新增入口默认使用概览。
     view: view === "timeline" || (!view && category !== "all") ? "timeline" : "overview",
-    open: [...new Set((params.get("activityOpen") || "").split(",").filter((key) => openGroups.includes(key as typeof openGroups[number])))].sort() };
+    open: [...new Set((params.get("activityOpen") || "").split(",").filter((key) => openGroups.includes(key as typeof openGroups[number])))].sort(),
+    ...(chart && validChart ? { chart } : {}) };
 }
 
-export function recentProgressHref(id: string | null = null, category: RecentProgressCategory = "all", options: Partial<Pick<RecentProgressRoute, "range" | "view" | "open">> = {}) {
+export function recentProgressHref(id: string | null = null, category: RecentProgressCategory = "all", options: Partial<Pick<RecentProgressRoute, "range" | "view" | "open" | "chart">> = {}) {
   const params = new URLSearchParams();
   if (category !== "all") params.set("activityKind", category);
   if (options.range && options.range !== "7d") params.set("activityRange", options.range);
@@ -77,6 +83,7 @@ export function recentProgressHref(id: string | null = null, category: RecentPro
   if (view === "timeline" || category !== "all") params.set("activityView", view);
   const open = [...new Set(options.open ?? [])].filter((key) => openGroups.includes(key as typeof openGroups[number])).sort();
   if (open.length) params.set("activityOpen", open.join(","));
+  if (options.chart) params.set("activityChart", options.chart);
   if (id) params.set("update", id);
   return `/activity${params.size ? `?${params}` : ""}`;
 }
@@ -113,7 +120,7 @@ function savedPosition(state: unknown): ListPosition | null {
   if (typeof value.id !== "string" || typeof value.scrollY !== "number" || !Number.isFinite(value.scrollY) || value.scrollY < 0) return null;
   if (value.route && typeof value.route === "object") {
     const route = value.route as RecentProgressRoute;
-    if (categories.includes(route.category) && ["7d", "30d", "all"].includes(route.range) && ["overview", "timeline"].includes(route.view) && Array.isArray(route.open)) return { route, id: value.id, scrollY: value.scrollY };
+    if (categories.includes(route.category) && ["7d", "30d", "all"].includes(route.range) && ["overview", "timeline"].includes(route.view) && Array.isArray(route.open)) return { route, id: value.id, scrollY: value.scrollY, ...(typeof value.anchorId === "string" ? { anchorId: value.anchorId } : {}) };
   }
   // 重设计前保存在浏览器里的列表位置仍可读取。
   return categories.includes(value.category as RecentProgressCategory) ? { route: recentProgressRoute(`?activityView=timeline&activityKind=${value.category}`), id: value.id, scrollY: value.scrollY } : null;
@@ -149,28 +156,32 @@ export function ProgressDetail({ item, onOpenSource, copy, today = "", sourcesOp
 
 export type RecentProgressViewProps = { notes: Note[]; today: string; loading: boolean; fetchedAt: number | null; error?: string | null; onOpenSource: (path: string) => void; embedded?: boolean };
 
-export function ProgressListRow({ item, route, copy, onSelect, today, compact = false, hideCompany = false }: {
-  item: RecentProgressEntry; route: RecentProgressRoute; copy: typeof progressZh; today: string; compact?: boolean; hideCompany?: boolean;
+export function ProgressListRow({ item, route, copy, onSelect, today, compact = false, hideCompany = false, anchorSuffix = "" }: {
+  item: RecentProgressEntry; route: RecentProgressRoute; copy: typeof progressZh; today: string; compact?: boolean; hideCompany?: boolean; anchorSuffix?: string;
   onSelect: (event: MouseEvent<HTMLAnchorElement>, item: RecentProgressEntry) => void;
 }) {
-  return <li><a id={rowId(item.id)} className={`recent-progress-row${compact ? " recent-progress-row-compact" : ""}`} href={recentProgressHref(item.id, route.category, route)} onClick={(event) => onSelect(event, item)} data-progress-kind={item.kind} data-tone={progressTone(item, today)}>
+  return <li><a id={`${rowId(item.id)}${anchorSuffix}`} className={`recent-progress-row${compact ? " recent-progress-row-compact" : ""}`} href={recentProgressHref(item.id, route.category, route)} onClick={(event) => onSelect(event, item)} data-progress-kind={item.kind} data-tone={progressTone(item, today)}>
     <span className="recent-progress-row-main"><strong>{hideCompany ? item.position || item.company : item.company || progressSourceLabel(item.sourceType, copy)}</strong>{!hideCompany && <span>{item.action || item.position || progressSourceLabel(item.sourceType, copy)}</span>}</span>
     <span className="recent-progress-row-meta"><span className="recent-progress-state">{progressStateLabel(item.state, copy)}</span>{item.kind === "blocker" && (item.due || item.dueText) ? <small className="recent-progress-due">{item.due ? <>{item.due <= today ? item.due === today ? copy.dueToday : copy.overdue : copy.due} <time dateTime={item.due}>{item.due}</time></> : compact ? copy.dueTextShort : `${copy.dueText} ${item.dueText}`}</small> : <small><time dateTime={item.date}>{item.date}</time> · {copy[item.dateBasis]}</small>}</span><span className="recent-progress-arrow" aria-hidden="true">→</span>
   </a></li>;
 }
 
 type Overview = ReturnType<typeof buildRecentProgressOverview>;
-type OverviewProps = { overview: Overview; route: RecentProgressRoute; copy: typeof progressZh; today: string; onToggle: (key: string) => void; onSelect: (event: MouseEvent<HTMLAnchorElement>, item: RecentProgressEntry) => void };
+type OverviewProps = { overview: Overview; route: RecentProgressRoute; copy: typeof progressZh; today: string; locale: string; onToggle: (key: string) => void; onChartSelection: (selection: string | undefined) => void; onSelect: (event: MouseEvent<HTMLAnchorElement>, item: RecentProgressEntry) => void };
 
-function ProgressOverview({ overview, route, copy, today, onToggle, onSelect }: OverviewProps) {
+function ProgressOverview({ overview, route, copy, today, locale, onToggle, onSelect, onChartSelection }: OverviewProps) {
   const currentLimit = 2;
   const advancingLimit = Math.max(1, 3 - Math.min(currentLimit, overview.current.length));
   const priorities = [
     { key: "current", title: copy.current, note: copy.currentRange, entries: overview.current, limit: currentLimit, empty: copy.noCurrent, tone: "action" },
     { key: "advancing", title: copy.advancing, note: copy.advancingRange, entries: overview.advancing, limit: advancingLimit, empty: copy.noAdvancing, tone: "positive" },
   ].filter((group) => group.key !== "current" || group.entries.length > 0);
+  const explore = (key: string) => {
+    if (!route.open.includes(key)) onToggle(key);
+    window.requestAnimationFrame(() => document.getElementById(`progress-${key}-records`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  };
   return <div className="recent-progress-overview">
-    {!overview.current.length && <p className="recent-progress-current-clear"><span aria-hidden="true">✓</span>{copy.noCurrent}</p>}
+    <ProgressDashboard overview={overview} locale={locale} onToggle={explore} selection={route.chart} onSelection={onChartSelection} renderRow={(item) => <ProgressListRow key={item.id} item={item} route={route} copy={copy} today={today} compact anchorSuffix="-chart" onSelect={onSelect} />} />
     <div className={`recent-progress-priorities${overview.current.length ? "" : " recent-progress-priorities-single"}`}>{priorities.map((group) => <section className="recent-progress-priority" key={group.key} data-priority={group.key} data-tone={group.tone}>
       <header><div><h2>{group.title}<span>{group.entries.length}</span></h2><p>{group.note}</p></div>{group.entries.length > group.limit && <button type="button" className="recent-progress-text-button" aria-expanded={route.open.includes(group.key)} aria-controls={`progress-${group.key}-records`} onClick={() => onToggle(group.key)}>{route.open.includes(group.key) ? copy.less : `${copy.more} (${group.entries.length})`}</button>}</header>
       {group.entries.length ? <ul className="recent-progress-list" id={`progress-${group.key}-records`}>{(route.open.includes(group.key) ? group.entries : group.entries.slice(0, group.limit)).map((item) => <ProgressListRow key={item.id} item={item} route={route} copy={copy} today={today} compact onSelect={onSelect} />)}</ul> : <p className="recent-progress-priority-empty">{group.empty}</p>}
@@ -228,7 +239,7 @@ export default function RecentProgressView({ notes, today, loading, fetchedAt, e
       else {
         const saved = navigation.position;
         const position = saved && routeHref({ ...saved.route, id: null }) === routeHref({ ...route, id: null }) ? saved : null;
-        const target = position ? document.getElementById(rowId(position.id)) : null;
+        const target = position ? document.getElementById(position.anchorId || rowId(position.id)) : null;
         (target || listRef.current)?.focus({ preventScroll: true });
         window.scrollTo({ top: position?.scrollY ?? 0, left: 0, behavior: "instant" });
       }
@@ -242,6 +253,11 @@ export default function RecentProgressView({ notes, today, loading, fetchedAt, e
     if (typeof window !== "undefined") window.history.replaceState({ ...(window.history.state ?? {}), ...(!next.id ? { __echoProgressList: null, __echoProgressDetail: null } : {}) }, "", routeHref(next));
     setRoute(next);
   };
+  const setRange = (value: ProgressRange) => {
+    const next = { ...route, range: value };
+    delete next.chart;
+    changeRoute(next);
+  };
   const setOpen = (key: string, open: boolean) => {
     if (route.open.includes(key) === open) return;
     changeRoute({ ...route, open: open ? [...route.open, key].sort() : route.open.filter((value) => value !== key) });
@@ -249,7 +265,7 @@ export default function RecentProgressView({ notes, today, loading, fetchedAt, e
   const openDetail = (event: MouseEvent<HTMLAnchorElement>, item: RecentProgressEntry) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    const position = { route: { ...route, id: null }, id: item.id, scrollY: window.scrollY };
+    const position = { route: { ...route, id: null }, id: item.id, scrollY: window.scrollY, ...(event.currentTarget?.id ? { anchorId: event.currentTarget.id } : {}) };
     window.history.replaceState({ ...(window.history.state ?? {}), __echoProgressList: position }, "");
     window.history.pushState({ ...(window.history.state ?? {}), __echoProgressDetail: item.id }, "", recentProgressHref(item.id, category, route));
     pending.current = { kind: "detail" };
@@ -265,7 +281,7 @@ export default function RecentProgressView({ notes, today, loading, fetchedAt, e
   };
 
   return <section className={`recent-progress-view${embedded ? " recent-progress-view-embedded" : ""}`} aria-label={copy.title}>
-    <header className="recent-progress-header">{!embedded && <div><span className="recent-progress-kicker">{copy.kicker}</span><h1>{copy.title}</h1></div>}<div className="recent-progress-header-controls"><nav className="recent-progress-range" aria-label={copy.rangeLabel}>{(["7d", "30d", "all"] as const).map((value) => <button type="button" key={value} aria-pressed={range === value} onClick={() => changeRoute({ ...route, range: value })}>{value === "7d" ? copy.range7d : value === "30d" ? copy.range30d : copy.rangeAll}</button>)}</nav><p className="recent-progress-range-dates">{overview.start ? <><time dateTime={overview.start}>{overview.start}</time> — <time dateTime={overview.end}>{overview.end}</time> · {copy.inclusive}</> : <>{copy.rangeAll} · {copy.until} <time dateTime={overview.end}>{overview.end}</time></>} · JST</p>{embedded && !id && <button type="button" className="recent-progress-embedded-toggle" onClick={() => changeRoute({ ...route, view: view === "overview" ? "timeline" : "overview" })}>{view === "overview" ? copy.timeline : locale === "ja" ? "概要に戻る" : "返回概览"}<span aria-hidden="true">{view === "overview" ? " →" : " ↩"}</span></button>}</div></header>
+    <header className="recent-progress-header">{!embedded && <div><span className="recent-progress-kicker">{copy.kicker}</span><h1>{copy.title}</h1></div>}<div className="recent-progress-header-controls"><nav className="recent-progress-range" aria-label={copy.rangeLabel}>{(["7d", "30d", "all"] as const).map((value) => <button type="button" key={value} aria-pressed={range === value} onClick={() => setRange(value)}>{value === "7d" ? copy.range7d : value === "30d" ? copy.range30d : copy.rangeAll}</button>)}</nav><p className="recent-progress-range-dates">{overview.start ? <><time dateTime={overview.start}>{overview.start}</time> — <time dateTime={overview.end}>{overview.end}</time> · {copy.inclusive}</> : <>{copy.rangeAll} · {copy.until} <time dateTime={overview.end}>{overview.end}</time></>} · JST</p>{embedded && !id && <button type="button" className="recent-progress-embedded-toggle" onClick={() => changeRoute({ ...route, view: view === "overview" ? "timeline" : "overview" })}>{view === "overview" ? copy.timeline : locale === "ja" ? "概要に戻る" : "返回概览"}<span aria-hidden="true">{view === "overview" ? " →" : " ↩"}</span></button>}</div></header>
     <div className="recent-progress-scope-bar"><details className="recent-progress-scope" open={route.open.includes("scope")} onToggle={(event) => setOpen("scope", event.currentTarget.open)}><summary>{copy.scopeShort}{loaded && hasGaps && <span>{copy.summaryGap}</span>}</summary><p>{copy.scopeDescription}</p><p>{loaded ? <>{copy.fetched}：<time dateTime={new Date(fetchedAt).toISOString()}>{new Intl.DateTimeFormat(locale, { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(fetchedAt)} JST</time></> : copy.unavailable}</p>
       {loaded && hasGaps && <><p>{copy.gaps}</p><ul>{([["undated", "gapUndated"], ["invalidDates", "gapInvalid"], ["futureDates", "gapFuture"], ["unreviewed", "gapUnreviewed"], ["unsupportedRecords", "gapUnsupported"]] as const).filter(([key]) => result.gaps[key] > 0).map(([key, label]) => <li key={key}>{copy[label]}：{result.gaps[key]}</li>)}</ul></>}
     </details>{loaded && result.gaps.unreviewed > 0 && <a className="recent-progress-review-link" href={`/actions?category=review`} title={copy.reviewMeaning}>{copy.reviewData} {result.gaps.unreviewed} →</a>}</div>
@@ -279,7 +295,7 @@ export default function RecentProgressView({ notes, today, loading, fetchedAt, e
       </div> : <>
         {!embedded && <nav className="recent-progress-view-switch" aria-label={copy.records}><button type="button" aria-pressed={view === "overview"} onClick={() => changeRoute({ ...route, view: "overview" })}>{copy.overview}</button><button type="button" aria-pressed={view === "timeline"} onClick={() => changeRoute({ ...route, view: "timeline" })}>{copy.timeline}</button></nav>}
         <div id="recent-progress-records" ref={listRef} tabIndex={-1} aria-label={copy.records} data-progress-category={category} data-progress-view={view}>
-          {view === "overview" ? result.entries.length ? <ProgressOverview overview={overview} route={route} copy={copy} today={today} onSelect={openDetail} onToggle={(key) => setOpen(key, !route.open.includes(key))} /> : <p className="recent-progress-empty">{copy.empty}{hasGaps && <span>{copy.summaryGap}</span>}</p> : <>
+          {view === "overview" ? result.entries.length ? <ProgressOverview overview={overview} route={route} copy={copy} today={today} locale={locale} onSelect={openDetail} onToggle={(key) => setOpen(key, !route.open.includes(key))} onChartSelection={(chart) => changeRoute({ ...route, chart })} /> : <p className="recent-progress-empty">{copy.empty}{hasGaps && <span>{copy.summaryGap}</span>}</p> : <>
             <p className="recent-progress-timeline-note">{copy.timelineMeaning}</p>
             <nav className="recent-progress-filters" aria-label={copy.filters}>{categories.map((key) => <button key={key} type="button" aria-pressed={key === category} aria-controls="recent-progress-records" onClick={() => changeRoute({ ...route, category: key })}>{copy[key]}<span>{overview.entries.filter((entry) => inCategory(entry, key)).length}</span></button>)}</nav>
             {items.length ? dates.map((date) => <section className="recent-progress-date-group" key={date} aria-labelledby={`progress-date-${date}`}><h2 id={`progress-date-${date}`}><time dateTime={date}>{date}</time></h2><ul className="recent-progress-list">{items.filter((entry) => entry.date === date).map((item) => <ProgressListRow key={item.id} item={item} route={route} copy={copy} today={today} onSelect={openDetail} />)}</ul></section>) : <p className="recent-progress-empty">{copy.emptyCategory}{hasGaps && <span>{copy.summaryGap}</span>}</p>}
