@@ -149,6 +149,46 @@ test("评价保留原话、中文解释、员工来源及岗位启示，比较�
   assert.match(compared, /相談しやすい環境です。/);
 });
 
+test("外部总结先于平台与摘录，正文连续可读，阅读边界、日期、署名及来源可核对", () => {
+  const item = context("数据平台岗位");
+  item.profile = { updatedOn: "2026-01-03", facts: [], reviews: [{ platform: "员工评价平台", status: "available", score: 3.5, scale: 5, sampleCount: 8,
+    commentPeriod: "2025年", coverage: "两个部门", positive: [], negative: [], readOn: "2026-01-03", limitations: "员工个人经历", insights: [] }],
+    reviewSynthesis: { asOf: "2026-01-03", aiAuthor: "Codex", coverage: "抽读两个部门；旧评价不能代表当前项目。", paragraphs: ["综合来看，**项目差异**比平台均分更需要关注。", "[员工原文](https://example.com/reviews/one)反映沟通方式有所不同。", "<script>alert(1)</script>只是文字；需要在面谈核实。"].map(prepModel.parseInline),
+      sources: [{ label: "员工回答", url: "https://example.com/reviews/one" }, { label: "研究记录", wiki: "[[80_AI分析/外部评价研究]]" }] } };
+  const html = render(components.default, { context: item, onOpenWiki() {} });
+  assert.ok(html.indexOf("外部评价总结") < html.indexOf("员工评价平台"));
+  const synthesis = html.match(/<section class="co-review-synthesis"[\s\S]*?<\/section>/)?.[0];
+  assert.ok(synthesis);
+  assert.match(synthesis, /<strong><span>项目差异<\/span><\/strong>/);
+  assert.match(synthesis, /href="https:\/\/example.com\/reviews\/one"/);
+  assert.match(synthesis, /<time dateTime="2026-01-03">2026-01-03<\/time> · Codex/);
+  assert.match(synthesis, /抽读两个部门；旧评价不能代表当前项目/);
+  assert.match(synthesis, /<details class="co-review-synthesis-sources"><summary>总结依据 · 2 项<\/summary>/);
+  assert.match(synthesis, />研究记录 ↗<\/button>/);
+  assert.match(synthesis, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(synthesis, /<script>|co-review-synthesis-more|hidden=|aria-hidden/);
+  assert.equal((synthesis.match(/<p>/g) ?? []).length, 3, "所有保存的正文自然段均显示");
+
+  const compared = render(components.CompanyCompare, { contexts: [item, context("另一岗位")], onClose() {}, onDetail() {}, onRemove() {}, onOpenWiki() {} });
+  assert.match(compared, /class="co-review-synthesis compact"/);
+  assert.match(compared, /<details class="co-review-synthesis-more"><summary>展开完整总结<\/summary>/);
+  assert.ok(compared.indexOf("项目差异") < compared.indexOf("co-review-synthesis-more"));
+  assert.match(compared, /反映沟通方式有所不同/);
+  assert.match(compared, /需要在面谈核实/);
+  assert.match(compared, /总结依据 · 2 项/);
+});
+
+test("未保存外部总结时不从平台均分或正负主题拼出总结，也不影响旧评价", () => {
+  const item = context("数据平台岗位");
+  item.profile = { updatedOn: "2026-01-03", facts: [], reviews: [] };
+  for (const reviewSynthesis of [undefined, null]) {
+    item.profile.reviewSynthesis = reviewSynthesis;
+    const html = render(components.default, { context: item, onOpenWiki() {} });
+    assert.doesNotMatch(html, /co-review-synthesis|外部评价总结/);
+    assert.match(html, /尚未收录可核对的外部评价/);
+  }
+});
+
 test("新旧口径混选时保留公司事实，禁止并排雷达和维度分数", () => {
   const first = context("旧岗位", 1), second = context("新岗位", 2);
   const html = render(components.CompanyCompare, { contexts: [first, second], onClose() {}, onDetail() {}, onRemove() {}, onOpenWiki() {}, onEdit() {} });

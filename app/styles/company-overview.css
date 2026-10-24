@@ -79,6 +79,20 @@
 .co-dimension-detail ul:not(.co-evidence) { padding-left: 17px; color: var(--co-muted); margin-bottom: 10px; }
 .co-footnote { margin: 12px 0 0; color: var(--co-muted); font-size: 11px; }
 .co-external { border-top: 1px solid var(--co-line); padding-top: 20px; scroll-margin-top: 110px; }
+.co-review-synthesis { margin-bottom: 24px; padding: 16px 20px; border-left: 3px solid var(--co-green); background: var(--surface-recessed, var(--paper)); }
+.co-review-synthesis > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 20px; margin-bottom: 10px; }
+.co-review-synthesis h3 { margin: 0; color: var(--co-green); font-size: 13px; font-weight: 650; }
+.co-review-synthesis > header > span { margin-left: auto; color: var(--co-muted); font-size: 11px; }
+.co-review-synthesis .co-summary-prose { max-width: 92ch; font-size: 14px; line-height: 1.9; }
+.co-review-synthesis .co-summary-prose > p:last-child { margin-bottom: 0; }
+.co-review-synthesis-coverage { margin: 12px 0 4px; color: var(--co-muted); font-size: 11px; line-height: 1.7; }
+.co-review-synthesis-sources, .co-review-synthesis-more { font-size: 11px; }
+.co-review-synthesis-more { margin-top: 8px; }
+.co-review-synthesis-more[open] > summary { margin-bottom: 10px; }
+.co-review-synthesis.compact { padding: 12px; margin-bottom: 18px; }
+.co-review-synthesis.compact > header { display: block; }
+.co-review-synthesis.compact > header > span { display: block; margin-top: 3px; }
+.co-review-synthesis.compact .co-summary-prose { font-size: 13px; line-height: 1.8; }
 /* 评论按「判断—原文—对本场的用处」展开，单个平台使用整行，避免半幅留白。 */
 .co-reviews { display: grid; gap: 24px; }
 .co-review-platform + .co-review-platform { border-top: 1px solid var(--co-line); padding-top: 20px; }

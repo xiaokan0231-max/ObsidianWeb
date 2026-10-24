@@ -8,6 +8,7 @@ import {
   type CompanyFitDimension,
   type CompanyOverview,
   type CompanyReview,
+  type CompanyReviewSynthesis,
 } from "@/lib/company-overview";
 import { HARD_GATE_LABEL, JOB_FIT_AXES, JOB_FIT_SCORE_LABEL, UNRATED_V2_LABEL, toJobCard } from "@/lib/jobs";
 import { prefersReducedMotion } from "@/lib/motion";
@@ -87,6 +88,18 @@ function CaseFit({ context }: { context: CompanyOverview }) {
   return <div className="co-case-fit"><strong>Fit {fit.score}</strong> · Band {fit.band} · Gate {HARD_GATE_LABEL[fit.hardGate]}<ul>{JOB_FIT_AXES.map((key) => <li key={key}>{JOB_FIT_SCORE_LABEL[key].label} {fit.scores[key]}/{JOB_FIT_SCORE_LABEL[key].max}</li>)}</ul></div>;
 }
 
+function ReviewSynthesis({ synthesis, compact = false, onOpenWiki }: { synthesis?: CompanyReviewSynthesis | null; compact?: boolean; onOpenWiki: (target: string) => void }) {
+  if (!synthesis) return null;
+  const renderParagraph = (paragraph: CompanyReviewSynthesis["paragraphs"][number], index: number) => <p key={index}><Inlines nodes={paragraph} refs={{ onOpenWiki: (target, section) => onOpenWiki(section ? `${target}#${section}` : target) }} /></p>;
+  return <section className={`co-review-synthesis${compact ? " compact" : ""}`} aria-label="外部评价总结">
+    <header><h3>外部评价总结</h3><span>截至 <time dateTime={synthesis.asOf}>{synthesis.asOf}</time> · {synthesis.aiAuthor}</span></header>
+    <div className="co-summary-prose">{(compact ? synthesis.paragraphs.slice(0, 1) : synthesis.paragraphs).map(renderParagraph)}</div>
+    {compact && synthesis.paragraphs.length > 1 && <details className="co-review-synthesis-more"><summary>展开完整总结</summary><div className="co-summary-prose">{synthesis.paragraphs.slice(1).map(renderParagraph)}</div></details>}
+    <p className="co-review-synthesis-coverage">{synthesis.coverage}</p>
+    <details className="co-review-synthesis-sources"><summary>总结依据 · {synthesis.sources.length} 项</summary><Evidence items={synthesis.sources} onOpenWiki={onOpenWiki} /></details>
+  </section>;
+}
+
 function Reviews({ reviews, onOpenWiki, compact = false }: { reviews: CompanyReview[]; onOpenWiki: (target: string) => void; compact?: boolean }) {
   if (!reviews.length) return <p className="co-muted">未调查 · 尚未收录可核对的外部评价。</p>;
   return <div className={`co-reviews${compact ? " compact" : ""}`}>{reviews.map((review, index) => {
@@ -151,7 +164,7 @@ export default function CompanyOverviewContent({ context, onOpenWiki, historical
         {facts.length ? <dl className="co-fact-grid">{facts.map((fact, index) => <div key={`${fact.id}:${index}`}><dt>{fact.label}</dt><dd><Fact fact={fact} onOpenWiki={onOpenWiki} /></dd></div>)}</dl> : <p className="co-muted">公司规模、业务、岗位条件等资料待整理；已存在的案件和面谈记录仍可查看。</p>}
       </section>
     </div>
-    <section className="co-external" id={`${prefix}-reviews`} aria-labelledby={`${prefix}-reviews-title`}><header className="co-section-header"><span>03</span><h2 id={`${prefix}-reviews-title`} tabIndex={-1}>外部评价</h2><p>员工的经历 · 对本次面谈的启示</p></header><Reviews reviews={profile?.reviews ?? []} onOpenWiki={onOpenWiki} /></section>
+    <section className="co-external" id={`${prefix}-reviews`} aria-labelledby={`${prefix}-reviews-title`}><header className="co-section-header"><span>03</span><h2 id={`${prefix}-reviews-title`} tabIndex={-1}>外部评价</h2><p>员工的经历 · 对本次面谈的启示</p></header><ReviewSynthesis synthesis={profile?.reviewSynthesis} onOpenWiki={onOpenWiki} /><Reviews reviews={profile?.reviews ?? []} onOpenWiki={onOpenWiki} /></section>
   </div>;
 }
 
@@ -208,7 +221,7 @@ export function CompanyCompare({ contexts, onClose, onDetail, onRemove, onOpenWi
     { label: "案件 v2 採点", render: (context) => <CaseFit context={context} /> },
     ...[...facts].map(([id, label]) => ({ label, render: (context: CompanyOverview) => <Fact fact={[...(context.assessment?.contextFacts ?? []), ...(context.profile?.facts ?? [])].find((fact) => fact.id === id)} onOpenWiki={onOpenWiki} /> })),
     ...(mixedCriteria ? [] : axes.map((dimension) => ({ label: dimension.label, render: (context: CompanyOverview) => <Dimension label={dimension.label} dimension={context.assessment?.dimensions.find((item) => item.key === dimension.key)} onOpenWiki={onOpenWiki} /> }))),
-    { label: "外部评价", render: (context) => <Reviews compact reviews={context.profile?.reviews ?? []} onOpenWiki={onOpenWiki} /> },
+    { label: "外部评价", render: (context) => <><ReviewSynthesis compact synthesis={context.profile?.reviewSynthesis} onOpenWiki={onOpenWiki} /><Reviews compact reviews={context.profile?.reviews ?? []} onOpenWiki={onOpenWiki} /></> },
     { label: "面谈核实", render: (context) => context.assessment?.questions.length ? <ul>{context.assessment.questions.map((question) => <li key={question}>{question}</li>)}</ul> : "岗位详情与评价待补" },
   ];
   return <div className="job-compare-backdrop co-compare-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} className="co-compare-panel" role="dialog" aria-modal="true" aria-label="公司与岗位并排对比" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>

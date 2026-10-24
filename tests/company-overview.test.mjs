@@ -28,6 +28,9 @@ const reviewInsight = (overrides = {}) => ({ title: "协作机会与项目差异
   summary: "员工描述了经验交流，也指出项目安排影响学习机会。", implication: "面谈确认首个项目如何安排带教。",
   evidence: [{ url: "https://example.com/reviews/respondent-1", published_on: "2026-09-18", role: "工程师／在职／中途入社",
     quote: "チーム内で相談できます。", paraphrase: "该回答者认为团队内能及时请教，但没有说明其他部门的情况。" }], ...overrides });
+const reviewSynthesis = (overrides = {}) => ({ as_of: "2026-09-20", ai_author: "Codex", coverage: "抽读两个部门的员工评价；未覆盖所有回答者。",
+  paragraphs: ["综合这些评价，**学习机会取决于项目**。", "[员工原文](https://example.com/reviews/respondent-1)提到团队交流；对本次面谈，应核对实际支援安排。"],
+  sources: [{ label: "员工评价", url: "https://example.com/reviews/respondent-1" }, { label: "公司卷宗", wiki: "[[20_求職/测试/_公司]]" }], ...overrides });
 
 function fixture() {
   const dossier = note("20_求職/测试/_公司.md", { type: "company", company: "株式会社テスト", company_profile: {
@@ -441,11 +444,74 @@ test("未调查/没找到资料允许无URL，不虚构平台页；不得附加�
   }
 });
 
+test("可选的外部评价总结保留自然段、署名、阅读边界与全部来源，不从主题摘录猜测总结", () => {
+  const { notes, dossier, context } = fixture();
+  assert.equal(resolveCompanyOverview(notes, context).profile.reviewSynthesis, null);
+  dossier.frontmatter.company_profile.review_synthesis = reviewSynthesis();
+  const entry = resolveCompanyOverview(notes, context);
+  assert.deepEqual(validateCompanyOverviewNotes(notes), []);
+  assert.equal(entry.profileStatus, "available");
+  assert.equal(entry.profile.reviewSynthesis.asOf, "2026-09-20");
+  assert.equal(entry.profile.reviewSynthesis.aiAuthor, "Codex");
+  assert.equal(entry.profile.reviewSynthesis.coverage, "抽读两个部门的员工评价；未覆盖所有回答者。");
+  assert.equal(entry.profile.reviewSynthesis.paragraphs.length, 2);
+  assert.ok(entry.profile.reviewSynthesis.paragraphs[0].some((node) => node.kind === "strong"));
+  assert.ok(entry.profile.reviewSynthesis.paragraphs[1].some((node) => node.kind === "link"));
+  assert.deepEqual(entry.profile.reviewSynthesis.sources, dossier.frontmatter.company_profile.review_synthesis.sources);
+  assert.equal(entry.profile.reviews[0].score, 3.5);
+});
+
+test("损坏的外部总结单独关闭，评分、公司事实和已有观察仍然可用且错误字段可追踪", () => {
+  const mutations = [
+    ["as_of", (s) => { s.as_of = "2026-02-30"; }],
+    ["ai_author", (s) => { s.ai_author = "AI"; }],
+    ["ai_author", (s) => { s.ai_author = 123; }],
+    ["coverage", (s) => { s.coverage = ""; }],
+    ["coverage", (s) => { s.coverage = ["不是文本"]; }],
+    ["paragraphs", (s) => { s.paragraphs = []; }],
+    ["paragraphs", (s) => { s.paragraphs = [123]; }],
+    ["paragraphs", (s) => { s.paragraphs = ["   "]; }],
+    ["paragraphs[0]", (s) => { s.paragraphs = ["## 标题"]; }],
+    ["paragraphs[0]", (s) => { s.paragraphs = ["- 主题列表"]; }],
+    ["paragraphs[0]", (s) => { s.paragraphs = ["段落一。\n\n段落二。"]; }],
+    ["paragraphs[0]", (s) => { s.paragraphs = ["![图片](https://example.com/p.png)"]; }],
+    ["paragraphs[0]", (s) => { s.paragraphs = ["[相对地址](/reviews/one)"]; }],
+    ["paragraphs[0]", (s) => { s.paragraphs = ["[不安全地址](javascript:alert)"]; }],
+    ["paragraphs[0]", (s) => { s.paragraphs = ["[[不存在的研究]]"]; }],
+    ["sources", (s) => { s.sources = []; }],
+    ["sources[0]", (s) => { s.sources = [{ label: "来源", url: "https://example.com/one", wiki: "[[20_求職/测试/_公司]]" }]; }],
+    ["sources[0].url", (s) => { s.sources = [{ label: "来源", url: "/relative" }]; }],
+    ["sources[0].wiki", (s) => { s.sources = [{ label: "来源", wiki: "[[不存在的研究]]" }]; }],
+  ];
+  for (const [field, mutate] of mutations) {
+    const { notes, dossier, context } = fixture();
+    const bad = reviewSynthesis();
+    mutate(bad);
+    dossier.frontmatter.company_profile.review_synthesis = bad;
+    dossier.frontmatter.company_profile.reviews[0].insights = [reviewInsight()];
+    const entry = resolveCompanyOverview(notes, context);
+    assert.equal(entry.profileStatus, "available", field);
+    assert.equal(entry.profile.reviewSynthesis, null, field);
+    assert.equal(entry.profile.reviews[0].score, 3.5, field);
+    assert.equal(entry.profile.facts[0].value, "约100人", field);
+    assert.equal(entry.profile.reviews[0].insights.length, 1, field);
+    assert.ok(entry.issues.some((issue) => issue.includes(`company_profile.review_synthesis.${field}`)), field);
+    assert.ok(validateCompanyOverviewNotes(notes).some((issue) => issue.includes("company_profile.review_synthesis")), field);
+  }
+  const { notes, dossier, context } = fixture();
+  dossier.frontmatter.company_profile.review_synthesis = null;
+  const entry = resolveCompanyOverview(notes, context);
+  assert.equal(entry.profileStatus, "available");
+  assert.equal(entry.profile.reviewSynthesis, null);
+  assert.match(entry.issues.join("\n"), /review_synthesis 必须是结构化对象/);
+});
+
 test("vault-check实际读取结构化YAML，兼容两版评价口径且坏数据会阻断", async (t) => {
   const data = fixture();
   const { context, dossier, report, candidate } = data;
   dossier.frontmatter.company_profile.reviews[0].insights = [reviewInsight()];
   dossier.frontmatter.company_profile.reviews[0].sample_unit = "名回答者";
+  dossier.frontmatter.company_profile.review_synthesis = reviewSynthesis();
   const summary = addCompanySummary(data);
   summary.content = summary.content.replace(/^# .*\n/, "# 公司总结\n");
   context.frontmatter = { type: "todo", company: "株式会社テスト", category: "面接準備", status: "未着手", priority: "medium", audience: "user",
