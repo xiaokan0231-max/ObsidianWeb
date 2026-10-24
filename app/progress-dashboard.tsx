@@ -8,6 +8,7 @@ import type { RecentProgressEntry } from "@/lib/recent-progress";
 import { ProgressConstellation, ProgressFlow, ProgressHeatmap } from "./progress-observatory";
 import { CountUp } from "./count-up";
 import "./styles/progress-dashboard.css";
+import "./styles/progress-palette.css";
 
 const zh = {
   eyebrow: "CAREER SIGNAL / 机会观测台", headline: "你的机会，正在展开。", description: "从动态脉冲到案件星图，把每一次进展连起来。", signal: "记录信号", visualizations: "5 个可交互视图",
