@@ -34,7 +34,9 @@ test("日本語のカレンダーメニューでも原文の予定と JST の時
   assert.match(html, /予定を見る/);
   assert.match(html, /元の記録を見る/);
   assert.match(html, /カジュアル面談（原文）/);
-  assert.match(html, /dateTime="2026-08-10T10:00\+09:00">10:00–10:30/);
+  assert.match(html, /dateTime="2026-08-10T10:00\+09:00">10:00<\/time>/);
+  assert.match(html, /class="agenda-time">10:00–10:30<\/span>/);
+  assert.match(html, /aria-label="2026-08-10 · 10:00–10:30 · JST · 株式会社テスト/);
 });
 
 test("日本語の資料庫は検索・用途・並び替えを翻訳し、タイトルと本文を保持する", async () => {

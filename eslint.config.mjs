@@ -24,6 +24,8 @@ const eslintConfig = defineConfig([
     // Claude Code 的 worktree：每个都是一份完整仓库，各自的 checkout 自己 lint，
     // 主仓库不要连带扫进来（否则同一份源码会被重复报，且混入对方的构建产物）。
     "**/.claude/worktrees/**",
+    // 发布暂存区可能保存整份旧源码，与主工作区分开校验。
+    "work/**",
   ]),
 ]);
 
