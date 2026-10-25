@@ -75,6 +75,7 @@ const calendarZh = {
   localScore: (points: string) => `局部${points}分`,
   schedule: "查看安排",
   source: "查看原始记录",
+  sourceShort: "原始记录",
   conflict: "时间冲突",
   more: (count: number) => `另有 ${count} 项`,
   collapse: "收起",
@@ -192,7 +193,7 @@ const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
     final: "最終面接", finalShort: "最終面接", finalMark: "終",
     agent: "エージェント面談", agentShort: "エージェント", agentMark: "エ", agentDetail: "エージェント面談：正式な選考回数には含まれません",
     unknownRound: "段階未確認", unknownShort: "未確認", unknownDetail: "段階未確認：この記録では選考段階が明示されていません",
-    interview: "面接", meeting: "面談", eventLabel: japaneseEventLabel, review: "面接の振り返り", reviewShort: "振り返り", score: (points) => `${points}点`, localScore: (points) => `部分${points}点`, schedule: "予定を見る", source: "元の記録を見る",
+    interview: "面接", meeting: "面談", eventLabel: japaneseEventLabel, review: "面接の振り返り", reviewShort: "振り返り", score: (points) => `${points}点`, localScore: (points) => `部分${points}点`, schedule: "予定を見る", source: "元の記録を見る", sourceShort: "元の記録",
     conflict: "時間が重複",
     more: (count) => `ほか ${count} 件`, collapse: "閉じる",
     countdown: (days) => days === 0 ? "今日" : days === 1 ? "明日" : days > 1 ? `${days} 日後` : `${-days} 日前`,
@@ -1120,7 +1121,7 @@ function AgendaGroup({
   const { locale } = useUiLocale();
   const copy = CALENDAR_COPY[locale];
   const [expanded, setExpanded] = useState(false);
-  const dateFormatter = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "Asia/Tokyo" });
+  const monthFormatter = new Intl.DateTimeFormat(locale, { month: "short", timeZone: "Asia/Tokyo" });
   const shown = limit && !expanded ? events.slice(0, limit) : events;
   return (
     <section className={className ? `agenda-group ${className}` : "agenda-group"}>
@@ -1141,38 +1142,43 @@ function AgendaGroup({
                 title={actionLabel}
                 aria-label={actionLabel}
               >
-                <time dateTime={event.date}>
+                <time className="agenda-date" dateTime={event.date}>
+                  <span>{monthFormatter.format(new Date(`${event.date}T00:00:00+09:00`))}</span>
                   <strong>{event.date.slice(8)}</strong>
-                  <span>{dateFormatter.format(new Date(`${event.date}T00:00:00+09:00`))}</span>
                 </time>
                 <span className="agenda-copy">
-                  <span className="agenda-event-meta">
+                  <span className="agenda-context">
                     {event.id === nextEventId && <span className="agenda-next-label">{copy.nextUp}</span>}
-                    {round && <RoundBadge round={round} />}
-                    <InterviewScoreBadge score={scoreByEvent.get(event.id)} copy={copy} />
-                    <small>{event.time ? `${calendarEventTime(event)} · ${copy.eventLabel(event.label)}` : copy.eventLabel(event.label)}</small>
                     {offset !== null && <span className="agenda-when" data-soon={offset === 0 || offset === 1 ? "" : undefined}>{copy.countdown(offset)}</span>}
                   </span>
                   <strong>{compactCompany(event.company)}</strong>
-                  <span className="calendar-card-footer"><CalendarOriginBadge origin={originByEvent.get(event.id)} locale={locale} /><CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} /></span>
+                  <span className="agenda-event-meta">
+                    {event.time && <span className="agenda-time">{calendarEventTime(event)}</span>}
+                    {round && <RoundBadge round={round} />}
+                    <InterviewScoreBadge score={scoreByEvent.get(event.id)} copy={copy} />
+                    <small>{copy.eventLabel(event.label)}</small>
+                  </span>
                 </span>
                 <span className="calendar-status-dot" aria-hidden="true" />
               </button>
-              <CalendarInterviewLinks targets={interviewDestinations.get(event.id)} onNavigate={(view) => onInterview(event, view)} />
+              <div className="agenda-signals calendar-card-footer"><CalendarOriginBadge origin={originByEvent.get(event.id)} locale={locale} /><CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} /></div>
               {detailed && (
                 <p className="agenda-progress-detail">
                   <b>{progressLabel(progress, copy)}</b>{copy.progressDetail(progress)}
                 </p>
               )}
-              {target && (
-                <button
-                  className="agenda-source"
-                  onClick={() => onOpen(event.note)}
-                  aria-label={`${event.date} · ${event.company} · ${copy.eventLabel(event.label)} · ${copy.source}`}
-                >
-                  {copy.source}
-                </button>
-              )}
+              <div className="agenda-actions">
+                <CalendarInterviewLinks targets={interviewDestinations.get(event.id)} onNavigate={(view) => onInterview(event, view)} />
+                {target && (
+                  <button
+                    className="agenda-source"
+                    onClick={() => onOpen(event.note)}
+                    aria-label={`${event.date} · ${event.company} · ${copy.eventLabel(event.label)} · ${copy.source}`}
+                  >
+                    {copy.sourceShort}
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}

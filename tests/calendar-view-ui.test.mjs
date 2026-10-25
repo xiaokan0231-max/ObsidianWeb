@@ -21,7 +21,8 @@ test("月格突出开始时刻，完整起止范围保留在说明和议程，�
   }));
   assert.match(html, /日本时间（JST）/);
   assert.match(html, /dateTime="2026-08-10T10:00\+09:00">10:00<\/time>/);
-  assert.match(html, /<small>10:00–10:30 · 面谈<\/small>/);
+  assert.match(html, /<span class="agenda-time">10:00–10:30<\/span>/);
+  assert.match(html, /<small>面谈<\/small>/);
   assert.match(html, /aria-label="2026-08-10 · 10:00–10:30 · JST · 株式会社テスト/);
   assert.match(html, /title="2026-08-10 · 10:00–10:30 · JST · 株式会社テスト/);
 });

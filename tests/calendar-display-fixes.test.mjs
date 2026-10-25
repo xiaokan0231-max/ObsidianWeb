@@ -258,12 +258,12 @@ test("日文界面的议程与卡片说明不再露出中文轮次名", () => {
     const events = batch.map(([label], index) => simpleEvent(`label-${index}`, { label, date: `2026-08-0${index + 1}`, phase: "past" }));
     const html = render(ja, { events });
     for (const [, japanese] of batch) {
-      assert.match(html, new RegExp(`<small>10:00 · ${japanese}</small>`), japanese);
+      assert.match(html, new RegExp(`<small>${japanese}</small>`), japanese);
       assert.match(html, new RegExp(`aria-label="[^"]*株式会社テスト · ${japanese} · `), `卡片说明 ${japanese}`);
     }
     assert.doesNotMatch(html, /轻松面谈|第一次面试|第二次面试|最终面试|猎头面谈|招聘说明会|· 面试 ·|· 面谈 ·|· 面试<|· 面谈</);
     const zhHtml = render(zh, { events });
-    for (const [label] of batch) assert.match(zhHtml, new RegExp(`<small>10:00 · ${label}</small>`), label);
+    for (const [label] of batch) assert.match(zhHtml, new RegExp(`<small>${label}</small>`), label);
   }
 });
 
@@ -430,9 +430,9 @@ test("日文界面只换逐字等于中文正本的轮次词，带补充的原�
     simpleEvent("canonical", { label: "第二次面试", date: "2026-08-05", phase: "past" }),
   ];
   const html = render(ja, { events });
-  assert.match(html, /<small>10:00 · カジュアル面談（原文）<\/small>/);
-  assert.match(html, /<small>10:00 · 第一次面试（テスト補足）<\/small>/);
-  assert.match(html, /<small>10:00 · 二次面接<\/small>/);
+  assert.match(html, /<small>カジュアル面談（原文）<\/small>/);
+  assert.match(html, /<small>第一次面试（テスト補足）<\/small>/);
+  assert.match(html, /<small>二次面接<\/small>/);
 });
 
 test("周视图左侧时刻标签按自身高度对齐（align-self: start），不能被网格撑满一小时而整体上移半小时", () => {

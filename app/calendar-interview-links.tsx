@@ -24,7 +24,7 @@ export function CalendarInterviewLinks({ targets, compact = false, icons = false
       href={appViewHref(target.view, calendarInterviewSearch(target))}
       data-view={target.view} data-missing={!target.path || undefined}
       aria-label={`${target.date} · ${target.time || ""} · ${target.company} · ${label}`}
-      title={`${label}${target.path ? "" : ja ? " · 資料はまだありません" : " · 资料待补充"}`}
+      title={compact || icons || !target.path ? `${label}${target.path ? "" : ja ? " · 資料はまだありません" : " · 资料待补充"}` : undefined}
       onClick={(event: MouseEvent<HTMLAnchorElement>) => {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();

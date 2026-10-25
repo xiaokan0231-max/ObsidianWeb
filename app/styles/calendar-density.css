@@ -94,19 +94,29 @@
 
 .calendar-agenda .agenda-copy > strong {
   display: block;
-  overflow: hidden;
-  overflow-wrap: normal;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   font-size: 14px;
   line-height: 1.5;
-  text-overflow: ellipsis;
 }
 .calendar-agenda .agenda-copy small,
 .calendar-agenda .agenda-main time span,
 .calendar-agenda .agenda-source,
 .calendar-agenda .agenda-empty { font-size: 12px; }
 
-/* 去向始终可见，触屏和键盘访问也能在打开前知道会进入哪一场面试。 */
+/* 日期只写月与日，完整日期不再塞回窄列重复显示；完整场次身份仍在主按钮的可访问名称里。 */
+.calendar-agenda .agenda-main > .agenda-date {
+  align-items: center;
+  gap: 4px;
+  padding: 7px 2px;
+  border-radius: var(--radius-control);
+  background: color-mix(in oklab, var(--commitment-tone) 7%, transparent);
+  white-space: nowrap;
+}
+.calendar-agenda .agenda-date span { margin: 0; font-size: 11px; line-height: 16px; }
+.calendar-agenda .agenda-date strong { font-size: 26px; line-height: 1; font-variant-numeric: tabular-nums; }
+
+/* 去向始终可见，键盘访问也能在打开前知道会进入哪一场面试。 */
 .calendar-view .calendar-interview-destination {
   display: block;
   margin-top: 3px;
@@ -119,19 +129,30 @@
 }
 
 .calendar-agenda .agenda-source {
-  min-height: 32px;
-  margin: 0 9px 8px 61px;
-  padding: 4px 0;
+  flex: 0 0 auto;
+  min-height: 28px;
+  margin: 0;
+  padding: 4px 6px;
   border: 0;
+  border-radius: 4px;
   background: transparent;
   color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
   text-align: left;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.calendar-agenda .agenda-source:hover { color: var(--commitment-tone); }
+.calendar-agenda .agenda-source:hover { color: var(--commitment-tone); background: color-mix(in oklab, var(--commitment-tone) 8%, transparent); }
+
+/* 三个入口共用一条操作栏，避免按正文缩进后各占一层、把卡片撑出大片空白。 */
+.calendar-agenda .agenda-actions { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-top: 1px solid var(--line-soft); }
+.calendar-agenda .agenda-actions:empty { display: none; }
+.calendar-agenda .agenda-actions > .calendar-interview-links { flex: 1 1 auto; gap: 4px; }
+.calendar-agenda .agenda-actions .calendar-interview-links a { flex: 1 1 auto; justify-content: center; min-height: 28px; padding: 4px; border-radius: 4px; font-size: 11px; line-height: 20px; }
+.calendar-agenda .agenda-actions .calendar-interview-links a > span[aria-hidden] { display: none; }
+.calendar-agenda .agenda-actions .calendar-interview-links a:hover { background: color-mix(in oklab, currentColor 8%, transparent); text-decoration: none; }
 
 /* 颜色与形状共同表示进展，避免小尺寸下等待与结束难以分辨。 */
 .calendar-view .status-active { --calendar-status-color: var(--success); }
@@ -213,7 +234,8 @@
   position: relative;
 }
 
-.calendar-agenda .agenda-main { grid-template-columns: 42px minmax(0, 1fr) 12px; }
+.calendar-agenda .agenda-main { grid-template-columns: 40px minmax(0, 1fr) 10px; align-items: start; gap: 10px; padding: 12px 12px 10px; }
+.calendar-agenda .agenda-main > .calendar-status-dot { width: 10px; height: 10px; margin-top: 5px; }
 .agenda-main > .calendar-status-dot { align-self: start; margin-top: 3px; }
 .calendar-view .calendar-progress-legend { color: var(--text-secondary); }
 .calendar-view .calendar-progress-legend .calendar-legend-item { color: inherit; }
@@ -419,8 +441,9 @@
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  margin-bottom: 5px;
+  margin: 5px 0 0;
 }
+.agenda-time { color: var(--commitment-tone); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .agenda-event-meta small {
   min-width: 0;
@@ -509,7 +532,9 @@
 .calendar-agenda .agenda-item[data-next] { border-color: color-mix(in oklab, var(--brand) 45%, var(--line)); background: color-mix(in oklab, var(--brand) 6%, var(--surface)); box-shadow: inset 2px 0 var(--brand); }
 .agenda-next-label { color: var(--interactive); font-size: 10px; font-weight: 650; white-space: nowrap; }
 .agenda-event-meta { flex-wrap: wrap; align-items: center; gap: 5px; }
-.agenda-event-meta .agenda-when { margin-left: auto; }
+.agenda-context { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 18px; margin-bottom: 4px; }
+.agenda-context:empty { display: none; }
+.agenda-context .agenda-when { margin-left: auto; }
 .calendar-agenda .agenda-copy > .calendar-origin-badge { margin-top: 7px; }
 .cw-block > .calendar-origin-badge { position: absolute; bottom: 3px; right: 4px; }
 .cw-short > .calendar-origin-badge { position: static; flex: 0 0 auto; }
@@ -759,7 +784,8 @@
 .calendar-agenda .agenda-more:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 .calendar-agenda .agenda-progress-detail {
-  margin: -4px 9px 10px 61px;
+  margin: 0;
+  padding: 0 12px 10px;
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.6;
@@ -1311,7 +1337,7 @@
 .calendar-event .calendar-card-footer .calendar-company-rating { font-size: 10px; }
 .calendar-event .calendar-card-footer { width: 100%; gap: 2px; }
 .calendar-event .calendar-card-footer > .calendar-origin-badge { flex: 1 1 0; min-width: 0; }
-.calendar-agenda .calendar-card-footer { justify-content: flex-start; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
+.calendar-agenda .calendar-card-footer { justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin: 0; padding: 0 12px 10px; }
 .cw-rating-footer { position: absolute; left: 5px; bottom: 0; }
 .cw-rating-footer .calendar-company-rating { font-size: 9px; line-height: 12px; }
 .cw-short .cw-block-title .calendar-company-rating { align-self: center; font-size: 9px; line-height: 14px; }
@@ -1329,7 +1355,6 @@
 .calendar-interview-links.compact { gap: 8px; }
 .calendar-interview-links.compact a { gap: 1px; font-size: 10px; line-height: 18px; }
 .calendar-event-item > .calendar-interview-links { position: absolute; bottom: 3px; left: 7px; right: 5px; justify-content: space-between; }
-.calendar-agenda .agenda-item > .calendar-interview-links { margin: 3px 15px 6px 62px; }
 .cw-event-shell { position: relative; min-width: 0; }
 .cw-event-shell.timed { position: absolute; z-index: 1; min-height: 22px; }
 .cw-event-shell.timed > .cw-block { position: relative; width: 100%; height: 100%; }
