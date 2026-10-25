@@ -77,6 +77,7 @@ import type { QuickSummary } from "@/lib/language/quick-types";
 import { useExitTransition } from "./use-exit-transition";
 import { useDialogFocus } from "./use-dialog-focus";
 import SidebarFooter from "./sidebar-footer";
+import BrandMark from "./brand-mark";
 import { prefersReducedMotion as reducedMotionPreferred } from "@/lib/motion";
 import {
   canStartViewTransition,
@@ -1386,7 +1387,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigateToView("calendar"); } }}
           aria-label={ui.calendarBack}
         >
-          <span className="brand-mark" aria-hidden="true">職</span>
+          <BrandMark />
           <span className="brand-copy">
             <strong>{branding.name}</strong>
             <small>CAREER WAR ROOM</small>
@@ -1480,7 +1481,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
         */}
         <header className="topbar">
           <div className="mobile-brand">
-            <span className="brand-mark" aria-hidden="true">職</span>
+            <BrandMark />
             <strong>{branding.name}</strong>
           </div>
 
