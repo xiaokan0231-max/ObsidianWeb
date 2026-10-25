@@ -33,7 +33,7 @@ test("server-renders the Career War Room shell", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>求职作战室<\/title>/i);
-  assert.match(html, /<link rel="icon" href="\/favicon\.svg"/i);
+  assert.match(html, /<link rel="icon" href="\/favicon\.svg(?:\?[^"]+)?"/i);
   assert.match(html, /正在加载求职作战室/);
   assert.match(html, /class="language-switch"/);
   assert.match(html, /lang="zh-CN" aria-pressed="true"/);

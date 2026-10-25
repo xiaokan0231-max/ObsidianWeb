@@ -5,7 +5,7 @@ export default function BrandMark() {
   return (
     <span className="brand-mark brand-mark-symbol" aria-hidden="true">
       <Image
-        src="/logo.svg"
+        src="/logo.svg?v=cat"
         alt=""
         width={48}
         height={48}

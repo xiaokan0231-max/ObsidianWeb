@@ -1,6 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="256" height="256">
-  <title>求职作战室 · 折径</title>
-  <rect x=".5" y=".5" width="47" height="47" rx="13.5" fill="#142923" stroke="#365148"/>
-  <path d="M5 37V17C5 10.373 10.373 5 17 5H39L29 15H18A3 3 0 0 0 15 18V27L5 37Z" fill="#80C5B5"/>
-  <path d="M9 43L19 33H30A3 3 0 0 0 33 30V21L43 11V31C43 37.627 37.627 43 31 43H9Z" fill="#F09573"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+  <title>求职作战室 · 小猫向导</title>
+  <rect x="1" y="1" width="62" height="62" rx="20" fill="#DFF1E8" stroke="#B6D7C5" stroke-width="1.6"/>
+  <g stroke="#40594C" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 49Q32 53 42 49L43 56Q32 61 21 56Z" fill="#8DC8AE"/>
+    <path d="M35 54L42 53L46 60Q42 62 38 59Z" fill="#76B89C"/>
+    <path d="M13 29L11 13C10.6 9.4 13.4 8 16.2 10.5L25 18Q32 16 39 18L47.8 10.5C50.6 8 53.4 9.4 53 13L51 29C56.5 35 55.5 44.5 48 49Q32 58 16 49C8.5 44.5 7.5 35 13 29Z" fill="#FFF8E8"/>
+  </g>
+  <path d="M15.5 15.5L21.5 20.5L16.5 23Z" fill="#EFB7AE"/>
+  <path d="M48.5 15.5L42.5 20.5L47.5 23Z" fill="#EFB7AE"/>
+  <g fill="#EAA79E" opacity=".75">
+    <ellipse cx="18" cy="40" rx="4.4" ry="2.5"/>
+    <ellipse cx="46" cy="40" rx="4.4" ry="2.5"/>
+  </g>
+  <g fill="#40594C">
+    <ellipse cx="24" cy="33" rx="2.7" ry="3.4"/>
+    <ellipse cx="40" cy="33" rx="2.7" ry="3.4"/>
+  </g>
+  <g fill="#FFFDF6">
+    <circle cx="23.2" cy="31.8" r=".85"/>
+    <circle cx="39.2" cy="31.8" r=".85"/>
+  </g>
+  <path d="M29.8 38.7Q32 37.6 34.2 38.7Q34 40.4 32 41Q30 40.4 29.8 38.7Z" fill="#D68D83"/>
+  <path d="M32 41V42.3M32 42.3C32 44.8 28.5 45.2 27.5 43.4M32 42.3C32 44.8 35.5 45.2 36.5 43.4" fill="none" stroke="#40594C" stroke-width="1.7" stroke-linecap="round"/>
 </svg>
