@@ -1,5 +1,5 @@
 .review-view [hidden] { display: none !important; }
-.rv-section-tabs { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); margin-bottom: 24px; padding: 0 0 10px; }
+.rv-section-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); margin: 18px 0 14px; padding: 0 0 10px; }
 .rv-section-tabs button { border: 0; background: transparent; padding: 10px 18px; color: var(--muted); cursor: pointer; }
 .rv-section-tabs button[aria-pressed="true"] { background: var(--green); color: var(--on-fill); border-radius: 3px; }
 .rv-section-tabs .rv-cross-link { margin-left: auto; color: var(--green); }
@@ -8,6 +8,45 @@
 .rv-insights-entry > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; min-width: 0; }
 .rv-insights-entry h2 { margin: 0; font-size: 17px; font-family: var(--font-serif); }
 .rv-insights-entry p { margin: 0; color: var(--muted); font-size: 13px; }
+/* 长证据正文可收缩，操作栏保留完整按钮宽度，避免按钮被挤成逐字竖排。 */
+.rv-reassessment-entry { align-items: flex-start; }
+.rv-reassessment-entry > .rv-reassessment-copy { display: block; flex: 1; min-width: 0; }
+.rv-reassessment-entry > .rv-reassessment-actions { display: flex; flex: 0 0 180px; flex-direction: column; align-items: stretch; gap: 8px; margin-left: 0; }
+.rv-reassessment-actions button { white-space: nowrap; padding: 8px 12px; }
+/* 评分入口不依赖当前面板；长诊断与算式只在读者展开后占正文空间。 */
+.rv-assessment-disclosure { margin-bottom: 16px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
+.rv-assessment-disclosure > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 12px 16px; cursor: pointer; list-style: none; }
+.rv-assessment-disclosure > summary::-webkit-details-marker { display: none; }
+.rv-assessment-score { display: inline-flex; align-items: baseline; gap: 10px; flex-shrink: 0; font-size: 12px; color: var(--muted); }
+.rv-assessment-score strong { color: var(--ink); font-size: 18px; font-variant-numeric: tabular-nums; }
+.rv-assessment-preview { flex: 1 1 280px; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 1.6; }
+.rv-assessment-open { display: inline-flex; align-items: center; gap: 8px; color: var(--green); font-size: 12px; }
+.rv-assessment-open i { font-style: normal; }
+.rv-assessment-disclosure[open] .rv-assessment-open i { transform: rotate(180deg); }
+.rv-assessment-disclosure > .rv-reassessment-entry { border: 0; border-top: 1px solid var(--line); margin: 0; flex-wrap: wrap; }
+.rv-assessment-disclosure .rv-reassessment-copy { flex-basis: 420px; overflow-wrap: anywhere; }
+.rv-assessment-disclosure .rv-reassessment-copy :is(p, li) { margin-block: 8px; line-height: 1.7; }
+.rv-assessment-close { margin: 0 18px 16px; padding: 8px 12px; border: 1px solid var(--line); background: var(--surface); color: var(--green); cursor: pointer; }
+.rv-assessment-content { padding: 18px; border-top: 1px solid var(--line); }
+.rv-assessment-content h2 { margin: 0; font-family: var(--font-serif); font-size: 21px; }
+.rv-assessment-content p { max-width: 44em; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+.rv-assessment-content header p { color: var(--muted); margin: 6px 0 18px; }
+.rv-assessment-dimensions { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 0 0 24px; }
+.rv-assessment-dimensions > div { padding: 10px 12px; background: var(--surface-sunken); }
+.rv-assessment-dimensions dt { font-size: 12px; color: var(--muted); }
+.rv-assessment-dimensions dd { margin: 4px 0 0; color: var(--green); font-size: 18px; }
+.rv-assessment-issues { max-width: 52em; padding-left: 22px; }
+.rv-assessment-issues li { padding: 0 0 18px; }
+.rv-assessment-issues h4 { margin: 8px 0; font-size: 16px; }
+.rv-issue-important { color: var(--danger-strong); font-size: 12px; }
+.rv-issue-next { padding: 12px 16px; border-left: 3px solid var(--green); background: var(--success-wash); }
+.rv-issue-next strong { font-size: 13px; }
+.rv-issue-next p { margin: 6px 0 0; }
+.rv-assessment-links { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.rv-assessment-content button { padding: 8px 12px; margin-top: 8px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); color: var(--green); font: inherit; font-size: 12px; cursor: pointer; }
+.rv-assessment-evidence { border-top: 1px solid var(--line); padding-top: 14px; font-size: 13px; overflow-wrap: anywhere; }
+.rv-assessment-evidence summary, .rv-previous-introduction summary { cursor: pointer; color: var(--muted); }
+.rv-assessment-evidence > details { margin: 12px 0; }
 .ia-view, .interview-insights-view { max-width: 1280px; margin: 0 auto; color: var(--ink); }
 .ia-actions { display: flex; gap: 12px; align-items: center; margin: 0 0 24px; }
 .ia-actions > p { flex: 1; color: var(--muted); margin: 0; font-size: 13px; }

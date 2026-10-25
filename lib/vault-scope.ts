@@ -1,5 +1,6 @@
 import { getType, type Note } from "./notes.ts";
 import { isLanguageTextbookChapter } from "./language-textbook.ts";
+import { isInterviewQuestionResource } from "./interview-question-collection.ts";
 
 export type VaultScope = "all" | "overview" | "actions" | "activity" | "jobs" | "interview" | "training";
 
@@ -43,18 +44,19 @@ export function noteInVaultScope(note: Note, scope: VaultScope) {
   if (scope === "overview") {
     return COMMITMENT_TYPES.has(type) || OVERVIEW_REVIEW_TYPES.has(type);
   }
-  // 日历冷启动也读取本场评分正本，不加载全库分析报告。
+  // 日历冷启动也要拿到评分正本；只载入单场报告，不把全库AI分析带进来。
   if (scope === "actions") return COMMITMENT_TYPES.has(type) || type === "outbound-draft" || type === "company" || type === "interview-answer-review"
     || (type === "ai-report" && note.frontmatter.report_kind === "interview-reassessment" && note.frontmatter.report_role === "session");
   if (scope === "jobs") {
     return type === "job-case" || Boolean(note.frontmatter.case_id) || ["ledger", "job-queue", "job-audit", "job_platform_sync", "ai-report"].includes(type);
   }
   if (scope === "interview") return INTERVIEW_TYPES.has(type) || COMMITMENT_TYPES.has(type) || type === "company" || type === "self"
-    || (type === "ai-report" && ["company-fit", "company-summary"].includes(String(note.frontmatter.report_kind)));
+    || (type === "ai-report" && ["company-fit", "company-summary", "interview-reassessment"].includes(String(note.frontmatter.report_kind)));
   // 专项课和学习说明属于 material；按标记读取，避免把全部求职素材载入训练页。
   return TRAINING_TYPES.has(type) || type === "self"
     || (type === "material" && note.frontmatter.material_kind === "language-expression-course")
     || isLanguageTextbookChapter(note)
+    || isInterviewQuestionResource(note)
     || isLanguageScenarioResource(note);
 }
 

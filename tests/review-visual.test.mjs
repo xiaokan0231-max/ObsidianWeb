@@ -136,3 +136,10 @@ test("复盘：句卡按场次加 key、草稿留在卡内，全文阅读不在 
     assert.match(rule, /var\(--ruby-size\)/, `${selector} 统一用 --ruby-size`);
   }
 });
+
+test("evidence-mode reviews never become numeric timeline points or historical full marks", () => {
+  const evidence={...review(null,[null,null,null,null,null]),evaluationMode:"evidence"};
+  const limited={...entries[0],key:"limited",review:evidence};
+  assert.deepEqual(reviewScoreTimeline([limited]),[]);
+  assert.equal(historicalDimensionAverages([limited],"other"),null);
+});

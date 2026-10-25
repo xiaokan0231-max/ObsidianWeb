@@ -146,7 +146,7 @@ test("独立校验器搬离仓库后仍验证跨场引用，并拒绝错误归�
   try {
     const scripts = join(dir, "skill");
     await mkdir(scripts);
-    for (const file of ["validate-review.mjs", "review-contract.mjs", "interview-advisory.ts", "interview-advisory-contract.mjs"]) {
+    for (const file of ["validate-review.mjs", "review-contract.mjs", "diagnostic-checks.mjs", "assessment-scoring.mjs", "japan-interview-signals.mjs", "interview-advisory.ts", "interview-advisory-contract.mjs"]) {
       await copyFile(`.agents/skills/review-interview-answers/scripts/${file}`, join(scripts, file));
     }
     const vault = join(dir, "vault");

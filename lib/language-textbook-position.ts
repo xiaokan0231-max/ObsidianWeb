@@ -11,8 +11,10 @@ export function normalizeTextbookPosition(module: TextbookModule, candidate: unk
   const point = matched ?? module.points[0];
   const validView = TEXTBOOK_VIEWS.includes(value.lessonView as TextbookView)
     && (value.lessonView !== "source" || !!point.source);
+  // 只有全新阅读位置才先看原场；显式 URL 和旧缓存中的 explain 不改写。
+  const initialView = candidate == null && point.source ? "source" : "explain";
   // 已删除的知识点不能把原来的页签套到另一点；旧 source 链接仍可读讲解。
-  return { knowledge: point.id, lessonView: validView && (!value.knowledge || matched) ? value.lessonView as TextbookView : "explain" };
+  return { knowledge: point.id, lessonView: validView && (!value.knowledge || matched) ? value.lessonView as TextbookView : initialView };
 }
 
 export function resolveTextbookPosition(module: TextbookModule, search: string, saved?: unknown): TextbookPosition {

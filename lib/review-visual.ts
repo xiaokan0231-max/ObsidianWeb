@@ -2,7 +2,7 @@
 // 画面側で場当たりに数えると、一覧の分数帯と詳細の分数帯が別々の閾値で割れても誰も気づかない。
 // だから閾値も並び順もここ一箇所に置き、node:test で固定する。
 
-import { buildInterviewTrends } from "./interview-trends.mjs";
+import { buildInterviewTrends, interviewEvidenceScores } from "./interview-trends.mjs";
 import { REVIEW_DIMENSION_META, type InterviewAnswerReview, type ReviewDimensionKey } from "./review-deep.ts";
 
 export type ReviewScoreBand = "high" | "mid" | "low" | "none";
@@ -21,7 +21,16 @@ export type ReviewVisualEntry = {
   round: string;
   review?: InterviewAnswerReview | null;
   result?: string;
+  reassessment?: { frontmatter: Record<string, unknown> } | Record<string, unknown> | null;
 };
+
+/** 列表、轮次与详情入口共用同一来源选择，未评估绝不补成0或100。 */
+export function reviewDisplayScore(entry: ReviewVisualEntry): { score: number | null; label: string; historicalScore: number | null } {
+  const scores = interviewEvidenceScores(entry);
+  if (scores.scored) return { score: scores.overall, label: scores.overall === null ? "局部评分 · 无总分" : "新版有据评分", historicalScore: scores.historical };
+  if (scores.reassessed || entry.review?.evaluationMode === "evidence") return { score: null, label: "证据评价 · 无总分", historicalScore: scores.historical };
+  return { score: scores.historical, label: scores.historical === null ? "未复盘" : "旧分 · 不同口径", historicalScore: scores.historical };
+}
 
 export type DimensionAverages = Record<ReviewDimensionKey, number | null>;
 
@@ -34,7 +43,9 @@ export function historicalDimensionAverages(
   entries: ReviewVisualEntry[],
   excludeKey: string,
 ): DimensionAverages | null {
-  const others = entries.filter((entry) => entry.key !== excludeKey && entry.review?.dimensions);
+  const selected = entries.find((entry) => entry.key === excludeKey);
+  const currentScoring = selected ? interviewEvidenceScores(selected).scored : entries.some((entry) => interviewEvidenceScores(entry).scored);
+  const others = entries.filter((entry) => entry.key !== excludeKey && (entry.reassessment || entry.review?.dimensions) && (entry.reassessment || entry.review?.evaluationMode !== "evidence") && interviewEvidenceScores(entry).scored === currentScoring);
   if (others.length === 0) return null;
   const trends = buildInterviewTrends(others.map((entry) => ({ ...entry, review: entry.review ?? null }))) as {
     dimensionAverages: Record<string, number | null>;
@@ -56,16 +67,12 @@ export type ReviewScorePoint = {
 
 /** 回答分の推移：深度復盤のある場だけ、古い順。同日は key で安定させる（再描画で点が入れ替わらない）。 */
 export function reviewScoreTimeline(entries: ReviewVisualEntry[]): ReviewScorePoint[] {
-  return entries
-    .filter((entry): entry is ReviewVisualEntry & { review: InterviewAnswerReview } => Boolean(entry.review))
-    .map((entry) => ({
-      key: entry.key,
-      company: entry.company,
-      date: entry.date,
-      round: entry.round,
-      score: Math.round(entry.review.overallScore),
-    }))
-    .sort((left, right) => (left.date || "").localeCompare(right.date || "") || left.key.localeCompare(right.key));
+  const currentScoring = entries.some((entry) => interviewEvidenceScores(entry).scored);
+  return entries.flatMap((entry) => {
+    const scores = interviewEvidenceScores(entry);
+    const score = currentScoring ? scores.overall : scores.reassessed ? null : scores.historical;
+    return score === null ? [] : [{ key: entry.key, company: entry.company, date: entry.date, round: entry.round, score: Math.round(score) }];
+  }).sort((left, right) => (left.date || "").localeCompare(right.date || "") || left.key.localeCompare(right.key));
 }
 
 export type ReviewCompanyGroup<T> = {

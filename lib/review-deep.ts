@@ -8,6 +8,9 @@ import {
   REVIEW_STRATEGY_TAGS,
 } from "./review-contract.mjs";
 import { renderInterviewAdvisory, type InterviewAdvisory } from "./interview-advisory.ts";
+import { computeAssessmentScores } from "./assessment-scoring.mjs";
+import { JAPAN_SIGNALS_VERSION, normalizeJapanSignals, renderJapanSignalsMarkdown } from "./japan-interview-signals.mjs";
+import type { JapanSignals } from "./interview-outcome.ts";
 
 // 枚举本体不在这里，在 review-contract.mjs——那份同时被 codex-bridge 的 JSON schema
 // 和 skill 的校验器读。在这里再写一遍联合类型，就等于多一个不会变红的副本。
@@ -42,6 +45,7 @@ export type ReviewDeduction = {
   blockId: string;
   points: number;
   severity: ReviewDeductionSeverity;
+  recovery?: "unresolved" | "partial" | "repaired" | "unknown";
   labelZh: string;
   detailZh: string;
   fixZh: string;
@@ -49,12 +53,16 @@ export type ReviewDeduction = {
 };
 
 export type InterviewAnswerDimension = {
-  score: number;
+  score: number | null;
+  baseScore?: 75 | 85 | 95 | null;
+  basisZh?: string;
+  positiveEvidenceBlockIds?: string[];
+  level?: "supported" | "partial" | "core_gap" | "not_assessed";
   rationaleZh: string;
   evidenceBlockIds: string[];
   /**
-   * 扣分明细。schema v3 起必填（可以是空数组＝满分）。
-   * 有它时 score 一律由 100 − Σpoints 推导，不采用模型自报的 score——
+   * 历史账本从100起扣；有据分从举证基准起扣，空数组不证明优秀。
+   * 分数由服务器推导，不采用模型自报的 score——
    * 「说不出扣在哪就扣不动分」，避免旧版那种理由全是好话、分数却只有 86 的幽灵扣分。
    */
   deductions?: ReviewDeduction[];
@@ -88,12 +96,28 @@ export type InterviewAnswerBlockReview = {
   improvedAnswerJa: string;
 };
 
+export type AssessmentScoring = {
+  methodVersion: "2026-10-v3";
+  assessedDimensions: ReviewDimensionKey[];
+  rawMean: number | null;
+  roundedMean: number | null;
+  cap: number | null;
+  formulaZh: string;
+};
+
 export type InterviewAnswerReview = {
   generatedAt: string;
   model: string;
-  overallScore: number;
+  overallScore: number | null;
+  evaluationMode?: "evidence" | "scored_evidence";
+  evaluation?: { conclusionZh: string; coverageZh: string; limitsZh: string; scoringEligible?: boolean; eligibilityZh?: string; materialScope?: "full_available_text" | "limited" };
+  scoring?: AssessmentScoring;
   /** schema v1 の旧レポートには無い。新規生成では必須。 */
   dimensions?: InterviewAnswerDimensions;
+  /** 整场日本面试信号：与五维分开，不进均分。旧报告缺省＝未评估，不是全部做到。 */
+  japanSignals?: JapanSignals;
+  /** 信号层的口径版本，由服务器写入。 */
+  japanSignalsVersion?: string;
   /** 整场面试的自然语言导读，与回答质量评分分开；旧报告可缺省。 */
   overviewZh?: string;
   summaryZh: string;
@@ -128,6 +152,7 @@ function boundedScore(value: unknown) {
 function normalizeDeductions(
   value: unknown,
   sentencesByBlock: Map<string, Set<string>>,
+  scoredMode = false,
 ): ReviewDeduction[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -144,8 +169,9 @@ function normalizeDeductions(
       const allowedSentences = sentencesByBlock.get(blockId);
       return {
         blockId,
-        points: Math.min(band.max, Math.max(band.min, Math.round(Number(item.points) || 0))),
+        points: scoredMode ? Number(item.points) : Math.min(band.max, Math.max(band.min, Math.round(Number(item.points) || 0))),
         severity,
+        ...(item.recovery ? { recovery: oneOf(item.recovery, ["unresolved", "partial", "repaired", "unknown"] as const, "unknown") } : {}),
         labelZh: text(item.labelZh) || detailZh.slice(0, 40),
         detailZh,
         fixZh: text(item.fixZh),
@@ -169,6 +195,8 @@ function scoreFromDeductions(deductions: ReviewDeduction[]) {
 function normalizeDimensions(
   value: unknown,
   sentencesByBlock: Map<string, Set<string>>,
+  evidenceMode = false,
+  scoredMode = false,
 ): InterviewAnswerDimensions | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const source = value as Record<string, unknown>;
@@ -178,9 +206,15 @@ function normalizeDimensions(
     keys.map((key) => {
       const item = source[key] as Record<string, unknown>;
       const hasLedger = Array.isArray(item.deductions);
-      const deductions = normalizeDeductions(item.deductions, sentencesByBlock);
+      const deductions = normalizeDeductions(item.deductions, sentencesByBlock, scoredMode);
       return [key, {
-        score: hasLedger ? scoreFromDeductions(deductions) : boundedScore(item.score),
+        score: evidenceMode ? null : hasLedger ? scoreFromDeductions(deductions) : boundedScore(item.score),
+        ...(item.level ? { level: oneOf(item.level, ["supported", "partial", "core_gap", "not_assessed"] as const, "not_assessed") } : {}),
+        ...(scoredMode ? {
+          baseScore: [75, 85, 95].includes(Number(item.baseScore)) && item.baseScore !== null ? item.baseScore as 75 | 85 | 95 : null,
+          basisZh: text(item.basisZh),
+          positiveEvidenceBlockIds: texts(item.positiveEvidenceBlockIds, REVIEW_LIMITS.dimensionEvidenceBlockIds).filter(id => sentencesByBlock.has(id)),
+        } : {}),
         rationaleZh: text(item.rationaleZh),
         evidenceBlockIds: texts(item.evidenceBlockIds, REVIEW_LIMITS.dimensionEvidenceBlockIds).filter((id) => sentencesByBlock.has(id)),
         // 旧レポートでは键自体を生やさない：JSON 往復で消える undefined を持つと
@@ -195,7 +229,7 @@ function scoreFromDimensions(dimensions: InterviewAnswerDimensions) {
   const keys = Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[];
   return Math.round(
     keys.reduce(
-      (total, key) => total + dimensions[key].score * REVIEW_DIMENSION_META[key].weight,
+      (total, key) => total + (dimensions[key].score ?? 0) * REVIEW_DIMENSION_META[key].weight,
       0,
     ),
   );
@@ -251,12 +285,39 @@ export function normalizeInterviewAnswerReview(
       improvedAnswerJa: text(item.improvedAnswerJa),
     }));
 
-  const dimensions = normalizeDimensions(value.dimensions, sentencesByBlock);
+  const scored = value.evaluationMode === "scored_evidence";
+  const dimensions = normalizeDimensions(value.dimensions, sentencesByBlock, value.evaluationMode === "evidence" || scored, scored);
+  const evidence = value.evaluationMode === "evidence";
+  const rawEvaluation = value.evaluation && typeof value.evaluation === "object" ? value.evaluation as Record<string, unknown> : {};
+  // 旧非数值报告保留原语义；新有据分必须从所选基准和实际事件算，缺证不补成100。
+  if (evidence && dimensions) for (const dimension of Object.values(dimensions)) {
+    dimension.score = null;
+    dimension.level ??= "not_assessed";
+  }
+  const evaluation = {
+    conclusionZh: text(rawEvaluation.conclusionZh) || "资料不足，尚未形成有据结论",
+    coverageZh: text(rawEvaluation.coverageZh) || "仅分析本次输入文本",
+    limitsZh: text(rawEvaluation.limitsZh) || "未提供的材料与未检验能力不作评价",
+    ...(scored ? {
+      scoringEligible: rawEvaluation.scoringEligible === true,
+      eligibilityZh: text(rawEvaluation.eligibilityZh),
+      materialScope: oneOf(rawEvaluation.materialScope, ["full_available_text", "limited"] as const, "limited"),
+    } : {}),
+  };
+  const computed = scored ? computeAssessmentScores({ dimensions, evaluation }) as { dimensions: InterviewAnswerDimensions; overallScore: number | null; scoring: AssessmentScoring } : null;
+  // 信号只随新生成（或本人要求的重评）进入正本；没有就不生成键，读取方据此显示「未评估」。
+  const japanSignals = normalizeJapanSignals(value.japanSignals, sentencesByBlock) as JapanSignals | undefined;
   return {
     generatedAt: meta.generatedAt,
     model: meta.model,
-    overallScore: dimensions ? scoreFromDimensions(dimensions) : boundedScore(value.overallScore),
-    dimensions,
+    ...(evidence || scored ? { evaluationMode: scored ? "scored_evidence" as const : "evidence" as const, evaluation } : {}),
+    ...(computed ? { scoring: computed.scoring } : {}),
+    overallScore: computed ? computed.overallScore : evidence ? null : dimensions ? scoreFromDimensions(dimensions) : boundedScore(value.overallScore),
+    dimensions: computed && dimensions ? computed.dimensions : dimensions,
+    ...(japanSignals ? {
+      japanSignalsVersion: typeof value.japanSignalsVersion === "string" && value.japanSignalsVersion ? value.japanSignalsVersion : JAPAN_SIGNALS_VERSION,
+      japanSignals,
+    } : {}),
     ...(text(value.overviewZh) ? { overviewZh: text(value.overviewZh) } : {}),
     summaryZh: text(value.summaryZh),
     strengths: texts(value.strengths),
@@ -303,6 +364,11 @@ const RENDERED_HEADINGS = new Set([
   "採点内訳（各20%）",
   "強み",
   "弱み",
+  "关键问题与修复状态",
+  "有据维度评价",
+  "材料完整度与限制",
+  "有据评分与计算依据",
+  "日本面试信号",
 ]);
 
 /**
@@ -349,7 +415,7 @@ export function renderInterviewAnswerReview(
 ) {
   const advisory = meta.preservedAdvisory ?? review.advisory;
   const durableReview = advisory ? { ...review, advisory } : review;
-  const dimensionSection = review.dimensions
+  const dimensionSection = review.evaluationMode === "scored_evidence" ? `${renderEvidenceEvaluation(review)}\n\n${renderScoredEvaluation(review)}` : review.evaluationMode === "evidence" ? renderEvidenceEvaluation(review) : review.dimensions
     ? `### 採点内訳（各20%）\n\n${(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[])
         .map((key) => {
           const dimension = review.dimensions?.[key];
@@ -423,10 +489,10 @@ ${review.overviewZh ? `\n## 综合导读\n\n${review.overviewZh}\n` : ""}
 ${advisory ? `\n${renderInterviewAdvisory(advisory)}\n` : ""}
 ## 全体評価
 
-**${review.overallScore} / 100** — ${review.summaryZh}
+${review.evaluationMode === "scored_evidence" ? `${review.evaluation?.conclusionZh ?? "资料不足"}\n\n${review.overallScore === null ? "不提供总分：资料或可评维未满足门槛。" : `**${review.overallScore} / 100（有据参考分）**`} ${review.evaluation?.eligibilityZh ?? ""}\n\n${review.summaryZh}` : review.evaluationMode === "evidence" ? `不提供新总分。${review.evaluation?.conclusionZh ?? "资料不足"}\n\n${review.summaryZh}` : `**${review.overallScore} / 100** — ${review.summaryZh}`}
 
 ${dimensionSection}
-
+${review.japanSignals ? `\n${renderJapanSignalsMarkdown(review.japanSignals)}\n` : ""}
 ### 強み
 ${list(review.strengths)}
 
@@ -440,4 +506,30 @@ ${DATA_MARKER}
 ${JSON.stringify(durableReview, null, 2)}
 \`\`\`
 `;
+}
+
+
+export const EVIDENCE_LEVEL_LABELS = {
+  supported: "已展示（限所引内容）", partial: "局部缺口", core_gap: "关键缺口未恢复", not_assessed: "未评估／证据不足",
+};
+export const RECOVERY_LABELS = { unresolved: "未恢复", partial: "部分恢复", repaired: "已恢复", unknown: "恢复情况未明确" };
+
+/** 新报告先呈现严重性与恢复情况，历史分数仅由旧格式读取。 */
+export function renderEvidenceEvaluation(review: InterviewAnswerReview) {
+  const issues = allDeductions(review.dimensions).filter(i => i.severity !== "opportunity")
+    .sort((a, b) => Number(b.severity === "major" && b.recovery === "unresolved") - Number(a.severity === "major" && a.recovery === "unresolved") || b.points - a.points);
+  const rows = issues.map(i => `- **${i.severity === "major" ? "严重" : i.severity === "moderate" ? "中等" : "轻微"} · ${RECOVERY_LABELS[i.recovery ?? "unknown"]}** ${i.blockId} ${i.labelZh}\n  - 证据：${i.evidenceSentenceIds.join("・")}；${i.detailZh}\n  - 下一步：${i.fixZh}`).join("\n");
+  const dimensions = Object.entries(review.dimensions ?? {}).map(([key, d]) => `- **${REVIEW_DIMENSION_META[key as ReviewDimensionKey].label}：${EVIDENCE_LEVEL_LABELS[d.level ?? "not_assessed"]}** ${d.rationaleZh}（${d.evidenceBlockIds.join("・") || "无足够证据"}）`).join("\n");
+  return `### 关键问题与修复状态\n\n${rows || "目前资料未确认可归责问题；不等于未检验能力优秀。"}\n\n### 有据维度评价\n\n${dimensions}\n\n### 材料完整度与限制\n\n${review.evaluation?.coverageZh ?? "仅本次输入"}\n\n${review.evaluation?.limitsZh ?? "资料不足部分不评价"}`;
+}
+
+/** 基准、正证与损失并列；未评维和门槛不得伪装为平均里的满分。 */
+export function renderScoredEvaluation(review: InterviewAnswerReview) {
+  const rows = (Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).map(key => {
+    const d = review.dimensions?.[key];
+    if (!d || d.score === null) return `- **${REVIEW_DIMENSION_META[key].label}：未评估** ${d?.basisZh ?? "资料不足"}`;
+    const events = (d.deductions ?? []).map(item => `  - −${item.points}：${item.blockId} ${item.labelZh}（${RECOVERY_LABELS[item.recovery ?? "unknown"]}）；${item.detailZh}（${item.evidenceSentenceIds.join("・")}）`).join("\n");
+    return `- **${REVIEW_DIMENSION_META[key].label} ${d.score}**：基准${d.baseScore}；${d.basisZh}\n  - 正证：${d.positiveEvidenceBlockIds?.join("・") || "没有额外正证升级；75仅标准参考线"}\n${events || "  - 无已举证扣分；不表示优秀"}`;
+  }).join("\n");
+  return `### 有据评分与计算依据\n\n${rows}\n\n${review.scoring?.formulaZh ?? "尚无确定性计算"}\n\n${review.evaluation?.eligibilityZh ?? ""}`;
 }

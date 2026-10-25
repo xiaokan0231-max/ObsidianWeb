@@ -6,12 +6,23 @@ Bridge 模式返回一个 JSON 对象，不输出代码围栏或说明文字。�
 
 ```json
 {
+  "evaluationMode": "scored_evidence",
+  "evaluation": { "conclusionZh": "", "coverageZh": "", "limitsZh": "", "scoringEligible": true, "eligibilityZh": "", "materialScope": "full_available_text" },
   "dimensions": {
-    "questionUnderstanding": { "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] },
-    "coverage": { "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] },
-    "directness": { "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] },
-    "evidenceCredibility": { "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] },
-    "riskControl": { "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] }
+    "questionUnderstanding": { "level": "not_assessed", "baseScore": null, "basisZh": "本维缺证", "positiveEvidenceBlockIds": [], "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] },
+    "coverage": { "level": "not_assessed", "baseScore": null, "basisZh": "本维缺证", "positiveEvidenceBlockIds": [], "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] },
+    "directness": { "level": "not_assessed", "baseScore": null, "basisZh": "本维缺证", "positiveEvidenceBlockIds": [], "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] },
+    "evidenceCredibility": { "level": "not_assessed", "baseScore": null, "basisZh": "本维缺证", "positiveEvidenceBlockIds": [], "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] },
+    "riskControl": { "level": "not_assessed", "baseScore": null, "basisZh": "本维缺证", "positiveEvidenceBlockIds": [], "deductions": [], "rationaleZh": "", "evidenceBlockIds": ["q01"] }
+  },
+  "japanSignals": {
+    "motivation": { "verdict": "poor", "observationZh": "", "fixZh": "", "evidence": [{ "blockId": "q09", "sentenceIds": ["s061"] }] },
+    "closing": { "verdict": "poor", "observationZh": "", "fixZh": "", "evidence": [{ "blockId": "q12", "sentenceIds": ["s090"] }] },
+    "concernRecovery": { "verdict": "not_applicable", "observationZh": "", "fixZh": "", "evidence": [] },
+    "unpromptedNegative": { "verdict": "good", "observationZh": "", "fixZh": "", "evidence": [{ "blockId": "q02", "sentenceIds": ["s010"] }] },
+    "registerConsistency": { "verdict": "mixed", "observationZh": "", "fixZh": "", "evidence": [{ "blockId": "q08", "sentenceIds": ["s056"] }] },
+    "salaryVisaLine": { "verdict": "not_applicable", "observationZh": "", "fixZh": "", "evidence": [] },
+    "reverseQuestions": { "verdict": "poor", "observationZh": "", "fixZh": "", "evidence": [{ "blockId": "q11", "sentenceIds": ["s084"] }] }
   },
   "overviewZh": "",
   "summaryZh": "",
@@ -22,13 +33,12 @@ Bridge 模式返回一个 JSON 对象，不输出代码围栏或说明文字。�
 }
 ```
 
-**不要返回任何分数。** 不返回 `overallScore`，也不返回 `dimensions[*].score`：
-维度分＝`100 − Σdeductions.points`，总分＝五维各 20%，都由服务器计算。
+**模型不返回最终分数，返回有据参考分。** dimensions[*]必填baseScore=null/75/85/95、basisZh和positiveEvidenceBlockIds。base85/95至少两独立正例，语义须回查；null仅未评估。服务端用assessment-scoring.mjs生成score、overallScore和scoring（methodVersion、assessedDimensions、rawMean、roundedMean、cap、formulaZh）。evaluation含材料范围materialScope=full_available_text/limited、scoringEligible及eligibilityZh。完整问答且≥3维含覆盖/直接性才可整体评分；有限材料不造整场。保留旧evidence模式读兼容，未来新增为scored_evidence。
 
 ## 综合导读与评分摘要
 
-- `overviewZh`：新生成报告必填的非空中文字符串，以空行（`\n\n`）分隔自然段。解释整场面试的重心与互动、本人表现、对方可能的判断及推进意愿、已确认结果与待定事项。所有判断要能回到输入证据；在行文中区分观察、推断和未知。后来收到的结果须说明时间关系。不要输出 Markdown 标题、列表或录用概率。
-- `summaryZh`：回答质量及评分理由的摘要，保留诊断用途，不重复导读。
+- `overviewZh`：新生成报告必填的非空中文字符串，以空行（`\n\n`）分隔自然段。解释整场面试的重心与互动、本人表现、对方可能的判断及推进意愿、已确认结果与待定事项。所有判断要能回到输入证据；在行文中区分观察、推断和未知。后来收到的结果须说明时间关系。开头至多三项重要且改得动的行动用自然段展开，包含q/s短摘、问题本质、严重度与原因置信度、具体改法和进步检验；后讲强答/成功澄清，末说明来源限制。不要输出 Markdown 标题、列表或录用概率。
+- `summaryZh`：诊断结论、严重度/修复状态及未检验项；交代参考线/正证、事件、算式、重大未恢复50/60门槛、参与维度及材料限制，不把等级直接映射分数。
 
 Markdown 和 Web 都在评分前展示 `overviewZh`。旧报告允许缺少该字段；缺失只代表尚未补导读，不用旧评分摘要冒充。只为旧报告补导读时同步更新可读 Markdown 与 JSON 正本，保留旧评分和逐题分析，并记录本次增补的作者与日期。
 
@@ -48,7 +58,7 @@ Markdown 和 Web 都在评分前展示 `overviewZh`。旧报告允许缺少该�
 
 区间：`major` 10–25、`moderate` 5–9、`minor` 2–4、`opportunity` 1–3。分档口径见 `scoring-rubric.md`。
 
-一维没有可举证的扣分点就返回 `[]`（＝100 分）。每维最多 12 条，超出会被 `validate-review.mjs` 判错
+每维level为supported/partial/core_gap/not_assessed；supported需正证，not_assessed可无引用但须说明限制。事件recovery必填；无事件不产生100；base75为参考线，不宣称充分展示。新方法major固定25/moderate固定5/minor固定2；完全修复且无残余影响允许0，无错机会不扣；一个事件只归一个维度，其他维度解释交互。每维最多 12 条，超出会被 `validate-review.mjs` 判错
 （正本侧还会先把溢出部分截掉，砍掉扣分＝这一维分数被抬高，所以溢出没有任何好处）。
 12 是上限不是目标：要合并同类项而不是罗列到上限——反复出现的同一个毛病写成一条按 `major`/`moderate` 记。
 
@@ -56,7 +66,7 @@ Markdown 和 Web 都在评分前展示 `overviewZh`。旧报告允许缺少该�
 
 - `blockId`, `questionTitle`, `interviewerIntentZh`
 - `askedPoints`, `answeredPoints`, `missedPoints`
-- `comprehension`: `clear | partial | likely_missed`
+- `comprehension`: `clear | partial | likely_missed`；partial仅为未充分对齐，不等同误听；likely_missed须可靠误听依据，否则在evaluationZh明示原因未知
 - `relevance`: `direct | partial | off_target`
 - `quality`: `strong | mixed | weak | neutral`
 - `strategyTags`
@@ -85,6 +95,30 @@ Markdown 和 Web 都在评分前展示 `overviewZh`。旧报告允许缺少该�
 - `priorityBlockIds` 必须来自 `blocks[]`，最多 8 个。
 - 所有输入 qNN 都必须有一个输出块，不遗漏、不重复。
 
+## 日本面试信号
+
+`japanSignals` 是整场级的独立层，口径见 `scoring-rubric.md`「日本面试信号」。七个键各恰好一次：`motivation`（志望度・入社意欲）、`closing`（收尾表态）、`concernRecovery`（懸念当场化解）、`unpromptedNegative`（主动说负面）、`registerConsistency`（即兴段です・ます）、`salaryVisaLine`（年收・在留口径）、`reverseQuestions`（逆質問类型）。键、结论枚举、Bridge schema 与机械校验的正本是 `scripts/japan-interview-signals.mjs`（`lib/japan-interview-signals.mjs` 为其符号链接）。
+
+每项为 `{ verdict, observationZh, fixZh, evidence }`：
+
+| 字段 | 说明 |
+|---|---|
+| `verdict` | `good` 做到 \| `mixed` 部分 \| `poor` 没做到 \| `not_applicable` 未触发 \| `insufficient_material` 资料不足 |
+| `observationZh` | 非空。现场发生了什么、为什么这样判断；未触发／资料不足时写查过哪些段落、为什么不能判断 |
+| `fixZh` | 字符串。`mixed`/`poor` 必须给下一场可照做的一句话或动作；`good` 可写保持方式 |
+| `evidence` | `[{ blockId, sentenceIds }]`。`good`/`mixed`/`poor` 至少一条，句子必须属于该 qNN，不重复引用 |
+
+- `not_applicable` 只用于 `concernRecovery`、`salaryVisaLine`、`reverseQuestions`；`motivation`、`closing` 每场都评，`materialScope=full_available_text` 时不能写 `insufficient_material`。
+- 输入是记忆重构（`reconstruction=memory`）或 `verbatim=false` 时，`registerConsistency` 只能是 `insufficient_material`。
+- 判断本人行为的项至少引用一句本人（私）原话；`concernRecovery` 的判断须引用面试官的懸念句，`good`/`mixed` 还要引用本人的回应句。话者按已完成的话者裁定计算。
+- 年收・在留只对照 `statedPositions` 里 self 层资料的既定口径，按面试日期取当时有效的版本。
+- 无原音不评发音、语速；提到时校验器给出警告。
+- 不改五维 `deductions`、`score` 或 `overallScore`，也不返回任何信号分数。
+
+服务器把通过校验的信号写入持久化 JSON，并加 `japanSignalsVersion`（当前 `2026-10-js1`）。旧报告没有这两个字段：读取方显示「未评估」，不能当作全部做到；校验器对旧报告只给警告，`--require-signals` 时判错。本人要求只为历史场次补评信号时，同步更新 JSON 正本的 `japanSignals`、`japanSignalsVersion` 与 Markdown「日本面试信号」节（用 `renderJapanSignalsMarkdown` 渲染），并标注补评作者与日期；不改旧评分、逐题评价、导读、顾问层和人工追加内容。
+
+信号与选考结果的跨场对照由程序计算，不由模型书写：每场结果为通过（同一案件之后还有下一轮）、不採用、无音，最后一轮取关联 job-case 的 `status`，没有 job-case 的独立面谈取面谈 TODO 的 `selection_status`；中介面谈记为不适用，本人保留记为本人中止，关联不明记为未判定。对照表只计数，并写明样本小、不推因果。
+
 ## 独立顾问与横向 Bridge JSON
 
 共享 schema 正本为 `lib/interview-advisory-contract.mjs`，运行时校验与 Markdown 正本读写在 `lib/interview-advisory.ts`。Bridge 只返回下列分析字段；服务器增加 `version: 1`、`generatedAt`、`model`、`sourceFingerprint`，不让模型自填来源指纹、覆盖统计或评分。
@@ -104,6 +138,8 @@ Markdown 和 Web 都在评分前展示 `overviewZh`。旧报告允许缺少该�
 - `modules[]`：五个 key 各一次：`employerPriorities | positioning | effectiveAnswers | opportunities | nextStage`。
 - 每个 module 为 `{ key, titleZh, commentaryZh, findings }`；资料不足可 `findings=[]`。
 - 每个 finding 为 `{ id, titleZh, bodyZh, boundaryZh, evidence, contextPaths }`，至少引用两份不同 sourcePath 的实际原话，保留反例与阶段边界。
+
+顶层评论与每个顾问条目的 evidence、sentenceIds 必须非空。generationContract 由服务器从本次实际提供的来源建立：每个引用选一个 sourcePath、该来源真实 blockId 和该块句子 sentenceIds，三者必须精确配对；生成 schema 用同一引用分支绑定，不允许拼路径、猜或重编号、跨块借句。contextPaths 只选已提供的背景路径，不能替代原句。必填说明非空，alternativeZh 和 answerJa 可空字符串但不能 null；阶段、scope、ID 格式遵守 schema。全报告 ID 唯一、条目内证据和背景引用不重复、横向五模块各一次和每条 finding 至少两份来源，由共享语义校验完成。没有直接依据的条目可删除，但不能清空全部具体分析以规避校验。所有契约错误一次反馈完整列表给模型，在同一任务内最多恢复一次；未知运行错误不自动重试，第二次失败完整保留旧报告和评分。实际生成 schema 与完整输出保留到私有临时诊断文件，拒收输出与问题列表另记机器状态，不作为有效复盘或本人事实。
 
 两类任务的引用都使用 `{ sourcePath, blockId, sentenceIds }`。sourcePath 是完整 Vault 相对路径，qNN/sNN 必须属于该场次，不允许用日期+轮次替代身份。contextPaths 仅能引用输入存在的背景、通知或反馈笔记；模型不能新增来源。条目 ID 使用英文、数字、下划线或短横线，全报告唯一。
 
@@ -127,8 +163,10 @@ ObsidianWeb 在 `*_回答品質復盤.md` 中保存可读 Markdown 和 `<!-- int
 
 - `generatedAt`
 - `model`
-- `dimensions[*].score`：`100 − Σdeductions.points`（下限 0）
-- `overallScore`：五维等权平均的四舍五入值
+- evaluationMode: scored_evidence，evaluation记录结论/材料覆盖/限制、整体评分资格与原因
+- dimensions含baseScore/basisZh/positiveEvidenceBlockIds，score由共享模块算；未评估维null
+- overallScore满足资格才计算，否则null；scoring保存参与维、均值、门槛和公式；旧格式历史数值保持
+- japanSignals与japanSignalsVersion：整场日本面试信号及其口径版本，独立于五维与总分；旧报告缺省
 
 schema v2 的旧报告只有 `score` 和 `rationaleZh`、没有 `deductions`，Web 会退回旧版渲染并提示重新生成。
 读旧报告时不要把它的 `score` 反推成扣分明细——那些分数本来就没有逐条依据。

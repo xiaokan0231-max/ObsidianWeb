@@ -1,7 +1,7 @@
 ---
 name: review-interview-answers
 description: >-
-  Analyze completed interview transcripts with evidence-backed answer-quality reviews, independent consultant commentary about company signals and candidate fit, and cross-interview insights. Preserve translation, grammar work and five-dimension scoring while offering strategic advice, effective answer reuse and next-step guidance. Use for 面试复盘、顾问解读、企业信号、横向分析、跨面试洞察、回答质量、漏答、五维评分，or when generating, regenerating, or auditing ObsidianWeb interview reviews after human transcript decisions are complete.
+  Analyze completed interview transcripts with evidence-backed answer-quality reviews, independent consultant commentary about company signals and candidate fit, and cross-interview insights. Prioritize consequential, tractable improvements using source provenance, continuous dialogue, explicit severity anchors, positive counterexamples and actionable retests; provide transparent evidence-backed scores alongside priority improvements, plus whole-interview Japan interview signals (motivation, closing stance, concern recovery, unprompted negatives, register, salary/visa line, reverse questions) kept separate from the five dimensions and compared with selection outcomes. Use for 面试复盘、顾问解读、企业信号、横向分析、跨面试洞察、回答质量、漏答、五维评分、日本面试信号、志望度、收尾表态、逆質問，or when generating, regenerating, or auditing ObsidianWeb interview reviews after human transcript decisions are complete.
 ---
 
 # 面试回答深度复盘
@@ -24,64 +24,50 @@ Vault 模式或审计模式下，生成或审计评价前完整读取：
 
 1. `references/scoring-rubric.md`：五维评分与日本面试风险口径。
 2. `references/output-contract.md`：字段、枚举、反馈语义和输出规则。
+3. `references/diagnostic-method.md`：来源分层、七个现场视角、连续问答、行动优先级与行为验证。
+4. `scripts/diagnostic-prompt.mjs`：Bridge确定性注入的共享分析规则，网页与本技能不能使用两套口径。
+5. `scripts/japan-interview-signals.mjs`：整场日本面试信号的键、结论枚举、Bridge 提示与机械校验；Bridge 与网页从同一文件取口径。
 
 Bridge 模式不得为了读取参考而突破调用方的“不可调用工具、不可访问文件”边界；使用本文件内的工作流和调用方提供的 JSON schema。调用方的 schema 会确定性执行 `output-contract.md` 的字段约束。
 
 ## 工作流
 
-### 1. 建立证据层级
+### 1. 建立来源与裁定清单
 
-按以下优先级取证：
+按 `references/diagnostic-method.md` 区分原问答、清洗转写、本人批注、AI修复/准备稿；不能把状态已处理等同本人逐句确认。原始/正/原同场互核，人工补充与现场交付分开。旧AI仅作线索。无原音不评价发音/速度，AI错误不归用户。
 
-1. 面试官与候选人的逐句内容，以及已完成的本人裁定。
-2. `humanFeedback` / `*_回答品質批注.md` 中本人补充的事实与对旧 AI 评价的反对。
-3. 整理稿中的翻译、注释和同场事实。
-4. 旧 AI 复盘，只作为待复核线索，不能覆盖前三层。
+### 2. 检查可评边界
 
-不得把改善回答、旧 AI 推测、职位刻板印象写成本人已具备的经历。改善回答只能使用证据层已有事实；材料不足时使用有边界的表达，如“正在学习”“实务经验有限”。
+未获得本人授权且关键`疑`/话者归属未裁定，不生成完整持久化深度复盘，列出受影响s和原因；可做有限审计。已授权自动整理的非关键疑点排除能力评价，不重新要求全场停工。Bridge可依赖服务器门槛但不能忽略可见来源冲突。缺原问、回忆重构、ASR不能可靠复原时标资料不足，不造漏答或补分。
 
-### 2. 检查执行门槛
+### 3. 全场连续问答核对
 
-- 仅在整理稿的全部 `疑`、错误归属和话者疑问已有人工作出裁定后生成深度复盘。
-- Bridge 模式下可依赖服务器已经完成门槛检查，但不得忽略输入中仍可见的冲突。
-- Vault 模式下若无法证明裁定已完成，停止生成并列出仍需裁定的 sNN/目标；不要替本人猜测。
+每q包括流程块恰好一评：对象/时段/维度/子问 → 实际交付 → 前后追问和恢复 → 影响 → 原因及置信度。asked/answered/missed不能按答案倒推问题，q内s归属保持。答偏可确认而原因未知时写明未知，comprehension=partial只表示未充分对齐；likely_missed需可靠误听依据。主动澄清且成功不扣，初答偏后补齐不说整场未答。
 
-### 3. 逐个问题块恢复问题结构
+按真实触发核七视角：听题意图、充分性与具体证据、个人贡献事实、岗位资深度、动机转职、日语含义语用、追问修正。五维仅为账本归属，不强填七类缺点；未问技术选型不当主因，诚实边界与说明段倾听不是缺陷。强答、具体认可、成功修复必须保留。
 
-对每个 qNN，包括寒暄和流程块，完成以下判断：
+### 4. 找重要且改得动的事件
 
-1. 从面试官原话与追问链提取 `interviewerIntentZh`。
-2. 把并列问法拆成 `askedPoints`，不要按候选人实际回答反推问题范围。
-3. 只把候选人明确说出的内容列入 `answeredPoints`。
-4. 把未回答、只回答一半或被其他话题替代的部分列入 `missedPoints`。
-5. 区分三件事：没听懂问题、听懂但不知道、知道却没有在现场说出来。
-6. 用 sNN 记录好坏评价的直接证据。
+严重度与行动价值分别判断。按证据可信度、实际影响、跨场复现、可改善程度和成本解释排序，不编数学收益分。至多三项先行建议含原问/答短摘和q/s、缺失信息、严重度与原因置信度、下一次可说的第一句/动作、未知问法首次录答或听者复述的进步验证。年龄/无日本经历/市场单列背景，不挤训练优先项。无严重问题不凑数。
 
-回归检查：面试官同时问 AI、MCP、DDD，而候选人只谈 DDD 时，必须把 AI、MCP 列为漏答。本人补充“其实会 AI/MCP”只能说明潜在能力，不能改写“现场没有回答”的事实。
+各块evaluationZh说观察与恢复、原因置信度和本题影响；improvementZh给动作和验证，improvedAnswerJa仅用确认事实，无需改写为空。好坏都引用直接原句，不用正确空话或技术术语数量判好。
 
-### 4. 评价每个问题块
+### 5. 有据评分、严重性与修复状态
 
-- 给出理解度、相关性和质量等级。
-- 先描述实际效果，再给改进方向；不要重复一层已经完成的逐句语法评分。
-- 仅在确有证据时附固定策略标签。不要为了形成趋势而给每个块贴标签。
-- 对无需改写的强回答把 `improvedAnswerJa` 留空。
-- 对需要重练的回答，日语改善稿先覆盖全部子问，再用一个最强证据展开；保持可在压力下说出口。
+使用2026-10-v3可解释评分：每个可评维度baseScore只选75标准参考线/85两段独立有效正证/95两段有实际难度的强答；basisZh和positiveEvidenceBlockIds说明依据，不按level直接换分。not_assessed为null，未问/缺证不当100。每维保留supported/partial/core_gap/not_assessed和每事件recovery，完整修复无残余损失不扣，同事件只扣一维，25/5/2按真实残余损失分档。score由共享assessment-scoring.mjs算，不自填最终数字。
 
-### 5. 逐条列出扣分，不要打分
+重大未恢复事件：相关维最高50，整场最高60，并说明这是整体判断门槛而非重复加扣25。完整可用问答全链且至少三维（含覆盖、直接性）可评时，整场为可评维等权平均取最近5；缺维排除，显示参与维/算式/覆盖/限制。有限材料仅对可靠原始局部给分，不造整场。档位/门槛是规范性约定，非经验校准、人格/录取概率，旧100起扣不可当能力涨跌比较。正证与已恢复信息计入，不用技术术语或流利平均掉重大未恢复问题。分数与可执行优先改进同时交付。
 
-按 `references/scoring-rubric.md` 分别评价问题理解、覆盖完整度、直接性、证据可信度、风险控制。
+### 6. 评整场日本面试信号（与五维分开）
 
-**每一维只输出 `deductions`（扣分明细）、`rationaleZh` 和 qNN 证据，不输出分数。**
-维度分＝`100 − Σpoints`，总分＝五维等权平均，都由服务器计算。这条是整个评分契约的支点：
-分数从扣分推导出来，所以**说不出扣在哪一题、扣多少、为什么，就不能扣分**。
+按 `references/scoring-rubric.md`「日本面试信号」逐项给结论、观察、下一步和 q/s 证据：志望度・入社意欲、收尾表态、懸念当场化解、主动说负面、即兴段です・ます、年收・在留口径、逆質問类型。它们不折算分数、不进五维均分、不在五维重复扣分。
 
-每条扣分给 `severity`（决定 points 区间）、`labelZh`、`detailZh`、`fixZh` 和块内 sNN 证据。
-找不到可举证的扣分点就返回空数组＝100 分：满分是起点，不是奖赏。
+- 志望度和收尾每场都评，「没被问到的不评」对这两项不适用；完整资料下只能判做到、部分或没做到。
+- 做到、部分、没做到必须引用本场原句；判断本人行为至少引一句本人原话，懸念还要引面试官的懸念句。未触发和资料不足不评价本人，但要说清查过哪些段落。
+- 敬体只看即兴段并以 `原::` 为准；记忆重构只能写资料不足。年收・在留按面试当时的 self 层既定口径对照。无原音不评发音和语速。
+- 选考结果只在跨场对照里由程序并排，不用来倒推现场表现。历史复盘不批量补评；本人要求重评的场次才定向补 `japanSignals`，规则见 `references/output-contract.md`「日本面试信号」。
 
-审计模式可展示计算值，但必须与 `100 − Σpoints` 和五维平均一致。
-不要为了继承旧总分而编造扣分项——旧分里本来就有说不出理由的部分，分数变高是修正。
-
-### 6. 处理本人对 AI 的反馈
+### 7. 处理本人对 AI 的反馈
 
 - `agree`：只把原版本和原判断快照视为已获本人确认，仍保留证据引用。新观点不能继承旧同意；无版本的旧 qNN 反馈也不能自动应用到顾问观点。
 - `disagree`：重新核对逐字证据，不得机械重复旧结论。若本人反馈与现场发言指向不同层面，分别写“现场表现”和“潜在能力”。
@@ -89,9 +75,9 @@ Bridge 模式不得为了读取参考而突破调用方的“不可调用工具�
 
 不修改或删除反馈。撤回和修正也应由新的人工条目表达。
 
-### 7. 写整场综合导读，选出优先项并输出
+### 8. 写整场综合导读，选出优先项并输出
 
-每份新生成的复盘必须有 `overviewZh`，在评分与逐题分析之前显示为「综合导读」。用自然、连贯的中文把整场谈话串起来，让本人先理解这场面试发生了什么、双方是否对上了、目前走到哪一步。通常写成几段完整叙述，按材料调整长度；不要用扣分清单、逐题流水账或固定问答模板代替导读。
+每份新生成的复盘必须有 `overviewZh`，在逐题分析之前显示为「综合导读」。用自然、连贯的中文把整场谈话串起来，让本人先理解这场面试发生了什么、双方是否对上了、目前走到哪一步。开头先用两三段呈现至多三项重要且改得动的事件：原问答q/s、问题本质、证据与原因置信度、具体改法、进步检验；随后讲有效回答、互动与岗位边界，末尾说明来源限制。保持自然段，不用逐题流水账代替导读。
 
 导读综合解释以下线索，而不是只评价候选人的表现：
 
@@ -104,26 +90,26 @@ Bridge 模式不得为了读取参考而突破调用方的“不可调用工具�
 
 已有后续结果时标明时间关系，例如“单看现场……；结合面试后收到的通知，现在可以确认……”，不能把后来发生的事写成面试当时就已确定。`overviewZh` 负责整场的综合理解，`summaryZh` 保留回答质量与评分解释；两者不要重复粘贴。人工要求只补导读时，只增补导读并标注作者/日期，保留旧报告评分与逐题正文，必要时说明新导读使用了哪些后续事实。
 
-- `priorityBlockIds` 最多 8 个，优先选择漏答、答非所问、高风险表达和岗位关键能力缺口。
+- `priorityBlockIds` 最多 8 个，按严重度及行动价值排序，主要行动以至多三项为先；summaryZh写评分依据、诊断结论和材料局限，严重事件不能由平均分抹平。
 - 强项和弱项都引用具体 qNN，不写空泛人格评价。
 - Bridge 模式严格返回 `references/output-contract.md` 中的 JSON，不加 Markdown 前后文。
 - 回答质量任务只更新 `*_回答品質復盤.md` 的原评价层；顾问任务定向合并独立 `advisory`；横向任务更新固定的 `20_求職/_素材/面接横断_顧問分析.md`。保留报告中人工追加内容，不改逐字稿、整理稿、批注、回答品质批注或回答练习。
 
-### 8. 验证
+### 9. 验证
 
-生成持久化报告后运行：
+先按 `references/diagnostic-method.md` 做三场完整问答和一场留出样本的独立行为验证（含正例/成功澄清），不能只做文字匹配。历史重评另存版本日期与新旧对照，不批量覆写原稿。生成持久化报告后运行：
 
 ```bash
 node .agents/skills/review-interview-answers/scripts/validate-review.mjs \
   --review '<回答品質復盤.md>' \
-  --source '<整理稿.md>'
+  --source '<整理稿.md>' --method v3 --require-signals
 ```
 
-修复所有 error 后才报告完成。warning 需要人工判断，不要静默忽略。
+新生成的复盘和本人要求补评信号的场次必须带 `--require-signals`；只审计旧报告时去掉它，缺信号只给警告。修复所有 error 后才报告完成。warning 需要人工判断，不要静默忽略。
 
-### 9. 回流到面试标准回答库（闭环，Vault 模式）
+### 10. 回流到面试标准回答库（闭环，Vault 模式）
 
-复盘所得要能进入面试**前**查阅的标准回答库，否则库会和最新面试脱节。生成报告后，对本场 `priorityBlockIds` 里的每个漏答/答非所问/高风险表达，以及顾问层中 scope=general 的有效表达和提升方案做一次回流检查——对象是 `20_求職/_素材/面接標準回答集.md`（`type: interview-prep-library`，Web「面试准备」页读取；结构契约见 `99_系统/_数据字典.md`）：
+复盘所得要能进入面试**前**查阅的标准回答库，否则库会和最新面试脱节。历史批量重评先记录回流候选，不自动批量覆写标准回答库；按用户本次授权范围执行。生成报告后，对本场 `priorityBlockIds` 里的每个漏答/答非所问/高风险表达，以及顾问层中 scope=general 的有效表达和提升方案做一次回流检查——对象是 `20_求職/_素材/面接標準回答集.md`（`type: interview-prep-library`，Web「面试准备」页读取；结构契约见 `99_系统/_数据字典.md`）：
 
 - **已有对应卡**（如复合问题漏答↔p12、转职次数↔p08、他社選考↔p24、结尾一言↔p25）：把本场新证据追加进该卡的「证据」节（`[[本場整理稿#qNN …]]`），必要时据此修订「使用边界」。不重写已验证的口径。
 - **没有对应卡且是跨公司通用题**：新增一张 `## p{下一个编号}` 卡，分节结构照库内现有卡；每条证据必须回链到具体整理稿/復盤，不写无出典的漂亮话。
@@ -131,7 +117,7 @@ node .agents/skills/review-interview-answers/scripts/validate-review.mjs \
 
 回流是本技能的**边界内动作**（写的是独立的回答库，不是复盘报告本身，也不碰逐字稿/整理稿/批注）。改动回答库后，若本机有 vault 环境，运行 `npm run vault:check` 确认无枚举/结构问题。判断为「本场无需回流」时，一句话说明理由，不要静默跳过。
 
-### 10. 独立的单场顾问解读
+### 11. 独立的单场顾问解读
 
 顾问分析要解释“对方为什么问、双方怎样理解彼此、这份机会对本人意味着什么、后续怎样投入更有价值”。内容按材料展开，不固定段数和观点数，不为简洁删除有用推理；也不为显得深入强行制造隐含信号。
 
@@ -142,7 +128,7 @@ node .agents/skills/review-interview-answers/scripts/validate-review.mjs \
 - 后续建议说明核实事项和触发条件；不自动改变案件状态、日程、待办或对外发消息。已有后续结果需注明事后时间，日期不足以推定同日事件先后。
 - 本人反馈与背景高于旧 AI 标签。局部听清后完成回答，不再因原始听返标签推成没听懂；本人已澄清的技术用途、单位、团队范围、合同意愿必须进入解释。
 
-### 11. 跨面试顾问洞察
+### 12. 跨面试顾问洞察
 
 固定五个模块：企业关注、个人定位、有效表达、机会限制与后续、下一阶段建议。保留完整模块但不强填观点；材料不足在模块评论中说清。每条横向 finding 至少引用两份不同场次整理稿，保留反例、阶段差异和适用边界。
 
@@ -157,7 +143,7 @@ node .agents/skills/review-interview-answers/scripts/validate-review.mjs \
 1. 所有 qNN 都有且只有一个评价块。
 2. 复合问题的子问、现场回答和漏答互不混淆。
 3. 每个维度有理由和 qNN 证据；每一分扣分都指得到具体 qNN、sNN 和一句可执行的 `fixZh`；
-   维度分等于 `100 − Σpoints`，持久化总分等于五维平均。
+   维度和整体分由共享v3算法重新计算相等，未评估维度不填分，资格、正证、门槛和实际覆盖可见。
 4. 所有 sNN 证据属于对应 qNN，策略标签属于固定枚举。
 5. 本人反对或补充已被重新核对，旧 AI 结论没有被机械复读。
 6. 原文与人工事实层没有被改写。
@@ -165,3 +151,7 @@ node .agents/skills/review-interview-answers/scripts/validate-review.mjs \
 8. 评分前有独立的自然语言综合导读，同时解释本人表现、对方可能的判断与推进意愿；可观察证据、合理推断、后续确认与未知没有混淆。
 9. 完整复盘有独立顾问层与横向洞察，重要观点可回到原句；仅补顾问时历史评分与逐题评价保持不变。横向结论引用多场原话，阶段和后续时间不混淆。
 10. 人工反馈按对象及版本核对，未完成部分和实际覆盖范围可见；不把生成分析变成新日程、状态变化或对外承诺。
+
+11. 严重事件置顶且原因不被捏造；机会不作错误，成功澄清/正面反例被保留；新旧评分口径不可作能力涨跌比较。
+12. 改法可执行且有首次未知问法/听者复述等验证，行为验证记录来源、版本、实际覆盖、漏检和误报。
+13. 新复盘有七项日本面试信号，各有结论、观察、下一步和本场 q/s 证据；志望度与收尾已判断，信号未进入五维均分，`--require-signals` 校验通过。

@@ -39,6 +39,7 @@ import {
 } from "../lib/knowledge-graph.ts";
 import { GENERATED_LIFECYCLES, markerJson } from "../lib/vault-compact.mjs";
 import { validateCompanyOverviewNotes } from "../lib/company-overview.ts";
+import { todoActionMetadataIssues } from "../lib/todo-action-schema.ts";
 
 const PREP_REQUIRED = ["company", "round", "format", "interviewers"];
 const PREP_SESSION_STATUSES = ["preparing", "scheduled", "completed", "cancelled"];
@@ -389,6 +390,7 @@ for (const path of files) {
     }
 
     const action = String(frontmatter.action ?? "").trim();
+    for (const issue of todoActionMetadataIssues(frontmatter)) problems.push(`${relativePath}: ${issue}`);
     if (action && (/[*_`[\]]/.test(action) || action.length > 88)) {
       problems.push(`${relativePath}: action は Markdown を含まない88文字以内の表示用短文にする`);
     }

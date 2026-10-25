@@ -19,6 +19,18 @@ async function component(file, additions = {}) {
 }
 const advisoryUi = await component("interview-advisory.tsx");
 const insightsUi = await component("interview-insights.tsx", { "./interview-advisory": advisoryUi });
+
+test("生成引用失败明确由系统重生成，不要求本人补证且保留排查详情", async () => {
+  const ui = await component("interview-advisory.tsx", {
+    "./interview-advisory-sync": { useInterviewAdvisorySync: () => ({ busy: false, error: "顾问复盘数据无效：observations[6] 缺少逐句证据", state: null, revision: 0 }) },
+  });
+  const html = renderToStaticMarkup(createElement(ui.default, { notes: [], notePath: "20_求職/テスト/一次面接_整理稿.md", onOpenEvidence() {}, onVaultChanged() {}, onOpenInsights() {} }));
+  assert.match(html, /无需为这次更新失败补材料/);
+  assert.match(html, /重试更新/);
+  assert.match(html, /旧复盘和评分已保留/);
+  assert.match(html, /查看失败详情/);
+  assert.match(html, /observations\[6\]/);
+});
 const pathA = "20_求職/株式会社テスト/2026-01-01_一次面接_整理稿.md";
 const pathB = "20_求職/株式会社サンプル/2026-01-01_一次面接_整理稿.md";
 const evidence = [pathA, pathB].map((sourcePath) => ({ sourcePath, blockId: "q01", sentenceIds: ["s001"] }));

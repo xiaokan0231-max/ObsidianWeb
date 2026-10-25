@@ -5,6 +5,7 @@
  * REVIEW_DIMENSION_META を引けない。
  */
 import type { InterviewAnswerReview, ReviewDimensionKey } from "./review-deep.ts";
+import type { InterviewOutcome, JapanSignals, SignalOutcomeComparison } from "./interview-outcome.ts";
 
 export const REPEATED_INTERVIEW_MIN: number;
 
@@ -25,6 +26,19 @@ export type TrendEntry = {
   date: string;
   round: string;
   review: InterviewAnswerReview | null;
+  reassessment?: { frontmatter: Record<string, unknown> } | Record<string, unknown> | null;
+  /** 这一场的选考结果（resolveInterviewOutcomes 的值）；不传＝未判定。 */
+  outcome?: InterviewOutcome | null;
+};
+
+export function interviewEvidenceScores(entry: Pick<TrendEntry, "review" | "reassessment"> | { review?: InterviewAnswerReview | null; reassessment?: TrendEntry["reassessment"] }): {
+  scored: boolean;
+  reassessed: boolean;
+  dimensions: Record<ReviewDimensionKey, number | null>;
+  assessed: ReviewDimensionKey[];
+  overall: number | null;
+  historical: number | null;
+  methodVersion: string;
 };
 
 export function reviewTrendEntry(
@@ -42,8 +56,13 @@ export type TrendInterview = {
   company: string;
   date: string;
   round: string;
-  overall: number;
+  overall: number | null;
+  historicalOverall: number | null;
+  scoreMethod: "scored_evidence" | "historical";
   dimensions: Record<ReviewDimensionKey, number | null>;
+  outcome: InterviewOutcome | null;
+  /** 新口径的整场日本面试信号；旧复盘为 null（未评估，不是全部做到）。 */
+  signals: JapanSignals | null;
   priorityBlocks: {
     blockId: string;
     title: string;
@@ -74,6 +93,8 @@ export type TrendTag = {
 
 export type InterviewTrends = {
   interviews: TrendInterview[];
+  scoreMethod: "scored_evidence" | "historical";
+  signalOutcome: SignalOutcomeComparison;
   dimensionAverages: Record<ReviewDimensionKey, number | null>;
   weakestDimension: ReviewDimensionKey | null;
   tags: TrendTag[];

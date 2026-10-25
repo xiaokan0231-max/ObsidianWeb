@@ -343,12 +343,12 @@ test("deep review stays locked behind completed human decisions and an allowlist
   assert.match(route, /unresolved\.length > 0/);
   assert.match(route, /review_interview_answers/);
   assert.match(bridge, /review_interview_answers: \{ model: SOL_MODEL, timeoutMs: 480_000 \}/);
-  assert.match(bridge, /AI、MCP、DDD/);
+  assert.match(bridge, /interviewDiagnosticInstruction\(task\)/);
   assert.match(bridge, /"dimensions"/);
   assert.match(bridge, /"strategyTags"/);
   // 分数を返させない・扣分を逐条举证させる、が review_interview_answers の契約の核。
-  assert.match(bridge, /\*\*不要输出任何分数\*\*/);
-  assert.match(bridge, /说不出扣在哪一题、扣多少、为什么，就不能扣分/);
+  // 分析规则由共享模块注入；实际任务组装由 interview-diagnostic-method 测试覆盖。
+  assert.match(bridge, /diagnostic-prompt\.mjs/);
   assert.doesNotMatch(bridge, /reviewDimension = \{[^}]*score: number/s);
   assert.match(client, /review_interview_answers/);
   assert.match(annotate, /inAnnotationQueue/);
@@ -367,7 +367,7 @@ test("five-dimension scores stay visible before the full report is expanded", as
     readAppCss(),
   ]);
   const stageStart = client.indexOf("rv-deep-stage");
-  const collapsedReportStart = client.indexOf("doc.deepReview && deepOpen", stageStart);
+  const collapsedReportStart = client.indexOf("doc.deepReview && !findInterviewReassessment(notes, doc.note.path) && deepOpen", stageStart);
   const glanceStart = client.indexOf("rv-score-glance", stageStart);
 
   assert.ok(stageStart >= 0);
@@ -395,4 +395,38 @@ test("the report shows where each point went, and says so when it cannot", async
   assert.match(client, /旧格式报告没有扣分明细，重新生成后可见/);
   assert.match(css, /\.rv-deduction-list > li\.sev-major/);
   assert.match(css, /\.rv-deduction-fix/);
+});
+
+test("new evidence review persists no numeric evaluation and does not turn absent evidence into full marks", () => {
+  const dimension = { deductions: [], rationaleZh: "未问这一维", evidenceBlockIds: [] };
+  const review = normalizeInterviewAnswerReview({evaluationMode:"evidence",evaluation:{conclusionZh:"核心信息未交付",coverageZh:"完整输入文本",limitsZh:"无原音"},dimensions:Object.fromEntries(["questionUnderstanding","coverage","directness","evidenceCredibility","riskControl"].map(k=>[k,dimension])),blocks:[],summaryZh:"未检验能力不评"},{generatedAt:"2026-01-01",model:"test"},new Map());
+  assert.equal(review.overallScore,null);
+  for(const d of Object.values(review.dimensions)){assert.equal(d.score,null);assert.equal(d.level,"not_assessed");}
+  const output=renderInterviewAnswerReview(review,{company:"株式会社テスト",date:"2026-01-01",round:"一次",sourceName:"测试",annotationName:null});
+  assert.match(output,/不提供新总分/);
+  assert.match(output,/未评估／证据不足/);
+  assert.doesNotMatch(output,/100|各20%|保持满分/);
+  assert.equal(parseInterviewAnswerReview(output).overallScore,null);
+});
+
+test("legacy introduction is identified and collapsed as history without changing its original paragraphs", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { loadAppModule } = await import("./helpers/render-tsx.mjs");
+  const { ReviewIntroduction } = await loadAppModule("app/interview-review.tsx");
+  const original = "原报告第一段。\n\n原报告第二段。";
+  const legacy = { overviewZh: original };
+  const html = renderToStaticMarkup(createElement(ReviewIntroduction, { review: legacy }));
+  assert.match(html, /旧版综合导读（历史）/);
+  assert.match(html, /不作为上方新版证据评价/);
+  assert.match(html, /<details><summary>展开旧版导读<\/summary><p>原报告第一段。<\/p><p>原报告第二段。<\/p><\/details>/);
+  assert.doesNotMatch(html, /<details[^>]*open/);
+  assert.equal(legacy.overviewZh, original);
+  const css = await readAppCss();
+  assert.match(css, /\.rv-review-introduction > details > summary \{[^}]*color: var\(--text-on-inverse\)/);
+  assert.match(css, /\.rv-review-introduction > details > summary::marker,[\s\S]*?summary::-webkit-details-marker \{ color: currentColor; \}/);
+  assert.match(css, /\.rv-review-introduction > details > summary:focus-visible \{[^}]*outline: 2px solid currentColor;[^}]*outline-offset: 4px/);
+  const current = renderToStaticMarkup(createElement(ReviewIntroduction, { review: { ...legacy, evaluationMode: "evidence" } }));
+  assert.match(current, /aria-label="综合导读"/);
+  assert.doesNotMatch(current, /历史|<details/);
 });

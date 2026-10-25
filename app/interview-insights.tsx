@@ -1,5 +1,7 @@
 "use client";
 
+import { advisoryFailureMessage } from "@/lib/advisory-recovery";
+
 import { useMemo, useState } from "react";
 import type { AdvisoryEvidenceRef, InterviewInsights as InsightsReport } from "@/lib/interview-advisory";
 import type { Note } from "@/lib/notes";
@@ -7,6 +9,7 @@ import { AdvisoryEvidence, AdvisoryFeedback, AdvisoryParagraphs } from "./interv
 import { useInterviewAdvisorySync } from "./interview-advisory-sync";
 import { ADVISORY_STAGE_LABELS, EMPTY_INSIGHTS_FILTER, filterAdvisoryCoverage, filterInsightModules, type AdvisoryCoverage, type InsightsFilter } from "./interview-insights-state";
 import { useUiLocale } from "./ui-locale";
+import { SignalOutcomeTable, signalOutcomeFromNotes, signalsCopy } from "./interview-japan-signals";
 
 const INSIGHTS_MENU_JA: Record<string, string> = {
   "横向分析模块": "比較分析の項目",
@@ -41,7 +44,7 @@ export function InsightsCoverage({ coverage, selected, onSelect, onOpen }: {
         <label><input type="checkbox" checked={selected.has(item.sourcePath)} onChange={() => onSelect(item.sourcePath)} aria-label={`对照 ${company} ${item.date} ${item.round}`} />
           <span><b>{item.date || "日期未定"} · {item.round || "轮次未定"}</b><small>{ADVISORY_STAGE_LABELS[item.stage ?? ""] || "阶段待分析"}</small></span></label>
         <span className={`ii-status ${item.status}`}>{STATUS_LABELS[item.status]}</span><button type="button" onClick={() => onOpen(item.sourcePath)}>本场复盘 ↗</button>
-        {(item.reason || item.lastError) && <p>{item.lastError || item.reason}</p>}
+        {(item.reason || item.lastError) && <p>{item.lastError ? advisoryFailureMessage(item.lastError) : item.reason}</p>}
       </li>)}
     </ul></section>)}
   </div>;
@@ -90,6 +93,8 @@ export default function InterviewInsights({ notes, onOpenEvidence, onOpenReview,
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const coverage = sync.state?.coverage ?? EMPTY_COVERAGE;
   const visible = useMemo(() => filterAdvisoryCoverage(coverage, filter), [coverage, filter]);
+  // 信号与结果的对照由程序计数，不等顾问分析生成；放在模型写的横向结论之前，免得两者被读成同一种判断。
+  const signalOutcome = useMemo(() => signalOutcomeFromNotes(notes), [notes]);
   const active = sync.state?.active;
   const error = sync.error || sync.state?.error;
   const failedSources = coverage.filter((item) => item.lastError);
@@ -100,7 +105,7 @@ export default function InterviewInsights({ notes, onOpenEvidence, onOpenReview,
       <div className="ii-hero-actions"><span role="status">{active ? `正在更新${active.sourcePath ? `：${active.sourcePath.split("/").at(-1)?.replace(/\.md$/, "")}` : "横向分析"}` : sync.busy ? "正在更新分析…" : coverage.length ? `已记录 ${coverage.length} 场面谈` : "正在读取面谈材料…"}</span>
         <button type="button" disabled={sync.busy || Boolean(active)} onClick={() => void sync.synchronize(needsRetry)}>{needsRetry ? ui("重试更新") : ui("检查并更新")}</button></div>
     </header>
-    {error && <p className="ia-error" role="alert">{error} 已生成的内容仍然保留。</p>}
+    {error && <p className="ia-error" role="alert">{advisoryFailureMessage(error)} 已生成的内容仍然保留。</p>}
     {failedSources.length > 0 && <p className="ia-error" role="status">有 {failedSources.length} 场分析更新失败，原因列在对照范围中。其他场次可以继续阅读，点击重试更新可重新处理失败场次。</p>}
     {sync.state?.report && sync.state.insightsStatus !== "ready" && <p className="ii-filter-note" role="status">依据已有变化，下面保留上一版横向分析，完成更新后替换。</p>}
     <section className="ii-scope"><header><h2>对照范围</h2><p>同一公司多轮可以一起查看；未完成裁定的场次会显示原因。可用场次纳入生成材料，具体发现按主题选择证据，并非每场都在横向结论中被引用。</p></header>
@@ -114,6 +119,7 @@ export default function InterviewInsights({ notes, onOpenEvidence, onOpenReview,
         <InsightsCoverage coverage={visible} selected={selected} onSelect={(path) => setSelected((current) => { const next = new Set(current); if (next.has(path)) next.delete(path); else next.add(path); return next; })} onOpen={onOpenReview} />
       </details>
     </section>
+    <SignalOutcomeTable comparison={signalOutcome} onSelect={onOpenReview} t={signalsCopy(locale)} />
     {sync.state?.report ? <InsightsReportView report={sync.state.report} coverage={coverage} filter={filter} selected={selected} notes={notes} onOpenEvidence={onOpenEvidence}
       onFeedbackSaved={async (note) => { if (note && onNoteWritten) onNoteWritten(note); else await onVaultChanged(); void sync.synchronize(); }} />
       : <section className="ia-empty"><h2>{sync.busy || active ? "正在整理跨场证据" : "横向分析尚未生成"}</h2><p>系统会先补齐已完成裁定的单场顾问分析，再统一生成横向结论。你可以继续阅读已有复盘。</p>{coverage.length === 0 && !sync.busy && <p>有可用的面谈整理稿后，这里会显示纳入范围。</p>}</section>}

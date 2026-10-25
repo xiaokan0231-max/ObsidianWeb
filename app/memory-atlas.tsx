@@ -1602,7 +1602,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   onVaultChanged={loadVault}
                   onNoteWritten={patchNote}
                   initialSelectedKey={reviewInitialKey}
-                  initialPanel={interviewParams.get("panel") === "source" ? "source" : interviewParams.get("panel") === "quality" ? "quality" : "advisory"}
+                  initialPanel={interviewParams.get("panel") === "advisory" ? "advisory" : interviewParams.get("panel") === "quality" ? "quality" : "source"}
                   initialBlockId={interviewParams.get("block")}
                   initialSentenceId={interviewParams.get("sentence")}
                   onOpenEvidence={openReviewEvidence}

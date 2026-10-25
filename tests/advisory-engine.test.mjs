@@ -33,6 +33,124 @@ function setup(invoke) {
   return { notes, calls, deps, engine: createAdvisoryEngine(deps) };
 }
 
+test("空逐句证据反馈一次重新生成，回查真实原句后保存且旧评分不变", async () => {
+  let attempt = 0;
+  const { engine, notes, calls } = setup((_task, payload) => {
+    const output = advisory(payload.sourcePath);
+    if (++attempt === 1) output.observations[0].evidence = [];
+    else {
+      assert.match(payload.generationRepair.validationError, /observations\[0\]/);
+      assert.deepEqual(payload.generationRepair.rejectedOutput.observations[0].evidence, []);
+      assert.equal(payload.blocks[0].sentences[0].id, "s001");
+      // 无直接依据的建议应删去，不能把其他句子塞进空引用。
+      output.observations[0].evidence = [ref(payload.sourcePath)];
+    }
+    return output;
+  });
+  await engine.generateSource(A);
+  assert.equal(calls.length, 2);
+  const { advisory: saved, ...quality } = parseInterviewAnswerReview(notes.get(reviewPath(A)).content);
+  assert.deepEqual(quality, core);
+  assert.equal(saved.observations.length, 1);
+  assert.deepEqual(saved.evidence, [ref(A)]);
+  assert.equal((await engine.sourceState(A)).status, "ready");
+});
+
+test("一次修复仍无证据就停止，保留旧报告，不无限重试或伪造引用", async () => {
+  const { engine, notes, calls } = setup((_task, payload) => ({ ...advisory(payload.sourcePath), evidence: [] }));
+  const before = notes.get(reviewPath(A)).content;
+  await assert.rejects(engine.generateSource(A), /缺少逐句证据/);
+  assert.equal(calls.length, 2);
+  assert.equal(notes.get(reviewPath(A)).content, before);
+  assert.match((await engine.sourceState(A)).lastError, /缺少逐句证据/);
+});
+
+test("补证重生成若返回伪造句子仍拒绝保存", async () => {
+  let attempt = 0;
+  const { engine, notes, calls } = setup((_task, payload) => ({ ...advisory(payload.sourcePath), evidence: ++attempt === 1 ? [] : [{ ...ref(A), sentenceIds: ["s999"] }] }));
+  const before = notes.get(reviewPath(A)).content;
+  await assert.rejects(engine.generateSource(A), /不属于/);
+  assert.equal(calls.length, 2);
+  assert.equal(notes.get(reviewPath(A)).content, before);
+});
+
+test("来源路径格式错误只回查重生成一次，从已存在的清单精确选择", async () => {
+  let attempt = 0;
+  const { engine, notes, calls } = setup((_task, payload) => {
+    assert.deepEqual(payload.generationContract.evidenceSources.map(item=>item.sourcePath), [A]);
+    const output = advisory(payload.sourcePath);
+    if (++attempt === 1) output.observations[0].evidence[0].sourcePath = "一次面接.md";
+    else {
+      assert.match(payload.generationRepair.validationError, /observations\[0\].evidence\[0\]/);
+      assert.match(payload.generationRepair.validationError, /一次面接.md/);
+      assert.equal(payload.generationRepair.rejectedOutput.observations[0].evidence[0].sourcePath, "一次面接.md");
+    }
+    return output;
+  });
+  await engine.generateSource(A);
+  assert.equal(calls.length, 2);
+  assert.equal(parseInterviewAnswerReview(notes.get(reviewPath(A)).content).overallScore, core.overallScore);
+});
+
+test("来源修复再返回未知故障不循环，旧稿完整保留", async () => {
+  let attempt = 0;
+  const { engine, notes, calls } = setup((_task, payload) => {
+    if (++attempt > 1) throw new Error("模拟未知运行故障");
+    const output = advisory(payload.sourcePath);
+    output.evidence[0].sourcePath = "错误.md";
+    return output;
+  });
+  const before = notes.get(reviewPath(A)).content;
+  await assert.rejects(engine.generateSource(A), /未知运行故障/);
+  assert.equal(calls.length, 2);
+  assert.equal(notes.get(reviewPath(A)).content, before);
+  const failures = JSON.parse(notes.get(ADVISORY_STATE_PATH).content.split("<!-- interview-advisory-state -->")[1].match(/```json\s*([\s\S]*?)```/)[1]);
+  assert.equal(failures[A].diagnostics.length, 1);
+  assert.equal(failures[A].diagnostics[0].output.evidence[0].sourcePath, "错误.md");
+  assert.ok(failures[A].diagnostics[0].issues.length);
+});
+
+test("一次恢复反馈全部契约错误，保留正面具体观察，不默默重编号", async () => {
+  let attempt = 0;
+  const { engine, notes, calls } = setup((_task, payload) => {
+    const output = advisory(payload.sourcePath);
+    if (++attempt === 1) {
+      output.evidence[0].blockId = "多个问题";
+      output.observations[0].evidence[0].sentenceIds = ["s999"];
+      output.fitZh = " ";
+      output.observations[0].alternativeZh = null;
+    } else {
+      const issues = payload.generationRepair.validationErrors.join("\n");
+      for (const field of ["blockId", "sentenceIds", "fitZh", "alternativeZh"]) assert.ok(issues.includes(field));
+      assert.equal(payload.generationRepair.rejectedOutput.evidence[0].blockId, "多个问题");
+      assert.deepEqual(payload.generationContract.evidenceSources[0].blocks, [{ blockId: "q01", sentenceIds: ["s001", "s002"] }]);
+    }
+    return output;
+  });
+  await engine.generateSource(A);
+  assert.equal(calls.length, 2);
+  const saved = parseInterviewAnswerReview(notes.get(reviewPath(A)).content);
+  assert.equal(saved.advisory.observations.length, 1);
+  assert.equal(saved.overallScore, core.overallScore);
+});
+
+test("不能靠清空全部具体分析使恢复通过，保留拒收诊断和旧稿", async () => {
+  let attempt = 0;
+  const { engine, notes, calls } = setup((_task, payload) => {
+    const output = advisory(payload.sourcePath);
+    if (++attempt === 1) output.evidence[0].blockId = "无效编号";
+    else output.observations = [];
+    return output;
+  });
+  const before = notes.get(reviewPath(A)).content;
+  await assert.rejects(engine.generateSource(A), /清空了全部具体分析/);
+  assert.equal(calls.length, 2);
+  assert.equal(notes.get(reviewPath(A)).content, before);
+  const failures = JSON.parse(notes.get(ADVISORY_STATE_PATH).content.split("<!-- interview-advisory-state -->")[1].match(/```json\s*([\s\S]*?)```/)[1]);
+  assert.equal(failures[A].diagnostics.length, 2);
+  assert.equal(failures[A].diagnostics[0].output.evidence[0].blockId, "无效编号");
+});
+
 test("逐场补齐后统一生成横向；指纹去重、旧核心和未知字段保留", async () => {
   const { engine, notes, calls } = setup();
   const initial = await engine.state();
@@ -63,7 +181,7 @@ test("无效引用拒绝落盘并保留旧报告；失败跨重启可见且不�
   const restarted = createAdvisoryEngine(deps);
   assert.match((await restarted.sourceState(A)).lastError, /不属于/);
   await assert.rejects(restarted.generateSource(A), /请点击重试/);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
 });
 
 test("同一来源并发只调用一次模型，生成时事实改变不覆盖旧稿", async () => {
@@ -158,7 +276,7 @@ test("横向拒绝猜中原稿里存在但本次模型未见的问题句", async
   notes.get(A).content += "\n## q02 未引用的话题\n- **s003｜私**\n    - 正:: 今回の横断入力には渡していません。\n";
   await engine.generateSource(A);
   await engine.generateSource(B);
-  await assert.rejects(engine.generateInsights(), /不存在的来源或问题/);
+  await assert.rejects(engine.generateInsights(), /来源\/问题组合无效/);
   const input = calls.find((call) => call.task === "review_interview_insights").payload.interviews.find((item) => item.sourcePath === A);
   assert.deepEqual(input.blocks.map((block) => block.id), ["q01"]);
   assert.equal(notes.has(INSIGHTS_PATH), false);

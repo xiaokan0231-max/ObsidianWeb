@@ -1,6 +1,6 @@
 import { errorResponse, readJson } from "@/lib/server/api";
 import { invokeCodex } from "@/lib/server/codex-bridge";
-import { readNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
+import { readAllNotes, readNote, readNoteOrNull, writeNote } from "@/lib/server/obsidian";
 import {
   carryOverSections,
   normalizeInterviewAnswerReview,
@@ -13,12 +13,14 @@ import {
   reviewDecisionTasks,
   uniqueAnnotations,
 } from "@/lib/review";
-import { getString as text, noteBasename as basename } from "@/lib/notes";
+import { getString as text, getType, noteBasename as basename } from "@/lib/notes";
 import { parseReviewFeedback, uniqueReviewFeedback } from "@/lib/review-feedback";
 import { isReviewNotePath, reviewSiblingPath } from "@/lib/review-paths";
 import { interviewAdvisory } from "@/lib/server/interview-advisory";
 import { withReviewWrite } from "@/lib/server/review-write-queue";
 import { commitReviewWithFreshInputs } from "@/lib/server/review-input-guard";
+import { scoredEvidenceErrors } from "@/.agents/skills/review-interview-answers/scripts/diagnostic-checks.mjs";
+import { japanSignalErrors } from "@/.agents/skills/review-interview-answers/scripts/japan-interview-signals.mjs";
 
 type Body = { notePath?: string };
 
@@ -54,6 +56,14 @@ export async function POST(request: Request) {
 
     const existingReview = (await readNoteOrNull(existingReviewPath))?.content ?? "";
 
+    // 整理稿是AI清洗层，原问答不存在时不能只凭整理稿把整场资料判为完整。
+    const rawRef = text(source.frontmatter.source_note).match(/^\[\[([^\]|]+)(?:\|[^\]]+)?\]\]$/)?.[1];
+    const rawPath = rawRef ? `${rawRef.includes("/") ? rawRef : `${notePath.slice(0, notePath.lastIndexOf("/"))}/${rawRef}`}${rawRef.endsWith(".md") ? "" : ".md"}` : null;
+    const safeRawPath = rawPath?.startsWith("20_求職/") && !rawPath.includes("..") ? rawPath : null;
+    const original = safeRawPath ? await readNoteOrNull(safeRawPath) : null;
+    const materialScopeLimit = text(original?.frontmatter.type) === "transcript"
+      && !["memory", "partial", "limited", "unavailable"].includes(text(source.frontmatter.assessment_scope)) ? "full_available_text" : "limited";
+
     const feedbackNote = await readNoteOrNull(feedbackPath);
     const feedbackExists = feedbackNote !== null;
     const humanFeedback = feedbackNote
@@ -65,6 +75,19 @@ export async function POST(request: Request) {
       const list = bySentence.get(item.sentenceId) ?? [];
       list.push(item);
       bySentence.set(item.sentenceId, list);
+    }
+    // 年收・在留要对照本人既定口径，口径只认 self 层；只交写有年收或在留的那几份，不把全部自述塞进提示。
+    const statedPositions = (await readAllNotes({ scope: "interview" }))
+      .filter((note) => getType(note) === "self" && note.frontmatter.lifecycle !== "archived" && /年収|年收|在留/.test(note.content))
+      .map((note) => ({ path: note.path, updated: text(note.frontmatter.updated), content: note.content }));
+    // 信号的话者检查要用本人裁定后的话者；待裁定的「私?」「面?」不算任何一方。
+    const speakerDecisions = new Map(tasks.filter((task) => task.target === "speaker").map((task) => [task.sentenceId, task.resolution]));
+    const speakers = new Map<string, string>();
+    for (const sentence of parsed.sentences) {
+      const decision = speakerDecisions.get(sentence.id);
+      if (decision === "speaker-interviewer") speakers.set(sentence.id, "面");
+      else if (decision === "speaker-self") speakers.set(sentence.id, "私");
+      else if (!sentence.uncertainSpeaker) speakers.set(sentence.id, sentence.speaker);
     }
     const result = await invokeCodex<Record<string, unknown>>("review_interview_answers", {
       company: text(source.frontmatter.company),
@@ -86,15 +109,36 @@ export async function POST(request: Request) {
       })),
       existingReview,
       humanFeedback,
+      sourceMaterial: {
+        sourcePath: notePath, layer: "ai-cleaned-transcript", frontmatter: source.frontmatter,
+        originalPath: safeRawPath, originalText: original?.content ?? "",
+        materialScopeLimit,
+        boundaryZh: "原稿有无仅决定资料上限；仍须检查实际缺录、回忆与AI修复边界。无原音不能评分发音或语速。",
+      },
+      statedPositions: {
+        notes: statedPositions,
+        boundaryZh: "本人既定的年收与在留口径，只用于判断 japanSignals.salaryVisaLine。按面试日期取当时有效的版本，事后改过的口径不倒查；不改写成本人的现场发言。",
+      },
       analysisBoundary: {
         exclude: "逐句语法评分、转录质量评分",
-        include: "问题理解、子问覆盖、相关性、完整性、面试策略风险、改善回答",
+        include: "问题理解、子问覆盖、相关性、完整性、面试策略风险、改善回答、整场日本面试信号",
       },
     });
     const generatedAt = new Date().toISOString();
     // 写入前核对原始输出，不能让规范化静默过滤掉模型漏答或跨题引用。
     const rawBlocks = Array.isArray(result.output.blocks) ? result.output.blocks as Record<string, unknown>[] : [];
     const byBlock = new Map(parsed.blocks.map((block) => [block.id, new Set(block.sentences.map((sentence) => sentence.id))]));
+    const scoringErrors = scoredEvidenceErrors(result.output, { sourceBlockIds: byBlock.keys(), sentencesByBlock: byBlock });
+    const outputEvaluation = result.output.evaluation as Record<string, unknown> | undefined;
+    if (materialScopeLimit === "limited" && outputEvaluation?.materialScope !== "limited") scoringErrors.push("原始资料上限为limited，不能生成整场评分");
+    if (scoringErrors.length) throw new Error(`有据评分契约无效：${scoringErrors.join("；")}。原报告已保留。`);
+    const signalErrors = japanSignalErrors(result.output.japanSignals, {
+      sentencesByBlock: byBlock,
+      speakers,
+      materialScope: typeof outputEvaluation?.materialScope === "string" ? outputEvaluation.materialScope : undefined,
+      reconstructed: source.frontmatter.reconstruction === "memory" || source.frontmatter.verbatim === false,
+    });
+    if (signalErrors.length) throw new Error(`日本面试信号无效：${signalErrors.join("；")}。原报告已保留。`);
     if (rawBlocks.length !== parsed.blocks.length || new Set(rawBlocks.map((block) => block.blockId)).size !== parsed.blocks.length ||
       rawBlocks.some((block) => !byBlock.has(String(block.blockId)) ||
         !Array.isArray(block.evidenceSentenceIds) || block.evidenceSentenceIds.some((id) => !byBlock.get(String(block.blockId))!.has(String(id))))) {
@@ -119,6 +163,7 @@ export async function POST(request: Request) {
         { path: notePath, content: source.content },
         { path: annotationPath, content: annotationContent },
         { path: feedbackPath, content: feedbackNote?.content ?? null },
+        ...(safeRawPath ? [{ path: safeRawPath, content: original?.content ?? null }] : []),
       ], readNoteOrNull, async () => {
         // 模型运行期间可能已有新的顾问评论或人工章节，保留最新版本而非调用前快照。
         const previousOutput = (await readNoteOrNull(outputPath))?.content ?? "";
