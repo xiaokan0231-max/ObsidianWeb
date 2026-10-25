@@ -1,205 +1,151 @@
-# 求职作战室（ObsidianWeb）
+<p align="center">
+  <img src="public/logo.svg" width="88" alt="求职作战室的小猫向导" />
+</p>
 
-**以求职为中心，以 Obsidian vault 为唯一数据源的本地优先工作台。**
+<h1 align="center">求职作战室 · ObsidianWeb</h1>
 
-一堆 Markdown 笔记（frontmatter・双链・标题）本身就是领域模型，
-由它实时构建案件看板、日历、面试准备、时间线、3D 知识图谱和学习闭环。
-Next.js (vinext) / React 19 / TypeScript，部署到 Cloudflare Workers。
+<p align="center"><strong>把散落的求职笔记，变成看得清、能比较、可练习的下一步。</strong></p>
+<p align="center">Obsidian Markdown 驱动的本地工作台：日历、面试准备、公司对比、复盘与日语训练。</p>
+<p align="center"><code>Local-first</code> · <code>Markdown as data</code> · <code>无需数据库</code> · <code>Cloudflare Workers</code></p>
+<p align="center"><a href="README.md">日本語</a> · <strong>简体中文</strong> · <a href="README.en.md">English</a></p>
 
-线上可以使用独立的只读 Vault 副本：运行 `npm run publish:prepare`，从 Obsidian 正式接口导出当前内容并构建网站；发布构建产物时，将 Sites 运行时变量 `OBSIDIAN_DATA_SOURCE` 设为 `published`。笔记资源随部署一起更新，不依赖本机在线；只构建代码不等于更新笔记，后续发布也应运行同一准备命令。导出内容位于被 Git 忽略的 `public/_published-vault/`，不得提交到公开源码仓库。线上副本拒绝写入和生成操作；本机默认仍使用实时 Obsidian 接口。
+![日历首页：从真实安排进入准备与复盘](docs/images/readme/calendar.jpg)
 
-![求职作战室](public/og.jpg)
+> 本页展示实际应用界面。截图中的公司、人物、评分、评论原句和面试记录均为虚构演示，不包含个人求职资料。
 
-右上角可切换中文／日本語。导航、搜索命令和常用菜单随界面语言切换，选择会在刷新后保留；笔记标题、正文与业务数据保留原文。
+## 一条连起来的工作流
 
-- 🇯🇵 [日本語](README.md) ・ 🇬🇧 [English](README.en.md)
+**看安排 → 准备面试 → 比较机会 → 复盘回答 → 回到练习。**
 
----
+邮件、求人链接、面试稿和反馈很容易各放一处。ObsidianWeb 以 Vault 中的笔记为正本，把同一家公司、同一岗位和同一场面试连接起来。界面负责整理和呈现，记录继续保留为可以阅读、搜索和版本管理的 Markdown。
 
-## 这个设计有意思在哪
+| 从这里开始 | 可以做什么 |
+| --- | --- |
+| **日历** | 看已确认的面试与面谈，区分机会来源，进入对应准备稿或复盘；单独查看 AI 代投活动。 |
+| **面试作战** | 阅读公司的故事、外部评价和面谈锦囊；并排比较公司；回看原话、评价和练习记录。 |
+| **训练中心** | 练习回答、日语词汇与表达，让面试中发现的问题回到复习。 |
+| **求职** | 查看岗位机会、选考状态、跟进信息和渠道分析。 |
+| **资料库** | 按条件搜索笔记，沿时间线回看，或从关系图探索材料之间的联系。 |
 
-### 1. 「不要数据库」是个主动决定
+## 看看实际界面
 
-`db/schema.ts` **是空的，且是有意为之**。持久层就是 Obsidian 的 vault——一个 Markdown 目录。
+### 日历：先看到真正约好的事
 
+月／周视图统一使用日本时间。每场面试可以分别进入准备和复盘，已有公司评分也能直接查看。AI 代投以独立活动和进度条展示，机会来源用颜色区分。
+
+准备任务、回复等待和跟进期限留在“最近进展”，不会变成面试占用。
+
+### 面试准备：先读故事，再进入细节
+
+![面试准备：公司故事、外部评价与面谈锦囊](docs/images/readme/interview-prep.jpg)
+
+三个主要标签把阅读顺序收拢为 **面试故事、外部评价、面谈锦囊**。公司与岗位信息连接到候选人的经历，再落到志望动机、逆質問和临场卡；研究来源可以继续展开查看。不同轮次、旧版与新版准备稿可以共存。
+
+### 公司对比：把分数背后的取舍放在一起看
+
+![公司对比：独立评分、岗位信息与评价主题](docs/images/readme/company-compare.jpg)
+
+最多并排比较 **8 个公司／岗位**。可以按即将面谈、最近面过、OpenWork 高分或転職会議高分快速选组，也可以搜索业务和岗位。
+
+- 先看岗位、时间、来源和平台原始评分，再读机会与疑虑。
+- 两个平台分别展示；公司口碑与岗位契合采用各自的量尺。
+- 缺失资料留空，样本范围、评价原文和判断依据按需展开。
+- 所选正本路径保存在 URL，刷新或返回后可以接着比较。
+
+### 面试复盘：回到对话发生的地方
+
+![面试复盘：原话、批注与有据评价](docs/images/readme/interview-review.jpg)
+
+从原文阅读进入全文理解与回答评价。证据链接定位到具体问题和句子，说话者裁定与本人批注保留在记录中。改进后的回答可以继续进入重练，复盘与练习连成一条路径。
+
+### 日语训练：把面试反馈变成下一次练习
+
+![日语训练：快练、复习与表达练习](docs/images/readme/training.jpg)
+
+词汇、语法、面试表达和专项练习集中在训练中心。到期复习、错题和练习记录帮助安排接下来练什么；回答重练则连接真实面试中的改进句。
+
+### 资料库：从一份材料走到另一份材料
+
+![知识关系图：以笔记和双链探索材料](docs/images/readme/knowledge-map.jpg)
+
+列表、时间线和关系图读取同一批笔记。默认使用易于定位的二维视图，也提供基于 three.js 的三维探索和可选手势交互。
+
+界面提供多套配色皮肤与深浅模式。中文／日文切换覆盖导航、命令和主要菜单；笔记标题、原文和部分内容保留原语言。
+
+## 数据留在哪里
+
+```mermaid
+flowchart LR
+    V[Obsidian Vault<br/>Markdown · frontmatter · wikilink]
+    A[Local REST API]
+    W[ObsidianWeb<br/>日历 · 面试 · 对比 · 训练]
+    P[导出的只读快照]
+    C[Cloudflare Workers<br/>线上阅读]
+    V --> A --> W
+    W -->|本地编辑与记录| A
+    A --> V
+    V -->|导出与构建| P --> C
 ```
-Obsidian (Local REST API) ──► app/api/vault?scope=… ──► readAllNotes() ──► 各视图
-        ▲                          │
-        └── 写回：状态改 frontmatter 标量行／复盘・练习追记到专用笔记 ──┘
-```
 
-- 不做副本 ⇒ **二重口径在结构上无法产生**。在 Obsidian 改还是在网页改，事实都只有一份。
-- API key 只存在于服务端进程，不进浏览器代码、不进仓库（`lib/server/obsidian.ts`）。
-- 写回原语只有两个。**状态**（案件的状态・渠道・跟进，TODO 的状态）走 `lib/server/frontmatter-patch.ts`，
-  只替换各路由允许的 key 的标量行，正文一个字不碰；**记录**（复盘的批注・反馈・练习）走
-  `lib/server/note-append.ts`，追记到专用笔记的正文。由于「读→改→写」不是原子操作，
-  修改同一笔记的路由共用路径队列（`createKeyedSerialQueue`），锁内读取、校验版本、修改并回读；不同笔记仍可并行。
-- 乐观锁：案件使用磁盘上的 `mtime` 作为版本，不一致就返回 409 让页面重新加载。
-  案件状态写完之后把派生统计标成 `derivedState: stale`，在 `vault:stats` 重跑前不冒充「同一时点的汇总」。
-- 投递渠道是**历史事实**，改状态时不允许覆盖；未评分显示「—」而不是 0 分。
+- **Markdown 是正本。** 无需额外数据库；结构化 frontmatter、正文和双链共同组成数据模型。
+- **缓存与汇总可以重建。** 派生统计由脚本生成，避免手写数字与上游记录脱节。
+- **证据跟着判断走。** 外部评价、公司资料和岗位判断保留来源及阅读范围。
+- **本地与线上职责明确。** 本地连接 Obsidian 进行编辑和 AI 生成；线上可以发布独立只读快照，电脑离线后仍可阅读。
 
-### 2. 「生成区块」：派生值的单一事实源
+## 本地运行
 
-汇总数、占比、推移这类**派生数据，机制上禁止人手写**。
-
-```markdown
-<!-- generated:<id> 勿手改 -->
-（只有脚本能改这里）
-<!-- /generated -->
-```
-
-派生值一旦被打成散文就和上游断开：上游变它不变，写错也没人报错。
-这个事故真的发生过，所以把**事实（人写）和派生（机器算）**分成两类，
-由 `npm run vault:check`（frontmatter 校验）和 `npm run vault:stats`（重新生成）强制。
-
-同一思路也用在评价数据上。公司的六维契合评价只从 frontmatter 的结构化 YAML 里画，
-没有依据的轴保持 `null`、**留空**，不合成总分（`lib/company-overview.ts`）。
-schema 版本和评价口径版本分开记，旧口径的雷达不会和新口径并排比较。
-
-### 3. 检查不放 CI，放三层
-
-vault 是「换台机器可能根本不存在」的外部数据，绑进代码测试会让 CI 无故变红，
-红灯多了就没人看了。于是拆成三层：
-
-| 层 | 触发 | 行为 |
-|---|---|---|
-| Agent 的 Stop hook | AI 每轮回答结束 | 不一致就 **exit 2 拦住**，理由回灌给 AI |
-| `npm run dev` 启动 | 你要看页面时 | 只 warning，不阻塞 |
-| vault 仓库 pre-commit | `git commit` 时 | 不一致就**拒绝提交** |
-
-`vault:check` 校验的不只是枚举值：准备稿各版本（`prep_version`）的章节结构、
-`case`／`meeting` 二选一、公司画像与契合报告的嵌套 YAML 都在内。
-
-### 4. 增量缓存：按「运行时没有 fs」来设计
-
-每次读全库太慢，但服务端跑在 workerd 上（`nodejs_compat` 是虚拟文件系统），拿不到 `fs` 的 mtime。
-
-于是改成**给 REST API 的 `POST /search/` 发一条 JsonLogic `{"var":"stat.mtime"}`，
-一次请求拿到全库 mtime**（实测 12ms）。之后每次读都是「1 次扫描 + 只重取变过的文件」
-（`lib/server/vault-cache.ts`）。视图通过 `/api/vault?scope=` 只取自己需要的笔记类型（`lib/vault-scope.ts`）。
-
-写后读一致性和 metadata cache 滞留按实测结果固定进了测试，而不是照着猜测写防御；
-看板连点造成的后写覆盖前写由路由内的串行队列挡住。
-
-### 5. 准备稿的版本在 vault 里共存
-
-同一个案件的面试准备稿会混着旧 12 节（v1）和新 5 章（v2）。历史稿正文不改写，
-网页**按选中的那份稿切换布局**。研究资料只累积到「这份稿的时点」为止，
-后一轮的 URL 不会倒灌进前一轮（`lib/interview-prep-index.ts`）。
-没有 job-case 的面谈可以用 `meeting: [[面谈TODO]]` 单独成系列。
-
-追记专用的笔记也这么读。回答练习队列只追加 `attempt / complete / snooze` 事件，
-`queued / active / completed / snoozed` 由**折叠事件**导出（`lib/review-practice.ts`）。
-话者裁定只认最新一条明确裁定，「记不清了」这类不确定的申告会让那句话回到未解决。
-
-### 6. 3D 舞台：把交互力学抽成零依赖纯函数
-
-用 three.js 把语义关系画成四旋臂的「记忆星图」，把活动量画成「时之航道」。
-UnrealBloom＋高光软肩、三层星空、指针的「能量探针」和粒子动量场。
-
-- 探针的位置・倾斜走临界阻尼、能量走指数 attack／release——都是**解析解**（`lib/stage-interaction.mjs`），
-  粒子滑行走动量场的**解析解**（`lib/stage-motion.mjs`）。与帧率无关，
-  GLSL 和 CPU 侧的公式由**测试逐字比对**
-- 鼠标与手部追踪共用一个状态机；按压／拖拽期间锁定输入源
-- 手部追踪（MediaPipe Tasks Vision，wasm 和模型**自托管**）：捏合阈值按
-  每只手的**自适应包络**（已按画面宽高比校正）＞ 存档校准 ＞ 默认值 决定，短捏最短 24ms。
-  捏住／握拳拖动复用 OrbitControls 自己的旋转数学，双手负责平移・缩放・旋转；
-  握拳即时接管和按位移判定抓取由识别侧负责
-- 默认是 2D 的「关系地图」（一跳邻域）和「时间列表」（月索引・日密度），3D 作为「探索模式」被记住
-
-### 7. 本地 LLM 桥
-
-生成走只监听 `127.0.0.1` 的本地桥（`scripts/codex-bridge.mjs`，由 `scripts/dev-with-obsidian.sh` 拉起）。
-
-- 启动脚本每次启动签发一枚用完即弃的令牌，网页和桥用同一枚令牌绑定
-- 校验登录方式，检测到 API key 登录**直接拒绝执行**
-- 子进程不继承 `OPENAI_API_KEY` / `CODEX_API_KEY`
-- 启动脚本在端口冲突时自动选空闲端口，消除「旧桥还在，新页面 503」
-
----
-
-## 视图
-
-主导航：总览／行动／求职／面试作战／训练中心／资料库。⌘K 打开页面命令和全文搜索。
-
-| 视图 | 内容 |
-|---|---|
-| 总览 | 「当前行动」卡（就地把 TODO 写成 進行中／完了／保留）＋ 行动・进行中案件・待应募岗位・7 天内日程・等待回复・复盘・今日重练 |
-| 行动清单 / 日历 | 面试・行动期限・等待回复作为「承诺」在一张日历上按类型着色。面试事件直接跳到该轮的准备稿（未来）或复盘（过去）；公司・日期・轮次・时间不全部匹配时给空状态，不猜第一候选 |
-| 岗位机会（案件看板） | 「决策台」（待判断队列＋详情）为默认。全文搜索・多轴筛选・最多 3 件并排对比。改状态时一并保存渠道，可写回跟进（等待对象／跟进日／下一场日程） |
-| 选考与分析 | 进行中・面试阶段・结果等待・可应募四张 glance 卡与手札分析 |
-| 本场面试 | 按案件／面谈的准备稿。v2 是 公司总览／面谈纵览／志望動機／逆質問／资料 五个 tab＋临场备用。六维契合雷达（缺依据的轴留空）、最多 3 家并排对比。v1 稿有面试前通读的「导读」模式 |
-| 通用准备 | 回答库（可进全文阅读层连读）。共通资产从本场面试的资料链接以浮层打开 |
-| 面试复盘 | 整场「综合导读」→ 逐字稿与批注对照 → 五维评分。小说式全文阅读（中文／日本語切换・话者裁定生效） |
-| 回答重练 | 复盘里攒下的改善回答，先自己说出来再揭示。顺畅／卡顿／不会的自评和 完成／明日再练 只追记 |
-| 日语训练 | 「快练」：面试证据课程（本人改错・中文释义的面试官用语・回答结构）＋ 単語文法帳，一组 10/20/30 题、一题一屏、键盘作答、答完即时反馈。题型有识义・读音・识词・助词填空・哪个更自然（四选一或二选一）、少量 ≤6 字短输入（可关）和句型翻卡自评。按首答记成功日的间隔复习（+3/+7/+30 天，答错 +1 天），每天先出到期题、新题有额度，答错的隔 3 题再出一次。日语释义的面试官用语、技术词、本人事实暂不出题。能力画像・问题地图・训练语料 tab |
-| 专项训练 | 中译日词块・固定搭配补全・句型替换・随机表达・安全改写五种练法 |
-| 资料库 | 信任层徽标＋摘要卡片，分区・场景交叉筛选，scope／sort 记在 URL 里 |
-| 阅读模式 | 从笔记详情进入书页式全屏阅读器：五档字号・目录・文档信息・反链・恢复阅读位置。在记忆星图／时之航道里以舞台内的暗色阅读层打开，不离开场景 |
-| 关系地图 / 记忆星图 | 默认是以公司／技能／笔记为中心的一跳邻域 2D 地图。3D 是四旋臂星系，鼠标／手势共用能量探针 |
-| 时间列表 / 时之航道 | 默认是带月索引・日密度・类型筛选的编年列表。3D 落在今天，侧栏按日列出当天的笔记和日程 |
-
----
-
-## 运行
-
-确保 Obsidian 和 **Local REST API** 插件正在运行：
+本地脚本面向 **macOS / Linux（Windows 可使用 WSL）**，需要 **Node.js ≥ 22.18、npm、jq、POSIX shell 和 openssl**，以及已运行并启用 **Local REST API** 插件的 Obsidian。
 
 ```bash
-npm install
-npm run dev
+git clone https://github.com/xiaokan0231-max/ObsidianWeb.git
+cd ObsidianWeb
+npm ci
+
+OBSIDIAN_VAULT_PATH=/absolute/path/to/your-vault npm run dev
 ```
 
-打开 `http://localhost:3000`。启动脚本会从 Obsidian 插件配置读 API key，只传给服务端进程。
+打开 **http://localhost:3000**。启动脚本从指定 Vault 的插件配置读取 API key，只传给服务端进程。请在插件中启用与 `OBSIDIAN_API_URL` 匹配的本地服务；默认地址是 `http://127.0.0.1:27123`。
 
-| 环境变量 | 用途 |
-|---|---|
-| `OBSIDIAN_VAULT_PATH` | vault 位置 |
-| `OBSIDIAN_CONFIG_PATH` / `OBSIDIAN_API_URL` | 覆盖默认值 |
-| `CODEX_BRIDGE_PORT` | 桥端口（默认 `43127`） |
+| 可选配置 | 用途 |
+| --- | --- |
+| `OBSIDIAN_CONFIG_PATH` | 插件配置文件不在默认位置时指定路径。 |
+| `OBSIDIAN_API_URL` | 覆盖本地 REST API 地址。 |
+| `CODEX_BRIDGE_PORT` | 指定本地 AI 桥端口；未指定时自动选择。 |
 
----
+AI 生成另需可用的 Codex CLI，并通过 ChatGPT 登录；本地桥拒绝 API-key 登录方式。浏览已有资料不要求 AI 功能可用。
 
-## 质量门禁
+这是围绕结构化 Vault 构建的工作台。空 Vault 不会自动拥有岗位、面试或训练数据；界面能力取决于相应笔记及字段是否存在。
+
+## 开发与检查
 
 ```bash
-npm test       # 类型 → lint → 单测 → 构建 → Worker 渲染测试
-npm run build:app  # 纯构建；资源准备与模型下载由调用方选择
-npm run lint   # eslint --max-warnings 0
+npm test               # 类型、lint、单测、生产构建与渲染检查
+npm run lint           # 代码规范检查
+npm run vault:check    # 校验 Vault 的类型、枚举和引用
+npm run vault:stats    # 重建派生统计和生成区块
+npm run vault:verify   # 只读核验 Vault 与派生统计
 ```
 
-`npm test` 含类型、lint、单测、生产构建和 Worker 渲染检查。CI 先用
-`node scripts/fetch-mediapipe.mjs --skip-model-download` 准备 WASM，再执行纯构建，不下载模型。
-测试使用内存 Obsidian 桩覆盖真实路由并发写入，也覆盖被抽成纯函数的数据层
-（`lib/*.ts` / `lib/*.mjs`），覆盖解析、规范化、竞态、渲染结果、GLSL 与 CPU 公式一致性、手势帧序列。
+Vault 是外部数据，因此校验与代码测试分开运行。`npm run dev` 会在启动时进行轻量检查；不要手工编辑标有 `generated` 的统计区块。
 
-实际在生产里坏过的形状——公司名的全半角差异、「株式会社」的前后位置、括号别名——
-每一种都被固定成了测试。
+| 目录 | 职责 |
+| --- | --- |
+| `app/` | React 页面、导航、交互和 API 路由。 |
+| `lib/` | 笔记解析、日程投影、公司评价和训练等领域逻辑。 |
+| `lib/server/` | Obsidian 连接、缓存、受控写回与本地桥。 |
+| `scripts/` | 启动、校验、统计、资源准备和发布导出。 |
+| `tests/` | 基于 `node:test` 的数据、路由与界面契约检查。 |
 
----
+技术栈：**Next.js / vinext、React、TypeScript、Cloudflare Workers、three.js、MediaPipe、Tailwind CSS 与主题令牌。**
 
-## 技术栈
+## 发布与资料边界
 
-| 领域 | 选型 |
-|---|---|
-| 框架 | Next.js 16 / vinext / React 19（RSC） |
-| 语言 | TypeScript 5.9（`strict`） |
-| 运行时 | Cloudflare Workers（wrangler / vite） |
-| 3D・输入 | three.js（EffectComposer / UnrealBloomPass） / MediaPipe Tasks Vision |
-| 样式 | Tailwind CSS 4 + 设计令牌（`base.css`）＋ 跨页原语层（`ux-refresh.css`）＋ 视图级密度 CSS |
-| 测试 | `node:test`（不用外部 runner） |
-| 数据 | Obsidian Local REST API（**无数据库**） |
+运行 `npm run publish:prepare` 会重新导出 Vault 并构建网站。线上运行时设置 `OBSIDIAN_DATA_SOURCE=published`，并通过 Cloudflare `ASSETS` 绑定读取部署内的快照。
 
-## 目录
+发布快照位于 Git 忽略的 `public/_published-vault/`，只进入部署产物。它包含实际笔记内容，发布前应确认适合目标访问范围。只更新代码不会自动更新线上笔记。
 
-```
-app/         路由・API 路由・视图（React）
-lib/         数据层。尽量 zero-import 纯函数，保证可测
-lib/server/  仅服务端：Obsidian 连接・缓存・frontmatter 补丁・串行队列・桥
-scripts/     vault 校验／重算、开发服务器、桥、MediaPipe 取回
-tests/       node:test，440 个用例
-```
+本机配置、API key、私有 Vault 和个人材料不应提交到公开源码仓库；本 README 的图片均为虚构演示。公开源码与公开个人内容是两件分别决定的事。
 
 ## 许可
 
-个人项目，未设许可证（All rights reserved）。
+个人项目，目前未提供开源许可证；保留所有权利。
