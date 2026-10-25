@@ -95,10 +95,10 @@ function ReviewSynthesis({ synthesis, compact = false, onOpenWiki }: { synthesis
   const renderParagraph = (paragraph: CompanyReviewSynthesis["paragraphs"][number], index: number) => <p key={index}><Inlines nodes={paragraph} refs={{ onOpenWiki: (target, section) => onOpenWiki(section ? `${target}#${section}` : target) }} /></p>;
   return <section className={`co-review-synthesis${compact ? " compact" : ""}`} aria-label="外部评价总结">
     <header><h3>外部评价总结</h3><span>截至 <time dateTime={synthesis.asOf}>{synthesis.asOf}</time> · {synthesis.aiAuthor}</span></header>
-    <div className="co-summary-prose">{(compact ? synthesis.paragraphs.slice(0, 1) : synthesis.paragraphs).map(renderParagraph)}</div>
-    {compact && synthesis.paragraphs.length > 1 && <details className="co-review-synthesis-more"><summary>展开完整总结</summary><div className="co-summary-prose">{synthesis.paragraphs.slice(1).map(renderParagraph)}</div></details>}
-    <p className="co-review-synthesis-coverage">{synthesis.coverage}</p>
-    <details className="co-review-synthesis-sources"><summary>总结依据 · {synthesis.sources.length} 项</summary><Evidence items={synthesis.sources} onOpenWiki={onOpenWiki} /></details>
+    <div className="co-summary-prose">{(compact ? synthesis.paragraphs.slice(0, 2) : synthesis.paragraphs).map(renderParagraph)}</div>
+    {compact && synthesis.paragraphs.length > 2 && <details className="co-review-synthesis-more"><summary>展开完整总结</summary><div className="co-summary-prose">{synthesis.paragraphs.slice(2).map(renderParagraph)}</div></details>}
+    {!compact && <p className="co-review-synthesis-coverage">{synthesis.coverage}</p>}
+    <details className="co-review-synthesis-sources"><summary>总结依据 · {synthesis.sources.length} 项</summary>{compact && <p className="co-review-synthesis-coverage">{synthesis.coverage}</p>}<Evidence items={synthesis.sources} onOpenWiki={onOpenWiki} /></details>
   </section>;
 }
 
@@ -283,6 +283,19 @@ function CaseFitGraphic({ context }: { context: CompanyOverview }) {
   const fit = context.kind === "case" ? toJobCard(context.note).fit : null;
   return <div className="co-jobfit-meter">{fit && <><strong>{fit.score}<small> / 100 · Band {fit.band}</small></strong><div aria-hidden="true"><i style={{ width: `${fit.score}%` }} /></div></>}<details><summary>{fit ? "案件採点与依据" : context.kind === "case" ? "未採点（v2）" : "面谈 · 无案件采点"}</summary><CaseFit context={context} /></details></div>;
 }
+function ReviewThemeCell({ context, onOpenWiki }: { context: CompanyOverview; onOpenWiki: (target: string) => void }) {
+  const reviews = context.profile?.reviews ?? [];
+  const themes = reviews.flatMap((review) => (review.insights ?? []).map((insight) => ({ ...insight, platform: review.platform })));
+  const titleKey = (title: string) => title.normalize("NFKC").trim().toLocaleLowerCase("ja-JP");
+  const unique = themes.filter((theme, index) => themes.findIndex((other) => titleKey(other.title) === titleKey(theme.title)) === index);
+  // 优先让机会与顾虑同时可见；缺少一类时按资料原序补足，不替评价编造另一面。
+  const preferred = [unique.find((theme) => theme.kind === "positive" || theme.kind === "mixed"), unique.find((theme) => theme.kind === "concern")];
+  const preview = [...preferred, ...unique].filter((theme, index, items) => theme && items.findIndex((other) => other && titleKey(other.title) === titleKey(theme.title)) === index).slice(0, 2);
+  return <div className="co-theme-cell">
+    {!!preview.length && <ul className="co-theme-preview" aria-label="评价主题预览">{preview.map((theme) => theme && <li key={titleKey(theme.title)} className={theme.kind}><span>{theme.platform}</span><strong>{theme.title}</strong></li>)}</ul>}
+    <details className="co-board-expand"><summary>{themes.length} 个主题 · 查看原文与阅读边界</summary><Reviews compact reviews={reviews} onOpenWiki={onOpenWiki} /></details>
+  </div>;
+}
 export function CompanyCompare({ contexts, notes = [], today = "1970-01-01", onClose, onDetail, onRemove, onOpenWiki, onEdit, embedded = false }: { contexts: CompanyOverview[]; notes?: Note[]; today?: string; onClose: () => void; onDetail: (context: CompanyOverview) => void; onRemove: (path: string) => void; onOpenWiki: (target: string) => void; onEdit?: () => void; embedded?: boolean }) {
   const [view, setView] = useState<"overview" | "reviews" | "conditions">("overview");
   const [sort, setSort] = useState<"selected" | CompanyCompareSort>("selected");
@@ -308,7 +321,7 @@ export function CompanyCompare({ contexts, notes = [], today = "1970-01-01", onC
       ...(mixedCriteria ? [] : axes.map((axis) => ({ label: axis.label, hint: "契合刻度 · 满分 5", render: (context: CompanyOverview) => <FitPips dimension={context.assessment?.dimensions.find((item) => item.key === axis.key)} /> }))),
     ] : [
       { label: "口碑总结", hint: "先读这家最重要的取舍", render: (context: CompanyOverview) => context.profile?.reviewSynthesis ? <ReviewSynthesis compact synthesis={context.profile.reviewSynthesis} onOpenWiki={onOpenWiki} /> : <span className="co-muted">尚无可核对的总结</span> },
-      { label: "主题与原文", hint: "按需展开证据", render: (context: CompanyOverview) => <details className="co-board-expand"><summary>{context.profile?.reviews.reduce((sum, review) => sum + review.insights.length, 0) || 0} 个主题 · 查看原文与阅读边界</summary><Reviews compact reviews={context.profile?.reviews ?? []} onOpenWiki={onOpenWiki} /></details> },
+      { label: "主题与原文", hint: "按需展开证据", render: (context: CompanyOverview) => <ReviewThemeCell context={context} onOpenWiki={onOpenWiki} /> },
     ]),
   ];
   return <CompareFrame embedded={embedded} className="co-board-shell" label="公司与岗位并排对比" onClose={onClose}>

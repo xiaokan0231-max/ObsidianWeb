@@ -223,6 +223,81 @@ test("外部总结先于平台与摘录，正文连续可读，阅读边界、�
   assert.doesNotMatch(compared, /co-review-synthesis compact|co-review-synthesis-more|反映沟通方式有所不同|需要在面谈核实/, "长篇总结不堆在默认概览，完整阅读仍由独立口碑视图承接");
 });
 
+// SSR 没有交互点击；只把真实组件的初始标签设为口碑，其他 React 状态与正文渲染照常执行。
+const reactForReviewTab = await import("react");
+const reviewTabComponents = await loadAppModule("app/company-overview.tsx", { stubs: {
+  react: { ...reactForReviewTab, useState: (initial) => reactForReviewTab.useState(initial === "overview" ? "reviews" : initial) },
+} });
+const renderReviewCompare = (contexts) => render(reviewTabComponents.CompanyCompare, { ...compareProps, contexts, embedded: true });
+
+test("并排口碑总结默认显示两段，余文、范围和来源仍完整保留", () => {
+  const item = context("两段概要岗位");
+  item.profile = { ...profile(), reviewSynthesis: { asOf: "2026-01-03", aiAuthor: "Codex", coverage: "仅覆盖两名测试员工，部门未确认。",
+    paragraphs: ["第一段说明已有机会。", "第二段说明具体代价与[资料](https://example.com/context)。", "第三段保留需要进一步核实的条件。"].map(prepModel.parseInline),
+    sources: [{ label: "员工资料", url: "https://example.com/source" }] } };
+  const html = renderReviewCompare([item, context("另一岗位")]);
+  assert.match(html, /aria-pressed="true">外部口碑/);
+  const synthesis = html.match(/<section class="co-review-synthesis compact"[\s\S]*?<\/section>/)?.[0];
+  assert.ok(synthesis);
+  const lead = synthesis.split('<details class="co-review-synthesis-more">')[0];
+  assert.match(lead, /第一段说明已有机会/);
+  assert.match(lead, /第二段说明具体代价/);
+  assert.match(lead, /href="https:\/\/example.com\/context"/);
+  assert.equal((lead.match(/<p>/g) ?? []).length, 2);
+  assert.doesNotMatch(lead, /第三段/);
+  assert.match(synthesis, /<details class="co-review-synthesis-more"><summary>展开完整总结<\/summary>[\s\S]*第三段保留需要进一步核实的条件/);
+  assert.match(synthesis, /仅覆盖两名测试员工，部门未确认/);
+  assert.match(synthesis, /2026-01-03<\/time> · Codex/);
+  assert.match(synthesis, /总结依据 · 1 项/);
+  assert.match(synthesis, /href="https:\/\/example.com\/source"/);
+  const sources = synthesis.match(/<details class="co-review-synthesis-sources">[\s\S]*?<\/details>/)?.[0];
+  assert.ok(sources);
+  assert.match(sources, /<summary>总结依据 · 1 项<\/summary><p class="co-review-synthesis-coverage">仅覆盖两名测试员工，部门未确认。<\/p>/);
+  assert.match(sources, /href="https:\/\/example.com\/source"/);
+  assert.doesNotMatch(synthesis.split('<details class="co-review-synthesis-sources">')[0], /仅覆盖两名测试员工，部门未确认/, "紧凑对比默认先展示判断，范围与依据一起展开");
+  item.profile.reviewSynthesis.paragraphs = item.profile.reviewSynthesis.paragraphs.slice(0, 2);
+  assert.doesNotMatch(renderReviewCompare([item]), /co-review-synthesis-more/, "只有两段时不生成空的继续阅读入口");
+});
+
+const theme = (title, kind, index) => ({ title, kind, summary: `${title}的已有员工说明。`, implication: "核对当前项目的实际安排。",
+  evidence: [{ url: `https://example.com/theme/${index}`, publishedOn: "2026-01-02", role: "测试工程师／在职", quote: "相談する機会があります。", paraphrase: "这位测试员工描述了讨论机会。" }] });
+
+test("主题预览优先展示已有机会和顾虑，标题去重，完整主题与原文仍可展开", () => {
+  const item = context("主题预览岗位");
+  item.profile = profile([
+    review("OpenWork", 3.6, { insights: [theme("专业交流的机会", "positive", 1), theme("其他成长方式", "positive", 2), theme("机会也取决于安排", "mixed", 3)] }),
+    review("転職会議", 3.4, { insights: [theme("专业交流的机会", "positive", 4), theme("配属支持需要核实", "concern", 5), theme("其他工时问题", "concern", 6)] }),
+  ]);
+  const html = renderReviewCompare([item]);
+  const preview = html.match(/<ul class="co-theme-preview"[^>]*>[\s\S]*?<\/ul>/)?.[0];
+  assert.ok(preview);
+  assert.equal((preview.match(/<li /g) ?? []).length, 2);
+  assert.match(preview, /<li[^>]*class="positive"><span>OpenWork<\/span><strong>专业交流的机会<\/strong>/);
+  assert.match(preview, /<li[^>]*class="concern"><span>転職会議<\/span><strong>配属支持需要核实<\/strong>/);
+  assert.equal((preview.match(/专业交流的机会/g) ?? []).length, 1, "同标题跨平台重复时预览只显示一次");
+  assert.doesNotMatch(preview, /其他成长方式|机会也取决于安排|其他工时问题/);
+  assert.match(html, /class="co-theme-cell">[\s\S]*<details class="co-board-expand"><summary>6 个主题 · 查看原文与阅读边界/);
+  for (const title of ["其他成长方式", "机会也取决于安排", "其他工时问题"]) assert.match(html, new RegExp(title));
+  assert.match(html, /href="https:\/\/example.com\/theme\/6"/);
+  assert.match(html, /<blockquote lang="ja" cite="https:\/\/example.com\/theme\/5">相談する機会があります。/);
+  assert.match(html, /样本范围有限/);
+});
+
+test("主题类别不齐时按已有顺序补足，无结构化主题时不从短摘要造预览", () => {
+  const item = context("缺少顾虑主题的岗位");
+  item.profile = profile([review("OpenWork", 3.8, { insights: [theme("先看到的两面线索", "mixed", 1), theme("后看到的具体机会", "positive", 2), theme("额外线索", "positive", 3)] })]);
+  const html = renderReviewCompare([item]);
+  const preview = html.match(/<ul class="co-theme-preview"[^>]*>[\s\S]*?<\/ul>/)?.[0];
+  assert.ok(preview);
+  assert.ok(preview.indexOf("先看到的两面线索") < preview.indexOf("后看到的具体机会"));
+  assert.doesNotMatch(preview, /class="concern"|额外线索/);
+  item.profile = profile([review("OpenWork", 3.8, { insights: [], positive: ["旧的正面短摘要"], negative: ["旧的顾虑短摘要"] })]);
+  const legacy = renderReviewCompare([item]);
+  assert.doesNotMatch(legacy, /co-theme-preview/);
+  assert.match(legacy, /0 个主题 · 查看原文与阅读边界/);
+  assert.match(legacy, /旧的正面短摘要|旧的顾虑短摘要/, "旧资料仍保留在完整评价中");
+});
+
 test("未保存外部总结时不从平台均分或正负主题拼出总结，也不影响旧评价", () => {
   const item = context("数据平台岗位");
   item.profile = { updatedOn: "2026-01-03", facts: [], reviews: [] };

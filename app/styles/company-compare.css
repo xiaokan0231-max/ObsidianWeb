@@ -232,6 +232,7 @@
 .co-board-table li + li { margin-top: 7px; }
 
 /* 独立页面沿用对比的识别色，让选组与阅读共用整页空间，避免再模拟一个大弹窗。 */
+.view-container:has(.company-comparison-page) { padding-bottom: 16px; }
 .company-comparison-page {
   --compare-mint: var(--teal);
   --compare-apricot: var(--gold-text);
@@ -245,7 +246,7 @@
   width: 100%;
   max-width: 1660px;
   margin: 0 auto;
-  padding: 4px 0 26px;
+  padding: 4px 0 0;
   color: var(--ink);
 }
 .cc-page-header {
@@ -331,13 +332,30 @@
 .co-compare-embedded .co-board-controls > div { padding: 2px; }
 .co-compare-embedded .co-board-controls > div > button { padding-top: 6px; padding-bottom: 6px; }
 .co-compare-embedded .co-board-controls select { min-height: 37px; padding-top: 6px; padding-bottom: 6px; }
-.co-compare-embedded .co-board-scroll { max-height: clamp(460px, 65dvh, 820px); scroll-padding-top: 180px; }
+/* 阅读区滚到顶栏下方时，尽量用足剩余高度；底部不再叠加弹窗时代的留白。 */
+.co-compare-embedded .co-board-scroll { max-height: calc(100dvh - 240px); scroll-padding-top: 180px; }
 .co-compare-embedded .co-board-table :is(th, td) { padding: 16px; }
 .co-compare-embedded .co-board-table thead th { padding-top: 13px; padding-bottom: 13px; }
 .co-compare-embedded .co-company-detail > em { margin-top: 4px; }
 .co-compare-embedded .co-board-table thead .co-candidate-meta { gap: 4px 6px; margin-top: 7px; line-height: 1.3; }
 .co-compare-embedded .co-board-table thead .co-candidate-meta :is(.co-date-tag, .co-origin-tag, .co-status-tag) { padding-top: 2px; padding-bottom: 2px; }
 .co-compare-embedded .co-board-table thead th:first-child { border-top-color: var(--compare-border); }
+.co-theme-cell { display: grid; gap: 12px; }
+.co-board-table ul.co-theme-preview { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.co-theme-preview li {
+  --theme-tone: var(--compare-apricot);
+  margin: 0;
+  padding: 9px 11px;
+  border-left: 3px solid var(--theme-tone);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in oklab, var(--theme-tone) 5%, var(--surface));
+}
+.co-theme-preview li.positive { --theme-tone: var(--compare-mint); }
+.co-theme-preview li.concern { --theme-tone: var(--compare-coral); }
+.co-board-table .co-theme-preview li + li { margin-top: 0; }
+.co-theme-preview li > span { display: block; margin-bottom: 4px; color: var(--theme-tone); font-size: 13px; }
+.co-theme-preview li > strong { display: block; color: var(--ink); font-size: 16px; font-weight: 600; line-height: 1.6; }
+.co-theme-cell > .co-board-expand { padding: 8px 10px; border-style: dashed; background: transparent; }
 .cc-empty {
   display: grid;
   justify-items: center;
