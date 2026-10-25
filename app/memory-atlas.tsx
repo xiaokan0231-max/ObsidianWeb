@@ -42,6 +42,8 @@ import { notifyUrlChange, SHELL_URL_KEYS } from "./use-url-state";
 import { describeConnectionError } from "@/lib/connection-error";
 import { postJson } from "@/lib/client-api";
 import { createVaultReader, type VaultReadOptions } from "@/lib/vault-reader";
+import { calendarModelFromSnapshot } from "@/lib/calendar-snapshot";
+import { useCalendarSnapshot } from "./use-calendar-snapshot";
 import { createWikiNavigator, type WikiNavigationNotice } from "@/lib/wiki-navigation";
 import ViewErrorBoundary from "./view-error-boundary";
 import {
@@ -73,7 +75,7 @@ import { LanguageSwitch, useUiLocale } from "./ui-locale";
 import { ThemeSwitch, useUiTheme } from "./ui-theme";
 import { rememberRecentPath } from "@/lib/recent-notes";
 import { SHELL_MESSAGES } from "./shell-messages";
-import { buildNavBadges, quickDueBadgeCount, type NavBadge, type NavBadges } from "@/lib/nav-badges";
+import { buildNavBadges, jobsBadgeReady, navBadgeLabel, quickDueBadgeCount, todayAppointmentCount, type NavBadge, type NavBadges } from "@/lib/nav-badges";
 import type { QuickSummary } from "@/lib/language/quick-types";
 import { useExitTransition } from "./use-exit-transition";
 import { useDialogFocus } from "./use-dialog-focus";
@@ -529,19 +531,25 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   // props が変わらず再レンダーされず、昨日の日付が凍りつく（総覧の見出し・日历の「今天」）。
   const [today, setToday] = useState(() => localDateKey());
   const [calendarToday, setCalendarToday] = useState(() => tokyoParts().date);
-  const loading = vaultState.loading || vaultState.readyScopes.size === 0 && vaultState.errors.size === 0;
+  const fullCalendarReady = ["all", "actions", "interview"].some((scope) => vaultState.readyScopes.has(scope as "all" | "actions" | "interview"));
+  const { refresh: refreshCalendar, ...calendarRead } = useCalendarSnapshot(view === "calendar");
+  const calendarModel = useMemo(() => (!fullCalendarReady || view === "calendar") && calendarRead.snapshot
+    ? calendarModelFromSnapshot(calendarRead.snapshot, calendarToday) : null, [fullCalendarReady, view, calendarRead.snapshot, calendarToday]);
+  const compactCalendar = view === "calendar";
+  const loading = compactCalendar ? calendarRead.loading || !calendarRead.snapshot && !calendarRead.error
+    : vaultState.loading || vaultState.readyScopes.size === 0 && vaultState.errors.size === 0;
   const activeScope = vaultScopeForView(view);
-  const error = vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
+  const error = compactCalendar ? calendarRead.error : vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
   const [writeError, setWriteError] = useState("");
   // 撤销失败而它的提示已被新的一次写入顶掉时，理由落到全局的写入错误横幅上（见 useUndoFlash）。
-  const reportStaleUndoFailure = useCallback((message: string) => setWriteError(`撤销没有完成：${message}`), []);
+  const reportStaleUndoFailure = useCallback((message: string) => setWriteError(`撤销没有完成：${message}`), [setWriteError]);
   const undoFlash = useUndoFlash({ onStaleFailure: reportStaleUndoFailure });
   const { show: showFlash } = undoFlash;
-  const fetchedAt = vaultState.checkedAt.get(activeScope) ?? vaultState.checkedAt.get("all") ?? null;
+  const fetchedAt = compactCalendar ? calendarRead.fetchedAt : vaultState.checkedAt.get(activeScope) ?? vaultState.checkedAt.get("all") ?? null;
   // どの scope が手元に揃ったか。視図はこれで「まだ来ていない」と「本当に無い」を分ける（假空态の根）。
   const readyScopes = vaultState.readyScopes;
   const interviewScopeReady = readyScopes.has("all") || readyScopes.has("interview");
-  const scopeReady = readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
+  const scopeReady = compactCalendar ? Boolean(calendarModel) : readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
   const actionsReady = readyScopes.has("all") || readyScopes.has("actions");
   const activityReady = readyScopes.has("all") || readyScopes.has("activity");
   const activityError = vaultState.errors.get("activity") ?? vaultState.errors.get("all") ?? "";
@@ -622,8 +630,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
 
   // 请求次序、scope 快照和写回保护由独立协调器管理，页面只订阅接受后的状态。
   const loadVault = useCallback(async (options?: VaultReadOptions): Promise<void> => {
+    if (currentView.current === "calendar" && (!options?.scope || options.scope === "actions" || options.fresh)) {
+      await refreshCalendar();
+      return;
+    }
     await vaultReader.request(options);
-  }, [vaultReader]);
+  }, [vaultReader, refreshCalendar]);
 
   const [wikiNotice, setWikiNotice] = useState<WikiNavigationNotice>(null);
   const [wikiNavigator] = useState(() => createWikiNavigator({
@@ -924,6 +936,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
 
   useEffect(() => {
     // rAF は非アクティブなタブでは発火しないため timer で初回ロードする。
+    if (initialView === "calendar") return;
     const timer = window.setTimeout(() => void loadVault({ scope: vaultScopeForView(initialView) }), 0);
     return () => window.clearTimeout(timer);
   }, [initialView, loadVault]);
@@ -931,6 +944,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const { quickDue, onQuickSummary } = useQuickDueBadge(Boolean(fetchedAt), currentView);
 
   useEffect(() => {
+    if (view === "calendar") return;
     const scope = vaultScopeForView(view);
     if (vaultReader.getState().readyScopes.has("all") || vaultReader.getState().readyScopes.has(scope)) return;
     void loadVault({ scope });
@@ -1015,8 +1029,9 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     return index;
   }, [notes]);
 
+  const [noteDetail, setNoteDetail] = useState<Note | null>(null);
   const selectedNote = selectedPath
-    ? notes.find((note) => note.path === selectedPath) ?? null
+    ? notes.find((note) => note.path === selectedPath) ?? (noteDetail?.path === selectedPath ? noteDetail : null)
     : null;
   const sharedAssetNote = sharedAssetOverlay
     ? notes.find((note) => note.path === sharedAssetOverlay.note) ??
@@ -1088,22 +1103,33 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   );
   // 日历统一使用 JST 日界；其它视图仍保留各自的本机日期口径。
   const calendarEvents = useMemo(
-    () => buildCalendarEvents(notes, new Date(`${calendarToday}T00:00:00`)),
-    [notes, calendarToday],
+    () => calendarModel?.events ?? buildCalendarEvents(notes, new Date(`${calendarToday}T00:00:00`)),
+    [calendarModel, notes, calendarToday],
   );
   const calendarInterviewTargets = useMemo(() => {
+    if (calendarModel) return calendarModel.interviewTargets;
     const targets = new Map<string, CalendarInterviewTarget>();
     for (const event of calendarEvents) {
       const target = resolveCalendarInterview(event, notes);
       if (target) targets.set(event.id, target);
     }
     return targets;
-  }, [calendarEvents, notes]);
+  }, [calendarModel, calendarEvents, notes]);
   // 侧栏角标与日历同一份场次表、同一个 JST「今天」；scope 未到手时不出数（lib/nav-badges.ts）。
-  const navBadges: NavBadges = useMemo(() => buildNavBadges({
-    events: calendarEvents, notes, today: calendarToday, readyScopes,
-    interviewTargets: calendarInterviewTargets, locale, quickDue,
-  }), [calendarEvents, notes, calendarToday, readyScopes, calendarInterviewTargets, locale, quickDue]);
+  const navBadges: NavBadges = useMemo(() => {
+    const badges = buildNavBadges({ events: calendarEvents, notes, today: calendarToday, readyScopes,
+      interviewTargets: calendarInterviewTargets, locale, quickDue,
+    });
+    if (calendarModel) {
+      const count = todayAppointmentCount(calendarEvents, calendarToday,
+        (event) => calendarModel.progressByEvent.get(event.id)?.tone === "closed");
+      if (count > 0) badges.actions = { kind: "today", count, label: navBadgeLabel("today", count, locale) };
+      if (!jobsBadgeReady(readyScopes) && calendarModel.selectionCount > 0) badges.career = {
+        kind: "selection", count: calendarModel.selectionCount, label: navBadgeLabel("selection", calendarModel.selectionCount, locale),
+      };
+    }
+    return badges;
+  }, [calendarModel, calendarEvents, notes, calendarToday, readyScopes, calendarInterviewTargets, locale, quickDue]);
 
   const calendarInterview = useMemo(() => {
     const requested = calendarInterviewFromSearch(view, interviewRouteSearch);
@@ -1125,17 +1151,25 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   // 只给 upcoming 的场次算进展，calendarProgress 要回查案件，没必要对全部历史跑一遍。
   const nextEvent = useMemo(() => {
     const upcoming = calendarEvents.filter((event) => event.phase === "upcoming");
-    const progressByEvent = new Map(upcoming.map((event) => [
+    const progressByEvent = calendarModel?.progressByEvent ?? new Map(upcoming.map((event) => [
       event.id, calendarProgress(event, notes, calendarInterviewTargets.get(event.id)),
     ]));
     return buildCalendarSummary({ events: upcoming, progressByEvent, applicationDays: [], today: calendarToday }).next?.event ?? null;
-  }, [calendarEvents, notes, calendarInterviewTargets, calendarToday]);
+  }, [calendarModel, calendarEvents, notes, calendarInterviewTargets, calendarToday]);
 
-  // ?note= が指すノートが今の scope に無い（他ページのリンクや共有 URL）：黙って開かないのではなく、全量を一度取りに行く。
+  // 精确路径只取这一篇；不能为打开日历来源而下载整库正文。
   useEffect(() => {
-    if (!selectedPath || selectedNote || vaultReader.getState().readyScopes.has("all") || vaultReader.getState().loadingScopes.has("all")) return;
-    void loadVault({ scope: "all" });
-  }, [selectedPath, selectedNote, loadVault, vaultReader]);
+    if (!selectedPath || selectedNote) return;
+    const controller = new AbortController();
+    void fetch(`/api/note?${new URLSearchParams({ path: selectedPath })}`, {
+      cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
+    }).then(async (response) => {
+      const body = await response.json() as { note?: Note; error?: string };
+      if (!response.ok || body.note?.path !== selectedPath) throw new Error(body.error || "笔记读取失败");
+      if (!controller.signal.aborted) setNoteDetail(body.note);
+    }).catch((error) => { if (!controller.signal.aborted) setWriteError(error instanceof Error ? error.message : "笔记读取失败"); });
+    return () => controller.abort();
+  }, [selectedPath, selectedNote]);
 
   // ⌘K 搜的是「全库」：没去过资料库时只载了当前视图的 scope，打开面板时把 all 补齐，
   // 面板在补齐前会说明「正在载入全部资料」，不把部分结果当成全库。
@@ -1254,10 +1288,10 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   }, [navigateToView]);
 
   const openCalendarInterview = useCallback((commitment: Commitment, view?: CalendarInterviewTarget["view"]) => {
-    const target = view ? resolveCalendarInterviewDestinations(commitment, notes)[view] : calendarInterviewTargets.get(commitment.id);
+    const target = view ? (calendarModel?.interviewDestinations.get(commitment.id) ?? resolveCalendarInterviewDestinations(commitment, notes))[view] : calendarInterviewTargets.get(commitment.id);
     if (target) navigateToView(target.view, calendarInterviewSearch(target));
     else openNote(commitment.note);
-  }, [calendarInterviewTargets, notes, navigateToView, openNote]);
+  }, [calendarModel, calendarInterviewTargets, notes, navigateToView, openNote]);
 
   // 顶栏「最近安排」直达那场面试的准备页；认不出对应面试的日程才退回日历。
   const openNextEvent = useCallback(() => {
@@ -1531,13 +1565,13 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
           <LanguageSwitch />
         </header>
 
-        {error && notes.length === 0 && view !== "settings" ? (
+        {error && notes.length === 0 && !calendarModel && view !== "settings" ? (
           <ConnectionError error={error} onRetry={() => void loadVault()} />
-        ) : loading && notes.length === 0 && view !== "settings" ? (
+        ) : loading && notes.length === 0 && !calendarModel && view !== "settings" && view !== "calendar" ? (
           <LoadingState view={view} />
         ) : (
           <ViewErrorBoundary key={view} label={view}>
-            {error && notes.length > 0 && (
+            {error && (notes.length > 0 || calendarModel) && (
               <div className="stale-data-banner" role="status">
                 <span>{ui.stalePrefix} {sourceDetail} {ui.staleSuffix}</span>
                 <button onClick={() => void loadVault()}>{ui.retry}</button>
@@ -1692,6 +1726,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
               )}
               {view === "calendar" && (
                 <CalendarView
+                  model={calendarModel}
                   events={calendarEvents}
                   notes={notes}
                   today={calendarToday}
@@ -1836,6 +1871,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
         />
       )}
 
+      {selectedPath && !selectedNote && !writeError && <NoteReaderLoading title={noteBasename(selectedPath)} onClose={closeNote} />}
       {selectedNote && (
         <ViewErrorBoundary label="note-reader">
           <Suspense fallback={<NoteReaderLoading title={noteBasename(selectedNote.path)} onClose={view === "graph" || view === "timeline" ? closeSceneNote : closeNote} />}>

@@ -6,6 +6,7 @@ export type PublishedVault = {
   schemaVersion: 2; publishedAt: string;
   scopes: Record<VaultScope, string[]>; chunks: Record<string, string>;
   responses?: Partial<Record<VaultScope, PublishedVaultResponse>>;
+  calendar?: PublishedVaultResponse;
 };
 
 // 同一部署里的资源不可变；合并并发读取，避免每次切页重复解析全库。

@@ -8,7 +8,7 @@ import { createVaultReader } from "../lib/vault-reader.ts";
 import { vaultScopeForView } from "../lib/vault-scope.ts";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
-test("每个直达页面在 HTML 中预加载与客户端首个请求相同的笔记范围", async () => {
+test("直达日历预加载专用摘要，其它页面预加载对应笔记范围", async () => {
   const { default: Section } = await loadAppModule("app/[section]/[[...rest]]/page.tsx", {
     stubs: {
       "next/navigation": { notFound() { throw new Error("not found"); }, redirect() { throw new Error("redirect"); } },
@@ -24,6 +24,11 @@ test("每个直达页面在 HTML 中预加载与客户端首个请求相同的�
     assert.equal(preload.props.rel, "preload");
     assert.equal(preload.props.as, "fetch");
     assert.equal(preload.props.crossOrigin, "anonymous", "匹配普通 fetch 的 cors 模式与同源凭证");
+    if (view === "calendar") {
+      assert.equal(preload.props.href, "/api/calendar");
+      assert.doesNotMatch(renderToStaticMarkup(tree), /\/api\/vault/);
+      continue;
+    }
     const requests = [];
     const reader = createVaultReader({ fetcher: async (url, options) => {
       requests.push({ url, options });

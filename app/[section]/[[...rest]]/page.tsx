@@ -18,7 +18,7 @@ export default async function AppSectionPage({
   if (!initialView) notFound();
   // 与外壳首个读取使用同一 scope；先取数据，避免等到客户端模块下载和挂载后才发起请求。
   return <>
-    <link rel="preload" as="fetch" href={`/api/vault?scope=${vaultScopeForView(initialView)}`} crossOrigin="anonymous" />
+    <link rel="preload" as="fetch" href={initialView === "calendar" ? "/api/calendar" : `/api/vault?scope=${vaultScopeForView(initialView)}`} crossOrigin="anonymous" />
     <MemoryAtlas initialView={initialView} />
   </>;
 }

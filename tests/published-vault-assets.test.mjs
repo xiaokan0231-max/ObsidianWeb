@@ -23,6 +23,11 @@ test("发布静态响应保留各范围全部正文、路径和时间，三种�
   const directory = await mkdtemp(join(tmpdir(), "published-assets-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const { manifest } = await writePublishedVaultAssets(notes, directory, publishedAt);
+  const calendar = JSON.parse(await readFile(join(directory, manifest.calendar.file), "utf8"));
+  assert.equal(calendar.connected, true);
+  assert.equal(calendar.calendar.schemaVersion, 1);
+  assert.equal(calendar.calendar.applicationNotes[0].content, "# 株式会社テスト");
+  assert.ok(!JSON.stringify(calendar).includes("完全な本文"));
   const reader = createPublishedVaultReader(async () => manifest,
     async (file) => JSON.parse(await readFile(join(directory, file), "utf8")));
   for (const [scope, entry] of Object.entries(manifest.responses)) {

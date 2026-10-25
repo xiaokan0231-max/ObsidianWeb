@@ -65,10 +65,11 @@ export function createPublishedVaultResponseHandler(fetchAsset: AssetFetch) {
 
   return async (request: Request, published: boolean): Promise<Response | null> => {
     const url = new URL(request.url);
-    if (!published || url.pathname !== "/api/vault" || !["GET", "HEAD"].includes(request.method)) return null;
+    if (!published || !["/api/vault", "/api/calendar"].includes(url.pathname) || !["GET", "HEAD"].includes(request.method)) return null;
     try {
       const scope = normalizeVaultScope(url.searchParams.get("scope"));
-      const entry = (await snapshot(request)).responses?.[scope];
+      const manifest = await snapshot(request);
+      const entry = url.pathname === "/api/calendar" ? manifest.calendar : manifest.responses?.[scope];
       // 旧发布快照仍交给原 API，避免必须同步升级全部部署。
       if (!entry) return null;
       if (!entry.file || !entry.etag) throw new Error("云端内容索引无效");

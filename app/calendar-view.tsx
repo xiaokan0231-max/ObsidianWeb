@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { type Note } from "@/lib/notes";
+import type { CalendarModel } from "@/lib/calendar-snapshot";
 import { type UiLocale } from "@/lib/ui-locale";
 import { useUiLocale } from "./ui-locale";
 import CalendarApplicationPanel, { CalendarApplicationTrigger, ApplicationProgressBar, type OpenApplicationDay } from "./calendar-application-panel";
@@ -367,6 +368,7 @@ function CalendarView({
   loading = false,
   fetchedAt,
   onOpenCompany,
+  model,
 }: {
   events: CalendarEvent[];
   notes: Note[];
@@ -376,6 +378,7 @@ function CalendarView({
   loading?: boolean;
   fetchedAt?: number | null;
   onOpenCompany?: (company: string, contextNote: Note) => void;
+  model?: CalendarModel | null;
   /** 「今日」は殻が持つ。memo 越しなので中で求めると日付を跨いでも昨日のままになる。 */
   today: string;
 }) {
@@ -435,16 +438,16 @@ function CalendarView({
     events.forEach((event) => map.set(event.date, [...(map.get(event.date) ?? []), event]));
     return map;
   }, [events]);
-  const applicationDays = useMemo(() => buildAiApplicationDays(notes, today), [notes, today]);
+  const applicationDays = useMemo(() => model?.applicationDays ?? buildAiApplicationDays(notes, today), [model, notes, today]);
   const overviewMonth = calView === "week" ? weekStart.slice(0, 7) : monthKey;
   const monthApplications = useMemo(() => summarizeAiApplicationDays(applicationDays, overviewMonth), [applicationDays, overviewMonth]);
-  const interviewDestinations = useMemo(() => new Map(events.map(event => [event.id, resolveCalendarInterviewDestinations(event, notes)])), [events, notes]);
-  const companyRatingByEvent = useMemo(() => buildCalendarCompanyRatings(events, notes, interviewTargets), [events, notes, interviewTargets]);
-  const originByEvent = useMemo(() => buildCalendarEventOrigins(events, notes), [events, notes]);
+  const interviewDestinations = useMemo(() => model?.interviewDestinations ?? new Map(events.map(event => [event.id, resolveCalendarInterviewDestinations(event, notes)])), [model, events, notes]);
+  const companyRatingByEvent = useMemo(() => model?.companyRatingByEvent ?? buildCalendarCompanyRatings(events, notes, interviewTargets), [model, events, notes, interviewTargets]);
+  const originByEvent = useMemo(() => model?.originByEvent ?? buildCalendarEventOrigins(events, notes), [model, events, notes]);
   const applicationsByDate = useMemo(() => new Map(applicationDays.map((day) => [day.date, day])), [applicationDays]);
-  const progressByEvent = useMemo(() => new Map(events.map((event) => [
+  const progressByEvent = useMemo(() => model?.progressByEvent ?? new Map(events.map((event) => [
     event.id, calendarProgress(event, notes, interviewTargets.get(event.id)),
-  ])), [events, notes, interviewTargets]);
+  ])), [model, events, notes, interviewTargets]);
   // 已结束案件残留的旧预约不算撞期：拒信之后那一格不会再去。
   const conflicts = useMemo(() => calendarConflicts(events.filter((event) =>
     progressByEvent.get(event.id)?.tone !== "closed")), [events, progressByEvent]);
@@ -513,7 +516,7 @@ function CalendarView({
     if (focus) focusDayRef.current = key;
   };
   const toggleFocusTone = (tone: ProgressTone) => setFocusTone((current) => current === tone ? "" : tone);
-  const scoreByEvent = useMemo(() => new Map(events.map(event => [event.id, calendarInterviewScore(event, interviewTargets.get(event.id), notes)])), [events, interviewTargets, notes]);
+  const scoreByEvent = useMemo(() => model?.scoreByEvent ?? new Map(events.map(event => [event.id, calendarInterviewScore(event, interviewTargets.get(event.id), notes)])), [model, events, interviewTargets, notes]);
   const openEvent = (event: CalendarEvent) => interviewTargets.get(event.id) ? onInterview(event) : onOpen(event.note);
 
   const goToWeek = (target: string) => {

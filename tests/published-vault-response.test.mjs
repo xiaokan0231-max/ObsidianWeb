@@ -55,6 +55,20 @@ test("published response preserves the vault API payload and streams asset bytes
   assert.deepEqual(f.calls.map((call) => call.encoding), ["identity", "identity"]);
 });
 
+test("日历专用静态响应复用压缩与验证器，旧快照才回退动态接口", async () => {
+  const f = fixture({ manifest: { ...manifest, calendar: entry } });
+  const response = await f.handle(new Request("https://example.com/api/calendar", {
+    headers: { "Accept-Encoding": "gzip" },
+  }), true);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Content-Encoding"), "gzip");
+  assert.deepEqual(gunzipSync(Buffer.from(await response.arrayBuffer())), bytes);
+  const cached = await f.handle(new Request("https://example.com/api/calendar", { headers: { "If-None-Match": etag } }), true);
+  assert.equal(cached.status, 304);
+  assert.equal(f.payloadCalls(), 1);
+  assert.equal(await fixture().handle(new Request("https://example.com/api/calendar"), true), null);
+});
+
 test("a matching validator returns 304 without reading any payload asset", async () => {
   const f = fixture();
   for (const validator of [etag, etag.slice(2), `"older", ${etag}`, "*"]) {

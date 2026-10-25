@@ -37,7 +37,7 @@ const worker = {
     const guarded = publishedRequestResponse(request, published);
     if (guarded) return guarded;
 
-    if (published && url.pathname === "/api/vault") {
+    if (published && ["/api/vault", "/api/calendar"].includes(url.pathname)) {
       let respond = publishedResponses.get(env.ASSETS);
       if (!respond) {
         respond = createPublishedVaultResponseHandler((asset) => env.ASSETS.fetch(asset));
