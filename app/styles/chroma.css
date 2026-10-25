@@ -1,0 +1,176 @@
+@import "./calendar-chroma.css";
+@import "./interview-chroma.css";
+
+/* 颜色帮助辨认工作区，正文与状态仍沿用原语义色；换皮肤时整层一起取色。 */
+.app-shell {
+  --workspace-accent: var(--teal);
+  --workspace-companion: var(--violet);
+}
+
+.app-shell:has(.side-nav > a.active[href^="/calendar"]) {
+  --workspace-accent: var(--gold-text);
+  --workspace-companion: var(--teal);
+}
+
+.app-shell:has(.side-nav > a.active[href^="/interview"]) {
+  --workspace-accent: var(--teal);
+  --workspace-companion: var(--violet);
+}
+
+.app-shell:has(.side-nav > a.active[href^="/training"]) {
+  --workspace-accent: var(--violet);
+  --workspace-companion: var(--teal);
+}
+
+.app-shell:has(.side-nav > a.active[href^="/jobs"]) {
+  --workspace-accent: var(--info);
+  --workspace-companion: var(--teal);
+}
+
+.app-shell:has(.side-nav > a.active[href^="/library"]) {
+  --workspace-accent: var(--interactive);
+  --workspace-companion: var(--gold-text);
+}
+
+.app-shell:has(.recent-progress-view) {
+  --workspace-accent: var(--observatory-blue);
+  --workspace-companion: var(--observatory-violet);
+}
+
+.app-shell:has(.settings-view) {
+  --workspace-accent: var(--violet);
+  --workspace-companion: var(--info);
+}
+
+.app-shell .main-stage {
+  background:
+    radial-gradient(ellipse 850px 480px at 4% 0, color-mix(in oklab, var(--workspace-accent) 3%, transparent), transparent 72%),
+    radial-gradient(ellipse 760px 620px at 100% 22%, color-mix(in oklab, var(--workspace-companion) 2%, transparent), transparent 76%),
+    color-mix(in oklab, var(--info) 1%, var(--paper));
+}
+
+/* 导航的色面比阅读纸面更鲜明；光泽不占用折叠标签的 ::after。 */
+.app-shell .sidebar {
+  background:
+    radial-gradient(ellipse 280px 380px at 0 0, color-mix(in oklab, var(--info) 6%, transparent), transparent 80%),
+    linear-gradient(165deg, var(--surface-raised-solid), var(--surface));
+  border-right-color: color-mix(in oklab, var(--workspace-companion) 18%, var(--line));
+  box-shadow: 8px 0 32px color-mix(in oklab, var(--shadow-color) 3%, transparent);
+}
+
+:root:not([data-theme="light"]) .app-shell .sidebar {
+  background:
+    radial-gradient(ellipse 220px 340px at 20% 0, color-mix(in oklab, var(--teal) 9%, transparent), transparent 78%),
+    radial-gradient(ellipse 200px 380px at 100% 100%, color-mix(in oklab, var(--violet) 9%, transparent), transparent 80%),
+    var(--paper-deep);
+  border-right-color: color-mix(in oklab, var(--workspace-companion) 20%, var(--line));
+}
+
+.app-shell .side-nav a { --nav-tone: var(--workspace-accent); }
+.app-shell .side-nav a[href^="/calendar"] { --nav-tone: var(--gold-text); }
+.app-shell .side-nav a[href^="/activity"] { --nav-tone: var(--info); }
+.app-shell .side-nav a[href^="/interview"] { --nav-tone: var(--teal); }
+.app-shell .side-nav a[href^="/training"] { --nav-tone: var(--violet); }
+.app-shell .side-nav a[href^="/jobs"] { --nav-tone: var(--info); }
+.app-shell .side-nav a[href^="/library"] { --nav-tone: var(--interactive); }
+.app-shell .side-nav a[href^="/consultation"] { --nav-tone: var(--green); }
+
+.app-shell .side-nav a .nav-glyph {
+  color: var(--nav-tone);
+  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--ease-spring);
+}
+
+.app-shell .side-nav > a {
+  border-radius: 10px;
+}
+
+.app-shell .side-nav > a:hover {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--nav-tone) 6%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--nav-tone) 22%, var(--line));
+}
+
+.app-shell .side-nav > a:hover .nav-glyph { transform: translateY(-1px); }
+
+.app-shell .side-nav > a.active,
+:root:not([data-theme="light"]) .app-shell .side-nav > a.active {
+  color: var(--ink);
+  background: linear-gradient(115deg, color-mix(in oklab, var(--nav-tone) 12%, var(--surface)), var(--surface) 90%);
+  box-shadow:
+    inset 3px 0 var(--nav-tone),
+    inset 0 0 0 1px color-mix(in oklab, var(--nav-tone) 25%, var(--line)),
+    0 5px 18px color-mix(in oklab, var(--nav-tone) 8%, transparent);
+}
+
+:root:not([data-theme="light"]) .app-shell .side-nav > a.active .nav-glyph,
+.app-shell .side-nav > a.active .nav-glyph {
+  color: var(--nav-tone);
+  filter: drop-shadow(0 0 5px color-mix(in oklab, var(--nav-tone) 18%, transparent));
+}
+
+.app-shell .side-subnav a.active {
+  background: color-mix(in oklab, var(--nav-tone) 5%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--nav-tone) 15%, var(--line));
+}
+
+.app-shell .side-subnav a.active::before { background: var(--nav-tone); }
+
+.app-shell .topbar {
+  background: linear-gradient(105deg,
+    color-mix(in oklab, var(--workspace-accent) 4%, var(--surface)) 0%,
+    color-mix(in oklab, var(--workspace-companion) 3%, var(--surface)) 68%,
+    var(--surface));
+  border-bottom-color: color-mix(in oklab, var(--workspace-accent) 20%, var(--line));
+  box-shadow: 0 6px 24px color-mix(in oklab, var(--shadow-color) 5%, transparent);
+}
+
+.app-shell .section-nav {
+  background: color-mix(in oklab, var(--surface) 92%, transparent);
+  border-bottom-color: color-mix(in oklab, var(--workspace-accent) 20%, var(--line));
+}
+
+.app-shell .section-nav-tabs > a.active {
+  color: var(--ink);
+  background: linear-gradient(110deg, color-mix(in oklab, var(--workspace-accent) 7%, var(--surface)), var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--workspace-accent) 24%, var(--line));
+}
+
+.app-shell .section-nav-tabs > a.active .nav-glyph { color: var(--workspace-accent); }
+
+/* 只装点页面外框，不改正文、状态徽章或各视图内部的数据编码。 */
+.app-shell :is(.jobs-stat, .jobs-decision-detail, .library-facets, .settings-card, .practice-card) {
+  border-color: color-mix(in oklab, var(--workspace-accent) 16%, var(--line));
+  background: linear-gradient(145deg, color-mix(in oklab, var(--workspace-accent) 3%, var(--surface)), var(--surface) 42%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--workspace-accent) 18%, var(--surface)),
+    0 6px 22px color-mix(in oklab, var(--shadow-color) 5%, transparent);
+}
+
+.app-shell :is(.library-view .note-card[data-library-card], .jobs-view .job-kanban-card) {
+  border-color: color-mix(in oklab, var(--workspace-accent) 14%, var(--line));
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--workspace-accent) 14%, var(--surface));
+}
+
+.app-shell .library-view .note-card[data-library-card] {
+  transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+}
+
+.app-shell :is(.library-view .note-card[data-library-card], .jobs-view .job-kanban-card):hover {
+  border-color: color-mix(in oklab, var(--workspace-accent) 55%, var(--line));
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--workspace-accent) 30%, var(--surface)),
+    0 6px 20px color-mix(in oklab, var(--workspace-accent) 8%, transparent);
+}
+
+/* 左缘表达岗位评价，不能被外壳的模块色覆盖；拖拽反馈继续沿用岗位卡自己的过渡。 */
+.app-shell .jobs-view .job-kanban-card,
+.app-shell .jobs-view .job-kanban-card:hover { border-left-color: var(--rate); }
+
+/* 沉浸舞台自己有完整光场，外壳不再往画布叠一层色。 */
+.app-shell:has(.stage-immersive) .main-stage { background: var(--paper); }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .side-nav > a:hover .nav-glyph { transform: none; }
+}
+
+:root[data-motion="reduce"] .app-shell .side-nav > a:hover .nav-glyph { transform: none; }

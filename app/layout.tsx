@@ -7,11 +7,11 @@ import { UiLocaleProvider } from "./ui-locale";
 import { UiThemeProvider } from "./ui-theme";
 import "./globals.css";
 /*
- * 皮肤与减弱动效是挂在 <html> 属性上的外观层，和写这些属性的 layout 放在一起引入，紧跟 globals.css。
- * 两个文件都不依赖打包后的先后：皮肤块的选择器特异性都是 (0,3,0)，压过 base.css 的 (0,1,0)/(0,2,0)；
- * motion.css 和 base.css 的系统兜底写的是同一组 !important 值。
+ * 外观层与写入主题属性的 layout 一起引入：先确定皮肤 token，再由 chroma 给工作区着色。
+ * 减弱动效最后兜底，并与 base.css 的系统偏好规则保持同一组 !important 值。
  */
 import "./styles/skins.css";
+import "./styles/chroma.css";
 import "./styles/motion.css";
 
 const geistSans = Geist({
