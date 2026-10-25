@@ -1,0 +1,216 @@
+/* 色彩只给容器与时间坐标增加层次，事件的状态色和来源色继续各自表达原意。 */
+.calendar-view {
+  --calendar-amber: var(--gold);
+  --calendar-cyan: var(--teal);
+  --calendar-violet: var(--violet);
+  --calendar-edge: color-mix(in oklab, var(--calendar-cyan) 18%, var(--line));
+  --calendar-glint: color-mix(in oklab, var(--highlight) 18%, transparent);
+  --calendar-lift-shadow: 0 6px 18px color-mix(in oklab, var(--shadow-color) 13%, transparent);
+  --calendar-pulse-start: color-mix(in oklab, var(--viz-blue) 10%, var(--surface-overlay));
+  --calendar-pulse-end: color-mix(in oklab, var(--calendar-violet) 12%, var(--surface-overlay));
+  --calendar-toolbar-start: color-mix(in oklab, var(--calendar-amber) 14%, var(--surface-overlay));
+  --calendar-toolbar-end: color-mix(in oklab, var(--calendar-amber) 8%, var(--surface));
+  --calendar-agenda-start: color-mix(in oklab, var(--viz-blue) 10%, var(--surface-overlay));
+  --calendar-agenda-end: color-mix(in oklab, var(--calendar-cyan) 8%, var(--surface));
+}
+
+/* 深色从凹面起调色，色相能显出来，又不靠抬亮整块底色挤压小字对比度。 */
+:root:not([data-theme="light"]) .calendar-view {
+  --calendar-pulse-start: color-mix(in oklab, var(--viz-blue) 24%, var(--paper-deep));
+  --calendar-pulse-end: color-mix(in oklab, var(--calendar-violet) 24%, var(--paper-deep));
+  --calendar-toolbar-start: color-mix(in oklab, var(--calendar-amber) 22%, var(--paper-deep));
+  --calendar-toolbar-end: color-mix(in oklab, var(--calendar-amber) 15%, var(--paper-deep));
+  --calendar-agenda-start: color-mix(in oklab, var(--viz-blue) 22%, var(--paper-deep));
+  --calendar-agenda-end: color-mix(in oklab, var(--calendar-cyan) 23%, var(--paper-deep));
+}
+
+.calendar-view .calendar-board {
+  border-color: var(--calendar-edge);
+  background:
+    radial-gradient(ellipse at 5% 0%, color-mix(in oklab, var(--calendar-amber) 6%, transparent), transparent 54%),
+    radial-gradient(ellipse at 95% 0%, color-mix(in oklab, var(--calendar-cyan) 5%, transparent), transparent 52%),
+    var(--surface);
+  box-shadow: inset 0 1px 0 var(--calendar-glint), var(--shadow-soft);
+}
+
+.calendar-view .calendar-toolbar {
+  border-bottom-color: color-mix(in oklab, var(--calendar-amber) 38%, var(--line));
+  background: linear-gradient(105deg, var(--calendar-toolbar-start), var(--calendar-toolbar-end));
+  box-shadow: inset 0 2px 0 color-mix(in oklab, var(--calendar-amber) 46%, transparent);
+}
+
+.calendar-view .calendar-month-label { color: var(--gold-text); }
+
+.calendar-view .calendar-visual-guide {
+  border-bottom-color: var(--calendar-edge);
+  background: linear-gradient(100deg, transparent, color-mix(in oklab, var(--calendar-cyan) 4%, transparent));
+}
+
+.calendar-view :is(.calendar-weekday, .cw-head) {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--calendar-cyan) 4%, var(--surface)), var(--surface));
+  border-bottom-color: var(--calendar-edge);
+}
+
+.calendar-view :is(.calendar-actions, .cw-switch) {
+  border-color: color-mix(in oklab, var(--calendar-cyan) 23%, var(--line));
+  background: color-mix(in oklab, var(--surface-raised-solid) 76%, transparent);
+  box-shadow: inset 0 1px 0 var(--calendar-glint);
+}
+
+.calendar-view .cw-switch button[aria-pressed="true"] {
+  background: linear-gradient(135deg, color-mix(in oklab, var(--calendar-amber) 6%, var(--surface-raised-solid)), color-mix(in oklab, var(--calendar-cyan) 4%, var(--surface-raised-solid)));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--calendar-amber) 26%, var(--line)), 0 2px 5px color-mix(in oklab, var(--shadow-color) 9%, transparent);
+}
+
+/* 投递区的紫色呼应 AI 来源；进展条仍使用原来的成功、等待和结束颜色。 */
+.calendar-view .calendar-pulse {
+  border-color: color-mix(in oklab, var(--calendar-violet) 44%, var(--line));
+  background: linear-gradient(110deg, var(--calendar-pulse-start), var(--calendar-pulse-end));
+  box-shadow: inset 0 2px 0 color-mix(in oklab, var(--viz-blue) 45%, transparent), inset 0 1px 0 var(--calendar-glint), 0 5px 18px color-mix(in oklab, var(--shadow-color) 7%, transparent);
+}
+
+.calendar-view .calendar-month-metric strong { color: var(--ink); }
+.calendar-view .calendar-pulse-actions { border-left-color: color-mix(in oklab, var(--calendar-violet) 36%, var(--line)); }
+
+.calendar-view :is(.calendar-month-metric > span, .calendar-month-metric time, .calendar-month-metric small, .calendar-month-metric > div > span, .calendar-pulse-action small, .calendar-timezone) {
+  color: var(--text-secondary);
+}
+
+.calendar-view .calendar-month-graphic .application-progress-track {
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--line-strong) 55%, transparent), 0 2px 7px color-mix(in oklab, var(--shadow-color) 8%, transparent);
+}
+
+.calendar-view :is(.calendar-ai-applications[data-heat], .cw-ai) {
+  border-color: color-mix(in oklab, var(--calendar-violet) 31%, var(--line));
+  background: linear-gradient(135deg, color-mix(in oklab, var(--calendar-violet) 5%, var(--surface)), var(--surface));
+  box-shadow: inset 0 1px 0 var(--calendar-glint);
+}
+
+.calendar-view :is(.calendar-ai-applications, .cw-ai)[aria-expanded="true"] {
+  border-color: var(--calendar-violet);
+  background: color-mix(in oklab, var(--calendar-violet) 6%, var(--surface));
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--calendar-violet) 13%, transparent);
+}
+
+/* 今天用暖色定位，选中日用冷色描边，两者并存时仍能认出各自含义。 */
+.calendar-view .calendar-grid .calendar-day.today {
+  background: linear-gradient(150deg, color-mix(in oklab, var(--calendar-amber) 6%, var(--surface-raised-solid)), color-mix(in oklab, var(--calendar-amber) 4%, var(--surface-raised-solid)));
+  box-shadow: inset 0 3px 0 var(--calendar-amber), inset 0 0 0 1px color-mix(in oklab, var(--calendar-amber) 22%, transparent);
+}
+
+.calendar-view .calendar-grid .calendar-day.selected {
+  background: linear-gradient(150deg, color-mix(in oklab, var(--calendar-cyan) 6%, var(--surface-raised-solid)), color-mix(in oklab, var(--calendar-cyan) 4%, var(--surface-raised-solid)));
+  box-shadow: inset 0 0 0 2px var(--calendar-cyan);
+}
+
+.calendar-view .calendar-grid .calendar-day.today.selected {
+  box-shadow: inset 0 3px 0 var(--calendar-amber), inset 0 0 0 2px var(--calendar-cyan);
+}
+
+.calendar-view .calendar-day.today .calendar-day-select {
+  animation: none;
+  box-shadow: 0 2px 7px color-mix(in oklab, var(--calendar-amber) 24%, transparent), 0 0 0 3px color-mix(in oklab, var(--calendar-amber) 16%, transparent);
+}
+
+.calendar-view :is(.calendar-day-select, .cw-day-select)[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--calendar-cyan) 65%, transparent);
+}
+
+/* 周历只改底色，保留原来的整点背景线和按时间定位的几何关系。 */
+.calendar-view :is(.cw-col, .cw-allday-cell, .cw-day-head).today {
+  background-color: color-mix(in oklab, var(--calendar-amber) 6%, var(--surface));
+}
+
+.calendar-view .cw-day-head.today {
+  box-shadow: inset 0 3px 0 var(--calendar-amber);
+}
+
+.calendar-view :is(.cw-col, .cw-allday-cell, .cw-day-head).selected {
+  background-color: color-mix(in oklab, var(--calendar-cyan) 6%, var(--surface));
+  box-shadow: inset 1px 0 0 color-mix(in oklab, var(--calendar-cyan) 52%, transparent), inset -1px 0 0 color-mix(in oklab, var(--calendar-cyan) 52%, transparent), inset 0 -1px 0 var(--line-soft);
+}
+
+.calendar-view .cw-day-head.today.selected {
+  box-shadow: inset 0 3px 0 var(--calendar-amber), inset 1px 0 0 var(--calendar-cyan), inset -1px 0 0 var(--calendar-cyan);
+}
+
+/* 卡片只在原状态底色上加高光，不给成功、等待或结束换色。 */
+.calendar-view .calendar-event,
+.calendar-view .calendar-agenda .agenda-item:not([data-next]) {
+  background: linear-gradient(145deg, color-mix(in oklab, var(--commitment-wash) 83%, var(--surface-overlay)), var(--commitment-wash));
+}
+
+/* 历史卡保留原来的低浓度底色，让小字号的来源标记仍清楚。 */
+.calendar-view :is(.cw-block, .cw-chip):not(.status-closed):not(.past) {
+  background: linear-gradient(145deg, color-mix(in oklab, var(--calendar-status-color) 14%, var(--surface-raised-solid)), color-mix(in oklab, var(--calendar-status-color) 9%, var(--surface-raised-solid)));
+}
+
+.calendar-view .calendar-agenda .agenda-group {
+  border-color: color-mix(in oklab, var(--calendar-cyan) 36%, var(--line));
+  background: linear-gradient(145deg, var(--calendar-agenda-start), var(--calendar-agenda-end));
+  box-shadow: inset 0 2px 0 color-mix(in oklab, var(--calendar-cyan) 45%, transparent), inset 0 1px 0 var(--calendar-glint), var(--shadow-soft);
+}
+
+.calendar-view .calendar-agenda .agenda-heading { border-bottom-color: var(--calendar-edge); }
+
+.calendar-view .calendar-agenda .calendar-day-detail {
+  border-color: color-mix(in oklab, var(--calendar-cyan) 55%, var(--line));
+  box-shadow: inset 0 1px 0 var(--calendar-glint), 0 0 0 1px color-mix(in oklab, var(--calendar-cyan) 12%, transparent), var(--shadow-soft);
+}
+
+/* 下一场的光泽属于时间优先级；左缘和状态点继续来自实际进展。 */
+.calendar-view .calendar-agenda .agenda-item[data-next] {
+  border-left-color: var(--commitment-tone);
+  background:
+    radial-gradient(ellipse at 100% 0%, color-mix(in oklab, var(--calendar-amber) 6%, transparent), transparent 65%),
+    linear-gradient(135deg, color-mix(in oklab, var(--commitment-wash) 72%, var(--surface-overlay)), var(--commitment-wash));
+  box-shadow: inset 0 1px 0 var(--calendar-glint), 0 0 0 1px color-mix(in oklab, var(--calendar-amber) 30%, var(--line)), 0 7px 20px color-mix(in oklab, var(--shadow-color) 13%, transparent);
+}
+
+.calendar-view .calendar-agenda .agenda-item[data-next] .agenda-main > time {
+  border-radius: var(--radius-control);
+  background: color-mix(in oklab, var(--calendar-amber) 5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--calendar-amber) 16%, transparent);
+}
+
+.calendar-view :is(.calendar-event-item, .cw-event-shell, .agenda-item) {
+  transition: translate var(--dur-fast) var(--ease-out), box-shadow var(--dur-base) var(--ease-out), opacity var(--dur-base) var(--ease-out);
+}
+
+.calendar-view :is(.calendar-event.status-waiting, .agenda-item.status-waiting) .calendar-status-dot { animation: none; }
+
+@media (hover: hover) and (pointer: fine) {
+  .calendar-view :is(.calendar-event-item, .cw-event-shell, .agenda-item):hover { translate: 0 -1px; }
+
+  .calendar-view .calendar-event-item:hover {
+    border-radius: 6px;
+    box-shadow: var(--calendar-lift-shadow);
+  }
+
+  .calendar-view:not([data-focus-tone]) .calendar-agenda .agenda-item:not([data-next]):hover {
+    box-shadow: inset 0 1px 0 var(--calendar-glint), var(--calendar-lift-shadow);
+  }
+
+  .calendar-view :is(.calendar-ai-applications[data-heat], .cw-ai):hover {
+    border-color: var(--calendar-violet);
+    background: color-mix(in oklab, var(--calendar-violet) 6%, var(--surface));
+  }
+
+  .calendar-view .calendar-actions button:hover {
+    background: color-mix(in oklab, var(--calendar-cyan) 6%, var(--surface));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-view :is(.calendar-event-item, .cw-event-shell, .agenda-item),
+  .calendar-view :is(.calendar-event-item, .cw-event-shell, .agenda-item):hover {
+    translate: none;
+    transition: none;
+  }
+}
+
+:root[data-motion="reduce"] .calendar-view :is(.calendar-event-item, .cw-event-shell, .agenda-item),
+:root[data-motion="reduce"] .calendar-view :is(.calendar-event-item, .cw-event-shell, .agenda-item):hover {
+  translate: none;
+  transition: none;
+}

@@ -1,0 +1,230 @@
+/* 色彩只承担阅读分区，分数、状态和长文排版继续沿用各自的语义。 */
+@media screen {
+  .app-shell .session-v2,
+  .app-shell .company-overview,
+  .app-shell .co-compare-panel {
+    --chroma-story: var(--brand);
+    --chroma-story-ink: var(--interactive);
+    --chroma-reviews: var(--gold);
+    --chroma-reviews-ink: var(--gold-text);
+    --chroma-kit: color-mix(in oklab, var(--viz-cyan) 60%, var(--info));
+    --chroma-kit-ink: var(--info);
+    --chroma-data: var(--violet);
+    --chroma-paper: var(--surface-raised-solid);
+    --chroma-glint: color-mix(in oklab, var(--highlight) 35%, transparent);
+  }
+
+  .app-shell .session-v2 {
+    --chroma-active: var(--chroma-story);
+    --v2-accent: var(--chroma-story-ink);
+    border-image: linear-gradient(90deg, var(--chroma-story), var(--chroma-reviews) 40%, var(--chroma-kit) 76%, var(--chroma-data)) 1;
+  }
+
+  .app-shell .session-v2:has(.v2-prep-tab[data-section="reviews"][aria-selected="true"]) {
+    --chroma-active: var(--chroma-reviews);
+    --v2-accent: var(--chroma-reviews-ink);
+  }
+
+  .app-shell .session-v2:has(.v2-prep-tab[data-section="kit"][aria-selected="true"]) {
+    --chroma-active: var(--chroma-kit);
+    --v2-accent: var(--chroma-kit-ink);
+  }
+
+  /* 页面作用域比动态加载的旧标签样式多一级，避免换页后色层又被旧背景覆盖。
+   * 未选中的标签也保留淡色，切换不必只靠文字色辨认。 */
+  .app-shell .session-v2 .v2-nav-three .v2-prep-tab[data-section="story"] {
+    --prep-tab-color: var(--chroma-story);
+    --prep-tab-tone: var(--chroma-story-ink);
+  }
+
+  .app-shell .session-v2 .v2-nav-three .v2-prep-tab[data-section="reviews"] {
+    --prep-tab-color: var(--chroma-reviews);
+    --prep-tab-tone: var(--chroma-reviews-ink);
+  }
+
+  .app-shell .session-v2 .v2-nav-three .v2-prep-tab[data-section="kit"] {
+    --prep-tab-color: var(--chroma-kit);
+    --prep-tab-tone: var(--chroma-kit-ink);
+  }
+
+  .app-shell .session-v2 .v2-nav-three .v2-prep-tab {
+    border-color: color-mix(in oklab, var(--prep-tab-color) 42%, var(--v2-line));
+    background: linear-gradient(125deg, color-mix(in oklab, var(--prep-tab-color) 5%, var(--chroma-paper)), color-mix(in oklab, var(--prep-tab-color) 2%, var(--chroma-paper)));
+    color: var(--text-secondary);
+    box-shadow: inset 0 1px 0 var(--chroma-glint);
+    transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  }
+
+  .app-shell .session-v2 .v2-nav-three .v2-tab-icon {
+    border-color: color-mix(in oklab, var(--prep-tab-color) 32%, var(--v2-line));
+    background: color-mix(in oklab, var(--prep-tab-color) 13%, var(--chroma-paper));
+    box-shadow: inset 0 1px 0 var(--chroma-glint);
+  }
+
+  .app-shell .session-v2 .v2-nav.v2-nav-three .v2-prep-tab[aria-selected="true"] {
+    color: var(--ink);
+    border-color: color-mix(in oklab, var(--prep-tab-color) 65%, var(--v2-line));
+    background: linear-gradient(125deg, color-mix(in oklab, var(--prep-tab-color) 6%, var(--chroma-paper)), color-mix(in oklab, var(--prep-tab-color) 2%, var(--chroma-paper)));
+    box-shadow: inset 0 -2px 0 color-mix(in oklab, var(--prep-tab-color) 80%, transparent), inset 0 1px 0 var(--chroma-glint), 0 5px 15px -7px color-mix(in oklab, var(--prep-tab-color) 32%, transparent);
+  }
+
+  .app-shell .session-v2 .v2-nav-three [aria-selected="true"] .v2-tab-icon {
+    border-color: color-mix(in oklab, var(--prep-tab-color) 48%, var(--v2-line));
+    background: color-mix(in oklab, var(--prep-tab-color) 19%, var(--chroma-paper));
+  }
+
+  .app-shell .session-v2 .v2-nav-three [aria-selected="true"] .v2-tab-index {
+    color: var(--text-secondary);
+  }
+
+  .app-shell .session-v2 .v2-nav-three [aria-selected="true"] .v2-tab-caption {
+    color: var(--text-secondary);
+  }
+
+  .app-shell .session-v2 .v2-nav-three .v2-prep-tab:hover {
+    border-color: var(--prep-tab-tone);
+    box-shadow: inset 0 1px 0 var(--chroma-glint), 0 7px 18px -9px color-mix(in oklab, var(--prep-tab-color) 45%, transparent);
+    transform: none;
+  }
+
+  .app-shell .session-v2 .v2-nav-three .v2-prep-tab[aria-selected="true"]:hover {
+    box-shadow: inset 0 -2px 0 var(--prep-tab-color), inset 0 1px 0 var(--chroma-glint), 0 7px 18px -9px color-mix(in oklab, var(--prep-tab-color) 45%, transparent);
+  }
+
+  .app-shell .session-v2 :is(.v2-story-jumps a, .v2-kit-jumps button[aria-current]) {
+    border-color: color-mix(in oklab, var(--chroma-active) 30%, var(--v2-line));
+    background: color-mix(in oklab, var(--chroma-active) 6%, var(--chroma-paper));
+    color: var(--ink);
+    box-shadow: inset 0 1px 0 var(--chroma-glint);
+  }
+
+  .app-shell .session-v2 :is(.v2-story-overview, .v2-kit-section + .v2-kit-section) {
+    border-top-color: color-mix(in oklab, var(--chroma-active) 36%, var(--v2-line));
+  }
+
+  .app-shell .session-v2 .v2-quick button {
+    background: color-mix(in oklab, var(--chroma-kit) 6%, var(--chroma-paper));
+    border-color: color-mix(in oklab, var(--chroma-kit) 40%, var(--v2-line));
+    color: var(--ink);
+    box-shadow: inset 0 1px 0 var(--chroma-glint);
+  }
+
+  .app-shell .session-v2 .v2-quick button + button {
+    background: color-mix(in oklab, var(--chroma-kit) 3%, var(--chroma-paper));
+    color: var(--ink);
+  }
+
+  .app-shell .session-v2 .v2-quick button span {
+    color: var(--chroma-kit-ink);
+  }
+
+  .app-shell .session-v2 :is(.v2-quick button, .v2-library button, .v2-nav-utilities button) {
+    transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  }
+
+  .app-shell .session-v2 :is(.v2-quick button, .v2-library button):hover {
+    border-color: var(--chroma-kit-ink);
+    box-shadow: inset 0 1px 0 var(--chroma-glint), 0 5px 13px -7px color-mix(in oklab, var(--chroma-kit) 40%, transparent);
+  }
+
+  .app-shell .session-v2 .v2-toc a[aria-current] {
+    background: color-mix(in oklab, var(--chroma-active) 3%, var(--chroma-paper));
+  }
+
+  /* 台词是可以直接练习的工具；正文及预想回答仍留在平静的阅读底面。 */
+  .app-shell .session-v2 .v2-kit-section .prep-doc-say.you {
+    border-left-color: var(--chroma-kit);
+    background: color-mix(in oklab, var(--chroma-kit) 5%, var(--chroma-paper));
+    color: var(--ink);
+    box-shadow: inset 0 1px 0 var(--chroma-glint);
+  }
+
+  .app-shell .session-v2 .v2-kit-section .prep-doc-say.you > span:first-child {
+    color: var(--chroma-kit-ink);
+  }
+
+  .app-shell .company-overview .co-company-summary {
+    --co-green: var(--chroma-story-ink);
+    border-top-color: color-mix(in oklab, var(--chroma-story) 43%, var(--co-line));
+  }
+
+  .app-shell .company-overview .co-company-summary > .co-section-header > span {
+    color: var(--chroma-story-ink);
+  }
+
+  .app-shell .company-overview .co-company-facts {
+    border-top-color: color-mix(in oklab, var(--chroma-story) 27%, var(--co-line));
+  }
+
+  .app-shell .company-overview .co-fit-chart {
+    border-left-color: color-mix(in oklab, var(--chroma-data) 32%, var(--co-line));
+    background: color-mix(in oklab, var(--chroma-data) 3%, var(--chroma-paper));
+    box-shadow: inset 0 1px 0 var(--chroma-glint);
+  }
+
+  /* 六轴继续共用一种颜色，只换整条数据序列的色相，不用颜色重编码分值。 */
+  .app-shell :is(.company-overview, .co-compare-panel) .co-radar-fill {
+    fill: var(--chroma-data);
+  }
+
+  .app-shell :is(.company-overview, .co-compare-panel) .co-radar-value {
+    stroke: var(--chroma-data);
+  }
+
+  .app-shell :is(.company-overview, .co-compare-panel) .co-radar-dot {
+    fill: var(--chroma-data);
+  }
+
+  .app-shell .company-overview .co-external {
+    border-top-color: color-mix(in oklab, var(--chroma-reviews) 40%, var(--co-line));
+  }
+
+  .app-shell :is(.company-overview, .co-compare-panel) .co-review-synthesis {
+    --co-green: var(--chroma-reviews-ink);
+    border-left-color: var(--chroma-reviews);
+    background: color-mix(in oklab, var(--chroma-reviews) 4%, var(--chroma-paper));
+    color: var(--ink);
+    box-shadow: inset 0 1px 0 var(--chroma-glint), inset 0 -1px 0 color-mix(in oklab, var(--chroma-reviews) 16%, transparent);
+  }
+
+  .app-shell :is(.company-overview, .co-compare-panel) .co-review-coverage {
+    border-left-color: color-mix(in oklab, var(--chroma-reviews) 55%, var(--co-line));
+    background: color-mix(in oklab, var(--chroma-reviews) 3%, var(--chroma-paper));
+  }
+
+  .app-shell :is(.company-overview, .co-compare-panel) .co-review-platform + .co-review-platform {
+    border-top-color: color-mix(in oklab, var(--chroma-reviews) 30%, var(--co-line));
+  }
+
+  .app-shell .company-overview .co-review-evidence {
+    border-left-color: color-mix(in oklab, var(--chroma-reviews) 25%, var(--co-line));
+  }
+
+  .app-shell .company-overview .co-insight-implication b {
+    color: var(--chroma-kit-ink);
+  }
+
+  .app-shell .company-overview :is(.co-summary-continuation, .co-summary-sources, .co-review-synthesis-sources, .co-review-limits) > summary:hover {
+    background: color-mix(in oklab, currentColor 6%, transparent);
+  }
+
+  :root[data-motion="reduce"] .app-shell .session-v2 :is(.v2-prep-tab, .v2-quick button, .v2-library button, .v2-nav-utilities button):hover {
+    transform: none;
+  }
+}
+
+@media screen and (hover: hover) and (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion="reduce"]) .app-shell .session-v2 :is(.v2-nav-three .v2-prep-tab, .v2-quick button, .v2-library button):hover {
+    transform: translateY(-2px);
+  }
+}
+
+@media screen and (prefers-reduced-motion: reduce) {
+  .app-shell .session-v2 :is(.v2-prep-tab, .v2-tab-icon, .v2-quick button, .v2-library button, .v2-nav-utilities button) {
+    transition: none;
+  }
+
+  .app-shell .session-v2 :is(.v2-prep-tab, .v2-quick button, .v2-library button):hover {
+    transform: none;
+  }
+}
