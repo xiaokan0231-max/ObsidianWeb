@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="256" height="256">
+  <title>求职作战室 · 折径</title>
+  <rect x=".5" y=".5" width="47" height="47" rx="13.5" fill="#142923" stroke="#365148"/>
+  <path d="M5 37V17C5 10.373 10.373 5 17 5H39L29 15H18A3 3 0 0 0 15 18V27L5 37Z" fill="#80C5B5"/>
+  <path d="M9 43L19 33H30A3 3 0 0 0 33 30V21L43 11V31C43 37.627 37.627 43 31 43H9Z" fill="#F09573"/>
+</svg>

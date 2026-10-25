@@ -1,5 +1,6 @@
 @import "./calendar-chroma.css";
 @import "./interview-chroma.css";
+@import "./brand.css";
 
 /* 颜色帮助辨认工作区，正文与状态仍沿用原语义色；换皮肤时整层一起取色。 */
 .app-shell {
