@@ -152,7 +152,8 @@ export function createVaultReader({
     if (request.fresh) params.set("refresh", "1");
     const signal = AbortSignal.any([request.controller.signal, AbortSignal.timeout(timeoutMs)]);
     const read = (validator?: string | null) => fetcher(`/api/vault?${params}`, {
-      cache: "no-store", headers: validator ? { "If-None-Match": validator } : {}, signal,
+      // 本机接口仍由 no-store 禁止缓存；发布副本允许复用首屏 preload 与浏览器验证后的响应。
+      cache: request.fresh ? "no-store" : "default", headers: validator ? { "If-None-Match": validator } : {}, signal,
     });
     try {
       let response = await read(etag);

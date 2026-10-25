@@ -37,6 +37,16 @@ test("日历外壳的静态依赖不包含其它业务页，业务页仍作为�
   }
 });
 
+test("笔记正文与共用面试材料只在打开阅读层时加载", () => {
+  const dynamic = new Set(shell.flatMap((key) => client[key].dynamicImports ?? []));
+  for (const reader of ["note-drawer", "scene-note-reader", "interview-shared-asset"]) {
+    const key = `app/${reader}.tsx`;
+    assert.equal(client[key]?.isDynamicEntry, true, `${reader} 应保留独立入口`);
+    assert.equal(shell.includes(key), false, `${reader} 不应进入首屏静态依赖`);
+    assert.ok(dynamic.has(key), `${reader} 打开时必须能加载`);
+  }
+});
+
 test("教材和情境课样式随课程模块加载，不进入全局与日历首屏 CSS", async () => {
   const serverEntry = Object.keys(server).filter((key) => server[key].isEntry);
   assert.ok(serverEntry.length, "找到 Worker 构建入口");

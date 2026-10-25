@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { publishedRequestResponse } from "../lib/server/published-access";
+import { createPublishedVaultResponseHandler } from "../lib/server/published-vault-response";
 
 interface Env {
   OBSIDIAN_DATA_SOURCE?: string;
@@ -27,12 +28,27 @@ interface ExecutionContext {
 // dangerouslyAllowSVG: true in next.config.js and uncomment below:
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
+const publishedResponses = new WeakMap<Fetcher, ReturnType<typeof createPublishedVaultResponseHandler>>();
+
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const published = env.OBSIDIAN_DATA_SOURCE === "published";
     const guarded = publishedRequestResponse(request, published);
     if (guarded) return guarded;
+
+    if (published && url.pathname === "/api/vault") {
+      let respond = publishedResponses.get(env.ASSETS);
+      if (!respond) {
+        respond = createPublishedVaultResponseHandler((asset) => env.ASSETS.fetch(asset));
+        publishedResponses.set(env.ASSETS, respond);
+      }
+      const response = await respond(request, published);
+      if (response) {
+        response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+        return response;
+      }
+    }
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
