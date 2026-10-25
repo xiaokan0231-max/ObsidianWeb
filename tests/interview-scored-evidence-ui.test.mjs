@@ -128,7 +128,7 @@ test("新版评分趋势与旧评分历史分别渲染，旧图默认折叠", ()
   assert.match(html, /aria-label="新版有据评分趋势"/);
   const listEnd = html.lastIndexOf('class="rv-company-round"');
   assert.ok(listEnd >= 0, "场次列表仍能打开复盘");
-  assert.ok(html.indexOf("把不同公司的面谈放在一起看") > listEnd, "分析入口在场次列表之后");
+  assert.ok(html.indexOf("把公司的口碑、岗位与条件放在一起看") > listEnd, "公司对比入口在场次列表之后");
   assert.ok(html.indexOf('aria-label="新版有据评分趋势"') > listEnd, "评分走势位于一览底部");
   assert.match(html, /<details><summary>旧评分历史（不同口径，不能比较能力涨跌）<\/summary>/);
   assert.doesNotMatch(html, /<details open/);

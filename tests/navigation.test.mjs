@@ -77,6 +77,19 @@ test("高频日历与面试优先，事项并入最近进展而不增加入口",
   assert.ok(PAGE_COMMANDS.every((command) => !["行动清单", "总览"].includes(command.label)));
 });
 
+test("公司对比替换旧横向对照入口，导航和搜索使用同一中日文名称", () => {
+  const item = SECONDARY_NAVIGATION.interview.find(({ id }) => id === "insights");
+  assert.equal(item.label, "公司对比");
+  assert.equal(item.caption, "COMPARE");
+  assert.equal(getSecondaryNavigation("ja").interview.find(({ id }) => id === "insights").label, "企業比較");
+  const command = PAGE_COMMANDS.find(({ view }) => view === "insights");
+  assert.equal(command.label, item.label);
+  assert.match(command.description, /口碑.*岗位契合.*工作条件/);
+  for (const keyword of ["公司", "评分", "OpenWork", "転職会議", "横向", "企業", "比較"]) assert.ok(command.keywords.includes(keyword));
+  assert.equal(getPageCommands("ja").find(({ view }) => view === "insights").label, "企業比較");
+  assert.ok(SECONDARY_NAVIGATION.interview.every(({ label }) => label !== "横向对照"));
+});
+
 test("每个视图都有一个真正能点到的入口", () => {
   // 侧栏只画两种链接：一级项（去 target）和二级项（SECONDARY_NAVIGATION）。
   // item.views 只用来判断「当前在哪个分区」，本身不产生链接——所以不能拿它当「可达」。

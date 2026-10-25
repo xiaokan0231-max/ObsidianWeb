@@ -230,6 +230,128 @@
 .co-board-table :is(.co-score-context, .co-board-expand, .co-signal) a { text-underline-offset: 3px; }
 .co-board-table ul:not(.co-evidence) { margin: 0; padding-left: 18px; font-size: 16px; }
 .co-board-table li + li { margin-top: 7px; }
+
+/* 独立页面沿用对比的识别色，让选组与阅读共用整页空间，避免再模拟一个大弹窗。 */
+.company-comparison-page {
+  --compare-mint: var(--teal);
+  --compare-apricot: var(--gold-text);
+  --compare-purple: var(--violet);
+  --compare-coral: var(--interactive);
+  --compare-blue: var(--info);
+  --compare-border: color-mix(in oklab, var(--teal) 13%, var(--line-cool));
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+  max-width: 1660px;
+  margin: 0 auto;
+  padding: 4px 0 26px;
+  color: var(--ink);
+}
+.cc-page-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-width: 0;
+  padding: 14px 20px;
+  overflow: hidden;
+  border: 1px solid var(--compare-border);
+  border-radius: 18px;
+  background: radial-gradient(ellipse 480px 180px at 90% 5%, color-mix(in oklab, var(--compare-purple) 9%, transparent), transparent 75%), linear-gradient(110deg, color-mix(in oklab, var(--compare-mint) 8%, var(--surface-raised-solid)), var(--surface-raised-solid) 70%);
+  box-shadow: inset 0 1px var(--surface-lift);
+}
+.cc-page-header > div:first-child { min-width: 0; }
+.cc-page-header p { margin: 3px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.cc-page-header p:first-child, .cc-page-header .cc-eyebrow { margin: 0 0 2px; color: var(--compare-mint); font-size: 13px; font-weight: 650; letter-spacing: .075em; }
+.cc-page-header h1 { margin: 0; color: var(--ink); font-size: 26px; font-weight: 750; line-height: 1.2; letter-spacing: -.035em; }
+.cc-page-actions { display: flex; flex-shrink: 0; align-items: center; gap: 9px; }
+.cc-page-header button, .cc-page-actions > button {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 17px;
+  border: 1px solid var(--compare-mint);
+  border-radius: 11px;
+  color: var(--on-fill);
+  background: var(--compare-mint);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 4px 12px color-mix(in oklab, var(--compare-mint) 12%, transparent);
+}
+.cc-page-header button[aria-expanded="true"] { color: var(--compare-mint); background: color-mix(in oklab, var(--compare-mint) 9%, var(--surface-raised-solid)); box-shadow: none; }
+.cc-page-header button:hover { filter: brightness(1.07); }
+.company-comparison-page :is(button, a, summary, select):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.cc-page-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 0 4px; color: var(--text-secondary); font-size: 13px; }
+.cc-page-summary > span { display: inline-flex; align-items: baseline; gap: 6px; }
+.cc-page-summary strong { color: var(--compare-mint); font-size: 20px; font-weight: 750; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.cc-page-summary > span + span { padding-left: 18px; border-left: 1px solid var(--compare-border); }
+.company-comparison-page > .co-quick-picks { padding: 0; }
+.company-comparison-page > .co-quick-picks > button { padding: 12px; }
+.cc-selection-region, .cc-board-region { min-width: 0; }
+.cc-board-region { scroll-margin-top: 90px; }
+.co-compare-panel.co-compare-embedded {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  min-height: 0;
+  border-radius: 17px;
+  box-shadow: 0 8px 30px color-mix(in oklab, var(--shadow-color) 5%, transparent), inset 0 1px var(--surface-lift);
+}
+.co-compare-embedded :is(.co-selector-hero, .co-board-header) { gap: 14px; padding: 18px 22px; }
+.co-compare-embedded :is(.co-selector-hero, .co-board-header) .co-selector-icon { flex-basis: 43px; width: 43px; height: 43px; border-radius: 13px; font-size: 26px; }
+.co-compare-embedded :is(.co-selector-hero, .co-board-header) h2 { font-size: 23px; }
+.co-compare-embedded .co-selector-heading > span, .co-compare-embedded .co-board-header > div > span { margin-top: 4px; }
+.co-compare-embedded .co-quick-picks { gap: 9px; padding: 16px 22px 13px; }
+.co-compare-embedded .co-selector-tools { padding-right: 22px; padding-left: 22px; }
+.co-compare-embedded .co-selector-filters { padding-right: 22px; padding-left: 22px; }
+.co-compare-embedded .co-selector-guide { padding-right: 22px; padding-left: 22px; }
+.co-compare-embedded .co-candidate-grid {
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  max-height: 510px;
+  padding: 2px 22px 20px;
+  scroll-padding: 10px;
+}
+.co-compare-embedded .co-candidate-card { gap: 9px; padding: 15px; }
+.co-compare-embedded .co-candidate-business { font-size: 16px; }
+.co-compare-embedded .co-selector-footer { gap: 14px; padding: 12px 22px; }
+.co-compare-embedded .co-selected-chips > button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.co-compare-embedded .co-board-header { padding: 14px 20px; }
+.co-compare-embedded .co-board-header > div:nth-child(2) { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 3px 14px; }
+.co-compare-embedded .co-board-header p { grid-column: 2; grid-row: 1; margin: 0; white-space: nowrap; }
+.co-compare-embedded .co-board-header h2 { grid-column: 1; grid-row: 1; font-size: 20px; }
+.co-compare-embedded .co-board-header > div > span { grid-column: 1 / -1; margin: 0; font-size: 13px; }
+.co-compare-embedded .co-board-controls { gap: 13px; padding: 7px 20px; }
+.co-compare-embedded .co-board-controls > div { padding: 2px; }
+.co-compare-embedded .co-board-controls > div > button { padding-top: 6px; padding-bottom: 6px; }
+.co-compare-embedded .co-board-controls select { min-height: 37px; padding-top: 6px; padding-bottom: 6px; }
+.co-compare-embedded .co-board-scroll { max-height: clamp(460px, 65dvh, 820px); scroll-padding-top: 180px; }
+.co-compare-embedded .co-board-table :is(th, td) { padding: 16px; }
+.co-compare-embedded .co-board-table thead th { padding-top: 13px; padding-bottom: 13px; }
+.co-compare-embedded .co-company-detail > em { margin-top: 4px; }
+.co-compare-embedded .co-board-table thead .co-candidate-meta { gap: 4px 6px; margin-top: 7px; line-height: 1.3; }
+.co-compare-embedded .co-board-table thead .co-candidate-meta :is(.co-date-tag, .co-origin-tag, .co-status-tag) { padding-top: 2px; padding-bottom: 2px; }
+.co-compare-embedded .co-board-table thead th:first-child { border-top-color: var(--compare-border); }
+.cc-empty {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  padding: 42px 24px;
+  border: 1px dashed color-mix(in oklab, var(--compare-mint) 30%, var(--line-cool));
+  border-radius: 16px;
+  color: var(--text-secondary);
+  background: radial-gradient(ellipse 500px 150px at 50% 100%, color-mix(in oklab, var(--compare-mint) 5%, transparent), transparent), var(--surface);
+  text-align: center;
+}
+.cc-empty h2 { margin: 0; color: var(--ink); font-size: 22px; font-weight: 650; }
+.cc-empty p { max-width: 43em; margin: 0; color: var(--text-secondary); font-size: 16px; line-height: 1.7; }
+.cc-empty button { margin-top: 7px; padding: 10px 17px; border: 1px solid var(--compare-border); border-radius: 10px; color: var(--compare-mint); background: var(--surface-raised-solid); font: inherit; font-size: 15px; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .co-quick-picks > button, .co-candidate-card { transition: none; }
   .co-quick-picks > button:hover:not(:disabled), .co-candidate-card:hover:not(.disabled) { transform: none; }

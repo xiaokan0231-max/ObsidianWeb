@@ -25,6 +25,7 @@ import {
   calendarInterviewFromSearch,
   calendarInterviewSearch,
   companyOverviewSearch,
+  companyComparisonSearch,
   reviewEvidenceSearch,
   type AppView,
 } from "./app-route";
@@ -94,7 +95,7 @@ const VIEW_MODULES = {
   activity: PROGRESS_MODULE,
   actions: PROGRESS_MODULE,
   review: createPreloadable(() => import("./interview-review")),
-  insights: createPreloadable(() => import("./interview-insights")),
+  insights: createPreloadable(() => import("./company-comparison")),
   practice: createPreloadable(() => import("./interview-practice")),
   prep: createPreloadable(() => import("./interview-prep")),
   session: createPreloadable(() => import("./interview-session")),
@@ -108,7 +109,7 @@ const VIEW_MODULES = {
   timeline: createPreloadable(() => import("./timeline-view")),
 };
 const InterviewReview = lazy(VIEW_MODULES.review.load);
-const InterviewInsights = lazy(VIEW_MODULES.insights.load);
+const CompanyComparison = lazy(VIEW_MODULES.insights.load);
 const InterviewPractice = lazy(VIEW_MODULES.practice.load);
 const InterviewPrep = lazy(VIEW_MODULES.prep.load);
 const InterviewSession = lazy(VIEW_MODULES.session.load);
@@ -1227,17 +1228,11 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     setSearchOpen(false);
   }, [navigateToView, setSearchOpen]);
 
-  const openReview = useCallback((key?: string) => {
-    const params = new URLSearchParams();
-    if (key) params.set("review", key);
-    navigateToView("review", params);
-  }, [navigateToView]);
-
   const openReviewEvidence = useCallback((ref: AdvisoryEvidenceRef) => {
     navigateToView("review", reviewEvidenceSearch(ref));
   }, [navigateToView]);
 
-  const openInterviewInsights = useCallback(() => navigateToView("insights"), [navigateToView]);
+  const openInterviewInsights = useCallback((contextPath?: string) => navigateToView("insights", companyComparisonSearch(typeof contextPath === "string" ? [contextPath] : [])), [navigateToView]);
 
   // 分析页直接打开看板案件抽屉，跟进操作仍使用案件本身的表单。
   const openCase = useCallback((note: Note) => {
@@ -1612,8 +1607,8 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   onOpenSession={openReviewSession}
                 />
               )}
-              {view === "insights" && <InterviewInsights notes={notes} onOpenEvidence={openReviewEvidence} onOpenReview={openReview}
-                onVaultChanged={loadVault} onNoteWritten={patchNote} />}
+              {view === "insights" && <CompanyComparison notes={notes} today={calendarToday} loading={!scopeReady}
+                onOpenCompany={(context) => openApplicationCompany(context.company, context.note)} onOpenWiki={openWikiLink} />}
               {view === "practice" && (
                 <InterviewPractice
                   loading={!scopeReady && !error}

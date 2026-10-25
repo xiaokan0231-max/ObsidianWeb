@@ -185,6 +185,7 @@ export function AdvisoryReportPanel({ report, notes, notePath, onOpenEvidence, o
 export default function InterviewAdvisory({ report: initialReport, notes, notePath, onOpenEvidence, onVaultChanged, onNoteWritten, onOpenInsights }: EvidenceProps & {
   report?: InterviewAdvisory; notePath: string; onVaultChanged: () => void | Promise<void>; onNoteWritten?: (note: Note) => void; onOpenInsights: () => void;
 }) {
+  const { locale } = useUiLocale();
   const sync = useInterviewAdvisorySync(notes);
   const [loaded, setLoaded] = useState<{ report: InterviewAdvisory | null; status: string; reason?: string; lastError?: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -210,7 +211,7 @@ export default function InterviewAdvisory({ report: initialReport, notes, notePa
   const failure = error || loaded?.lastError || sync.error || sync.state?.error;
   return <div className="ia-view">
     <div className="ia-actions"><p>{busy || sync.busy || sync.state?.active ? "正在更新，已有内容仍可阅读。" : loaded?.status === "stale" ? "原文有更新，下面的评价尚未更新。" : loaded?.status === "blocked" ? "原文还有需要确认的地方，可在原文阅读中查看。" : report ? "先看这次机会和下一步，再按需要查看原话。" : "还没有这场面谈的解读，可以先阅读原文。"}</p>
-      <button type="button" onClick={onOpenInsights}>跨面试横向对照 →</button>
+      <button type="button" onClick={() => onOpenInsights()}>{locale === "ja" ? "企業比較を開く →" : "进入公司对比 →"}</button>
       <button type="button" disabled={busy || sync.busy || loaded?.status === "blocked"} onClick={() => void generate()}>{busy ? "更新中…" : failure ? advisoryRetryLabel(failure) : report ? "更新解读" : "获取面谈解读"}</button>
     </div>
     {failure && <div className="ia-error" role="alert"><p>{advisoryFailureMessage(failure)}</p><details><summary>查看失败详情</summary><p>{failure}</p></details></div>}

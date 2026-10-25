@@ -49,7 +49,7 @@ import { Blocks, Inlines } from "./prep-doc-render";
 import PrepMaterialReader from "./prep-material-reader";
 import InterviewSessionV2 from "./interview-session-v2";
 import { buildCompanyOverviews, resolveCompanyOverview, resolveCompanyOverviewFrom, type CompanyOverview } from "@/lib/company-overview";
-import CompanyOverviewContent, { COMPANY_COMPARE_LIMIT, CompanyCompare, CompanyCompareButton, CompanyCompareSelector, CompanyCompareTray, toggleCompanyComparison } from "./company-overview";
+import CompanyOverviewContent from "./company-overview";
 import ContextPicker from "./context-picker";
 import CompanyHeroCard from "./company-hero";
 import { buildContextPickerGroups } from "@/lib/context-picker";
@@ -1137,7 +1137,7 @@ function InterviewSession({
   forceOverviewOnly?: boolean;
   onContextChange?: (company: string, contextPath: string, prepPath: string) => void;
   onSelectionChange?: (company: string, prepPath: string) => void;
-  onOpenInsights?: () => void;
+  onOpenInsights?: (contextPath?: string) => void;
   /** 「今日」は殻が持つ。memo 越しなので中で求めると、日付を跨いでも昨日のまま凍る
    *  ——当日かどうかで既定モード（确认/冲刺/深度）が変わる画面なので、ここが一番効く。 */
   today: string;
@@ -1181,10 +1181,6 @@ function InterviewSession({
     ? notes.find((note) => getType(note) === "job-case" && getString(note.frontmatter.case_id) === context.caseId) ?? null
     : null), [context, notes]);
   const [legacyPrepPath, setLegacyPrepPath] = useState<string | null>(null);
-  const [comparePaths, setComparePaths] = useState<string[]>([]);
-  const [compareOpen, setCompareOpen] = useState(false);
-  const [compareSelectorOpen, setCompareSelectorOpen] = useState(false);
-  const compared = comparePaths.flatMap((path) => { const item = contexts.find((candidate) => candidate.note.path === path); return item ? [item] : []; });
   const selectDoc = (doc: InterviewPrepDoc) => {
     const nextContext = docContexts.get(doc.note.path) ?? null;
     setSelection({ prepPath: doc.note.path, contextPath: nextContext?.note.path ?? null });
@@ -1201,15 +1197,6 @@ function InterviewSession({
     setViewReplay(false);
     onContextChange?.(nextContext.company, nextContext.note.path, next?.note.path ?? "");
   };
-  const removeCompare = (path: string) => {
-    setComparePaths((current) => current.filter((item) => item !== path));
-    if (compared.length <= 2) setCompareOpen(false);
-  };
-  const openCompareSelector = () => {
-    setCompareOpen(false);
-    if (!compared.length && context) setComparePaths([context.note.path]);
-    setCompareSelectorOpen(true);
-  };
   // 地址栏的 prep 指向正在看的稿：刷新、分享时停在原稿或对照样稿上。
   const toggleReplay = () => {
     if (!selected || !replay) return;
@@ -1219,11 +1206,7 @@ function InterviewSession({
     if (docContext && onContextChange) onContextChange(selected.company, docContext.note.path, prepPath);
     else onSelectionChange?.(selected.company, prepPath);
   };
-  const companyAction = <div className="co-header-actions">{replay && <button type="button" className="co-replay-entry" aria-pressed={showingReplay} onClick={toggleReplay}>{ui(showingReplay ? "回到原稿" : "对照样稿")}</button>}<button type="button" className="co-compare-entry" onClick={openCompareSelector}>{ui("公司对比")}<span aria-hidden="true">{compared.length ? ` ${compared.length} / ${COMPANY_COMPARE_LIMIT}` : " ↗"}</span></button><CompanyCompareButton context={context} compared={!!context && compared.some((item) => item.key === context.key)} full={compared.length >= COMPANY_COMPARE_LIMIT} onToggle={() => {
-    if (!context) return;
-    if (compared.some((item) => item.key === context.key)) removeCompare(context.note.path);
-    else setComparePaths((current) => toggleCompanyComparison(current, context.note.path));
-  }} /></div>;
+  const companyAction = <div className="co-header-actions">{replay && <button type="button" className="co-replay-entry" aria-pressed={showingReplay} onClick={toggleReplay}>{ui(showingReplay ? "回到原稿" : "对照样稿")}</button>}{onOpenInsights && <button type="button" className="co-compare-entry" onClick={() => onOpenInsights(context?.note.path)}>{ui("公司对比")}<span aria-hidden="true"> ↗</span></button>}</div>;
   // 选项 id 与旧 select 的 option value 同形（context:<path> / series:<key>），切换逻辑照旧。
   const contextPicker = <ContextPicker groups={pickerGroups} today={today} selectedId={context ? `context:${context.note.path}` : selectedSeriesKey()} onSelect={(value) => {
     if (value.startsWith("context:")) { const next = contexts.find((item) => item.note.path === value.slice(8)); if (next) selectContext(next); }
@@ -1232,9 +1215,6 @@ function InterviewSession({
   function selectedSeriesKey() { const item = selected ? interviewPrepSeriesForDoc(series, selected) : null; return item ? `series:${item.key}` : ""; }
   const historicalCompany = !!selected && ["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today));
   const companyContent = <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} />;
-  const compareUI = <><CompanyCompareTray contexts={compared} onRemove={removeCompare} onClear={() => { setComparePaths([]); setCompareOpen(false); }} onOpen={() => setCompareOpen(true)} />
-    {compareSelectorOpen && <CompanyCompareSelector contexts={contexts} selected={compared} notes={notes} today={today} onSelectPaths={(paths) => setComparePaths(paths.slice(0, COMPANY_COMPARE_LIMIT))} onToggle={(path) => setComparePaths((current) => toggleCompanyComparison(current, path))} onClose={() => setCompareSelectorOpen(false)} onCompare={() => { setCompareSelectorOpen(false); setCompareOpen(true); }} />}
-    {compareOpen && compared.length >= 2 && <CompanyCompare contexts={compared} notes={notes} today={today} onClose={() => setCompareOpen(false)} onEdit={openCompareSelector} onRemove={removeCompare} onDetail={(item) => { setCompareOpen(false); selectContext(item); window.scrollTo({ top: 0, behavior: "instant" }); }} onOpenWiki={(target) => { setCompareOpen(false); onOpenWiki(target); }} />}</>;
   // 導読を持たない準備稿ではモード自体を出さない。空のモードに入れると
   // 「壊れている」と読めてしまうし、既存の他社ノートは全部それに当たる。
   const briefing = useMemo(
@@ -1317,7 +1297,7 @@ function InterviewSession({
         )}
       </summary>
       <div className="prep-weakness-body">
-        {onOpenInsights && <div className="prep-insights-entry"><p>准备前也可以对照其他公司的关注点、有效表达与机会条件。</p><button type="button" onClick={onOpenInsights}>{ui("打开横向对照 →")}</button></div>}
+        {onOpenInsights && <div className="prep-insights-entry"><p>准备前也可以比较其他公司的口碑、岗位契合与工作条件。</p><button type="button" onClick={() => onOpenInsights(context?.note.path)}>{ui("打开公司对比 →")}</button></div>}
         <p>根据 {digest.interviews.length} 场回答质量复盘统计；正本来自 vault 的「面接傾向_横断」。</p>
         <ul>
           {digest.tags.filter((tag) => tag.repeated).map((tag) => (
@@ -1341,7 +1321,7 @@ function InterviewSession({
       onOpenCard={onOpenCard} onOpenAsset={onOpenAsset}
       companyOverview={(onOpenReviews) => <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} view="story" onOpenReviews={onOpenReviews} />}
       externalReviews={<CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} view="reviews" />}
-      contextPicker={contextPicker} companyAction={companyAction} briefing={digestBand} />{compareUI}</>;
+      contextPicker={contextPicker} companyAction={companyAction} briefing={digestBand} /></>;
   }
 
   if (!selected || legacyPrepPath !== selected.note.path) {
@@ -1349,7 +1329,7 @@ function InterviewSession({
     return <><div className={`co-shell${context ? ` tone-${companyHeroTone(context, today)}` : ""}`}><header className="co-shell-head"><CompanyHeroCard context={context} rounds={contextRounds} today={today} linkedCase={linkedCase} fallbackCompany={selected?.company || initialCompany} fallbackTitle={selected?.round ?? ""} onOpen={onOpen} /><div className="co-shell-controls">{contextPicker}{companyAction}</div></header>
       <nav className="co-legacy-tabs" aria-label={ui("公司与面谈视图")}><button type="button" aria-pressed="true">{ui("公司总览")}</button><button type="button" disabled={!selected} aria-pressed="false" onClick={() => selected && setLegacyPrepPath(selected.note.path)}>{ui("面谈准备")}</button>{!selected && <span className="co-prep-unavailable">本场尚无准备稿</span>}</nav>
       {companyContent}{context && <button type="button" className="co-compare-toggle" onClick={() => onOpen(context.note)}>{context.kind === "meeting" ? "打开面谈记录" : "打开案件记录"} ↗</button>}
-    </div>{compareUI}</>;
+    </div></>;
   }
 
   return (
@@ -1507,7 +1487,7 @@ function InterviewSession({
           </details>
         </>
       )}
-    </div>{compareUI}</>
+    </div></>
   );
 }
 

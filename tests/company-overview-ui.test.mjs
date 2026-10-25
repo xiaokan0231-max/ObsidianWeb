@@ -404,7 +404,7 @@ const sessionExports = await loadAppModule("app/interview-session.tsx", { stubs:
 const makeNote = (path, frontmatter, content = "# 株式会社テスト — 数据工程") => ({ path, frontmatter, content, tags: [], stat: { ctime: 0, mtime: 0, size: 0 } });
 const job = makeNote("20_求職/测试/数据工程.md", { type: "job-case", company: "株式会社テスト", case_id: "test-data" });
 const oldPrep = makeNote("20_求職/测试/准备_s01.md", { type: "interview-prep", prep_version: 2, company: "株式会社テスト", case: "[[20_求職/测试/数据工程]]", round: "一次面接", session_order: 1, session_status: "completed", date: "2026-01-01" }, "# 株式会社テスト 面接准备\n\n## 纵览与建议\n\n旧轮次正文\n\n## 志望動機\n\n动机\n\n## 逆質問\n\n提问\n\n## 研究资料\n\n资料\n\n## 临场备用\n\n备用\n");
-const sessionProps = { notes: [job, oldPrep], today: "2026-01-10", initialContextPath: job.path, onOpen() {}, onOpenWiki() {}, onOpenCard() {}, onOpenAsset() {} };
+const sessionProps = { notes: [job, oldPrep], today: "2026-01-10", initialContextPath: job.path, onOpen() {}, onOpenWiki() {}, onOpenCard() {}, onOpenAsset() {}, onOpenInsights() {} };
 
 test("日历本场无稿：即使同案件已有旧轮次，也只显示公司总览", () => {
   const html = render(sessionExports.default, { ...sessionProps, forceOverviewOnly: true });

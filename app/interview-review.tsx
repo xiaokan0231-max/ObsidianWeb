@@ -185,8 +185,10 @@ const REVIEW_COPY_JA: Record<string, string> = {
   "查看证据 →": "根拠を見る →",
   "重评总索引 →": "評価の一覧 →",
   "跨场行动建议 →": "次の準備・練習 →",
-  "把不同公司的面谈放在一起看": "企業ごとの面談を比較する",
-  "进入横向对照 →": "面談を比較する →",
+  "把公司的口碑、岗位与条件放在一起看": "企業の口コミ・職種・条件を比較する",
+  "对照各平台评分、岗位契合与工作条件，判断值得继续了解的机会。": "各サイトの評価・職種の適合・勤務条件を見比べて、さらに知りたい機会を検討できます。",
+  "进入公司对比 →": "企業比較を開く →",
+  "公司对比 ↗": "企業比較 ↗",
 
   "查看之前的面谈导读": "以前の面談のまとめを見る",
   "面试评价": "面接の評価",
@@ -965,7 +967,7 @@ function InterviewReview({
             if (value === "source" && mode === "novel") switchMode("study");
             window.requestAnimationFrame(() => restoreWindowScroll(panelScrollTops.current[value] ?? 0));
           }}>{t(label)}</button>)}
-        <button type="button" className="rv-cross-link" onClick={onOpenInsights}>{t("横向对照 ↗")}</button>
+        <button type="button" className="rv-cross-link" onClick={() => onOpenInsights()}>{t("公司对比 ↗")}</button>
       </nav>
       <div className="rv-reader-tools" hidden={panel !== "source"}>
         <span>{t("阅读模式")}</span>
@@ -2336,7 +2338,7 @@ function ReviewIndex({
         <SignalOutcomeTable comparison={signalOutcome} onSelect={(key) => onSelect(key)} t={signalsCopy(locale)} />
       </details>}
       <InterviewReassessmentEntry notes={notes} onOpenNote={onOpenNote} t={t} />
-      <section className="rv-insights-entry"><div><h2>{t("把不同公司的面谈放在一起看")}</h2><p>从企业关注、双方匹配和实际推进条件里，找到下一阶段的方向。</p></div><button type="button" onClick={onOpenInsights}>{t("进入横向对照 →")}</button></section>
+      <section className="rv-insights-entry"><div><h2>{t("把公司的口碑、岗位与条件放在一起看")}</h2><p>{t("对照各平台评分、岗位契合与工作条件，判断值得继续了解的机会。")}</p></div><button type="button" onClick={() => onOpenInsights()}>{t("进入公司对比 →")}</button></section>
       {scorePoints.length >= 2 && <section aria-label="新版有据评分趋势"><p>仅比较新版同口径有据评分；分数变化不直接表示能力涨跌。</p><ReviewScoreTrend points={scorePoints} onSelect={(key) => onSelect(key)} t={t} /></section>}
       {historicalScorePoints.length >= 2 && <details><summary>旧评分历史（不同口径，不能比较能力涨跌）</summary><ReviewScoreTrend points={historicalScorePoints} onSelect={(key) => onSelect(key)} t={t} /></details>}
     </div>

@@ -27,7 +27,7 @@ const VIEW_PATHS: Record<AppView, string> = {
   session: "/interview",
   prep: "/interview/prep",
   review: "/interview/review",
-  insights: "/interview/insights",
+  insights: "/interview/compare",
   practice: "/interview/practice",
   language: "/training",
   topics: "/training/topics",
@@ -43,6 +43,8 @@ export const APP_VIEWS: readonly AppView[] = Object.keys(VIEW_PATHS) as AppView[
 const PATH_VIEWS = new Map(
   Object.entries(VIEW_PATHS).map(([view, path]) => [path, view as AppView]),
 );
+// 旧书签继续到同一视图；新导航统一使用公司对比的地址。
+PATH_VIEWS.set("/interview/insights", "insights");
 
 function normalizedPath(pathname: string) {
   if (!pathname || pathname === "/") return "/";
@@ -87,6 +89,13 @@ export function companyOverviewSearch(company: string, contextPath: string, prep
   if (company) params.set("company", company);
   if (contextPath) params.set("context", contextPath);
   if (prepPath) params.set("prep", prepPath);
+  return params;
+}
+
+/** 用正本路径恢复对比选择，避免同名公司或不同岗位互相顶替。 */
+export function companyComparisonSearch(paths: string[]) {
+  const params = new URLSearchParams();
+  for (const path of new Set(paths.filter((value) => value.trim()))) params.append("compare", path);
   return params;
 }
 

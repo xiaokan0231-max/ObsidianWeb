@@ -27,7 +27,7 @@ async function cssFor(manifest, keys, root) {
 
 const shell = staticClosure(client, ["app/memory-atlas.tsx"]);
 test("日历外壳的静态依赖不包含其它业务页，业务页仍作为动态入口可达", () => {
-  const views = ["interview-review", "interview-insights", "interview-practice", "interview-prep", "interview-session", "japanese-training", "language-expression-courses", "jobs-analytics", "jobs-view", "graph-view", "library-view", "timeline-view"];
+  const views = ["interview-review", "company-comparison", "interview-practice", "interview-prep", "interview-session", "japanese-training", "language-expression-courses", "jobs-analytics", "jobs-view", "graph-view", "library-view", "timeline-view"];
   const dynamic = new Set(shell.flatMap((key) => client[key].dynamicImports ?? []));
   for (const view of views) {
     const key = `app/${view}.tsx`;

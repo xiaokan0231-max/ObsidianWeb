@@ -225,14 +225,27 @@ export function toggleCompanyComparison(paths: string[], path: string) {
 }
 const COMPARE_FILTERS: { id: CompanyCompareFilter; label: string }[] = [{ id: "relevant", label: "相关公司" }, { id: "upcoming", label: "即将面谈" }, { id: "recent", label: "最近面过" }, { id: "rated", label: "有外部评分" }, { id: "selected", label: "已选" }, { id: "all", label: "全部案件" }];
 const COMPARE_PRESETS = [{ id: "upcoming", icon: "↗", title: "即将面谈", hint: "按确认日程，先看接下来几家" }, { id: "recent", icon: "◷", title: "最近面过", hint: "按真实面谈日期回看" }, { id: "openwork", icon: "★", title: "OpenWork 高分", hint: "只按 OpenWork 原始评分" }, { id: "jobtalk", icon: "✦", title: "転職会議 高分", hint: "只按転職会議原始评分" }] as const;
-export function CompanyCompareSelector({ contexts, selected, notes = [], today = "1970-01-01", onToggle, onSelectPaths, onClose, onCompare }: { contexts: CompanyOverview[]; selected: CompanyOverview[]; notes?: Note[]; today?: string; onToggle: (path: string) => void; onSelectPaths?: (paths: string[]) => void; onClose: () => void; onCompare: () => void }) {
+export function CompanyCompareQuickPicks({ candidates, onSelect }: { candidates: CompanyCompareCandidate[]; onSelect: (paths: string[], preset: typeof COMPARE_PRESETS[number]) => void }) {
+  return <div className="co-quick-picks" aria-label="快捷选择公司">{COMPARE_PRESETS.map((preset) => {
+    const paths = companyComparePreset(candidates, preset.id, 4);
+    return <button type="button" key={preset.id} disabled={!paths.length} title={`${preset.hint}。替换当前所选，之后仍可增删。`} onClick={() => onSelect(paths, preset)}><em aria-hidden="true">{preset.icon}</em><span><strong>{preset.title}</strong><small>{paths.length ? `快速选 ${paths.length} 家 · 可再调整` : "暂无对应资料"}</small></span><b aria-hidden="true">＋</b></button>;
+  })}</div>;
+}
+function CompareDialog({ className, label, onClose, children }: { className: string; label: string; onClose: () => void; children: ReactNode }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, true);
+  useEffect(() => { const old = document.body.style.overflow; document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = old; }; }, []);
+  return <div className="job-compare-backdrop co-compare-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} className={`co-compare-panel ${className}`} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>{children}</div></div>;
+}
+/** 独立页正常参与文档与键盘导航，只有浮层模式才隔离背景和焦点。 */
+function CompareFrame({ embedded, className, label, onClose, children }: { embedded: boolean; className: string; label: string; onClose: () => void; children: ReactNode }) {
+  return embedded ? <section className={`co-compare-panel ${className} co-compare-embedded`} aria-label={label}>{children}</section> : <CompareDialog className={className} label={label} onClose={onClose}>{children}</CompareDialog>;
+}
+export function CompanyCompareSelector({ contexts, selected, notes = [], today = "1970-01-01", onToggle, onSelectPaths, onClose, onCompare, embedded = false }: { contexts: CompanyOverview[]; selected: CompanyOverview[]; notes?: Note[]; today?: string; onToggle: (path: string) => void; onSelectPaths?: (paths: string[]) => void; onClose: () => void; onCompare: () => void; embedded?: boolean }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<CompanyCompareFilter>("relevant");
   const [sort, setSort] = useState<CompanyCompareSort>("relevance");
   const [presetMessage, setPresetMessage] = useState("");
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogFocus(dialogRef, true);
-  useEffect(() => { const old = document.body.style.overflow; document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = old; }; }, []);
   const candidates = useMemo(() => buildCompanyCompareCandidates(contexts, notes, today), [contexts, notes, today]);
   const selectedPaths = selected.map((item) => item.note.path);
   const selectedSet = new Set(selectedPaths);
@@ -242,12 +255,9 @@ export function CompanyCompareSelector({ contexts, selected, notes = [], today =
     if (onSelectPaths) onSelectPaths(paths);
     else { for (const path of selectedPaths) if (!paths.includes(path)) onToggle(path); for (const path of paths) if (!selectedSet.has(path)) onToggle(path); }
   };
-  return <div className="job-compare-backdrop co-compare-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} className="co-compare-panel co-selector-shell" role="dialog" aria-modal="true" aria-label="选择公司对比" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
-    <header className="co-selector-hero"><div className="co-selector-icon" aria-hidden="true">⇄</div><div className="co-selector-heading"><p>COMPARE · 先认出公司，再看差异</p><h2>选几家，一起看</h2><span>岗位、面谈时间与口碑放在一起，最多选择 {COMPANY_COMPARE_LIMIT} 项。</span></div><button type="button" className="co-dialog-close" onClick={onClose} aria-label="关闭公司选择">×</button></header>
-    <div className="co-quick-picks" aria-label="快捷选择公司">{COMPARE_PRESETS.map((preset) => {
-      const paths = companyComparePreset(candidates, preset.id, 4);
-      return <button type="button" key={preset.id} disabled={!paths.length} title={`${preset.hint}。替换当前所选，之后仍可增删。`} onClick={() => { replaceSelection(paths); setQuery(""); setFilter("selected"); setSort(preset.id === "upcoming" ? "relevance" : preset.id); setPresetMessage(`已按${preset.title}选入 ${paths.length} 家，可继续调整。`); }}><em aria-hidden="true">{preset.icon}</em><span><strong>{preset.title}</strong><small>{paths.length ? `快速选 ${paths.length} 家 · 可再调整` : "暂无对应资料"}</small></span><b aria-hidden="true">＋</b></button>;
-    })}</div>
+  return <CompareFrame embedded={embedded} className="co-selector-shell" label="选择公司对比" onClose={onClose}>
+    <header className="co-selector-hero"><div className="co-selector-icon" aria-hidden="true">⇄</div><div className="co-selector-heading"><p>COMPARE · 先认出公司，再看差异</p><h2>选几家，一起看</h2><span>岗位、面谈时间与口碑放在一起，最多选择 {COMPANY_COMPARE_LIMIT} 项。</span></div>{!embedded && <button type="button" className="co-dialog-close" onClick={onClose} aria-label="关闭公司选择">×</button>}</header>
+    <CompanyCompareQuickPicks candidates={candidates} onSelect={(paths, preset) => { replaceSelection(paths); setQuery(""); setFilter("selected"); setSort(preset.id === "upcoming" ? "relevance" : preset.id); setPresetMessage(`已按${preset.title}选入 ${paths.length} 家，可继续调整。`); }} />
     <div className="co-selector-tools"><label><span className="sr-only">搜索公司、岗位或业务</span><span aria-hidden="true">⌕</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="想不起来名字？也可以搜岗位、业务或渠道" /></label><label>排序<select value={sort} onChange={(event) => setSort(event.target.value as CompanyCompareSort)}><option value="relevance">面谈与资料优先</option><option value="recent">最近面过在前</option><option value="openwork">OpenWork 高 → 低</option><option value="jobtalk">転職会議 高 → 低</option></select></label></div>
     <div className="co-selector-filters" aria-label="筛选对比公司">{COMPARE_FILTERS.map((item) => <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{item.label}<small>{filterCompanyCompareCandidates(candidates, "", item.id, selectedPaths, "relevance").length}</small></button>)}</div>
     <p className="co-selector-guide" aria-live="polite">{query ? `找到 ${visible.length} 项` : presetMessage || "默认显示有公司资料或面谈记录的项目；近期安排排在前面。快捷选择会替换已选项。"}</p>
@@ -257,7 +267,7 @@ export function CompanyCompareSelector({ contexts, selected, notes = [], today =
       return <label key={item.context.key} className={`co-candidate-card${checked ? " selected" : ""}${full && !checked ? " disabled" : ""}`} data-tone={companyTone(item.shortName)}><input type="checkbox" checked={checked} disabled={full && !checked} onChange={() => onToggle(item.context.note.path)} aria-label={`${item.shortName} · ${item.displayRole}`} /><div className="co-candidate-head"><span className="co-company-monogram" data-tone={companyTone(item.shortName)} aria-hidden="true">{item.shortName.slice(0, 2)}</span><div className="co-candidate-identity"><h3 title={item.context.company}>{item.shortName}</h3><p title={item.context.title}>{item.displayRole}</p></div><span className="co-check-indicator" aria-hidden="true">{checked ? "✓" : "＋"}</span></div><p className="co-candidate-business" title={business}>{business}</p><CandidateMeta item={item} /><div className="co-candidate-ratings">{COMPARE_PLATFORMS.map((platform) => <PlatformScore key={platform} context={item.context} platform={platform} mini />)}</div><div className="co-readiness"><span>{item.readinessLabel}</span><small>{checked ? "已选入对比" : "点击加入"}</small></div></label>;
     })}{!visible.length && <div className="co-selector-empty"><strong>这里还没有匹配的公司</strong><p>试试岗位或业务关键词，或切换到「全部案件」。</p><button type="button" onClick={() => { setQuery(""); setFilter("all"); }}>查看全部案件</button></div>}</div>
     <footer className="co-selector-footer"><div className="co-selected-chips" aria-label="已选公司">{selected.length ? selected.map((item) => <button type="button" key={item.key} onClick={() => onToggle(item.note.path)} title={item.title}>{compareName(item)}<span aria-hidden="true">×</span></button>) : <span>先选 2 家，就能看出差异</span>}</div><div className="co-selector-submit"><span aria-live="polite">{selected.length} / {COMPANY_COMPARE_LIMIT} 已选{full ? " · 已选满，可移除后更换" : ""}</span>{selected.length > 0 && <button type="button" className="co-selection-clear" onClick={() => replaceSelection([])}>清空</button>}<button type="button" disabled={selected.length < 2} onClick={onCompare}>开始对比 <b aria-hidden="true">→</b></button></div></footer>
-  </div></div>;
+  </CompareFrame>;
 }
 function ComparisonSignal({ context, kind }: { context: CompanyOverview; kind: "positive" | "concern" }) {
   const insights = context.profile?.reviews.flatMap((review) => review.insights.map((insight) => ({ ...insight, platform: review.platform }))) ?? [];
@@ -273,12 +283,9 @@ function CaseFitGraphic({ context }: { context: CompanyOverview }) {
   const fit = context.kind === "case" ? toJobCard(context.note).fit : null;
   return <div className="co-jobfit-meter">{fit && <><strong>{fit.score}<small> / 100 · Band {fit.band}</small></strong><div aria-hidden="true"><i style={{ width: `${fit.score}%` }} /></div></>}<details><summary>{fit ? "案件採点与依据" : context.kind === "case" ? "未採点（v2）" : "面谈 · 无案件采点"}</summary><CaseFit context={context} /></details></div>;
 }
-export function CompanyCompare({ contexts, notes = [], today = "1970-01-01", onClose, onDetail, onRemove, onOpenWiki, onEdit }: { contexts: CompanyOverview[]; notes?: Note[]; today?: string; onClose: () => void; onDetail: (context: CompanyOverview) => void; onRemove: (path: string) => void; onOpenWiki: (target: string) => void; onEdit?: () => void }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
+export function CompanyCompare({ contexts, notes = [], today = "1970-01-01", onClose, onDetail, onRemove, onOpenWiki, onEdit, embedded = false }: { contexts: CompanyOverview[]; notes?: Note[]; today?: string; onClose: () => void; onDetail: (context: CompanyOverview) => void; onRemove: (path: string) => void; onOpenWiki: (target: string) => void; onEdit?: () => void; embedded?: boolean }) {
   const [view, setView] = useState<"overview" | "reviews" | "conditions">("overview");
   const [sort, setSort] = useState<"selected" | CompanyCompareSort>("selected");
-  useDialogFocus(dialogRef, true);
-  useEffect(() => { const old = document.body.style.overflow; document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = old; }; }, []);
   const candidates = useMemo(() => buildCompanyCompareCandidates(contexts, notes, today), [contexts, notes, today]);
   const items = sort === "selected" ? contexts.flatMap((context) => { const item = candidates.find((candidate) => candidate.context.key === context.key); return item ? [item] : []; }) : filterCompanyCompareCandidates(candidates, "", "all", [], sort);
   const columns = items.map((item) => item.context);
@@ -304,10 +311,10 @@ export function CompanyCompare({ contexts, notes = [], today = "1970-01-01", onC
       { label: "主题与原文", hint: "按需展开证据", render: (context: CompanyOverview) => <details className="co-board-expand"><summary>{context.profile?.reviews.reduce((sum, review) => sum + review.insights.length, 0) || 0} 个主题 · 查看原文与阅读边界</summary><Reviews compact reviews={context.profile?.reviews ?? []} onOpenWiki={onOpenWiki} /></details> },
     ]),
   ];
-  return <div className="job-compare-backdrop co-compare-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} className="co-compare-panel co-board-shell" role="dialog" aria-modal="true" aria-label="公司与岗位并排对比" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
-    <header className="co-board-header"><div className="co-selector-icon" aria-hidden="true">⇄</div><div><p>COMPARE · {columns.length} 项并排</p><h2>差异，放在一起看</h2><span>先看分数和取舍，再展开原文。不同平台不平均，资料缺失保留空白。</span></div><div className="co-board-actions">{onEdit && <button type="button" onClick={onEdit}>更换公司</button>}<button type="button" className="co-dialog-close" onClick={onClose} aria-label="关闭对比">×</button></div></header>
+  return <CompareFrame embedded={embedded} className="co-board-shell" label="公司与岗位并排对比" onClose={onClose}>
+    <header className="co-board-header"><div className="co-selector-icon" aria-hidden="true">⇄</div><div><p>COMPARE · {columns.length} 项并排</p><h2>差异，放在一起看</h2><span>先看分数和取舍，再展开原文。不同平台不平均，资料缺失保留空白。</span></div><div className="co-board-actions">{onEdit && <button type="button" onClick={onEdit}>更换公司</button>}{!embedded && <button type="button" className="co-dialog-close" onClick={onClose} aria-label="关闭对比">×</button>}</div></header>
     <div className="co-board-controls"><div role="group" aria-label="比较内容">{[{ id: "overview", label: "一眼看差异" }, { id: "reviews", label: "外部口碑" }, { id: "conditions", label: "职责与条件" }].map((tab) => <button type="button" key={tab.id} aria-pressed={view === tab.id} onClick={() => setView(tab.id as typeof view)}>{tab.label}</button>)}</div><label>列排序<select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="selected">选择顺序</option><option value="openwork">OpenWork 高 → 低</option><option value="jobtalk">転職会議 高 → 低</option><option value="recent">最近面谈</option></select></label><span>{columns.length > 3 ? "向右滚动查看更多公司 →" : "点开主题，查看具体依据"}</span></div>
     {mixedCriteria && <p className="co-notice co-compare-notice">所选画像的评价维度不同，暂不并排比较六维契合刻度。公司事实和各平台口碑仍可比较；各公司的原始判断可从「查看总览」阅读。</p>}
     <div className="co-board-scroll"><table className="co-board-table" style={{ minWidth: `${170 + columns.length * 270}px` }}><caption className="sr-only">公司事实、六维契合度与外部评价并排比较</caption><colgroup><col style={{ width: 170 }} />{columns.map((context) => <col key={context.key} style={{ width: 270 }} />)}</colgroup><thead><tr><th scope="col"><span>公司 / 岗位</span><small>每一列独立判断</small></th>{items.map((item) => <th scope="col" key={item.context.key} data-tone={companyTone(item.shortName)}><div className="co-board-company"><button type="button" className="co-company-detail" onClick={() => onDetail(item.context)}><span className="co-company-monogram" data-tone={companyTone(item.shortName)} aria-hidden="true">{item.shortName.slice(0, 2)}</span><strong>{item.shortName}</strong><small title={item.context.title}>{item.displayRole}</small><em>查看总览 ↗</em></button><button type="button" className="co-remove" onClick={() => onRemove(item.context.note.path)} aria-label={`从对比移除${item.context.company} ${item.displayRole}`}>×</button></div><CandidateMeta item={item} /></th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={`${view}:${row.label}:${index}`}><th scope="row">{row.label}{row.hint && <small>{row.hint}</small>}</th>{columns.map((context) => <td key={context.key}>{row.render(context)}</td>)}</tr>)}</tbody></table></div>
-  </div></div>;
+  </CompareFrame>;
 }
