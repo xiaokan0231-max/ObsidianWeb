@@ -1219,7 +1219,7 @@ function InterviewSession({
     if (docContext && onContextChange) onContextChange(selected.company, docContext.note.path, prepPath);
     else onSelectionChange?.(selected.company, prepPath);
   };
-  const companyAction = <div className="co-header-actions">{replay && <button type="button" className="co-replay-entry" aria-pressed={showingReplay} onClick={toggleReplay}>{ui(showingReplay ? "回到原稿" : "对照样稿")}</button>}<button type="button" className="co-compare-entry" onClick={openCompareSelector}>{ui("公司对比")}<span aria-hidden="true">{compared.length ? ` ${compared.length} / 3` : " ↗"}</span></button><CompanyCompareButton context={context} compared={!!context && compared.some((item) => item.key === context.key)} full={compared.length >= COMPANY_COMPARE_LIMIT} onToggle={() => {
+  const companyAction = <div className="co-header-actions">{replay && <button type="button" className="co-replay-entry" aria-pressed={showingReplay} onClick={toggleReplay}>{ui(showingReplay ? "回到原稿" : "对照样稿")}</button>}<button type="button" className="co-compare-entry" onClick={openCompareSelector}>{ui("公司对比")}<span aria-hidden="true">{compared.length ? ` ${compared.length} / ${COMPANY_COMPARE_LIMIT}` : " ↗"}</span></button><CompanyCompareButton context={context} compared={!!context && compared.some((item) => item.key === context.key)} full={compared.length >= COMPANY_COMPARE_LIMIT} onToggle={() => {
     if (!context) return;
     if (compared.some((item) => item.key === context.key)) removeCompare(context.note.path);
     else setComparePaths((current) => toggleCompanyComparison(current, context.note.path));
@@ -1233,8 +1233,8 @@ function InterviewSession({
   const historicalCompany = !!selected && ["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today));
   const companyContent = <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} />;
   const compareUI = <><CompanyCompareTray contexts={compared} onRemove={removeCompare} onClear={() => { setComparePaths([]); setCompareOpen(false); }} onOpen={() => setCompareOpen(true)} />
-    {compareSelectorOpen && <CompanyCompareSelector contexts={contexts} selected={compared} onToggle={(path) => setComparePaths((current) => toggleCompanyComparison(current, path))} onClose={() => setCompareSelectorOpen(false)} onCompare={() => { setCompareSelectorOpen(false); setCompareOpen(true); }} />}
-    {compareOpen && compared.length >= 2 && <CompanyCompare contexts={compared} onClose={() => setCompareOpen(false)} onEdit={openCompareSelector} onRemove={removeCompare} onDetail={(item) => { setCompareOpen(false); selectContext(item); window.scrollTo({ top: 0, behavior: "instant" }); }} onOpenWiki={(target) => { setCompareOpen(false); onOpenWiki(target); }} />}</>;
+    {compareSelectorOpen && <CompanyCompareSelector contexts={contexts} selected={compared} notes={notes} today={today} onSelectPaths={(paths) => setComparePaths(paths.slice(0, COMPANY_COMPARE_LIMIT))} onToggle={(path) => setComparePaths((current) => toggleCompanyComparison(current, path))} onClose={() => setCompareSelectorOpen(false)} onCompare={() => { setCompareSelectorOpen(false); setCompareOpen(true); }} />}
+    {compareOpen && compared.length >= 2 && <CompanyCompare contexts={compared} notes={notes} today={today} onClose={() => setCompareOpen(false)} onEdit={openCompareSelector} onRemove={removeCompare} onDetail={(item) => { setCompareOpen(false); selectContext(item); window.scrollTo({ top: 0, behavior: "instant" }); }} onOpenWiki={(target) => { setCompareOpen(false); onOpenWiki(target); }} />}</>;
   // 導読を持たない準備稿ではモード自体を出さない。空のモードに入れると
   // 「壊れている」と読めてしまうし、既存の他社ノートは全部それに当たる。
   const briefing = useMemo(
