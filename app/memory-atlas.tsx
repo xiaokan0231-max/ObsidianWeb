@@ -14,13 +14,10 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import type { AdvisoryEvidenceRef } from "@/lib/interview-advisory";
-import InterviewSharedAsset from "./interview-shared-asset";
 import { isTypingTarget } from "@/lib/keyboard";
 import type { JobsInitialFilters } from "./jobs-view";
 import CalendarView from "./calendar-view";
 import CalendarInterviewState from "./calendar-interview-state";
-import NoteDrawer from "./note-drawer";
-import SceneNoteReader from "./scene-note-reader";
 import SearchPalette, { type PaletteAction } from "./search-palette";
 import {
   appViewFromPathname,
@@ -78,6 +75,7 @@ import { SHELL_MESSAGES } from "./shell-messages";
 import { buildNavBadges, quickDueBadgeCount, type NavBadge, type NavBadges } from "@/lib/nav-badges";
 import type { QuickSummary } from "@/lib/language/quick-types";
 import { useExitTransition } from "./use-exit-transition";
+import { useDialogFocus } from "./use-dialog-focus";
 import SidebarFooter from "./sidebar-footer";
 import { prefersReducedMotion as reducedMotionPreferred } from "@/lib/motion";
 import {
@@ -122,6 +120,10 @@ const LibraryView = lazy(VIEW_MODULES.library.load);
 const SettingsView = lazy(VIEW_MODULES.settings.load);
 const TimelineView = lazy(VIEW_MODULES.timeline.load);
 const ProgressWorkspace = lazy(PROGRESS_MODULE.load);
+// 阅读器只在打开正文时需要，不能让准备稿与全文渲染一起进入日历首屏。
+const NoteDrawer = lazy(() => import("./note-drawer"));
+const SceneNoteReader = lazy(() => import("./scene-note-reader"));
+const InterviewSharedAsset = lazy(() => import("./interview-shared-asset"));
 
 /** 日历是外壳的静态依赖，不在表里；其余页面按需预取，失败留给页面自己的错误边界。 */
 function viewModule(view: AppView) {
@@ -379,13 +381,17 @@ function SharedAssetOverlay({
       origin={origin}
       onClose={onClose}
     >
-      <InterviewSharedAsset
-        key={`${target.note}#${target.section ?? ""}#${target.defaultSection ?? ""}`}
-        note={note}
-        target={target}
-        onOpenCard={onOpenCard}
-        onOpenWiki={onOpenWiki}
-      />
+      <ViewErrorBoundary label="shared-asset">
+        <Suspense fallback={<LoadingState view="session" />}>
+          <InterviewSharedAsset
+            key={`${target.note}#${target.section ?? ""}#${target.defaultSection ?? ""}`}
+            note={note}
+            target={target}
+            onOpenCard={onOpenCard}
+            onOpenWiki={onOpenWiki}
+          />
+        </Suspense>
+      </ViewErrorBoundary>
     </InterviewOverlay>
   );
 }
@@ -1073,9 +1079,10 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   // today を依存に入れるのは、日历事件の upcoming/past が「今日」で決まるため。
   // 入れないと、日付を跨いだ時に見出しの日付だけ進んで、昨日の面接が「未来の予定」の
   // まま残る——頂栏は実時間で「1 日前」と出すので、同じ画面の中で矛盾する。
+  // 全文链接与时间线统计只在时间航道使用；其它页面不用为整批正文做这次扫描。
   const derived = useMemo(
-    () => buildDerivedData(notes, new Date(`${today}T00:00:00`)),
-    [notes, today],
+    () => view === "timeline" ? buildDerivedData(notes, new Date(`${today}T00:00:00`)) : null,
+    [view, notes, today],
   );
   // 日历统一使用 JST 日界；其它视图仍保留各自的本机日期口径。
   const calendarEvents = useMemo(
@@ -1715,7 +1722,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
                   onNoteWritten={patchNote}
                 />
               )}
-              {view === "timeline" && (
+              {view === "timeline" && derived && (
                 <TimelineView
                   today={today}
                   items={derived.timeline}
@@ -1833,32 +1840,63 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
         />
       )}
 
-      {selectedNote && (view === "graph" || view === "timeline" ? (
-        <SceneNoteReader
-          note={selectedNote}
-          section={selectedSection}
-          allNotes={notes}
-          wikiIndexComplete={readyScopes.has("all")}
-          scene={view}
-          closing={noteExiting}
-          onClose={closeSceneNote}
-          onOpenWiki={openWikiLink}
-          onOpen={openNote}
-        />
-      ) : (
-        <NoteDrawer
-          note={selectedNote}
-          section={selectedSection}
-          allNotes={notes}
-          wikiIndexComplete={readyScopes.has("all")}
-          closing={noteExiting}
-          onClose={closeNote}
-          onOpenWiki={openWikiLink}
-          onOpen={openNote}
-        />
-      ))}
+      {selectedNote && (
+        <ViewErrorBoundary label="note-reader">
+          <Suspense fallback={<NoteReaderLoading title={noteBasename(selectedNote.path)} onClose={view === "graph" || view === "timeline" ? closeSceneNote : closeNote} />}>
+            {view === "graph" || view === "timeline" ? (
+              <SceneNoteReader
+                note={selectedNote}
+                section={selectedSection}
+                allNotes={notes}
+                wikiIndexComplete={readyScopes.has("all")}
+                scene={view}
+                closing={noteExiting}
+                onClose={closeSceneNote}
+                onOpenWiki={openWikiLink}
+                onOpen={openNote}
+              />
+            ) : (
+              <NoteDrawer
+                note={selectedNote}
+                section={selectedSection}
+                allNotes={notes}
+                wikiIndexComplete={readyScopes.has("all")}
+                closing={noteExiting}
+                onClose={closeNote}
+                onOpenWiki={openWikiLink}
+                onOpen={openNote}
+              />
+            )}
+          </Suspense>
+        </ViewErrorBoundary>
+      )}
     </div>
   );
+}
+
+
+/** 模块下载时也保留可关闭的阅读层，防止正文未到时点击穿透到背面的日历。 */
+function NoteReaderLoading({ title, onClose }: { title: string; onClose: () => void }) {
+  const { locale } = useUiLocale();
+  const ui = SHELL_MESSAGES[locale];
+  const dialogRef = useRef<HTMLElement>(null);
+  useDialogFocus(dialogRef);
+  useEffect(() => {
+    const bodyOverflow = document.body.style.overflow;
+    const rootOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = bodyOverflow;
+      document.documentElement.style.overflow = rootOverflow;
+    };
+  }, []);
+  return <div className="drawer-backdrop drawer-backdrop--full">
+    <aside ref={dialogRef} tabIndex={-1} className="note-drawer note-drawer--full" role="dialog" aria-modal="true" aria-label={title}>
+      <header className="drawer-header"><div>{title}</div><button type="button" onClick={onClose} aria-label={ui.closeNotice}>×</button></header>
+      <div className="drawer-scroll"><div className="scope-loading" role="status" aria-live="polite"><span className="scope-loading-dot" aria-hidden="true" /><p>{ui.loading}…</p></div></div>
+    </aside>
+  </div>;
 }
 
 

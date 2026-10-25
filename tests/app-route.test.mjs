@@ -60,8 +60,8 @@ test("根与总览跳转日历；本人行动页可直接打开", async () => {
     }), /not found/);
   }
   const calendar = await Section({ params: Promise.resolve({ section: "calendar" }), searchParams: Promise.resolve({}) });
-  assert.equal(calendar.props.initialView, "calendar");
+  assert.equal(calendar.props.children.find((child) => child.props.initialView).props.initialView, "calendar");
   const actions = await Section({ params: Promise.resolve({ section: "actions" }), searchParams: Promise.resolve(search) });
-  assert.equal(actions.props.initialView, "actions");
+  assert.equal(actions.props.children.find((child) => child.props.initialView).props.initialView, "actions");
   await assert.rejects(Section({ params: Promise.resolve({ section: "actions", rest: ["unknown"] }), searchParams: Promise.resolve({}) }), /not found/);
 });
