@@ -67,8 +67,8 @@ test("feedback is written separately, shown per AI block, and reused on regenera
   assert.match(route, /deduplicated: outcome\.deduplicated/);
   assert.match(deepRoute, /humanFeedback/);
   assert.match(ui, /你对这项 AI 评价/);
-  assert.match(ui, />不同意</);
-  assert.match(ui, />补充事实</);
+  assert.match(ui, /menu\("不同意"\)/);
+  assert.match(ui, /menu\("补充事实"\)/);
 });
 
 test("cross-interview trends require the same strategy tag in two interviews", async () => {

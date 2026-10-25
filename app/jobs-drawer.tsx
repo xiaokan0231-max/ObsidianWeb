@@ -1,5 +1,7 @@
 "use client";
 
+import { useJobLabels } from "./jobs-copy";
+
 import { useRef, useState } from "react";
 import {
   intakeRelative,
@@ -68,6 +70,7 @@ export function JobDrawer({
   onCompare: () => void;
   onOpenNote: (note?: Note) => void;
 }) {
+  const menu = useJobLabels();
   const { t, label: menuLabel } = useJobMenu();
   const intakeAge = intakeRelative(job.date, today);
   const dialogRef = useRef<HTMLElement>(null);
@@ -99,7 +102,7 @@ export function JobDrawer({
       <aside ref={dialogRef} tabIndex={-1} className="note-drawer job-drawer" aria-label={t("岗位详情")} aria-modal="true" role="dialog">
         <header className="drawer-header">
           <div>
-            <span style={{ color: "var(--green)" }}>{ORIGIN_LABEL[job.origin] ?? "岗位机会"}</span>
+            <span style={{ color: "var(--green)" }}>{ORIGIN_LABEL[job.origin] ?? menu("岗位机会")}</span>
             <small>{job.path}</small>
           </div>
           <button onClick={onClose} aria-label={t("关闭详情")}>×</button>
@@ -113,7 +116,7 @@ export function JobDrawer({
             <div className={`job-rating job-rating-large rate-${rateTone(job.rating)}`}>
               <span className="job-score">
                 <b>{rateText(job)}</b>
-                <small>{job.rated ? "/10" : "未採点"}</small>
+                <small>{job.rated ? "/10" : menu("未採点")}</small>
               </span>
               <span className="job-meter"><i style={{ width: `${job.rated ? job.rating * 10 : 0}%` }} /></span>
             </div>
@@ -156,16 +159,16 @@ export function JobDrawer({
           </div>
 
           <dl className="job-detail-facts">
-            <div><dt>年収</dt><dd>{job.salaryText || "—"}</dd></div>
-            <div><dt>勤務地</dt><dd>{job.location || "—"}</dd></div>
-            <div><dt>雇用形態</dt><dd>{job.employment || "—"}</dd></div>
-            <div><dt>来源</dt><dd>{job.source || "—"}</dd></div>
-            <div><dt>录入方式</dt><dd>{ORIGIN_LABEL[job.origin] ?? (job.origin || "—")}</dd></div>
-            <div><dt>案件 ID</dt><dd>{job.caseId || "—"}</dd></div>
-            <div><dt>官方渠道</dt><dd>{OFFICIAL_APPLY_LABEL[job.officialApplyStatus]}{job.officialApplyNote ? ` · ${job.officialApplyNote}` : ""}</dd></div>
+            <div><dt>{menu("年収")}</dt><dd>{job.salaryText || "—"}</dd></div>
+            <div><dt>{menu("勤務地")}</dt><dd>{job.location || "—"}</dd></div>
+            <div><dt>{menu("雇用形態")}</dt><dd>{job.employment || "—"}</dd></div>
+            <div><dt>{menu("来源")}</dt><dd>{job.source || "—"}</dd></div>
+            <div><dt>{menu("录入方式")}</dt><dd>{ORIGIN_LABEL[job.origin] ?? (job.origin || "—")}</dd></div>
+            <div><dt>{menu("案件 ID")}</dt><dd>{job.caseId || "—"}</dd></div>
+            <div><dt>{menu("官方渠道")}</dt><dd>{OFFICIAL_APPLY_LABEL[job.officialApplyStatus]}{job.officialApplyNote ? ` · ${job.officialApplyNote}` : ""}</dd></div>
             {/* 「推荐日期」だと応募日と紛らわしい。frontmatter `date` は AI 推薦が入库した日。 */}
-            <div><dt>入库日</dt><dd>{job.date ? `${job.date}${intakeAge && ` · ${intakeAge}`}` : "—"}</dd></div>
-            <div><dt>笔记更新</dt><dd>{formatDate(job.updatedAt, true)}</dd></div>
+            <div><dt>{menu("入库日")}</dt><dd>{job.date ? `${job.date}${intakeAge && ` · ${intakeAge}`}` : "—"}</dd></div>
+            <div><dt>{menu("笔记更新")}</dt><dd>{formatDate(job.updatedAt, true)}</dd></div>
           </dl>
 
           <section className="job-case-workspace" aria-label={t("案件推进")}>
@@ -174,7 +177,7 @@ export function JobDrawer({
                 <span>CASE WORKSPACE</span>
                 <h2>{t("下一步与承诺")}</h2>
               </div>
-              <small>{job.nextAction || "尚未记录下一动作"}</small>
+              <small>{job.nextAction || menu("尚未记录下一动作")}</small>
             </div>
             <div className="job-follow-up-form">
               <label>
@@ -207,7 +210,7 @@ export function JobDrawer({
             )}
             {related.length > 0 && (
               <div className="job-case-related">
-                <span>同一案件</span>
+                <span>{menu("同一案件")}</span>
                 {related.map((note) => (
                   <button key={note.path} type="button" onClick={() => onOpenNote(note)}>
                     {getTitle(note)} <small>{getType(note)}</small>
@@ -220,8 +223,8 @@ export function JobDrawer({
           {job.verification !== "verified" && (
             <p className="job-detail-warning">
               {job.verification === "warned"
-                ? "笔记里有未验证 / 需要核对的标记。应募前请自行打开求人原文确认必须要件。"
-                : "这条岗位还没有求人原文核对记录。AI 打分只是假设，不能当作事实。"}
+                ? menu("笔记里有未验证 / 需要核对的标记。应募前请自行打开求人原文确认必须要件。")
+                : menu("这条岗位还没有求人原文核对记录。AI 打分只是假设，不能当作事实。")}
             </p>
           )}
 
@@ -231,18 +234,18 @@ export function JobDrawer({
 
           {job.reason && (
             <section className="job-detail-block">
-              <h3>推荐理由</h3>
+              <h3>{menu("推荐理由")}</h3>
               <p>{job.reason}</p>
             </section>
           )}
-          <DetailList title="匹配点" items={job.matches} />
+          <DetailList title={menu("匹配点")} items={job.matches} />
           {job.caution && (
             <section className="job-detail-block job-detail-caution">
-              <h3>注意点</h3>
+              <h3>{menu("注意点")}</h3>
               <p>{job.caution}</p>
             </section>
           )}
-          <DetailList title="主打材料" items={job.materials} />
+          <DetailList title={menu("主打材料")} items={job.materials} />
         </div>
       </aside>
     </div>

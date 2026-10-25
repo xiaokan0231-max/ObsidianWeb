@@ -1,5 +1,7 @@
 "use client";
 
+import { useInterviewMenu } from "./interview-menu-copy";
+
 import {
   useEffect,
   useMemo,
@@ -87,6 +89,7 @@ export default function InterviewPrep({
    */
   syncUrl?: boolean;
 }) {
+  const menu = useInterviewMenu();
   const { locale } = useUiLocale();
   const ui = (label: string) => locale === "ja" ? PREP_MENU_JA[label] ?? menuLabel(label, locale) : label;
   const library = useMemo(() => findInterviewPrepLibrary(notes), [notes]);
@@ -152,13 +155,13 @@ export default function InterviewPrep({
   };
 
   if (!library) {
-    if (loading) return <div className="prep-view"><ScopeLoading label="标准回答库" /></div>;
+    if (loading) return <div className="prep-view"><ScopeLoading label={menu("标准回答库")} /></div>;
     return (
       <div className="prep-view">
         <div className="prep-empty">
           <span>INTERVIEW PREP</span>
-          <h1>还没有标准回答库</h1>
-          <p>在 Vault 中建立 type: interview-prep-library 的笔记后，这里会自动读取。</p>
+          <h1>{menu("还没有标准回答库")}</h1>
+          <p>{menu("在 Vault 中建立 type: interview-prep-library 的笔记后，这里会自动读取。")}</p>
         </div>
       </div>
     );
@@ -198,16 +201,16 @@ export default function InterviewPrep({
       </section>
 
       {filteredItems.length === 0 ? (
-        <p className="prep-no-result">没有符合当前搜索和分类的答案。</p>
+        <p className="prep-no-result">{menu("没有符合当前搜索和分类的答案。")}</p>
       ) : (
         <div className="prep-workbench">
           <nav className="prep-question-list" aria-label={ui("面试问题")}>
             <header>
               <div>
                 <span>{filteredItems.length}</span>
-                <small>个参考答案</small>
+                <small>{menu("个参考答案")}</small>
               </div>
-              <p><kbd>1–9</kbd> 快速切换</p>
+              <p><kbd>1–9</kbd>{menu(" 快速切换")}</p>
             </header>
             {filteredItems.map((item, index) => (
               <button
@@ -218,7 +221,7 @@ export default function InterviewPrep({
               >
                 <span className="prep-index">{index < 9 ? index + 1 : "·"}</span>
                 <span className="prep-question-copy">
-                  <small>{item.category} · {item.priority === "S" ? "优先必练" : `${item.priority}级`}</small>
+                  <small>{item.category} · {item.priority === "S" ? menu("优先必练") : menu("{priority}级", { priority: item.priority })}</small>
                   <strong>{item.title}</strong>
                   <em>{item.question}</em>
                 </span>
@@ -245,7 +248,7 @@ export default function InterviewPrep({
 
               {selected.purpose && (
                 <p className="prep-purpose">
-                  <span>这题要让对方得到什么</span>
+                  <span>{menu("这题要让对方得到什么")}</span>
                   {interviewPrepPlainText(selected.purpose)}
                 </p>
               )}
@@ -254,10 +257,10 @@ export default function InterviewPrep({
                 <header>
                   <div>
                     <span>STANDARD REFERENCE</span>
-                    <h3>标准参考答案</h3>
+                    <h3>{menu("标准参考答案")}</h3>
                   </div>
                   <button type="button" onClick={() => void copyAnswer(selected)}>
-                    {copiedId === selected.id ? "已复制 ✓" : "复制日语答案"}
+                    {copiedId === selected.id ? menu("已复制 ✓") : menu("复制日语答案")}
                   </button>
                 </header>
                 <p lang="ja"><Inlines nodes={parseInline(selected.standardAnswer)} /></p>
@@ -265,19 +268,19 @@ export default function InterviewPrep({
 
               {selected.shortAnswer && (
                 <section className="prep-short">
-                  <span>30秒版 · 压力下先说这个</span>
+                  <span>{menu("30秒版 · 压力下先说这个")}</span>
                   <p lang="ja">{interviewPrepPlainText(selected.shortAnswer)}</p>
                 </section>
               )}
 
               <div className="prep-guidance-grid">
-                <GuidanceBlock title="回答结构" text={selected.structure} />
-                <GuidanceBlock title="使用边界" text={selected.boundary} tone="warm" />
+                <GuidanceBlock title={menu("回答结构")} text={selected.structure} />
+                <GuidanceBlock title={menu("使用边界")} text={selected.boundary} tone="warm" />
               </div>
 
               {selected.evidence && (
                 <section className="prep-evidence">
-                  <span>只使用已经确认的事实</span>
+                  <span>{menu("只使用已经确认的事实")}</span>
                   <p>{interviewPrepPlainText(selected.evidence)}</p>
                 </section>
               )}
@@ -306,13 +309,13 @@ export default function InterviewPrep({
                 {item.tags.length > 0 ? ` · ${item.tags.join(" / ")}` : ""}
               </p>
               {[
-                ["问题", item.question, "ja"],
-                ["回答目的", item.purpose, undefined],
-                ["标准参考答案", item.standardAnswer, "ja"],
-                ["30秒版", item.shortAnswer, "ja"],
-                ["回答结构", item.structure, undefined],
-                ["使用边界", item.boundary, undefined],
-                ["事实与证据", item.evidence, undefined],
+                [menu("问题"), item.question, "ja"],
+                [menu("回答目的"), item.purpose, undefined],
+                [menu("标准参考答案"), item.standardAnswer, "ja"],
+                [menu("30秒版"), item.shortAnswer, "ja"],
+                [menu("回答结构"), item.structure, undefined],
+                [menu("使用边界"), item.boundary, undefined],
+                [menu("事实与证据"), item.evidence, undefined],
               ].map(([label, content, lang], fieldIndex) => content ? (
                 <section className="reader-answer-field" data-reading-anchor={`reader-answer-${item.id}-${fieldIndex}`} key={label}>
                   <h3>{label ? ui(label) : label}</h3>

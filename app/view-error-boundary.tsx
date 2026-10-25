@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { useCommonMenu } from "./common-menu-copy";
 
 /**
  * 单个视图的错误边界。
@@ -11,6 +12,18 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
  */
 type Props = { children: ReactNode; label: string };
 type State = { error: Error | null };
+
+function ViewErrorNotice({ error, label, onRetry }: { error: Error; label: string; onRetry: () => void }) {
+  const menu = useCommonMenu();
+  return <div className="view-error" role="alert">
+    <span className="error-code">RENDER / {label}</span>
+    <h1>{menu("这个页面暂时无法显示。")}</h1>
+    <p>{menu("可以先重试；如果页面内容仍未载入，请重新载入页面。侧栏仍可切换到其它页面。")}</p>
+    <code>{error.message}</code>
+    <button onClick={onRetry}>{menu("重试")} <span>↻</span></button>
+    <button onClick={() => window.location.reload()}>{menu("重新载入页面")}</button>
+  </div>;
+}
 
 export default class ViewErrorBoundary extends Component<Props, State> {
   state: State = { error: null };
@@ -25,16 +38,7 @@ export default class ViewErrorBoundary extends Component<Props, State> {
 
   render() {
     if (!this.state.error) return this.props.children;
-    return (
-      <div className="view-error" role="alert">
-        <span className="error-code">RENDER / {this.props.label}</span>
-        <h1>这个页面暂时无法显示。</h1>
-        <p>可以先重试；如果页面内容仍未载入，请重新载入页面。侧栏仍可切换到其它页面。</p>
-        <code>{this.state.error.message}</code>
-        <button onClick={() => this.setState({ error: null })}>重试 <span>↻</span></button>
-        {/* lazy 会缓存失败的模块请求；只重挂组件不能重新下载，需要保留整页恢复入口。 */}
-        <button onClick={() => window.location.reload()}>重新载入页面</button>
-      </div>
-    );
+    // lazy 会缓存失败的模块请求；保留整页恢复入口，文案随当前语言切换。
+    return <ViewErrorNotice error={this.state.error} label={this.props.label} onRetry={() => this.setState({ error: null })} />;
   }
 }

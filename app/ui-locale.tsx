@@ -38,3 +38,11 @@ export function LanguageSwitch() {
     </div>
   );
 }
+
+/** 发布提示也订阅语言，切换后无需刷新整页。 */
+export function PublishedReadOnlyNotice() {
+  const { locale } = useUiLocale();
+  return <aside style={{ position: "fixed", bottom: 12, right: 16, zIndex: 1000, padding: "6px 12px", borderRadius: 8, background: "var(--color-bg, #fff)", color: "var(--color-text, #222)", border: "1px solid var(--color-border, #ddd)", fontSize: 14 }}>
+    {locale === "ja" ? "公開済みの内容 · 閲覧専用" : "已发布内容 · 仅供浏览"}
+  </aside>;
+}

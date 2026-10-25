@@ -223,19 +223,18 @@ export function buildSignalOutcomeComparison(rows: SignalOutcomeRow[]): SignalOu
 }
 
 /** 样本说明与结果来源，界面和生成笔记共用同一段话。 */
-export function signalOutcomeCaveat(comparison: SignalOutcomeComparison) {
-  const counts = COMPARABLE_OUTCOMES.map((kind) => `${INTERVIEW_OUTCOME_LABELS[kind]} ${comparison.outcomeCounts[kind]}`).join("・");
-  return `样本很小：${comparison.rows.length} 场复盘里 ${comparison.assessed} 场按新口径评了日本面试信号，`
-    + `其中 ${comparison.comparable} 场有明确结果（全部场次：${counts}）。这里只把信号和结果并排、只计数，`
-    + "不算比率、不推因果——选考结果还受岗位匹配、时机、竞争者和企业状况影响。";
+export function signalOutcomeCaveat(comparison: SignalOutcomeComparison, t: (label: string) => string = (label) => label) {
+  const counts = COMPARABLE_OUTCOMES.map((kind) => `${t(INTERVIEW_OUTCOME_LABELS[kind])} ${comparison.outcomeCounts[kind]}`).join("・");
+  const values: Record<string, string | number> = { total: comparison.rows.length, assessed: comparison.assessed, comparable: comparison.comparable, counts };
+  return t("样本很小：{total} 场复盘里 {assessed} 场按新口径评了日本面试信号，其中 {comparable} 场有明确结果（全部场次：{counts}）。这里只把信号和结果并排、只计数，不算比率、不推因果——选考结果还受岗位匹配、时机、竞争者和企业状况影响。").replace(/\{(\w+)\}/g, (match, name: string) => String(values[name] ?? match));
 }
 
 export const SIGNAL_OUTCOME_SOURCE_NOTE = "结果来源：同一案件之后还有下一轮的场次记为通过；最后一轮取关联 job-case 的 status，"
   + "没有 job-case 的独立面谈取面谈 TODO 的 selection_status（closed 记为不採用、waiting 记为无音）。中介面谈不是企业选考，记为不适用。";
 
-export function verdictTallyText(cell: VerdictTally) {
-  const parts = [`${JAPAN_SIGNAL_VERDICT_SHORT.good} ${cell.good}`, `${JAPAN_SIGNAL_VERDICT_SHORT.mixed} ${cell.mixed}`, `${JAPAN_SIGNAL_VERDICT_SHORT.poor} ${cell.poor}`];
-  return cell.other ? `${parts.join("・")}・未判断 ${cell.other}` : parts.join("・");
+export function verdictTallyText(cell: VerdictTally, t: (label: string) => string = (label) => label) {
+  const parts = [`${t(JAPAN_SIGNAL_VERDICT_SHORT.good)} ${cell.good}`, `${t(JAPAN_SIGNAL_VERDICT_SHORT.mixed)} ${cell.mixed}`, `${t(JAPAN_SIGNAL_VERDICT_SHORT.poor)} ${cell.poor}`];
+  return cell.other ? `${parts.join("・")}・${t("未判断")} ${cell.other}` : parts.join("・");
 }
 
 function markdownTable(head: string[], rows: string[][]) {

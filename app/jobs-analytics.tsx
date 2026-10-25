@@ -1,5 +1,7 @@
 "use client";
 
+import { useJobLabels } from "./jobs-copy";
+
 import { memo, useMemo, useState, type CSSProperties } from "react";
 import { CountUp } from "./count-up";
 import ScopeLoading from "./scope-loading";
@@ -171,6 +173,7 @@ function ProgressPriority({
   job: JobCard;
   onOpen: (note: Note) => void;
 }) {
+  const menu = useJobLabels();
   const { t } = useAnalyticsMenu();
   const evidence = job.matches[0] || job.reason || job.stack.slice(0, 3).join("・");
 
@@ -181,23 +184,23 @@ function ProgressPriority({
       onClick={() => onOpen(job.note)}
     >
       <span className="analytics-priority-topline">
-        <b>{job.status === "面接中" ? "面接を最優先" : "現在の最優先案件"}</b>
+        <b>{job.status === "面接中" ? menu("面接を最優先") : menu("現在の最優先案件")}</b>
         <i className={`tone-${statusTone(job.status)}`}>{job.status}</i>
       </span>
       <strong>{job.company}</strong>
       <small>{job.position}</small>
       <div className="analytics-priority-action">
-        <span>下一步</span>
+        <span>{menu("下一步")}</span>
         <p>{focusAction(job)}</p>
       </div>
       <dl>
         <div>
-          <dt>次回日程</dt>
-          <dd>{scheduledDate(job) ? `${shortDate(scheduledDate(job))}${scheduledTime(job) ? ` ${scheduledTime(job)}` : ""}` : "未定"}</dd>
+          <dt>{menu("次回日程")}</dt>
+          <dd>{scheduledDate(job) ? `${shortDate(scheduledDate(job))}${scheduledTime(job) ? ` ${scheduledTime(job)}` : ""}` : menu("未定")}</dd>
         </div>
         <div>
-          <dt>応募优先度</dt>
-          <dd>{job.rating > 0 ? `${job.rating} / 10` : "未採点"}</dd>
+          <dt>{menu("応募优先度")}</dt>
+          <dd>{job.rating > 0 ? `${job.rating} / 10` : menu("未採点")}</dd>
         </div>
       </dl>
       {evidence ? <small className="analytics-priority-evidence">{evidence}</small> : null}
@@ -429,6 +432,7 @@ function JobsAnalytics({
   /** この視図の scope がまだ届いていない：台帳の空状態ではなく読取中を出す。 */
   loading?: boolean;
 }) {
+  const menu = useJobLabels();
   const { t, label: menuLabel } = useAnalyticsMenu();
   // 期間は URL に持つ：刷新・別画面からの戻りで「直近3か月」を毎回選び直さなくて済むように。
   const [range, setRange] = useUrlState<RangeId>("range", "all", RANGE_CODEC);
@@ -651,7 +655,7 @@ function JobsAnalytics({
       {derivedState !== "fresh" && (
         <p className={`analytics-stale ${derivedState}`} role="status">
           {derivedState === "rebuilding"
-            ? "案件状态已写入，正在重算台帳的派生统计…"
+            ? menu("案件状态已写入，正在重算台帳的派生统计…")
             : `案件状态已写入，下方图表仍是上一次 vault:stats 的结果。${statsError ? ` ${statsError}` : ""}`}
           {derivedState === "stale" && onRebuildStats && <button type="button" onClick={onRebuildStats}>{t("立即重算")}</button>}
         </p>
@@ -662,7 +666,7 @@ function JobsAnalytics({
           return (
             <div key={card.key} data-tone={card.tone} data-zero={count === 0}>
               <dt>{menuLabel(card.label)}</dt>
-              <dd><CountUp as="strong" value={count} /><small>件</small></dd>
+              <dd><CountUp as="strong" value={count} /><small>{menu("件")}</small></dd>
               {/* カード全体を覆う透明ボタン。dt/dd の入れ子（定義リストの意味）を壊さずに
                   押せるようにする。0 件は背景情報なので操作対象にしない。 */}
               <button
@@ -721,17 +725,17 @@ function JobsAnalytics({
             <div className="analytics-watch-list">
               <header>
                 <strong>{t("观察名单")}</strong>
-                <small>高优先・选考中</small>
+                <small>{menu("高优先・选考中")}</small>
               </header>
               {watchJobs.length > 0 ? (
                 watchJobs.map((job) => <ProgressWatchRow key={job.path} job={job} onOpen={openCase} />)
               ) : (
-                <p className="chart-empty">暂时没有其他需要持续观察的高优先案件。</p>
+                <p className="chart-empty">{menu("暂时没有其他需要持续观察的高优先案件。")}</p>
               )}
             </div>
           </div>
         ) : (
-          <p className="chart-empty">当前没有处于选考中的案件。</p>
+          <p className="chart-empty">{menu("当前没有处于选考中的案件。")}</p>
         )}
       </details>
 
@@ -739,7 +743,7 @@ function JobsAnalytics({
         <summary>
           <span>
             <strong>{t("当前手札分析")}</strong>
-            <small>评分、状态与技术需求；只有需要比较下一批岗位时再看</small>
+            <small>{menu("评分、状态与技术需求；只有需要比较下一批岗位时再看")}</small>
           </span>
           <em>{t("打开")}</em>
         </summary>
@@ -786,9 +790,7 @@ function JobsAnalytics({
           </button>
         ) : null}
         <small className="analytics-filter-note">
-          状態で絞っても状態内訳の図は全状態を表示し続ける（評点図に評点を掛けないのと同じ理屈）。
-          上の KPI・重点案件には効かない。
-        </small>
+          {menu("状態で絞っても状態内訳の図は全状態を表示し続ける（評点図に評点を掛けないのと同じ理屈）。 上の KPI・重点案件には効かない。")}</small>
           </div>
           <div className="analytics-filter analytics-cond-filter">
         <span>{t("来源")}</span>
@@ -829,8 +831,8 @@ function JobsAnalytics({
 
           <div className="chart-grid-2">
         <Card
-          title="現役案件の評点"
-            caption={`不採用を除いた現在の手札${condActive > 0 ? `・条件通過後の ${condJobs.length} 件` : "・全件"}。评分表示応募价值与时间优先级，不是录用概率；7 点以上为优先判断带。`}
+          title={menu("現役案件の評点")}
+            caption={`不採用を除いた現在の手札${condActive > 0 ? `・条件通過後の ${condJobs.length} 件` : menu("・全件")}。评分表示応募价值与时间优先级，不是录用概率；7 点以上为优先判断带。`}
         >
           <div className="chart-bars">
             {bands.map((band, index) => (
@@ -845,15 +847,15 @@ function JobsAnalytics({
               />
             ))}
           </div>
-          <TableView head={["評点", "件数", "意味"]} rows={bands.map((b) => [b.label, b.count, b.hint])} />
+          <TableView head={[menu("評点"), menu("件数"), menu("意味")]} rows={bands.map((b) => [b.label, b.count, b.hint])} />
         </Card>
 
         <Card
-          title="現役案件の状態"
+          title={menu("現役案件の状態")}
           caption={
             handScope === "high"
-              ? `評点 7 以上＋選考中の ${statusPool.length} 件。いま動かせる札の内訳${condActive === 0 ? "で、進行中の合計は上の KPI と一致する" : "（条件フィルタ適用中・状態自身は絞らない）"}。`
-              : `現役 ${statusPool.length} 件${condActive === 0 ? "すべて" : "（条件フィルタ適用中）"}。4〜6 点の投げない札も含む。`
+              ? `評点 7 以上＋選考中の ${statusPool.length} 件。いま動かせる札の内訳${condActive === 0 ? menu("で、進行中の合計は上の KPI と一致する") : menu("（条件フィルタ適用中・状態自身は絞らない）")}。`
+              : `現役 ${statusPool.length} 件${condActive === 0 ? "すべて" : menu("（条件フィルタ適用中）")}。4〜6 点の投げない札も含む。`
           }
         >
           <div className="chart-stack" role="img" aria-label={t("状態の分布")}>
@@ -877,14 +879,14 @@ function JobsAnalytics({
             ))}
           </ul>
           <TableView
-            head={["状態", "件数", "割合"]}
+            head={[menu("状態"), menu("件数"), menu("割合")]}
             rows={statuses.map((row) => [row.status, row.count, pct1(row.count / statusTotal)])}
           />
         </Card>
           </div>
 
           <Card
-        title="現役求人が求める技術（上位10）"
+        title={menu("現役求人が求める技術（上位10）")}
         caption={
           handScope === "high"
             ? `評点 7 以上＋選考中の ${handJobs.length} 件の stack を集計。次の応募先を選ぶ材料。`
@@ -903,7 +905,7 @@ function JobsAnalytics({
             />
           ))}
         </div>
-        <TableView head={["技術", "出現件数"]} rows={stacks.map((row) => [row.name, row.count])} />
+        <TableView head={[menu("技術"), menu("出現件数")]} rows={stacks.map((row) => [row.name, row.count])} />
           </Card>
         </div>
       </details>
@@ -913,7 +915,7 @@ function JobsAnalytics({
           <span>
             <b>{t("参考データ")}</b>
             <strong>{t("過去の不採用・経路別到達率・選考ファネル")}</strong>
-            <small>日々の判断には使わないため、通常は閉じておく</small>
+            <small>{menu("日々の判断には使わないため、通常は閉じておく")}</small>
           </span>
           <em>{t("開く")}</em>
         </summary>
@@ -935,20 +937,20 @@ function JobsAnalytics({
           </div>
 
           <div className="stat-row analytics-history-stats">
-            <Tile value={`${stats.rejections.total}`} label="不採用（累計）" note="凍結CSV ＋ ノート" />
+            <Tile value={`${stats.rejections.total}`} label={menu("不採用（累計）")} note={menu("凍結CSV ＋ ノート")} />
             <Tile
               value={pct1(reachRate(stats.rejections.reachedInterview, stats.rejections.total))}
-              label="面接到達率"
+              label={menu("面接到達率")}
               note={`${stats.rejections.reachedInterview} 社が書類を通過`}
             />
           </div>
 
           <Card
-            title="経路別の面接到達率"
+            title={menu("経路別の面接到達率")}
             caption={
               range === "all"
-                ? "どの経路が書類を通っているか。バーの長さ＝到達率、右の n＝その経路の不採用社数。"
-                : "⚠️ 経路別は月内訳を持たないため、ここだけ常に全期間の数字。他のチャートとは母数が違う。"
+                ? menu("どの経路が書類を通っているか。バーの長さ＝到達率、右の n＝その経路の不採用社数。")
+                : menu("⚠️ 経路別は月内訳を持たないため、ここだけ常に全期間の数字。他のチャートとは母数が違う。")
             }
           >
             {hasHistory ? (
@@ -981,14 +983,12 @@ function JobsAnalytics({
                   if (small.length === 0) return null;
                   return (
                     <p className="chart-note">
-                      <strong>n が小さい経路の率を単独で読まない。</strong>
-                      {small.map((row) => `${row.channel}の ${row.reached} / ${row.total} 社`).join("、")}は、
-                      1 社増減するだけで率が十数ポイント動く。
-                    </p>
+                      <strong>{menu("n が小さい経路の率を単独で読まない。")}</strong>
+                      {small.map((row) => `${row.channel}の ${row.reached} / ${row.total} 社`).join("、")}{menu("は、 1 社増減するだけで率が十数ポイント動く。")}</p>
                   );
                 })()}
                 <TableView
-                  head={["経路", "不採用", "書類終了", "面接到達", "到達率"]}
+                  head={[menu("経路"), menu("不採用"), menu("書類終了"), menu("面接到達"), menu("到達率")]}
                   rows={channels.map((row) => [
                     row.channel,
                     row.total,
@@ -999,37 +999,37 @@ function JobsAnalytics({
                 />
               </>
             ) : (
-              loading ? <ScopeLoading label="台帳" /> : <p className="chart-empty">台帳の集計がまだ生成されていない。</p>
+              loading ? <ScopeLoading label={menu("台帳")} /> : <p className="chart-empty">{menu("台帳の集計がまだ生成されていない。")}</p>
             )}
           </Card>
 
           <Card
-            title="選考ファネル（観測できている範囲）"
-            caption="台帳は不採用しか記録していないため、総応募数は直接には分からない。"
+            title={menu("選考ファネル（観測できている範囲）")}
+            caption={menu("台帳は不採用しか記録していないため、総応募数は直接には分からない。")}
           >
             <FunnelChart steps={funnel} label={t("選考ファネル")} />
             <TableView
-              head={["段階", "件数", "応募比", "前段比"]}
+              head={[menu("段階"), menu("件数"), menu("応募比"), menu("前段比")]}
               rows={funnel.map((row, index) => [row.stage, row.value, pct1(row.ofTop), index === 0 ? "—" : pctOrDash(row.ofPrevious)])}
             />
           </Card>
 
           <Card
-            title="月別：投げた数と落ちた数"
+            title={menu("月別：投げた数と落ちた数")}
             caption={
               stats.timeline.appliedKnownFrom
                 ? `応募数が分かるのは ${stats.timeline.appliedKnownFrom} 以降。それ以前は未走査。`
                 : loading
                   // 台帳がまだ届いていないだけの時に「無い」と言い切らない（经路別カードと同じ理由）。
-                  ? "応募日台帳を読込中…"
-                  : "応募日台帳がまだ無いので応募数は全月不明。"
+                  ? menu("応募日台帳を読込中…")
+                  : menu("応募日台帳がまだ無いので応募数は全月不明。")
             }
           >
             {timeline.length > 0 ? (
               <>
                 <ul className="chart-legend">
-                  <li><b data-step="1" /> 投げた <small>応募</small></li>
-                  <li><b data-step="4" /> 落ちた <small>不採用</small></li>
+                  <li><b data-step="1" />{menu(" 投げた ")}<small>{menu("応募")}</small></li>
+                  <li><b data-step="4" />{menu(" 落ちた ")}<small>{menu("不採用")}</small></li>
                 </ul>
                 <div className="chart-months">
                   {timeline.map((row, index) => (
@@ -1055,27 +1055,27 @@ function JobsAnalytics({
                   ))}
                 </div>
                 <TableView
-                  head={["月", "投げた", "落ちた"]}
-                  rows={timeline.map((row) => [row.month, row.applied === null ? "不明" : row.applied, row.rejected])}
+                  head={[menu("月"), menu("投げた"), menu("落ちた")]}
+                  rows={timeline.map((row) => [row.month, row.applied === null ? menu("不明") : row.applied, row.rejected])}
                 />
               </>
             ) : loading ? (
-              <ScopeLoading label="月別推移" />
+              <ScopeLoading label={menu("月別推移")} />
             ) : (
-              <p className="chart-empty">この期間に該当するデータがない。</p>
+              <p className="chart-empty">{menu("この期間に該当するデータがない。")}</p>
             )}
           </Card>
 
           <Card
-            title="応募と結果の推移"
+            title={menu("応募と結果の推移")}
             caption={`応募日が分かる ${flow.length > 0 ? flow[0].date : "—"} 以降の分だけ。`}
           >
             {flow.length > 0 ? (
               <>
                 <ul className="chart-legend">
-                  <li><b data-step="1" /> 累計で投げた <small>{flow[flow.length - 1].appliedCum}</small></li>
-                  <li><b data-step="4" /> 累計で結果が出た <small>{flow[flow.length - 1].resolvedCum}</small></li>
-                  <li><b data-step="2" /> 待っている <small>{flow[flow.length - 1].pending}</small></li>
+                  <li><b data-step="1" />{menu(" 累計で投げた ")}<small>{flow[flow.length - 1].appliedCum}</small></li>
+                  <li><b data-step="4" />{menu(" 累計で結果が出た ")}<small>{flow[flow.length - 1].resolvedCum}</small></li>
+                  <li><b data-step="2" />{menu(" 待っている ")}<small>{flow[flow.length - 1].pending}</small></li>
                 </ul>
                 <svg className="chart-line" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t("応募・結果・待機の推移")}>
                   {[0, 0.5, 1].map((tick) => {
@@ -1127,16 +1127,16 @@ function JobsAnalytics({
                   </text>
                 </svg>
                 <TableView
-                  head={["日付", "投げた", "結果", "累計投げた", "累計結果", "待ち"]}
+                  head={[menu("日付"), menu("投げた"), menu("結果"), menu("累計投げた"), menu("累計結果"), menu("待ち")]}
                   rows={flow
                     .filter((d) => d.applied > 0 || d.resolved > 0)
                     .map((d) => [d.date, d.applied, d.resolved, d.appliedCum, d.resolvedCum, d.pending])}
                 />
               </>
             ) : loading ? (
-              <ScopeLoading label="応募日台帳" />
+              <ScopeLoading label={menu("応募日台帳")} />
             ) : (
-              <p className="chart-empty">応募日台帳がまだ無い。</p>
+              <p className="chart-empty">{menu("応募日台帳がまだ無い。")}</p>
             )}
           </Card>
         </div>

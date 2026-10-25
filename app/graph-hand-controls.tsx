@@ -1,8 +1,11 @@
 "use client";
 
+import { useStageMenu } from "./stage-menu-copy";
+
 import {
   type CSSProperties,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
 } from "react";
@@ -508,10 +511,10 @@ function dualLinkLabel(transform: GraphHandTransform | null) {
 }
 
 // 读数里的「暂用」值必须是真正生效的回退（存档校准），不能写死默认值。
-function pinchTriggerLabel(primary: GraphTrackedHandFrame) {
+function pinchTriggerLabel(primary: GraphTrackedHandFrame, t: ReturnType<typeof useStageMenu>) {
   return primary.pinchConfident
-    ? `触发 ${primary.pinchCloseAt.toFixed(2)}`
-    : `学习中 · 暂用 ${primary.pinchCloseAt.toFixed(2)}`;
+    ? t("触发 {value}", { value: primary.pinchCloseAt.toFixed(2) })
+    : t("学习中 · 暂用 {value}", { value: primary.pinchCloseAt.toFixed(2) });
 }
 
 // 只改 React 自己建的那个文本节点的值：换成 textContent 会把节点整个替掉，
@@ -534,6 +537,8 @@ export function GraphHandControls({
   selectedLabel: string | null;
   relation: GraphHandRelationFeedback;
 }) {
+  const menu = useStageMenu();
+  const liveMenu = useEffectEvent(menu);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const onFrameRef = useRef(onFrame);
@@ -744,11 +749,11 @@ export function GraphHandControls({
       if (dualLinkRef.current && primary && secondary) {
         const vars = dualLinkVars(primary, secondary);
         Object.entries(vars).forEach(([name, value]) => dualLinkRef.current?.style.setProperty(name, value));
-        writeText(dualLabelRef.current, dualLinkLabel(frame.transform));
+        writeText(dualLabelRef.current, liveMenu(dualLinkLabel(frame.transform)));
       }
       if (primary) {
         writeText(pinchRatioRef.current, primary.rawPinchRatio.toFixed(2));
-        writeText(pinchTriggerRef.current, pinchTriggerLabel(primary));
+        writeText(pinchTriggerRef.current, pinchTriggerLabel(primary, liveMenu));
       }
       if (frame.diagnostics) {
         writeText(diagRatioRef.current, frame.diagnostics.pinchRatio.toFixed(2));
@@ -1487,10 +1492,10 @@ export function GraphHandControls({
         // 捏住／握拳都是转视角，标签不能说「抓住」——那会让人以为
         // 抓的是某个节点、松手会把它放到别处。
         const label = hand.grabbed
-          ? `转视角中${target?.kind === "node" ? ` · ${target.label}` : ""}`
+          ? `${menu("转视角中")}${target?.kind === "node" ? ` · ${target.label}` : ""}`
           : hand.pinching
-            ? target?.kind === "node" ? `${target.label} · 松手选择` : "继续捏住可转视角"
-            : target?.kind === "node" ? `${target.label} · 捏合选择` : hand.role === "primary" ? "主手" : "辅助手";
+            ? target?.kind === "node" ? menu("{title} · 松手选择", { title: target.label }) : menu("继续捏住可转视角")
+            : target?.kind === "node" ? menu("{title} · 捏合选择", { title: target.label }) : hand.role === "primary" ? menu("主手") : menu("辅助手");
         return (
           <div
             key={hand.id}
@@ -1524,7 +1529,7 @@ export function GraphHandControls({
           style={dualLinkVars(primary, secondary) as CSSProperties}
           aria-hidden="true"
         >
-          <span ref={dualLabelRef}>{dualLinkLabel(uiFrame.transform)}</span>
+          <span ref={dualLabelRef}>{menu(dualLinkLabel(uiFrame.transform))}</span>
         </div>
       )}
 
@@ -1537,9 +1542,9 @@ export function GraphHandControls({
             "--menu-x": menuCenterX(radialMenu.centerX),
             "--menu-y": menuCenterY(radialMenu.centerY),
           } as CSSProperties}
-          aria-label="空间手势菜单"
+          aria-label={menu("空间手势菜单")}
         >
-          <div><span>{radialMenu.kind === "palm" ? "辅助手掌盘" : "移动掌心"}</span><b>主手捏合确认</b></div>
+          <div><span>{radialMenu.kind === "palm" ? menu("辅助手掌盘") : menu("移动掌心")}</span><b>{menu("主手捏合确认")}</b></div>
           {RADIAL_ACTIONS.map((item) => {
             const disabled = Boolean(item.requiresSelection && !selectedLabel);
             return (
@@ -1549,7 +1554,7 @@ export function GraphHandControls({
                 data-disabled={disabled ? "true" : "false"}
                 style={{ "--menu-angle": `${item.angle}deg` } as CSSProperties}
               >
-                <b>{item.icon}</b><small>{disabled ? "先选择节点" : item.label}</small>
+                <b>{item.icon}</b><small>{disabled ? menu("先选择节点") : menu(item.label)}</small>
               </span>
             );
           })}
@@ -1562,8 +1567,8 @@ export function GraphHandControls({
           <strong>{relation.sourceLabel}<i>→</i>{relation.targetLabel}</strong>
           <small>
             {relation.connected
-              ? `${relation.pathLength} 跳连接 · ${relation.commonCount} 个共同邻居${relation.pathLabels.length > 0 ? ` · ${relation.pathLabels.slice(0, 3).join("  ")}` : ""}`
-              : "当前可见关系中没有连接"}
+              ? menu("{hops} 跳连接 · {count} 个共同邻居", { hops: relation.pathLength, count: relation.commonCount }) + (relation.pathLabels.length > 0 ? ` · ${relation.pathLabels.slice(0, 3).join("  ")}` : "")
+              : menu("当前可见关系中没有连接")}
           </small>
         </aside>
       )}
@@ -1572,7 +1577,7 @@ export function GraphHandControls({
         className="graph-hand-console"
         data-phase={uiFrame?.mode === "dual-transform" ? "dual" : phase}
         data-video={showVideo ? "true" : "false"}
-        aria-label="摄像头手势控制"
+        aria-label={menu("摄像头手势控制")}
       >
         {showVideo && (
           <div className="graph-hand-preview" aria-hidden="true">
@@ -1583,83 +1588,83 @@ export function GraphHandControls({
         )}
         <div className="graph-hand-status" aria-live="polite">
           <span><i /> HAND NAVIGATION <b>{uiFrame?.hands.length === 2 ? "DUAL" : "SINGLE"}</b></span>
-          <strong>{enabled ? modeTitle : "手势已关闭"}</strong>
+          <strong>{enabled ? menu(modeTitle) : menu("手势已关闭")}</strong>
           <small>
             {!enabled
-              ? "启用后用摄像头识别手势；视频只在本机内存中处理，不会上传。"
+              ? menu("启用后用摄像头识别手势；视频只在本机内存中处理，不会上传。")
               : uiFrame?.mode === "dual-transform"
-              ? "移动中点平移 · 拉开缩放 · 转动双手旋转"
+              ? menu("移动中点平移 · 拉开缩放 · 转动双手旋转")
               : uiFrame?.hands.length === 2
-                ? "辅助手稳定张掌可展开菜单盘；双手同时握拳或捏合可操纵空间"
-                : "短捏选择 · 捏住或握拳转视角 · ✌ 呼出菜单"}
+                ? menu("辅助手稳定张掌可展开菜单盘；双手同时握拳或捏合可操纵空间")
+                : menu("短捏选择 · 捏住或握拳转视角 · ✌ 呼出菜单")}
           </small>
           {/* 捏合是纯数值判定，捏了没反应时界面上必须看得见差在哪，
               否则只能靠猜。左边是当前开合度，右边是这只手的触发线。 */}
           {primary && (
             <em className="graph-hand-pinch-readout" data-pinching={primary.pinching}>
-              捏合 <span ref={pinchRatioRef}>{primary.rawPinchRatio.toFixed(2)}</span>
+              {menu("捏合 ")}<span ref={pinchRatioRef}>{primary.rawPinchRatio.toFixed(2)}</span>
               <i />
-              <span ref={pinchTriggerRef}>{pinchTriggerLabel(primary)}</span>
+              <span ref={pinchTriggerRef}>{pinchTriggerLabel(primary, menu)}</span>
             </em>
           )}
         </div>
         <details className="graph-hand-guide">
-          <summary>查看操作方法</summary>
+          <summary>{menu("查看操作方法")}</summary>
           <div>
-            <span data-active={uiFrame?.mode === "single-aim" ? "true" : "false"}><b>🖐</b><small>掌心瞄准</small></span>
-            <span data-active={uiFrame?.mode === "single-pinch" ? "true" : "false"}><b>🤏</b><small>短捏选择</small></span>
-            <span data-active={uiFrame?.mode === "single-orbit" ? "true" : "false"}><b>✊</b><small>捏住或握拳转视角</small></span>
-            <span data-active={uiFrame?.mode === "dual-transform" ? "true" : "false"}><b>↔</b><small>双手变换</small></span>
-            <span data-active={uiFrame?.mode === "relation-preview" ? "true" : "false"}><b>⛓</b><small>关系探索</small></span>
-            <span data-active={uiFrame?.mode === "palm-menu" ? "true" : "false"}><b>✋</b><small>掌心菜单</small></span>
+            <span data-active={uiFrame?.mode === "single-aim" ? "true" : "false"}><b>🖐</b><small>{menu("掌心瞄准")}</small></span>
+            <span data-active={uiFrame?.mode === "single-pinch" ? "true" : "false"}><b>🤏</b><small>{menu("短捏选择")}</small></span>
+            <span data-active={uiFrame?.mode === "single-orbit" ? "true" : "false"}><b>✊</b><small>{menu("捏住或握拳转视角")}</small></span>
+            <span data-active={uiFrame?.mode === "dual-transform" ? "true" : "false"}><b>↔</b><small>{menu("双手变换")}</small></span>
+            <span data-active={uiFrame?.mode === "relation-preview" ? "true" : "false"}><b>⛓</b><small>{menu("关系探索")}</small></span>
+            <span data-active={uiFrame?.mode === "palm-menu" ? "true" : "false"}><b>✋</b><small>{menu("掌心菜单")}</small></span>
           </div>
         </details>
         <details className="graph-hand-debug">
-          <summary>手势没反应？看这里</summary>
+          <summary>{menu("手势没反应？看这里")}</summary>
           {uiFrame?.diagnostics ? (
             <dl>
               <div data-ok={uiFrame.diagnostics.pinchRatio <= uiFrame.diagnostics.closeThreshold ? "true" : "false"}>
-                <dt>捏合度</dt>
+                <dt>{menu("捏合度")}</dt>
                 <dd>
                   <span ref={diagRatioRef}>{uiFrame.diagnostics.pinchRatio.toFixed(2)}</span>
-                  <i>需 ≤ <span ref={diagCloseRef}>{uiFrame.diagnostics.closeThreshold.toFixed(2)}</span></i>
+                  <i>{menu("需 ≤ ")}<span ref={diagCloseRef}>{uiFrame.diagnostics.closeThreshold.toFixed(2)}</span></i>
                 </dd>
               </div>
               <div data-ok={uiFrame.diagnostics.pinchPose ? "true" : "false"}>
-                <dt>姿势</dt>
+                <dt>{menu("姿势")}</dt>
                 <dd>
-                  {uiFrame.diagnostics.pinchPose ? "捏合" : "非捏合"}
-                  <i>分类 {uiFrame.diagnostics.gesture}</i>
+                  {uiFrame.diagnostics.pinchPose ? menu("捏合") : menu("非捏合")}
+                  <i>{menu("分类 ")}{uiFrame.diagnostics.gesture}</i>
                 </dd>
               </div>
               <div data-ok={uiFrame.diagnostics.suppressed ? "false" : "true"}>
-                <dt>捏合语法</dt>
-                <dd>{uiFrame.diagnostics.suppressed ? "被握拳作废" : "生效中"}</dd>
+                <dt>{menu("捏合语法")}</dt>
+                <dd>{uiFrame.diagnostics.suppressed ? menu("被握拳作废") : menu("生效中")}</dd>
               </div>
               <div data-ok={uiFrame.diagnostics.targetKind === "node" ? "true" : "false"}>
-                <dt>瞄准</dt>
-                <dd>{uiFrame.diagnostics.targetKind === "node" ? "节点" : uiFrame.diagnostics.targetKind === "space" ? "空间" : "无"}</dd>
+                <dt>{menu("瞄准")}</dt>
+                <dd>{uiFrame.diagnostics.targetKind === "node" ? menu("节点") : uiFrame.diagnostics.targetKind === "space" ? menu("空间") : menu("无")}</dd>
               </div>
               <div>
-                <dt>位移</dt>
+                <dt>{menu("位移")}</dt>
                 <dd>
                   <span ref={diagTravelRef}>{uiFrame.diagnostics.travel.toFixed(3)}</span>
-                  <i>≥ <span ref={diagMoveRef}>{uiFrame.diagnostics.moveThreshold.toFixed(3)}</span> 转拖动</i>
+                  <i>≥ <span ref={diagMoveRef}>{uiFrame.diagnostics.moveThreshold.toFixed(3)}</span>{menu(" 转拖动")}</i>
                 </dd>
               </div>
               <div data-ok={uiFrame.diagnostics.lastEvent === "select" ? "true" : "false"}>
-                <dt>最近事件</dt>
+                <dt>{menu("最近事件")}</dt>
                 <dd>{uiFrame.diagnostics.lastEvent}</dd>
               </div>
             </dl>
           ) : (
-            <p>把手举到画面里，这里会显示实时判定数值。</p>
+            <p>{menu("把手举到画面里，这里会显示实时判定数值。")}</p>
           )}
-          <button type="button" onClick={resetCalibration}>恢复默认灵敏度</button>
+          <button type="button" onClick={resetCalibration}>{menu("恢复默认灵敏度")}</button>
         </details>
         <div className="graph-hand-actions">
           {phase === "error" ? (
-            <button type="button" onClick={() => setRetry((current) => current + 1)}>重试</button>
+            <button type="button" onClick={() => setRetry((current) => current + 1)}>{menu("重试")}</button>
           ) : (
             <button
               type="button"
@@ -1674,22 +1679,22 @@ export function GraphHandControls({
                 setEnabled(!enabled);
               }}
             >
-              {enabled ? "关闭摄像头" : "启用手势"}
+              {enabled ? menu("关闭摄像头") : menu("启用手势")}
             </button>
           )}
-          <button type="button" onClick={replayOnboarding}>重新校准</button>
+          <button type="button" onClick={replayOnboarding}>{menu("重新校准")}</button>
           {uiFrame?.mode === "dual-transform" && <b>DUAL GRAB</b>}
         </div>
       </aside>
 
       {/* 校准要人把手举到镜头前：摄像头没开时弹出来只会让人困惑。 */}
       {enabled && onboarding.visible && (
-        <section className="graph-hand-onboarding" aria-label="手势校准">
+        <section className="graph-hand-onboarding" aria-label={menu("手势校准")}>
           <span>HAND CALIBRATION · {onboarding.step + 1}/{ONBOARDING_STEPS.length}</span>
-          <strong>{ONBOARDING_STEPS[onboarding.step].title}</strong>
-          <p>{ONBOARDING_STEPS[onboarding.step].hint}</p>
+          <strong>{menu(ONBOARDING_STEPS[onboarding.step].title)}</strong>
+          <p>{menu(ONBOARDING_STEPS[onboarding.step].hint)}</p>
           <div>{ONBOARDING_STEPS.map((_, index) => <i key={index} data-done={index <= onboarding.step ? "true" : "false"} />)}</div>
-          <button type="button" onClick={() => finishOnboarding(true)}>跳过引导</button>
+          <button type="button" onClick={() => finishOnboarding(true)}>{menu("跳过引导")}</button>
         </section>
       )}
     </>

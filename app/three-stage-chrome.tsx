@@ -1,5 +1,7 @@
 "use client";
 
+import { useStageMenu } from "./stage-menu-copy";
+
 // 3D 舞台共享 chrome：与场景无关的 React 部件与 hooks。
 // 这里的 JSX 结构必须与 globals.css 的 .space-graph-* 规则逐字节对齐——
 // 两个视图（星图／航道）共用同一套样式，改标记等于同时改两个视图。
@@ -312,6 +314,7 @@ export function StageSearchRadar<T extends StageSearchItem>({
   enterLabel: string;
   emptyHint: string;
 }) {
+  const menu = useStageMenu();
   return (
     <div
       className="space-graph-search"
@@ -353,8 +356,8 @@ export function StageSearchRadar<T extends StageSearchItem>({
             <span>FULL TEXT RADAR</span>
             <strong>
               {search.results.length > 0
-                ? `${search.results.length} 个${hitUnit}命中`
-                : `没有匹配的${hitUnit}`}
+                ? menu("{count} 个{unit}命中", { count: search.results.length, unit: menu(hitUnit) })
+                : menu("没有匹配的{unit}", { unit: menu(hitUnit) })}
             </strong>
           </header>
           {search.results.length > 0 ? (
@@ -386,9 +389,9 @@ export function StageSearchRadar<T extends StageSearchItem>({
             <p>{emptyHint}</p>
           )}
           <footer>
-            <span><kbd>↑</kbd><kbd>↓</kbd> 切换</span>
+            <span><kbd>↑</kbd><kbd>↓</kbd>{menu(" 切换")}</span>
             <span><kbd>Enter</kbd> {enterLabel}</span>
-            <span><kbd>Esc</kbd> 清空</span>
+            <span><kbd>Esc</kbd>{menu(" 清空")}</span>
           </footer>
         </div>
       )}
@@ -419,14 +422,15 @@ export function StageControls({
   onToggleShortcuts: () => void;
   extra?: ReactNode;
 }) {
+  const menu = useStageMenu();
   return (
     <div className="space-graph-controls">
       <button
         type="button"
-        aria-label={fullscreen ? "退出全屏" : fullscreenAriaLabel}
+        aria-label={fullscreen ? menu("退出全屏") : fullscreenAriaLabel}
         onClick={onToggleFullscreen}
       >
-        {fullscreen ? "退出全屏" : "全屏"} <kbd>F</kbd>
+        {fullscreen ? menu("退出全屏") : menu("全屏")} <kbd>F</kbd>
       </button>
       <button type="button" onClick={onResetView}>
         {resetLabel}
@@ -437,14 +441,14 @@ export function StageControls({
         aria-pressed={paused}
         onClick={onTogglePaused}
       >
-        {paused ? "继续呼吸" : "暂停动态"}
+        {paused ? menu("继续呼吸") : menu("暂停动态")}
       </button>
       <button
         type="button"
         aria-expanded={shortcutHelp}
         onClick={onToggleShortcuts}
       >
-        快捷键 <kbd>?</kbd>
+        {menu("快捷键 ")}<kbd>?</kbd>
       </button>
     </div>
   );
@@ -461,17 +465,18 @@ export function StageShortcuts({
   entries: { keys: string[]; label: string }[];
   onClose: () => void;
 }) {
+  const menu = useStageMenu();
   return (
     <aside className="space-graph-shortcuts" aria-label={ariaLabel}>
       <header>
         <div><span>COMMAND DECK</span><strong>{title}</strong></div>
-        <button type="button" onClick={onClose} aria-label="关闭快捷键">×</button>
+        <button type="button" onClick={onClose} aria-label={menu("关闭快捷键")}>×</button>
       </header>
       <div>
         {entries.map((entry) => (
           <span key={entry.label}>
             {entry.keys.map((key) => <kbd key={key}>{key}</kbd>)}
-            <b>{entry.label}</b>
+            <b>{menu(entry.label)}</b>
           </span>
         ))}
       </div>

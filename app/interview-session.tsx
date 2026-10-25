@@ -1,5 +1,7 @@
 "use client";
 
+import { useInterviewMenu } from "./interview-menu-copy";
+
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildPrepKillQuestions,
@@ -266,6 +268,7 @@ function KillMapPage({
   onOpenWiki: (target: string, section?: string) => void;
   query: string;
 }) {
+  const menu = useInterviewMenu();
   // 当日の使い方：一問ずつ声に出す。読み終えたら「言えた」を押して次へ。
   const [done, setDoneState] = useState<ReadonlySet<string>>(() => readSaidQuestions(storageKey));
   const setDone = (next: ReadonlySet<string> | ((current: ReadonlySet<string>) => ReadonlySet<string>)) => {
@@ -289,7 +292,7 @@ function KillMapPage({
       <header className="kill-map-head">
         <div>
           <strong>{done.size} / {questions.length}</strong>
-          <span>声に出して確認できた数</span>
+          <span>{menu("声に出して確認できた数")}</span>
         </div>
         <i aria-hidden="true"><em style={{ width: `${(done.size / questions.length) * 100}%` }} /></i>
         {done.size > 0 && (
@@ -313,7 +316,7 @@ function KillMapPage({
               type="button"
               className={done.has(question.id) ? "on" : ""}
               onClick={() => setDone((current) => toggle(current, question.id))}
-            >{done.has(question.id) ? "✓ 言えた" : "言えた"}</button>
+            >{done.has(question.id) ? menu("✓ 言えた") : menu("言えた")}</button>
           </header>
 
           {question.resolved ? (
@@ -323,21 +326,19 @@ function KillMapPage({
           ) : (
             // 参照が外れたら黙って空にしない——当日「答案が無い」ことに気づけないのが最悪
             <p className="kill-missing">
-              ⚠️ 答案「{question.source}」がこの準備稿の中に見つかりません。
-              vault 側の <code>答案::</code> と見出しがずれています。
-            </p>
+              {menu("⚠️ 答案「")}{question.source}{menu("」がこの準備稿の中に見つかりません。 vault 側の ")}<code>{menu("答案::")}</code>{menu(" と見出しがずれています。")}</p>
           )}
 
           {question.followUp.length > 0 && (
             <details className="kill-followup">
-              <summary>追問されたら <i aria-hidden="true">⌄</i></summary>
+              <summary>{menu("追問されたら ")}<i aria-hidden="true">⌄</i></summary>
               <Blocks blocks={question.followUp} refs={refs} />
             </details>
           )}
 
           {question.mine && (
             <p className="kill-mine">
-              <span>地雷</span>
+              <span>{menu("地雷")}</span>
               <Inlines nodes={question.mine} refs={refs} />
             </p>
           )}
@@ -349,7 +350,7 @@ function KillMapPage({
                 aria-expanded={openWhy.has(question.id)}
                 onClick={() => setOpenWhy((current) => toggle(current, question.id))}
               >
-                なぜこう答えるか <i aria-hidden="true">{openWhy.has(question.id) ? "−" : "＋"}</i>
+                {menu("なぜこう答えるか ")}<i aria-hidden="true">{openWhy.has(question.id) ? "−" : "＋"}</i>
               </button>
               {openWhy.has(question.id) &&
                 question.why.map((nodes, whyIndex) => (
@@ -372,26 +373,24 @@ function SessionQuickActions({
   onOpenCard: (cardId: string) => void;
   onOpenAsset: (asset: SharedAssetTarget) => void;
 }) {
+  const menu = useInterviewMenu();
   const phraseAsset = SHARED_ASSETS.find(
     (asset): asset is SharedAssetTarget => "note" in asset && asset.note === "当日フレーズ集",
   );
   return (
-    <div className="session-quick-actions" aria-label="冲刺时常用话术">
+    <div className="session-quick-actions" aria-label={menu("冲刺时常用话术")}>
       {motivationAsset && (
         <button type="button" onClick={() => onOpenAsset(motivationAsset)}>
-          <span>20秒</span>
-          志望動機
-        </button>
+          <span>{menu("20秒")}</span>
+          {menu("志望動機")}</button>
       )}
       <button type="button" onClick={() => onOpenCard("p01")}>
-        <span>30秒</span>
-        自己紹介
-      </button>
+        <span>{menu("30秒")}</span>
+        {menu("自己紹介")}</button>
       {phraseAsset && (
         <button type="button" onClick={() => onOpenAsset(phraseAsset)}>
-          <span>救场</span>
-          当日フレーズ
-        </button>
+          <span>{menu("救场")}</span>
+          {menu("当日フレーズ")}</button>
       )}
     </div>
   );
@@ -409,6 +408,7 @@ function SessionBrief({
   briefing: PrepSection;
   meta: { company: string; round: string };
 }) {
+  const menu = useInterviewMenu();
   // 見出しの id は Blocks が付ける `prep-h-<ブロック下標>`。同じ配列を渡すので下標は一致する。
   const headings = useMemo(
     () =>
@@ -446,21 +446,19 @@ function SessionBrief({
   }, [headings]);
 
   return (
-    <article className="session-brief" aria-label="导读">
+    <article className="session-brief" aria-label={menu("导读")}>
       <header>
         <div>
-          <span>面谈前通读一次</span>
+          <span>{menu("面谈前通读一次")}</span>
           <h2>{meta.company}／{meta.round}</h2>
           <p>
-            读完这一篇，就能整体明白这场面谈是怎么回事：对方是谁、这家公司和这个岗位是什么、
-            我的定位在哪、以及我自己最容易栽的地方。具体话术在「冲刺」和「深度准备」里。
-          </p>
+            {menu("读完这一篇，就能整体明白这场面谈是怎么回事：对方是谁、这家公司和这个岗位是什么、 我的定位在哪、以及我自己最容易栽的地方。具体话术在「冲刺」和「深度准备」里。")}</p>
         </div>
       </header>
       <div className="session-brief-main">
         {headings.length > 1 && (
-          <nav className="session-brief-index" aria-label="导读目录">
-            <span>目录</span>
+          <nav className="session-brief-index" aria-label={menu("导读目录")}>
+            <span>{menu("目录")}</span>
             <ol>
               {headings.map((heading, index) => (
                 <li key={heading.id}>
@@ -536,6 +534,7 @@ function SessionSprint({
   onOpenCard: (cardId: string) => void;
   onOpenAsset: (asset: SharedAssetTarget) => void;
 }) {
+  const menu = useInterviewMenu();
   const blocks = useMemo(() => {
     const quick = prepSectionByNumber(doc, 1);
     const live = prepSubsection(quick, LIVE_FRAME_RE);
@@ -567,12 +566,12 @@ function SessionSprint({
   }, [groups]);
 
   return (
-    <section className="session-sprint" aria-label="5分钟冲刺">
+    <section className="session-sprint" aria-label={menu("5分钟冲刺")}>
       <header>
         <div>
-          <span>5分钟冲刺</span>
-          <h2>按真实开口顺序热身一次</h2>
-          <p>开场 → 高概率问题第一声 → 救场话术 → 反向提问 → 收尾</p>
+          <span>{menu("5分钟冲刺")}</span>
+          <h2>{menu("按真实开口顺序热身一次")}</h2>
+          <p>{menu("开场 → 高概率问题第一声 → 救场话术 → 反向提问 → 收尾")}</p>
         </div>
         <SessionQuickActions
           motivationAsset={motivationAsset}
@@ -582,8 +581,8 @@ function SessionSprint({
       </header>
       <div className="session-sprint-layout">
         {groups.length > 1 && (
-          <nav className="session-sprint-toc" aria-label="冲刺の目次">
-            <span>この枠の順序</span>
+          <nav className="session-sprint-toc" aria-label={menu("冲刺の目次")}>
+            <span>{menu("この枠の順序")}</span>
             <ol>
               {groups.map((group, index) => (
                 <li key={group.id}>
@@ -632,6 +631,7 @@ function DocReader({
   onOpenCard: (cardId: string) => void;
   onOpenWiki: (target: string, section?: string) => void;
 }) {
+  const menu = useInterviewMenu();
   const ui = useLegacySessionMenu();
   const [active, setActive] = useState(0);
   const [query, setQuery] = useState("");
@@ -829,17 +829,16 @@ function DocReader({
   }, [activeGroupIndex, goToGroup, groups.length]);
 
   if (doc.sections.length === 0) {
-    return <p className="prep-no-result">这份准备笔记还没有 ## 章节。</p>;
+    return <p className="prep-no-result">{menu("这份准备笔记还没有 ## 章节。")}</p>;
   }
 
   return (
     <>
       {broken.length > 0 && (
         <p className="prep-doc-broken">
-          ⚠️ {broken.length} 处引用没解析出来，对应章节是空的：{broken.map((embed) => embed.raw).join("、")}
+          ⚠️ {broken.length}{menu(" 处引用没解析出来，对应章节是空的：")}{broken.map((embed) => embed.raw).join("、")}
           <br />
-          跑 <code>npm run vault:check</code> 会指出笔记名或节名哪里对不上。
-        </p>
+          {menu("跑 ")}<code>npm run vault:check</code>{menu(" 会指出笔记名或节名哪里对不上。")}</p>
       )}
 
       <div className="prep-doc-bar">
@@ -873,7 +872,7 @@ function DocReader({
             documentKey={`prep-document:${doc.note.path}`}
             title={doc.title}
             sections={doc.sections}
-            notice={broken.length > 0 ? `${broken.length} 处引用未解析，相关内容可能不完整。` : undefined}
+            notice={broken.length > 0 ? menu("{count} 处引用未解析，相关内容可能不完整。", { count: broken.length }) : undefined}
             onClose={() => setReaderOpen(false)}
             onOpenCard={onOpenCard}
             onOpenWiki={onOpenWiki}
@@ -906,10 +905,10 @@ function DocReader({
       {keyword && (
         <div className="prep-doc-hits">
           {totalHits === 0 ? (
-            <span className="none">「{keyword}」在这份文档里没有命中</span>
+            <span className="none">「{keyword}{menu("」在这份文档里没有命中")}</span>
           ) : (
             <>
-              <span>{totalHits} 处命中 ·</span>
+              <span>{totalHits}{menu(" 处命中 ·")}</span>
               {hits.map((hit) => (
                 <button
                   key={hit.index}
@@ -929,8 +928,8 @@ function DocReader({
           選択される画面なので、他の2画面と同じく rt/rp を落として渡す。 */}
       <div className="prep-doc-main">
         {!isKillMap && needsSubnav && subheads.length >= 3 && (
-          <nav className="prep-doc-subnav" aria-label="小节" ref={subnavRef}>
-            <span className="subnav-label">この節の構成 · {subheads.length}</span>
+          <nav className="prep-doc-subnav" aria-label={menu("小节")} ref={subnavRef}>
+            <span className="subnav-label">{menu("この節の構成 · ")}{subheads.length}</span>
             <div className="subnav-items">
               <i className="subnav-indicator" aria-hidden="true" />
               {subheads.map((item) => (
@@ -977,16 +976,16 @@ function DocReader({
           type="button"
           disabled={activeGroupIndex === 0}
           onClick={() => goToGroup(activeGroupIndex - 1)}
-        >← 上一模块</button>
+        >{menu("← 上一模块")}</button>
         <span>
           {activeGroupIndex + 1} / {groups.length} · {currentGroup?.label}
-          <em>←→ 切换主模块</em>
+          <em>{menu("←→ 切换主模块")}</em>
         </span>
         <button
           type="button"
           disabled={activeGroupIndex === groups.length - 1}
           onClick={() => goToGroup(activeGroupIndex + 1)}
-        >下一模块 →</button>
+        >{menu("下一模块 →")}</button>
       </div>
     </>
   );
@@ -999,6 +998,7 @@ function ExternalSources({
   links: PrepExternalLink[];
   roundCount: number;
 }) {
+  const menu = useInterviewMenu();
   const featured = [
     ...links.filter((link) => link.starred),
     ...links.filter((link) => !link.starred),
@@ -1007,10 +1007,10 @@ function ExternalSources({
   if (links.length === 0) return null;
 
   return (
-    <section className="session-sources" aria-label="案件共用外部资料">
+    <section className="session-sources" aria-label={menu("案件共用外部资料")}>
       <header>
-        <span>案件共用资料</span>
-        <p>截至本轮累计 {roundCount} 轮；不会混入之后才获得的资料</p>
+        <span>{menu("案件共用资料")}</span>
+        <p>{menu("截至本轮累计 ")}{roundCount}{menu(" 轮；不会混入之后才获得的资料")}</p>
       </header>
       <div className="session-source-featured">
         {featured.map((link) => (
@@ -1022,7 +1022,7 @@ function ExternalSources({
         ))}
       </div>
       <details>
-        <summary>展开全部 {links.length} 个链接</summary>
+        <summary>{menu("展开全部 ")}{links.length}{menu(" 个链接")}</summary>
         <div className="session-source-groups">
           {groups.map((group) => (
             <section key={group}>
@@ -1061,9 +1061,10 @@ function SessionAssets({
   onOpenAsset: (asset: SharedAssetTarget) => void;
   onOpenLibrary?: () => void;
 }) {
+  const menu = useInterviewMenu();
   return (
-    <section className="session-assets" aria-label="本轮专属与全局共用的面试话术">
-      <span>本轮专属</span>
+    <section className="session-assets" aria-label={menu("本轮专属与全局共用的面试话术")}>
+      <span>{menu("本轮专属")}</span>
       {motivationAsset ? (
         <button
           type="button"
@@ -1071,21 +1072,19 @@ function SessionAssets({
           onClick={() => onOpenAsset(motivationAsset)}
           title={motivationAsset.hint}
         >
-          <small>20秒</small>
-          志望動機
-        </button>
+          <small>{menu("20秒")}</small>
+          {menu("志望動機")}</button>
       ) : (
         <button
           type="button"
           className="company-motivation missing"
           disabled
-          title="这份面试准备的 §6 还没有公司专属志望動機"
+          title={menu("这份面试准备的 §6 还没有公司专属志望動機")}
         >
-          志望動機未准备
-        </button>
+          {menu("志望動機未准备")}</button>
       )}
       <i className="session-assets-separator" aria-hidden="true" />
-      <span>全局共用</span>
+      <span>{menu("全局共用")}</span>
       {SHARED_ASSETS.map((asset) => (
         <button
           key={"cardId" in asset ? asset.cardId : asset.note}
@@ -1101,8 +1100,7 @@ function SessionAssets({
       ))}
       {/* 「回答库 →」说的是整个库：去通用准备页翻，而不是只弹出 p01 那一张。 */}
       <button type="button" className="to-library" onClick={() => (onOpenLibrary ? onOpenLibrary() : onOpenCard("p01"))}>
-        回答库 →
-      </button>
+        {menu("回答库 →")}</button>
     </section>
   );
 }
@@ -1142,6 +1140,7 @@ function InterviewSession({
    *  ——当日かどうかで既定モード（确认/冲刺/深度）が変わる画面なので、ここが一番効く。 */
   today: string;
 }) {
+  const menu = useInterviewMenu();
   const ui = useLegacySessionMenu();
   const docs = useMemo(() => findInterviewPrepDocs(notes), [notes]);
   const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
@@ -1275,11 +1274,11 @@ function InterviewSession({
   const digestBand = digest && (
     <details className="prep-weakness">
       <summary>
-        <span>本轮提醒</span>
+        <span>{menu("本轮提醒")}</span>
         {digest.weakestDimension && (
           <em>
-            五维最弱 <b>{REVIEW_DIMENSION_META[digest.weakestDimension].label}</b>
-            {" "}平均 {digest.dimensionAverages[digest.weakestDimension]}
+            {menu("五维最弱 ")}<b>{REVIEW_DIMENSION_META[digest.weakestDimension].label}</b>
+            {" "}{menu("平均 ")}{digest.dimensionAverages[digest.weakestDimension]}
           </em>
         )}
         {/* 「最近一场仍出现」を各チップに繰り返すと、同じ橙のラベルが3つ並んで
@@ -1293,18 +1292,18 @@ function InterviewSession({
           ))}
         </ul>
         {digest.tags.some((tag) => tag.repeated && tag.inLatest) && (
-          <small className="prep-weakness-legend">● 最近一场仍出现</small>
+          <small className="prep-weakness-legend">{menu("● 最近一场仍出现")}</small>
         )}
       </summary>
       <div className="prep-weakness-body">
-        {onOpenInsights && <div className="prep-insights-entry"><p>准备前也可以比较其他公司的口碑、岗位契合与工作条件。</p><button type="button" onClick={() => onOpenInsights(context?.note.path)}>{ui("打开公司对比 →")}</button></div>}
-        <p>根据 {digest.interviews.length} 场回答质量复盘统计；正本来自 vault 的「面接傾向_横断」。</p>
+        {onOpenInsights && <div className="prep-insights-entry"><p>{menu("准备前也可以比较其他公司的口碑、岗位契合与工作条件。")}</p><button type="button" onClick={() => onOpenInsights(context?.note.path)}>{ui("打开公司对比 →")}</button></div>}
+        <p>{menu("根据 ")}{digest.interviews.length}{menu(" 场回答质量复盘统计；正本来自 vault 的「面接傾向_横断」。")}</p>
         <ul>
           {digest.tags.filter((tag) => tag.repeated).map((tag) => (
             <li key={tag.tag} className={tag.inLatest ? "hot" : ""}>
               <strong>{tag.label}</strong>
-              <span>{tag.interviews} / {digest.interviews.length} 场 · {tag.occurrences} 问</span>
-              {tag.inLatest && <i>最近一场仍出现</i>}
+              <span>{tag.interviews} / {digest.interviews.length}{menu(" 场 · ")}{tag.occurrences}{menu(" 问")}</span>
+              {tag.inLatest && <i>{menu("最近一场仍出现")}</i>}
             </li>
           ))}
         </ul>
@@ -1327,8 +1326,8 @@ function InterviewSession({
   if (!selected || legacyPrepPath !== selected.note.path) {
     // 顶部色条跟随案件状态（面接中橙・不採用灰…），与头部胶囊同一张色表。
     return <><div className={`co-shell${context ? ` tone-${companyHeroTone(context, today)}` : ""}`}><header className="co-shell-head"><CompanyHeroCard context={context} rounds={contextRounds} today={today} linkedCase={linkedCase} fallbackCompany={selected?.company || initialCompany} fallbackTitle={selected?.round ?? ""} onOpen={onOpen} /><div className="co-shell-controls">{contextPicker}{companyAction}</div></header>
-      <nav className="co-legacy-tabs" aria-label={ui("公司与面谈视图")}><button type="button" aria-pressed="true">{ui("公司总览")}</button><button type="button" disabled={!selected} aria-pressed="false" onClick={() => selected && setLegacyPrepPath(selected.note.path)}>{ui("面谈准备")}</button>{!selected && <span className="co-prep-unavailable">本场尚无准备稿</span>}</nav>
-      {companyContent}{context && <button type="button" className="co-compare-toggle" onClick={() => onOpen(context.note)}>{context.kind === "meeting" ? "打开面谈记录" : "打开案件记录"} ↗</button>}
+      <nav className="co-legacy-tabs" aria-label={ui("公司与面谈视图")}><button type="button" aria-pressed="true">{ui("公司总览")}</button><button type="button" disabled={!selected} aria-pressed="false" onClick={() => selected && setLegacyPrepPath(selected.note.path)}>{ui("面谈准备")}</button>{!selected && <span className="co-prep-unavailable">{menu("本场尚无准备稿")}</span>}</nav>
+      {companyContent}{context && <button type="button" className="co-compare-toggle" onClick={() => onOpen(context.note)}>{context.kind === "meeting" ? menu("打开面谈记录") : menu("打开案件记录")} ↗</button>}
     </div></>;
   }
 
@@ -1342,8 +1341,8 @@ function InterviewSession({
               <p className="eyebrow">
                 <i />
                 {["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today))
-                  ? "最近一场"
-                  : "当前面试"}
+                  ? menu("最近一场")
+                  : menu("当前面试")}
                 <b
                   className={
                     ["preparing", "scheduled", "upcoming"].includes(
@@ -1377,8 +1376,8 @@ function InterviewSession({
                   >
                     {selectedSeries?.rounds.map((doc, index) => (
                       <option key={doc.note.path} value={doc.note.path}>
-                        {`第 ${doc.sessionOrder ?? index + 1}/${selectedSeries.rounds.length} 轮 · `}
-                        {doc.round || "轮次未命名"}
+                        {menu("第 {current}/{total} 轮 · ", { current: doc.sessionOrder ?? index + 1, total: selectedSeries.rounds.length })}
+                        {doc.round || menu("轮次未命名")}
                       </option>
                     ))}
                   </select>
@@ -1401,20 +1400,20 @@ function InterviewSession({
 
             <dl className="session-context-meta">
               <div>
-                <dt>时间</dt>
-                <dd>{dateTimeDetail || (hasInterviewDate(selected.date) ? formatDate(selected.date, true) : "日程待定")}</dd>
+                <dt>{menu("时间")}</dt>
+                <dd>{dateTimeDetail || (hasInterviewDate(selected.date) ? formatDate(selected.date, true) : menu("日程待定"))}</dd>
               </div>
               <div>
-                <dt>轮次</dt>
-                <dd>{selected.round || "轮次未命名"}</dd>
+                <dt>{menu("轮次")}</dt>
+                <dd>{selected.round || menu("轮次未命名")}</dd>
               </div>
               <div>
-                <dt>形式／地点</dt>
-                <dd>{placeDetail || selected.format || "未填写"}</dd>
+                <dt>{menu("形式／地点")}</dt>
+                <dd>{placeDetail || selected.format || menu("未填写")}</dd>
               </div>
               <div>
-                <dt>面试官</dt>
-                <dd>{selected.interviewers || "未定"}</dd>
+                <dt>{menu("面试官")}</dt>
+                <dd>{selected.interviewers || menu("未定")}</dd>
               </div>
             </dl>
           </header>
@@ -1435,7 +1434,7 @@ function InterviewSession({
                 </button>
               ))}
             </div>
-            <p>按离面试还有多少时间，选择现在真正需要的信息。</p>
+            <p>{menu("按离面试还有多少时间，选择现在真正需要的信息。")}</p>
           </nav>
 
           {digestBand}
@@ -1445,7 +1444,7 @@ function InterviewSession({
               briefing={briefing}
               meta={{
                 company: selected.company || selected.title,
-                round: selected.round || "面談",
+                round: selected.round || menu("面談"),
               }}
             />
           )}
@@ -1468,8 +1467,8 @@ function InterviewSession({
 
           <details className="session-toolbox">
             <summary>
-              <span>资料与工具</span>
-              <small>{externalLinks.length} 个研究来源 · 本轮话术与全局回答库</small>
+              <span>{menu("资料与工具")}</span>
+              <small>{externalLinks.length}{menu(" 个研究来源 · 本轮话术与全局回答库")}</small>
               <i aria-hidden="true">＋</i>
             </summary>
             <div className="session-toolbox-body">

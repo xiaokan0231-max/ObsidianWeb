@@ -1,5 +1,7 @@
 "use client";
 
+import { useInterviewMenu } from "./interview-menu-copy";
+
 import { useMemo, useRef, useState } from "react";
 import {
   isRoundSpecificAsset,
@@ -25,6 +27,7 @@ export default function InterviewSharedAsset({
   onOpenCard: (cardId: string) => void;
   onOpenWiki: (target: string, section?: string) => void;
 }) {
+  const menu = useInterviewMenu();
   const doc = useMemo(
     () => parseSharedAssetDocument(note, target.section),
     [note, target.section],
@@ -62,7 +65,7 @@ export default function InterviewSharedAsset({
     return (
       <div className="shared-asset-missing">
         <span>SECTION NOT FOUND</span>
-        <h1>找不到指定的面试话术章节</h1>
+        <h1>{menu("找不到指定的面试话术章节")}</h1>
         <p>{target.note}{target.section ? ` › ${target.section}` : ""}</p>
       </div>
     );
@@ -95,23 +98,22 @@ export default function InterviewSharedAsset({
           value={query}
           onChange={setQuery}
           inputRef={searchRef}
-          placeholder={roundSpecific ? "搜索这份回答（/ 聚焦）" : "搜索这份资产（/ 聚焦）"}
-          label={roundSpecific ? "搜索本轮志望動機" : "搜索共通资产"}
+          placeholder={roundSpecific ? menu("搜索这份回答（/ 聚焦）") : menu("搜索这份资产（/ 聚焦）")}
+          label={roundSpecific ? menu("搜索本轮志望動機") : menu("搜索共通资产")}
         />
         <p>
-          {doc.sections.length} 章 · {" "}
+          {doc.sections.length}{menu(" 章 · ")}{" "}
           {doc.restrictedToSection
-            ? "仅展示面试可直接朗读的指定区段"
+            ? menu("仅展示面试可直接朗读的指定区段")
             : doc.sourceTitle}
         </p>
         <button type="button" className="reader-entry" onClick={() => setReaderOpen(true)}>
-          全文阅读
-        </button>
+          {menu("全文阅读")}</button>
       </div>
 
       {doc.intro.length > 0 && (
         <aside className="shared-asset-guide">
-          <span>使用说明</span>
+          <span>{menu("使用说明")}</span>
           <div className="prep-doc-body">
             <Blocks blocks={doc.intro} refs={{ onOpenCard, onOpenWiki, query: needle }} />
           </div>
@@ -121,10 +123,10 @@ export default function InterviewSharedAsset({
       <div className="shared-asset-workbench">
         <aside className="shared-asset-index">
           <header>
-            <strong>{needle ? `${visibleIndexes.length} 个命中章节` : `${doc.sections.length} 个章节`}</strong>
-            <small>点击切换正文</small>
+            <strong>{needle ? menu("{count} 个命中章节", { count: visibleIndexes.length }) : menu("{count} 个章节", { count: doc.sections.length })}</strong>
+            <small>{menu("点击切换正文")}</small>
           </header>
-          <nav aria-label={`${target.label}章节`}>
+          <nav aria-label={menu("{title}章节", { title: target.label })}>
             {visibleIndexes.map((index) => {
               const section = doc.sections[index];
               return (
@@ -138,14 +140,14 @@ export default function InterviewSharedAsset({
                   <b>{`${index + 1}`.padStart(2, "0")}</b>
                   <span>
                     <strong>{section.navLabel}</strong>
-                    <small>{section.plainText.slice(0, 54) || "正文"}</small>
+                    <small>{section.plainText.slice(0, 54) || menu("正文")}</small>
                   </span>
                   {hits[index] > 0 && <i>{hits[index]}</i>}
                 </button>
               );
             })}
           </nav>
-          {visibleIndexes.length === 0 && <p>没有找到“{query}”</p>}
+          {visibleIndexes.length === 0 && <p>{menu("没有找到“{query}”", { query })}</p>}
         </aside>
 
         <article
@@ -161,7 +163,7 @@ export default function InterviewSharedAsset({
               </h2>
             </div>
             <button type="button" onClick={() => void copyCurrent()}>
-              {copied ? "已复制（不含假名）" : "复制本节（不含假名）"}
+              {copied ? menu("已复制（不含假名）") : menu("复制本节（不含假名）")}
             </button>
           </header>
           <div className="prep-doc-body">
@@ -172,16 +174,14 @@ export default function InterviewSharedAsset({
           </div>
           <footer>
             <button type="button" disabled={active === 0} onClick={() => goTo(active - 1)}>
-              ← 上一节
-            </button>
+              {menu("← 上一节")}</button>
             <span>{current.navLabel}</span>
             <button
               type="button"
               disabled={active === doc.sections.length - 1}
               onClick={() => goTo(active + 1)}
             >
-              下一节 →
-            </button>
+              {menu("下一节 →")}</button>
           </footer>
         </article>
       </div>
@@ -192,7 +192,7 @@ export default function InterviewSharedAsset({
           title={target.label}
           sections={doc.sections}
           intro={doc.intro}
-          notice={doc.restrictedToSection ? "按原有范围，连续呈现指定区段的全部内容。" : undefined}
+          notice={doc.restrictedToSection ? menu("按原有范围，连续呈现指定区段的全部内容。") : undefined}
           onClose={() => setReaderOpen(false)}
           onOpenCard={onOpenCard}
           onOpenWiki={onOpenWiki}

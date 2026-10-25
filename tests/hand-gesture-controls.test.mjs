@@ -608,7 +608,7 @@ test("主交互收敛成掌心瞄准和捏合，复杂功能放进可见的 V �
     "pinchPose 滞回不能由状态机凭空点亮",
   );
   // 读数里的「暂用」值必须是真正生效的回退（存档校准），不能写死默认值。
-  assert.ok(controls.includes("学习中 · 暂用 ${primary.pinchCloseAt.toFixed(2)}"));
+  assert.ok(controls.includes('t("学习中 · 暂用 {value}", { value: primary.pinchCloseAt.toFixed(2) })'));
   assert.ok(!controls.includes("STATIC_ACTIONS"), "点赞、倒赞和 ILY 不应再直接抢占镜头");
   assert.ok(css.includes(".graph-hand-radial"));
   assert.ok(

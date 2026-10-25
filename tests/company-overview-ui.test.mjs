@@ -473,6 +473,7 @@ const sessionExports = await loadAppModule("app/interview-session.tsx", { stubs:
   if (specifier === "./company-overview") return components;
   if (specifier === "./interview-session-v2") return { default: ({ doc, companyAction }) => createElement("div", { "data-selected-prep": doc.note.path }, doc.round, companyAction) };
   if (specifier === "./ui-locale") return undefined;
+  if (specifier === "./interview-menu-copy") return undefined;
   if (specifier.startsWith("./")) return { Blocks() {}, Inlines() {}, default() {}, PrepSearchBox() {}, useSlashFocus() {}, copySelectionWithoutRuby() {} };
   return undefined;
 } });

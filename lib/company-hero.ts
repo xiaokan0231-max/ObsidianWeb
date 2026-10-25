@@ -1,3 +1,5 @@
+import { companyUiCopy } from "./company-ui-copy.ts";
+import type { UiLocale } from "./ui-locale.ts";
 import { getString, type Note } from "./notes.ts";
 import type { CompanyOverview } from "./company-overview.ts";
 import { formatContextPickerEvent } from "./context-picker.ts";
@@ -210,23 +212,26 @@ function upcomingPrepDoc(rounds: InterviewPrepDoc[], today: string) {
   }, null);
 }
 
-function eventInfo(explicit: string, rounds: InterviewPrepDoc[], today: string): CompanyHeroNow["event"] {
+function eventInfo(explicit: string, rounds: InterviewPrepDoc[], today: string, locale: UiLocale): CompanyHeroNow["event"] {
+  const t = companyUiCopy(locale);
   const raw = explicit.trim();
   const date = DATE.exec(raw)?.[0] ?? "";
-  if (date && date >= today) return { label: formatContextPickerEvent(raw, today), past: false, borrowedFrom: "" };
+  if (date && date >= today) return { label: formatContextPickerEvent(raw, today, locale), past: false, borrowedFrom: "" };
   const doc = upcomingPrepDoc(rounds, today);
-  if (doc) return { label: formatContextPickerEvent(doc.date, today), past: false, borrowedFrom: doc.note.path };
-  return date ? { label: `${formatContextPickerEvent(raw, today)} · 已过・待更新`, past: true, borrowedFrom: "" } : null;
+  if (doc) return { label: formatContextPickerEvent(doc.date, today, locale), past: false, borrowedFrom: doc.note.path };
+  return date ? { label: `${formatContextPickerEvent(raw, today, locale)} · ${t("已过・待更新")}`, past: true, borrowedFrom: "" } : null;
 }
 
-function followUpInfo(followUpAt: string, followUpAction: string, today: string): CompanyHeroNow["followUp"] {
+function followUpInfo(followUpAt: string, followUpAction: string, today: string, locale: UiLocale): CompanyHeroNow["followUp"] {
+  const t = companyUiCopy(locale);
   if (!DATE.test(followUpAt)) return null;
   const days = daysBetween(followUpAt, today) ?? 0;
-  const base = days > 0 ? `跟进 ${shortDay(followUpAt)} · 已过 ${days} 天` : days === 0 ? "跟进 今天" : `跟进 ${shortDay(followUpAt)}（${-days}天后）`;
+  const base = days > 0 ? t("跟进 {date} · 已过 {days} 天", { date: shortDay(followUpAt), days }) : days === 0 ? t("跟进 今天") : t("跟进 {date}（{days}天后）", { date: shortDay(followUpAt), days: -days });
   return { label: followUpAction ? `${base} · ${clip(followUpAction, 30)}` : base, overdue: days > 0 };
 }
 
-function caseHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today: string): CompanyHero {
+function caseHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today: string, locale: UiLocale): CompanyHero {
+  const t = companyUiCopy(locale);
   const card = toJobCard(context.note);
   const fm = context.note.frontmatter;
   // 胶囊文字与色调都从 frontmatter 原文推：toJobCard 对没写 status 的笔记会回退成「未応募」，那是冒充的事实。
@@ -244,7 +249,7 @@ function caseHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today: s
   if (card.channel) {
     // 求人票在哪发现的 ≠ 实际投递渠道；不同也不并列两个平台名，原文进 title 就够。
     progress.push(source && source !== card.channel && card.sourceGroup !== card.channel
-      ? { id: "channel", label: "経路", value: card.channel, title: `求人票来源：${card.source}` }
+      ? { id: "channel", label: "経路", value: card.channel, title: t("求人票来源：{source}", { source: card.source }) }
       : { id: "channel", label: "経路", value: card.channel });
   } else if (statusRequiresChannel(rawStatus)) {
     // 応募済以降台帳按经路统计，这一格空着必须能看见。保留・未応募不要求 channel（同 vault:check），不染橙。
@@ -284,10 +289,10 @@ function caseHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today: s
   const waitingLabel = getString(fm.waiting_label);
   const waiting = terminal ? ""
     : card.waitingFor && card.waitingFor !== "self"
-      ? [`等待${WAITING_FOR_LABEL[card.waitingFor] ?? card.waitingFor}`, waitingLabel].filter(Boolean).join(" · ")
-      : card.waitingFor === "self" && !card.nextAction ? "待本人行动" : "";
-  const followUp = terminal ? null : followUpInfo(card.followUpAt, getString(fm.follow_up_action), today);
-  const event = terminal ? null : eventInfo(card.nextEventAt, rounds, today);
+      ? [t("等待{owner}", { owner: t(WAITING_FOR_LABEL[card.waitingFor] ?? card.waitingFor) }), waitingLabel].filter(Boolean).join(" · ")
+      : card.waitingFor === "self" && !card.nextAction ? t("待本人行动") : "";
+  const followUp = terminal ? null : followUpInfo(card.followUpAt, getString(fm.follow_up_action), today, locale);
+  const event = terminal ? null : eventInfo(card.nextEventAt, rounds, today, locale);
   const now: CompanyHeroNow | null = card.nextAction || waiting || followUp || event
     ? { action: card.nextAction, waiting, followUp, event, placeholder: "" }
     : inProgress ? { action: "", waiting: "", followUp: null, event: null, placeholder: "未記録" } : null;
@@ -295,7 +300,7 @@ function caseHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today: s
   return {
     kind: "case",
     kicker: "案件",
-    kickerTitle: [`入库 ${intake || "未記録"}`, JOB_ORIGIN_LABEL[card.origin] ?? card.origin].filter(Boolean).join(" · "),
+    kickerTitle: [t("入库 {date}", { date: intake || "未記録" }), t(JOB_ORIGIN_LABEL[card.origin] ?? card.origin)].filter(Boolean).join(" · "),
     name: splitCompanyName(context.company),
     title: context.title === context.company ? "" : context.title,
     status: { label: status || "未記録", tone, note: statusNote },
@@ -309,7 +314,8 @@ function caseHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today: s
 }
 
 /** 面谈是 todo 笔记，不走 toJobCard——jobStatus() 对没有 status 的笔记会回退成「未応募」，那是伪造的选考状态。 */
-function meetingHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today: string, linkedCase: Note | null): CompanyHero {
+function meetingHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today: string, linkedCase: Note | null, locale: UiLocale): CompanyHero {
+  const t = companyUiCopy(locale);
   const fm = context.note.frontmatter;
   const ended = meetingEnded(context.note, today);
   const rawStatus = getString(fm.status).trim();
@@ -321,13 +327,13 @@ function meetingHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today
   const own = getString(fm.next_event_at).trim();
   const fromCase = !own && linkedCase ? getString(linkedCase.frontmatter.next_event_at).trim() : "";
   const eventAt = own || fromCase;
-  const eventTitle = own ? own : `借自案件 ${linkedCase?.path ?? ""}`;
+  const eventTitle = own ? own : t("借自案件 {path}", { path: linkedCase?.path ?? "" });
   const eventDate = DATE.exec(eventAt)?.[0] ?? "";
   // 案件也没写、但已关联的准备稿有将来日期：与切换面板同口径借来，title 写明借自谁。
   const borrowed = !eventAt && !ended ? upcomingPrepDoc(rounds, today) : null;
-  if (eventDate && eventDate < today) progress.push({ id: "next", label: "日時", value: `${formatContextPickerEvent(eventAt, today) || eventAt} · 已过`, title: eventTitle, muted: true });
-  else if (eventAt) progress.push({ id: "next", label: "日時", value: formatContextPickerEvent(eventAt, today) || eventAt, title: eventTitle });
-  else if (borrowed) progress.push({ id: "next", label: "日時", value: formatContextPickerEvent(borrowed.date, today), title: `借自准备稿 ${borrowed.note.path}` });
+  if (eventDate && eventDate < today) progress.push({ id: "next", label: "日時", value: t("{date} · 已过", { date: formatContextPickerEvent(eventAt, today, locale) || eventAt }), title: eventTitle, muted: true });
+  else if (eventAt) progress.push({ id: "next", label: "日時", value: formatContextPickerEvent(eventAt, today, locale) || eventAt, title: eventTitle });
+  else if (borrowed) progress.push({ id: "next", label: "日時", value: formatContextPickerEvent(borrowed.date, today, locale), title: t("借自准备稿 {path}", { path: borrowed.note.path }) });
   else progress.push({ id: "next", label: "日時", value: "未定", muted: true });
   const due = getString(fm.due).trim();
   const dueDays = DATE.test(due) ? daysBetween(due, today) ?? 0 : 0;
@@ -339,7 +345,7 @@ function meetingHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today
   if (priority) progress.push({ id: "priority", label: "優先度", value: priority });
 
   const action = getString(fm.action).trim();
-  const followUp = overdue ? { label: `期限已过 ${dueDays} 天`, overdue: true } : null;
+  const followUp = overdue ? { label: t("期限已过 {days} 天", { days: dueDays }), overdue: true } : null;
   const now: CompanyHeroNow | null = ended ? null
     : action || followUp ? { action, waiting: "", followUp, event: null, placeholder: "" }
       : { action: "", waiting: "", followUp: null, event: null, placeholder: "未記録" };
@@ -364,6 +370,6 @@ function meetingHero(context: CompanyOverview, rounds: InterviewPrepDoc[], today
  * rounds 是该案件／面谈已关联的准备稿（interview-session 已经按正本分好）；
  * linkedCase 是面谈 todo 通过 case_id 挂着的案件（日時写在案件上时从这里借）。
  */
-export function buildCompanyHero(context: CompanyOverview, { rounds = [], today, linkedCase = null }: { rounds?: InterviewPrepDoc[]; today: string; linkedCase?: Note | null }): CompanyHero {
-  return context.kind === "meeting" ? meetingHero(context, rounds, today, linkedCase) : caseHero(context, rounds, today);
+export function buildCompanyHero(context: CompanyOverview, { rounds = [], today, linkedCase = null, locale = "zh-CN" }: { rounds?: InterviewPrepDoc[]; today: string; linkedCase?: Note | null; locale?: UiLocale }): CompanyHero {
+  return context.kind === "meeting" ? meetingHero(context, rounds, today, linkedCase, locale) : caseHero(context, rounds, today, locale);
 }

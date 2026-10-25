@@ -1,3 +1,7 @@
+"use client";
+
+
+import { useInterviewMenu } from "./interview-menu-copy";
 import { parseSeirikou } from "@/lib/review";
 import type { AdvisoryEvidenceRef } from "@/lib/interview-advisory";
 import { REVIEW_DIMENSION_META, type ReviewDimensionKey } from "@/lib/review-deep";
@@ -23,11 +27,13 @@ export function assessmentIssueCopy(text: string) {
 }
 
 /** 默认保留分数与首要问题，完整依据按需展开，避免挤走原文。 */
-export function InterviewReassessmentEntry({ notes, sourcePath, onOpenNote, expanded, onExpandedChange, onClose, onOpenEvidence, onOpenUnderstanding, t = (label: string) => label }: {
+export function InterviewReassessmentEntry({ notes, sourcePath, onOpenNote, expanded, onExpandedChange, onClose, onOpenEvidence, onOpenUnderstanding, t: translate }: {
   notes: Note[]; sourcePath?: string; onOpenNote?: (note: Note) => void; t?: (label: string) => string;
   onOpenEvidence?: (ref: AdvisoryEvidenceRef) => void; onOpenUnderstanding?: () => void;
   expanded?: boolean; onExpandedChange?: (open: boolean) => void; onClose?: () => void;
 }) {
+  const menu = useInterviewMenu();
+  const t = translate ?? menu;
   const report = findInterviewReassessment(notes, sourcePath);
   if (!report) return null;
   const fm = report.frontmatter;
@@ -47,12 +53,12 @@ export function InterviewReassessmentEntry({ notes, sourcePath, onOpenNote, expa
       return issues.filter((x): x is string => typeof x === "string" && x.startsWith("严重 · 未恢复"))
         .map((issue) => ({ note: n, issue }));
     }).slice(0, 3);
-  const content = <section className="rv-insights-entry rv-reassessment-entry" aria-label="新版证据评价">
-    <div className="rv-reassessment-copy"><h2>{sourcePath ? scored ? "新版有据评分与主要问题" : "新版证据评价 · 无总分" : t("跨面试重点")}</h2>
+  const content = <section className="rv-insights-entry rv-reassessment-entry" aria-label={menu("新版证据评价")}>
+    <div className="rv-reassessment-copy"><h2>{sourcePath ? scored ? menu("新版有据评分与主要问题") : menu("新版证据评价 · 无总分") : t("跨面试重点")}</h2>
       <p>{sourcePath && fm.assessment_scope !== "full_available_text"
-        ? "有限材料分析，不生成整场分数；有证据的局部评分与观察仍保留。"
-        : scored ? "分数与关键问题一起读；未问或缺证的维度保持未评估，不以0或100代替。" : "以具体证据、关键问题与修复状态评价；未问或缺证的维度保持未评估。"}</p>
-      {critical.length > 0 && <><h3>先看未恢复的关键问题</h3><ol aria-label="未恢复核心问题">{critical.map(({ note, issue }) => {
+        ? menu("有限材料分析，不生成整场分数；有证据的局部评分与观察仍保留。")
+        : scored ? menu("分数与关键问题一起读；未问或缺证的维度保持未评估，不以0或100代替。") : menu("以具体证据、关键问题与修复状态评价；未问或缺证的维度保持未评估。")}</p>
+      {critical.length > 0 && <><h3>{menu("先看未恢复的关键问题")}</h3><ol aria-label={menu("未恢复核心问题")}>{critical.map(({ note, issue }) => {
         const copy = assessmentIssueCopy(issue);
         const source = notes.find(item => item.path === note.frontmatter.source_path);
         return <li key={note.path + issue}>
@@ -64,28 +70,28 @@ export function InterviewReassessmentEntry({ notes, sourcePath, onOpenNote, expa
         </li>;
       })}</ol></>}
       {sourcePath && <>
-        {scored && <section aria-label="新版有据评分">
-          <p><strong>{display.score === null ? "整场总分：未评估" : `新版总分：${Math.round(display.score)} / 100`}</strong> · {getString(fm.eligibility)}</p>
-          <p aria-label="新版维度评分">{(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).map((key, index) => <span key={key}>{index > 0 ? " · " : ""}{REVIEW_DIMENSION_META[key].label}：{dimensionScore(key) === null ? "未评估（—）" : dimensionScore(key)}</span>)}</p>
+        {scored && <section aria-label={menu("新版有据评分")}>
+          <p><strong>{display.score === null ? menu("整场总分：未评估") : menu("新版总分：{score} / 100", { score: Math.round(display.score) })}</strong> · {getString(fm.eligibility)}</p>
+          <p aria-label={menu("新版维度评分")}>{(Object.keys(REVIEW_DIMENSION_META) as ReviewDimensionKey[]).map((key, index) => <span key={key}>{index > 0 ? " · " : ""}{REVIEW_DIMENSION_META[key].label}：{dimensionScore(key) === null ? menu("未评估（—）") : dimensionScore(key)}</span>)}</p>
           {getString(fm.scoring_formula) && <p>{getString(fm.scoring_formula)}</p>}
         </section>}
-        {display.historicalScore !== null && <p>历史旧分：{Math.round(display.historicalScore)} / 100 · 不同口径，不能解读为能力涨跌。</p>}
-        <p><strong>{getString(fm.diagnostic_conclusion) || "材料与诊断见新版报告"}</strong></p>
-        {items("priority_issues").length > 0 && <ol aria-label="优先问题与修复状态">{items("priority_issues").map((item) => <li key={item}>{item}</li>)}</ol>}
-        {items("dimension_evaluation").length > 0 && <ul aria-label="有据维度判断">{items("dimension_evaluation").map((item) => <li key={item}>{item}</li>)}</ul>}
-        {scored && fm.assessment_scope !== "full_available_text" && items("local_scores").length > 0 && <ul aria-label="有据局部评分">{items("local_scores").map((item) => <li key={item}>{item}</li>)}</ul>}
-        {scored && (items("score_basis").length > 0 || (fm.assessment_scope === "full_available_text" && items("local_scores").length > 0)) && <details><summary>评分依据、上限与局部评分</summary>
-          {items("score_basis").length > 0 && <ul aria-label="评分依据与算式">{items("score_basis").map((item) => <li key={item}>{item}</li>)}</ul>}
-          {fm.assessment_scope === "full_available_text" && items("local_scores").length > 0 && <ul aria-label="局部评分">{items("local_scores").map((item) => <li key={item}>{item}</li>)}</ul>}
+        {display.historicalScore !== null && <p>{menu("历史旧分：")}{Math.round(display.historicalScore)}{menu(" / 100 · 不同口径，不能解读为能力涨跌。")}</p>}
+        <p><strong>{getString(fm.diagnostic_conclusion) || menu("材料与诊断见新版报告")}</strong></p>
+        {items("priority_issues").length > 0 && <ol aria-label={menu("优先问题与修复状态")}>{items("priority_issues").map((item) => <li key={item}>{item}</li>)}</ol>}
+        {items("dimension_evaluation").length > 0 && <ul aria-label={menu("有据维度判断")}>{items("dimension_evaluation").map((item) => <li key={item}>{item}</li>)}</ul>}
+        {scored && fm.assessment_scope !== "full_available_text" && items("local_scores").length > 0 && <ul aria-label={menu("有据局部评分")}>{items("local_scores").map((item) => <li key={item}>{item}</li>)}</ul>}
+        {scored && (items("score_basis").length > 0 || (fm.assessment_scope === "full_available_text" && items("local_scores").length > 0)) && <details><summary>{menu("评分依据、上限与局部评分")}</summary>
+          {items("score_basis").length > 0 && <ul aria-label={menu("评分依据与算式")}>{items("score_basis").map((item) => <li key={item}>{item}</li>)}</ul>}
+          {fm.assessment_scope === "full_available_text" && items("local_scores").length > 0 && <ul aria-label={menu("局部评分")}>{items("local_scores").map((item) => <li key={item}>{item}</li>)}</ul>}
         </details>}
         <p>{getString(fm.material_coverage)}</p>
         <p>{getString(fm.material_limits)}</p>
       </>}
     </div>
     {onOpenNote && <div className="rv-title-links rv-reassessment-actions">
-      <button type="button" onClick={() => onOpenNote(report)}>{sourcePath ? "打开新版报告 →" : t("重评总索引 →")}</button>
+      <button type="button" onClick={() => onOpenNote(report)}>{sourcePath ? menu("打开新版报告 →") : t("重评总索引 →")}</button>
       {actions && <button type="button" onClick={() => onOpenNote(actions)}>{t("跨场行动建议 →")}</button>}
-      {sourcePath && previous && <button type="button" onClick={() => onOpenNote(previous)}>旧版报告（历史）↗</button>}
+      {sourcePath && previous && <button type="button" onClick={() => onOpenNote(previous)}>{menu("旧版报告（历史）↗")}</button>}
     </div>}
   </section>;
   if (!sourcePath) return content;
@@ -104,7 +110,7 @@ export function InterviewReassessmentEntry({ notes, sourcePath, onOpenNote, expa
       const sentenceIds = copy.sentenceIds.filter(id => block?.sentences.some(sentence => sentence.id === id));
       return <li key={issue}>
         <h4>{block?.title || `${t("建议")} ${index + 1}`}</h4>
-        {issue.startsWith("严重") && <strong className="rv-issue-important">{t("优先改进")}</strong>}
+        {issue.startsWith(menu("严重")) && <strong className="rv-issue-important">{t("优先改进")}</strong>}
         <p>{copy.observation}</p>
         {copy.action && <div className="rv-issue-next"><strong>{t("下次可以这样做")}</strong><p>{copy.action}</p></div>}
         {block && onOpenEvidence && <button type="button" onClick={() => onOpenEvidence({ sourcePath, blockId: block.id, sentenceIds })}>{t("查看这段原文 →")}</button>}
@@ -119,13 +125,13 @@ export function InterviewReassessmentEntry({ notes, sourcePath, onOpenNote, expa
     </div>
     <details className="rv-assessment-evidence"><summary>{t("查看评价依据")}</summary>
       {getString(fm.diagnostic_conclusion) && <p>{getString(fm.diagnostic_conclusion)}</p>}
-      <ul aria-label="原始问题与修复记录">{issues.map(issue => <li key={issue}>{issue}</li>)}</ul>
-      <ul aria-label="各项评价依据">{items("dimension_evaluation").map(item => <li key={item}>{item}</li>)}</ul>
-      {items("local_scores").length > 0 && <ul aria-label="局部评分">{items("local_scores").map(item => <li key={item}>{item}</li>)}</ul>}
+      <ul aria-label={menu("原始问题与修复记录")}>{issues.map(issue => <li key={issue}>{issue}</li>)}</ul>
+      <ul aria-label={menu("各项评价依据")}>{items("dimension_evaluation").map(item => <li key={item}>{item}</li>)}</ul>
+      {items("local_scores").length > 0 && <ul aria-label={menu("局部评分")}>{items("local_scores").map(item => <li key={item}>{item}</li>)}</ul>}
       <details><summary>{t("分数怎么算的")}</summary>
         <p>{getString(fm.eligibility)}</p><p>{getString(fm.scoring_formula)}</p>
-        <ul aria-label="评分依据与算式">{items("score_basis").map(item => <li key={item}>{item}</li>)}</ul>
-        {display.historicalScore !== null && <p>历史旧分：{Math.round(display.historicalScore)} / 100 · 不同口径，不能解读为能力涨跌。</p>}
+        <ul aria-label={menu("评分依据与算式")}>{items("score_basis").map(item => <li key={item}>{item}</li>)}</ul>
+        {display.historicalScore !== null && <p>{menu("历史旧分：")}{Math.round(display.historicalScore)}{menu(" / 100 · 不同口径，不能解读为能力涨跌。")}</p>}
         {previous && onOpenNote && <button type="button" onClick={() => onOpenNote(previous)}>{t("查看之前的评价 ↗")}</button>}
       </details>
       <details><summary>{t("哪些内容暂时不能判断")}</summary><p>{getString(fm.material_coverage)}</p><p>{getString(fm.material_limits)}</p></details>

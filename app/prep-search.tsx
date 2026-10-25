@@ -1,5 +1,7 @@
 "use client";
 
+import { useCommonMenu } from "./common-menu-copy";
+
 import { useEffect, type ChangeEvent, type KeyboardEvent, type RefObject } from "react";
 
 // 判定本体は lib/keyboard.ts（全画面共用）。ここから再輸出するのは既存 import 先を壊さないため。
@@ -47,6 +49,7 @@ export function PrepSearchBox({
   /** 画面ごとの配置は各自の CSS が持つ。中身の構造だけをここで揃える。 */
   className?: string;
 }) {
+  const menu = useCommonMenu();
   return (
     <label className={className}>
       <span aria-hidden="true">⌕</span>
@@ -65,7 +68,7 @@ export function PrepSearchBox({
         aria-label={label}
       />
       {value && (
-        <button type="button" onClick={() => onChange("")} aria-label="清除搜索">✕</button>
+        <button type="button" onClick={() => onChange("")} aria-label={menu("清除搜索")}>✕</button>
       )}
     </label>
   );

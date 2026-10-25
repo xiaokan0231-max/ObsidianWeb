@@ -1,5 +1,7 @@
 "use client";
 
+import { useJobLabels } from "./jobs-copy";
+
 import { useCallback, useState } from "react";
 import {
   isJobStatus,
@@ -68,6 +70,7 @@ export function StatusPicker({
     expectedMtime?: number,
   ) => Promise<string | null>;
 }) {
+  const menu = useJobLabels();
   const { t } = useJobMenu();
   const customValue = value && !isJobStatus(value) ? value : null;
   const needsChannel = (next: string) => statusRequiresChannel(next) && !channel;
@@ -189,8 +192,7 @@ export function StatusPicker({
           </button>
           <button type="button" onClick={() => setPendingStatus(null)}>{t("取消")}</button>
           <small className="job-status-channel-hint">
-            「{pendingStatus}」需要记下实际投递渠道（写入 channel，台帳按渠道统计到达率）。没投过就选「保留」并写理由。
-          </small>
+            「{pendingStatus}{menu("」需要记下实际投递渠道（写入 channel，台帳按渠道统计到达率）。没投过就选「保留」并写理由。")}</small>
         </div>
       )}
 
@@ -395,6 +397,7 @@ export function JobStatusAlerts({
   jobs: JobCard[];
   onDismiss: (path: string) => void;
 }) {
+  const menu = useJobLabels();
   const { t } = useJobMenu();
   if (Object.keys(statusErrors).length === 0) return null;
   return (
@@ -402,7 +405,7 @@ export function JobStatusAlerts({
       {Object.entries(statusErrors).map(([path, message]) => (
         <p key={path}>
           <b>{jobs.find((job) => job.path === path)?.company ?? noteBasename(path)}</b>
-          <span>没有写入。{message}</span>
+          <span>{menu("没有写入。")}{message}</span>
           <button type="button" onClick={() => onDismiss(path)} aria-label={t("关闭提示")}>×</button>
         </p>
       ))}

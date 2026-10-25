@@ -207,6 +207,7 @@ const session = await loadAppModule("app/interview-session.tsx", { stubs: (speci
   if (specifier === "./ui-locale") return ui["./ui-locale"];
   if (specifier === "./interview-session-v2") return { default: ({ doc, companyAction }) => createElement("div", { "data-shown-prep": doc.note.path, "data-replay-of": doc.replayOf }, companyAction) };
   if (specifier === "./company-overview") return { default: () => null, COMPANY_COMPARE_LIMIT: 3, CompanyCompare: () => null, CompanyCompareButton: () => null, CompanyCompareSelector: () => null, CompanyCompareTray: () => null, toggleCompanyComparison: (list) => list };
+  if (specifier === "./interview-menu-copy") return undefined;
   if (specifier.startsWith("./")) return { Blocks() {}, Inlines() {}, default() {}, PrepSearchBox() {}, useSlashFocus() {}, copySelectionWithoutRuby() {} };
   return undefined;
 } });

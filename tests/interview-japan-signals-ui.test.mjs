@@ -75,3 +75,25 @@ test("横向对照页从笔记组装同一份对照：结果按整理稿路径�
   assert.equal(comparison.rows[0].signals.closing.verdict, "mixed");
 
 });
+
+test("日语信号面板和结果对照翻译界面，保留判定枚举、观察、建议与证据", () => {
+  const t = ui.signalsCopy("ja");
+  const html = renderToStaticMarkup(ui.JapanSignalsPanel({ review, outcome: rejected, onEvidence() {}, t }));
+  assert.match(html, /締めくくりの意思表示/);
+  assert.match(html, /aria-label="締めくくりの意思表示の原発言"/);
+  assert.match(html, /その場での懸念の解消/);
+  assert.match(html, /class="js-verdict v-poor">できなかった/);
+  assert.match(html, /次にすること/);
+  assert.match(html, /q09 · s040・s041/);
+  assert.ok(html.includes(signals.closing.observationZh));
+  assert.ok(html.includes(signals.closing.fixZh));
+  assert.ok(html.includes(rejected.detail));
+  assert.doesNotMatch(html, />收尾表态<|>部分<|>整场 · 与五维分开/);
+  const comparison = buildSignalOutcomeComparison([{ key: "source.md", company: "株式会社テスト", date: "2026-01-12", round: "最終面接", outcome: rejected, signals }]);
+  const table = renderToStaticMarkup(ui.SignalOutcomeTable({ comparison, t }));
+  assert.match(table, /標本は少数です/);
+  assert.match(table, /振り返り1件のうち1件/);
+  assert.match(table, /できなかった 1/);
+  assert.match(table, /比率や因果関係は算出しません/);
+  assert.ok(table.includes(signals.closing.observationZh));
+});

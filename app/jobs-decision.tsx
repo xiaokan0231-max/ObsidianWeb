@@ -1,5 +1,7 @@
 "use client";
 
+import { useJobLabels } from "./jobs-copy";
+
 import { useEffect, useRef } from "react";
 import {
   awaitingCounterpart,
@@ -42,6 +44,7 @@ export function JobDecisionWorkspace({
   ) => Promise<string | null>;
   onOpenNote: () => void;
 }) {
+  const menu = useJobLabels();
   const { t, label: menuLabel } = useJobMenu();
   const queueRef = useRef<HTMLElement>(null);
 
@@ -85,10 +88,10 @@ export function JobDecisionWorkspace({
             <span>
               <small>
                 {String(index + 1).padStart(2, "0")} ·{" "}
-                {awaitingCounterpart(job) ? `${job.status}（已动手·等对方）` : job.status}
+                {awaitingCounterpart(job) ? menu("{status}（已动手·等对方）", { status: job.status }) : job.status}
               </small>
               <strong>{job.company}</strong>
-              <em>{job.position || "职位未记录"}</em>
+              <em>{job.position || menu("职位未记录")}</em>
             </span>
           </button>
         ))}
@@ -97,9 +100,9 @@ export function JobDecisionWorkspace({
       <article className="jobs-decision-detail">
         <header>
           <div>
-            <span>{ORIGIN_LABEL[selected.origin] ?? "岗位机会"} · 応募优先度 {selected.rating}/10{selected.fit && ` · Fit ${selected.fit.score} · Band ${selected.fit.band}`}</span>
+            <span>{ORIGIN_LABEL[selected.origin] ?? menu("岗位机会")}{menu(" · 応募优先度 ")}{selected.rating}/10{selected.fit && ` · Fit ${selected.fit.score} · Band ${selected.fit.band}`}</span>
             <h2>{selected.company}</h2>
-            <p>{selected.position || "职位未记录"}</p>
+            <p>{selected.position || menu("职位未记录")}</p>
           </div>
           <StatusPicker
             key={selected.path}
@@ -115,11 +118,11 @@ export function JobDecisionWorkspace({
           />
         </header>
         <dl>
-          <div><dt>年収</dt><dd>{salaryLabel(selected)}</dd></div>
-          <div><dt>v2 採点</dt><dd>{selected.fit ? `Fit ${selected.fit.score} · Band ${selected.fit.band} · Gate ${HARD_GATE_LABEL[selected.fit.hardGate]}` : UNRATED_V2_LABEL}</dd></div>
-          <div><dt>勤務地</dt><dd>{selected.location || "—"}</dd></div>
-          <div><dt>原文</dt><dd>{VERIFICATION_LABEL[selected.verification]}</dd></div>
-          <div><dt>入库</dt><dd>{selected.date || "—"}</dd></div>
+          <div><dt>{menu("年収")}</dt><dd>{salaryLabel(selected)}</dd></div>
+          <div><dt>{menu("v2 採点")}</dt><dd>{selected.fit ? `Fit ${selected.fit.score} · Band ${selected.fit.band} · Gate ${HARD_GATE_LABEL[selected.fit.hardGate]}` : UNRATED_V2_LABEL}</dd></div>
+          <div><dt>{menu("勤務地")}</dt><dd>{selected.location || "—"}</dd></div>
+          <div><dt>{menu("原文")}</dt><dd>{VERIFICATION_LABEL[selected.verification]}</dd></div>
+          <div><dt>{menu("入库")}</dt><dd>{selected.date || "—"}</dd></div>
         </dl>
         {/* 判断要看的六轴与技术栈原来只在抽屉里，决策台为了它们还得另开一层。 */}
         <FitPanel fit={selected.fit} />
@@ -128,10 +131,10 @@ export function JobDecisionWorkspace({
             {selected.stack.map((tag) => <span key={tag}>{tag}</span>)}
           </div>
         )}
-        {selected.reason && <section><h3>为什么值得判断</h3><p>{selected.reason}</p></section>}
-        {selected.caution && <section className="is-caution"><h3>应募前确认</h3><p>{selected.caution}</p></section>}
+        {selected.reason && <section><h3>{menu("为什么值得判断")}</h3><p>{selected.reason}</p></section>}
+        {selected.caution && <section className="is-caution"><h3>{menu("应募前确认")}</h3><p>{selected.caution}</p></section>}
         {selected.matches.length > 0 && (
-          <section><h3>岗位契合点</h3><ul>{selected.matches.slice(0, 5).map((item, index) => <li key={index}>{item}</li>)}</ul></section>
+          <section><h3>{menu("岗位契合点")}</h3><ul>{selected.matches.slice(0, 5).map((item, index) => <li key={index}>{item}</li>)}</ul></section>
         )}
         <footer>
           {selected.officialApplyUrl && (

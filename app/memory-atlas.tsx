@@ -1529,7 +1529,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
               title={`${nextEvent.date}${nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST ${nextEvent.label}`}
             >
               <small>{ui.nextEvent}</small>
-              <em>{countdownLabel(nextEvent.date, new Date(`${calendarToday}T00:00:00`))}{nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST</em>
+              <em>{countdownLabel(nextEvent.date, new Date(`${calendarToday}T00:00:00`), locale)}{nextEvent.time ? ` ${calendarEventTime(nextEvent)}` : ""} JST</em>
               <strong>{nextEvent.company}</strong>
               <i aria-hidden="true">→</i>
             </button>

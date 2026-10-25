@@ -1,5 +1,7 @@
 "use client";
 
+import { useCommonMenu } from "./common-menu-copy";
+
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { UNDO_LABEL } from "@/lib/ui-labels";
 
@@ -72,6 +74,7 @@ export function useUndoFlash({ onStaleFailure }: { onStaleFailure?: (message: st
 export type UndoFlashState = ReturnType<typeof useUndoFlash>;
 
 export function UndoFlashBar({ state }: { state: UndoFlashState }) {
+  const menu = useCommonMenu();
   const { flash, busy, error, runUndo, dismiss } = state;
   if (!flash) return null;
   return (
@@ -88,11 +91,11 @@ export function UndoFlashBar({ state }: { state: UndoFlashState }) {
       <span>{flash.message}</span>
       {flash.undo && (
         <button type="button" className="undo-flash-action" disabled={busy} onClick={() => void runUndo()}>
-          {busy ? "撤销中…" : UNDO_LABEL}
+          {busy ? menu("撤销中…") : menu(UNDO_LABEL)}
         </button>
       )}
       {error && <em role="alert">{error}</em>}
-      <button type="button" className="undo-flash-close" aria-label="关闭提示" onClick={dismiss}>×</button>
+      <button type="button" className="undo-flash-close" aria-label={menu("关闭提示")} onClick={dismiss}>×</button>
     </div>
   );
 }

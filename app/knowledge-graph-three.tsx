@@ -1,9 +1,12 @@
 "use client";
 
+import { useStageMenu } from "./stage-menu-copy";
+
 import {
   type CSSProperties,
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -213,6 +216,8 @@ export default function ThreeKnowledgeGraph({
   initialFocusId = null,
   onFocusChange,
 }: Props) {
+  const menu = useStageMenu();
+  const liveMenu = useEffectEvent(menu);
   const stageRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -437,7 +442,7 @@ export default function ThreeKnowledgeGraph({
       host,
       antialias: nodes.length < 1200,
       pixelRatioCap: nodes.length > 1200 ? 1.25 : 1.75,
-      ariaLabel: `Obsidian 3D 记忆星图，共 ${nodes.length} 个节点；单击聚焦，双击打开完整笔记，拖拽旋转，方向键选择`,
+      ariaLabel: liveMenu("Obsidian 3D 记忆星图，共 {count} 个节点；单击聚焦，双击打开完整笔记，拖拽旋转，方向键选择", { count: nodes.length }),
     });
     if (!stage) {
       onFallbackRef.current();
@@ -647,7 +652,7 @@ export default function ThreeKnowledgeGraph({
       const title = document.createElement("strong");
       title.textContent = groupNode.groupLabel;
       const count = document.createElement("small");
-      count.textContent = `${groupNodes.length} 个节点`;
+      count.textContent = liveMenu("{count} 个节点", { count: groupNodes.length });
       label.appendChild(title);
       label.appendChild(count);
       labelLayer.appendChild(label);
@@ -2594,7 +2599,7 @@ export default function ThreeKnowledgeGraph({
   }, [links, nodeById, nodes, openNode]);
 
   if (nodes.length === 0) {
-    return <div className="space-graph-empty">这个分区暂时没有可绘制的笔记。</div>;
+    return <div className="space-graph-empty">{menu("这个分区暂时没有可绘制的笔记。")}</div>;
   }
 
   return (
@@ -2610,25 +2615,25 @@ export default function ThreeKnowledgeGraph({
       {!ready && (
         <div className="space-graph-loading" role="status">
           <i />
-          <span>正在点亮记忆星图</span>
+          <span>{menu("正在点亮记忆星图")}</span>
         </div>
       )}
       <div className="space-graph-brand" aria-hidden="true">
         <span>MEMORY CONSTELLATION</span>
-        <strong>思考的轨迹，以光连接。</strong>
+        <strong>{menu("思考的轨迹，以光连接。")}</strong>
       </div>
       <StageSearchRadar
         inputRef={searchInputRef}
         search={search}
         meta={(node) => `${node.kindLabel} · ${node.groupLabel}`}
         resultsId="space-graph-search-results"
-        placeholder="搜索标题与全文"
-        inputAriaLabel="在关系图中搜索标题与全文"
-        listAriaLabel="关系图全文搜索结果"
-        clearAriaLabel="清空关系图搜索"
-        hitUnit="节点"
-        enterLabel="飞向节点"
-        emptyHint="尝试更短的关键词，或搜索正文中的日语、公司名和技术词。"
+        placeholder={menu("搜索标题与全文")}
+        inputAriaLabel={menu("在关系图中搜索标题与全文")}
+        listAriaLabel={menu("关系图全文搜索结果")}
+        clearAriaLabel={menu("清空关系图搜索")}
+        hitUnit={menu("节点")}
+        enterLabel={menu("飞向节点")}
+        emptyHint={menu("尝试更短的关键词，或搜索正文中的日语、公司名和技术词。")}
       />
       {activeNode && !selectedNode && (
         <div
@@ -2638,7 +2643,7 @@ export default function ThreeKnowledgeGraph({
         >
           <span>{activeNode.groupLabel}</span>
           <strong>{activeNode.title}</strong>
-          <small>{activeNode.degree} 条可见关系</small>
+          <small>{activeNode.degree}{menu(" 条可见关系")}</small>
         </div>
       )}
       {selectedNode && (
@@ -2649,42 +2654,42 @@ export default function ThreeKnowledgeGraph({
             "--node-accent": selectedNode.color,
             "--dossier-zoom": dossierZoom,
           } as CSSProperties}
-          aria-label={`${selectedNode.title}的节点档案`}
+          aria-label={menu("{title}的节点档案", { title: selectedNode.title })}
         >
           <i className="space-graph-dossier-scan" aria-hidden="true" />
           <header>
             <div>
-              <span>NODE SIGNAL · 已锁定</span>
+              <span>{menu("NODE SIGNAL · 已锁定")}</span>
               <small>{selectedNode.groupLabel}</small>
             </div>
             <div className="space-graph-dossier-actions">
               <button
                 type="button"
-                aria-label={dossierMode === "focus" ? "将节点档案停靠到右侧" : "居中放大节点档案"}
+                aria-label={dossierMode === "focus" ? menu("将节点档案停靠到右侧") : menu("居中放大节点档案")}
                 onClick={() => setDossierMode((current) => current === "dock" ? "focus" : "dock")}
               >
-                {dossierMode === "focus" ? "停靠" : "居中"} <kbd>D</kbd>
+                {dossierMode === "focus" ? menu("停靠") : menu("居中")} <kbd>D</kbd>
               </button>
               <button
                 type="button"
-                aria-label="缩小节点档案文字"
+                aria-label={menu("缩小节点档案文字")}
                 onClick={() => changeDossierZoom(-0.1)}
               >
                 −
               </button>
-              <output aria-label={`节点档案缩放 ${Math.round(dossierZoom * 100)}%`}>
+              <output aria-label={menu("节点档案缩放 {percent}%", { percent: Math.round(dossierZoom * 100) })}>
                 {Math.round(dossierZoom * 100)}%
               </output>
               <button
                 type="button"
-                aria-label="放大节点档案文字"
+                aria-label={menu("放大节点档案文字")}
                 onClick={() => changeDossierZoom(0.1)}
               >
                 +
               </button>
               <button
                 type="button"
-                aria-label="收起节点档案并返回全景"
+                aria-label={menu("收起节点档案并返回全景")}
                 onClick={() => resetViewRef.current()}
               >
                 ×
@@ -2702,17 +2707,17 @@ export default function ThreeKnowledgeGraph({
               <h2>{selectedNode.title}</h2>
             </div>
             <dl>
-              <div><dt>连接</dt><dd>{selectedNode.degree}</dd></div>
-              <div><dt>外链</dt><dd>{selectedNode.outbound}</dd></div>
-              <div><dt>更新</dt><dd>{selectedNode.updatedLabel}</dd></div>
+              <div><dt>{menu("连接")}</dt><dd>{selectedNode.degree}</dd></div>
+              <div><dt>{menu("外链")}</dt><dd>{selectedNode.outbound}</dd></div>
+              <div><dt>{menu("更新")}</dt><dd>{selectedNode.updatedLabel}</dd></div>
             </dl>
             <div className="space-graph-dossier-copy">
-              <span>内容预览 · 可滚动查看全文</span>
-              <p>{selectedNode.excerpt || "这篇记忆暂时没有可提取的正文摘要。"}</p>
+              <span>{menu("内容预览 · 可滚动查看全文")}</span>
+              <p>{selectedNode.excerpt || menu("这篇记忆暂时没有可提取的正文摘要。")}</p>
             </div>
             {selectedNeighbors.length > 0 && (
               <div className="space-graph-dossier-neighbors">
-                <span>最近的记忆轨道</span>
+                <span>{menu("最近的记忆轨道")}</span>
                 <div>
                   {selectedNeighbors.map(({ node: neighbor, relationLabel, direction }) => (
                     <button
@@ -2740,23 +2745,21 @@ export default function ThreeKnowledgeGraph({
             >
               <span>
                 <small>ENTER MEMORY</small>
-                展开完整记忆
-              </span>
+                {menu("展开完整记忆")}</span>
               <b aria-hidden="true">→</b>
             </button>
           ) : (
             <div className="space-graph-entity-hint">
-              派生实体 · 请选择关系节点继续探索
-            </div>
+              {menu("派生实体 · 请选择关系节点继续探索")}</div>
           )}
           <footer>
             <span>
               {selectedNode.openable
-                ? <>双击节点或按 <kbd>Enter</kbd> 也可穿越</>
-                : "实体由 Vault 的结构化字段实时生成"}
+                ? <>{menu("双击节点或按 ")}<kbd>Enter</kbd>{menu(" 也可穿越")}</>
+                : menu("实体由 Vault 的结构化字段实时生成")}
             </span>
             <button type="button" onClick={() => setShortcutHelp(true)}>
-              查看快捷键 <kbd>?</kbd>
+              {menu("查看快捷键 ")}<kbd>?</kbd>
             </button>
           </footer>
         </aside>
@@ -2766,14 +2769,14 @@ export default function ThreeKnowledgeGraph({
           accent={openingNode.color}
           kicker="MEMORY GATE · SYNCHRONIZING"
           title={openingNode.title}
-          note="正在展开完整记忆"
+          note={menu("正在展开完整记忆")}
         />
       )}
       <StageControls
         fullscreen={fullscreen}
-        fullscreenAriaLabel="全屏查看星图，快捷键 F"
+        fullscreenAriaLabel={menu("全屏查看星图，快捷键 F")}
         onToggleFullscreen={() => void toggleFullscreen()}
-        resetLabel="回到全景"
+        resetLabel={menu("回到全景")}
         onResetView={() => resetViewRef.current()}
         paused={paused}
         onTogglePaused={() => setPaused((value) => !value)}
@@ -2791,28 +2794,28 @@ export default function ThreeKnowledgeGraph({
       )}
       {shortcutHelp && (
         <StageShortcuts
-          title="星图快捷键"
-          ariaLabel="星图快捷键"
+          title={menu("星图快捷键")}
+          ariaLabel={menu("星图快捷键")}
           onClose={() => setShortcutHelp(false)}
           entries={[
-            { keys: ["/"], label: "全文搜索" },
-            { keys: ["F"], label: "全屏" },
-            { keys: ["D"], label: "档案居中／停靠" },
-            { keys: ["O"], label: "打开完整记忆" },
-            { keys: ["＋", "－"], label: "文字缩放" },
-            { keys: ["0"], label: "恢复 100%" },
-            { keys: ["←", "→"], label: "切换节点" },
-            { keys: ["P"], label: "暂停／继续动态" },
-            { keys: ["R"], label: "回到全景" },
+            { keys: ["/"], label: menu("全文搜索") },
+            { keys: ["F"], label: menu("全屏") },
+            { keys: ["D"], label: menu("档案居中／停靠") },
+            { keys: ["O"], label: menu("打开完整记忆") },
+            { keys: ["＋", "－"], label: menu("文字缩放") },
+            { keys: ["0"], label: menu("恢复 100%") },
+            { keys: ["←", "→"], label: menu("切换节点") },
+            { keys: ["P"], label: menu("暂停／继续动态") },
+            { keys: ["R"], label: menu("回到全景") },
           ]}
         />
       )}
       <div className="space-graph-caption">
-        <span>单击锁定 · 拖动探索 · 双击穿越</span>
-        <strong>{nodes.length} 个节点 · {links.length} 条连接</strong>
+        <span>{menu("单击锁定 · 拖动探索 · 双击穿越")}</span>
+        <strong>{nodes.length}{menu(" 个节点 · ")}{links.length}{menu(" 条连接")}</strong>
       </div>
       <details className="space-graph-index">
-        <summary>用列表访问全部节点</summary>
+        <summary>{menu("用列表访问全部节点")}</summary>
         <div>
           {nodes
             .toSorted((left, right) => right.degree - left.degree)

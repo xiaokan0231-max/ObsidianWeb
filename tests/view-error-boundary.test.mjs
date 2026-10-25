@@ -8,12 +8,14 @@ const walk = (value) => !value || typeof value !== "object" ? [] : Array.isArray
 test("模块加载失败保留错误和整页恢复，普通重试仍只清除边界状态", async () => {
   let reloads = 0;
   const { default: Boundary } = await loadAppModule("app/view-error-boundary.tsx", {
+    stubs: { "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) } },
     globals: { window: { location: { reload: () => { reloads += 1; } } } },
   });
   const boundary = new Boundary({ label: "topics", children: "page-content" });
   assert.equal(boundary.render(), "page-content");
   boundary.state = Boundary.getDerivedStateFromError(new Error("Failed to fetch dynamically imported module"));
-  const tree = walk(boundary.render());
+  const fallback = boundary.render();
+  const tree = walk(fallback.type(fallback.props));
   assert.equal(tree.find((node) => node.type === "code").props.children, boundary.state.error.message);
   const buttons = tree.filter((node) => node.type === "button");
   buttons.find((node) => node.props.children === "重新载入页面").props.onClick();

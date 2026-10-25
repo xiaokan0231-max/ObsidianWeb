@@ -1,5 +1,7 @@
 "use client";
 
+import { useJobLabels } from "./jobs-copy";
+
 import { memo, useCallback, type CSSProperties } from "react";
 import {
   elapsedLabel,
@@ -46,6 +48,7 @@ export const JobCardView = memo(function JobCardView({
   onCompare: (path: string) => void;
   onStatus: StatusWriter;
 }) {
+  const menu = useJobLabels();
   const { t, label: menuLabel } = useJobMenu();
   const { path } = job;
   const mtime = job.note.stat.mtime;
@@ -99,7 +102,7 @@ export const JobCardView = memo(function JobCardView({
               href={job.url}
               target="_blank"
               rel="noopener noreferrer"
-              title="求人票"
+              title={menu("求人票")}
               aria-label={t("求人票 ↗")}
               onClick={(event) => event.stopPropagation()}
             >
@@ -121,13 +124,13 @@ export const JobCardView = memo(function JobCardView({
           className={`job-intake tone-${intake}`}
           title={job.date ? t("入库日 {date}", { date: job.date }) : t("笔记 frontmatter 里没有 date")}
         >
-          {intake === "new" ? "NEW" : `入库 ${intakeLabel(job.date, today)}`}
+          {intake === "new" ? "NEW" : menu("入库 {date}", { date: intakeLabel(job.date, today) })}
         </span>
         {/* 応募日は「投げてから何日たったか」を出すために入库日とは別に見せる。
             入库日で代用すると 7/20 に入って 7/24 に投げた案件が4日ずれる。 */}
         {job.appliedOn && (
           <span className="job-applied" title={t("応募日 {date}", { date: job.appliedOn })}>
-            応募 {shortDay(job.appliedOn)}
+            {menu("応募 ")}{shortDay(job.appliedOn)}
             <em>{elapsedLabel(job.appliedOn, today)}</em>
           </span>
         )}
@@ -145,7 +148,7 @@ export const JobCardView = memo(function JobCardView({
 
       {job.reason && (
         <div className="job-block">
-          <span className="job-block-label">推荐理由</span>
+          <span className="job-block-label">{menu("推荐理由")}</span>
           <p><Highlight text={clip(job.reason, 92)} matcher={matcher} /></p>
         </div>
       )}

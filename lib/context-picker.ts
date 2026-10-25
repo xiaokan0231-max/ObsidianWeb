@@ -232,11 +232,11 @@ function dayIndex(date: string) {
 }
 
 /** 列表右侧的短日期：今天／明天直说，其余只给月日，跨年才带年。 */
-export function formatContextPickerEvent(eventAt: string, today: string) {
+export function formatContextPickerEvent(eventAt: string, today: string, locale: "zh-CN" | "ja" = "zh-CN") {
   const event = parseEvent(eventAt);
   if (!event) return "";
   const days = dayIndex(event.date) - dayIndex(today);
   const [year, month, day] = event.date.split("-").map(Number);
-  const dayLabel = days === 0 ? "今天" : days === 1 ? "明天" : year === Number(today.slice(0, 4)) ? `${month}/${day}` : `${year}/${month}/${day}`;
+  const dayLabel = days === 0 ? (locale === "ja" ? "今日" : "今天") : days === 1 ? (locale === "ja" ? "明日" : "明天") : year === Number(today.slice(0, 4)) ? `${month}/${day}` : `${year}/${month}/${day}`;
   return event.time ? `${dayLabel} ${event.time}` : dayLabel;
 }

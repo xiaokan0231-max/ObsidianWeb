@@ -566,13 +566,13 @@ export function daysFromToday(date: string, now = new Date()) {
  * そのまま `${days} 天后` に流していて、期限を過ぎた予定が「-2 天后」と出ていた。
  * 表示だけの分岐に見えるが、遅れているものが遅れて見えないという実害がある。
  */
-export function countdownLabel(date: string, now = new Date()) {
+export function countdownLabel(date: string, now = new Date(), locale: UiLocale = "zh-CN") {
   const days = daysFromToday(date, now);
-  if (days === null) return "日期未定";
-  if (days === 0) return "今天";
-  if (days === 1) return "明天";
-  if (days > 1) return `${days} 天后`;
-  return `${-days} 天前`;
+  if (days === null) return locale === "ja" ? "日付未定" : "日期未定";
+  if (days === 0) return locale === "ja" ? "今日" : "今天";
+  if (days === 1) return locale === "ja" ? "明日" : "明天";
+  if (days > 1) return locale === "ja" ? `${days} 日後` : `${days} 天后`;
+  return locale === "ja" ? `${-days} 日前` : `${-days} 天前`;
 }
 
 export function todoPriority(note: Note) {

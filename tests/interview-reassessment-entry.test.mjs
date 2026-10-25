@@ -6,7 +6,7 @@ import { loadAppModule } from "./helpers/render-tsx.mjs";
 import * as notes from "../lib/notes.ts";
 import { noteInVaultScope } from "../lib/vault-scope.ts";
 
-const { InterviewReassessmentEntry } = await loadAppModule("app/interview-reassessment-entry.tsx", { stubs: { "@/lib/notes": notes } });
+const { InterviewReassessmentEntry } = await loadAppModule("app/interview-reassessment-entry.tsx", { stubs: { "@/lib/notes": notes, "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) } } });
 const note = (path, frontmatter) => ({ path, name: path.split("/").at(-1), frontmatter, content: "# 测试重评", stat: { mtime: 1, ctime: 1, size: 0 } });
 const sourcePath = "20_求職/株式会社テスト/2026-01-01_一次面接_整理稿.md";
 const base = { type: "ai-report", report_kind: "interview-reassessment", method_version: "test-v2", generated_at: "2026-01-02" };
@@ -84,7 +84,7 @@ test("session starts compact with score and recovery, retaining full detail and 
 });
 
 test("reader-facing summary and advice separate provenance and expose only verified original sentences", async () => {
-  const { assessmentIssueCopy } = await loadAppModule("app/interview-reassessment-entry.tsx");
+  const { assessmentIssueCopy } = await loadAppModule("app/interview-reassessment-entry.tsx", { stubs: { "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) } } });
   const issue = "严重 · 未恢复 · q01 s001、s999：关键时期没有回答。下一步：先确认时期再说明实际职责。";
   assert.deepEqual(assessmentIssueCopy(issue), { observation: "关键时期没有回答。", action: "先确认时期再说明实际职责。", blockId: "q01", sentenceIds: ["s001", "s999"] });
   const source = { ...full, path: sourcePath, frontmatter: { type: "transcript-study" }, content: "# 整理稿\n## q01 職務の確認\n- **s001｜面**\n    - 正:: 以前の役職は？\n- **s002｜私**\n    - 正:: 開発担当です。\n" };

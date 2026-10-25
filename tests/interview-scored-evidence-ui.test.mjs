@@ -7,7 +7,7 @@ import { loadAppModule } from "./helpers/render-tsx.mjs";
 import { reviewDisplayScore, reviewScoreTimeline, historicalDimensionAverages } from "../lib/review-visual.ts";
 import { interviewEvidenceScores, buildInterviewTrends } from "../lib/interview-trends.mjs";
 
-const { InterviewReassessmentEntry, findInterviewReassessment } = await loadAppModule("app/interview-reassessment-entry.tsx");
+const { InterviewReassessmentEntry, findInterviewReassessment } = await loadAppModule("app/interview-reassessment-entry.tsx", { stubs: { "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) } } });
 const { default: InterviewReview, DeepReviewPanel } = await loadAppModule("app/interview-review.tsx", { stubs: { "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) } } });
 const keys = ["questionUnderstanding", "coverage", "directness", "evidenceCredibility", "riskControl"];
 const sourcePath = "20_求職/株式会社テスト/2026-01-01_一次面接_整理稿.md";

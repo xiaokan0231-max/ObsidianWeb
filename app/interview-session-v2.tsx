@@ -1,5 +1,7 @@
 "use client";
 
+import { useInterviewMenu } from "./interview-menu-copy";
+
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { PREP_V2_REPLAY_COMPARISON_TITLE, PREP_V2_SECTIONS, getPrepV2Section, prepInlineText, type InterviewPrepDoc, type PrepExternalLink } from "@/lib/interview-prep-doc";
 import { prepSourceHost, prepV2BlockLinks, prepV2Overview, prepV2StageSections } from "@/lib/interview-prep-v2";
@@ -140,6 +142,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   onOpenCard: (id: string) => void;
   onOpenAsset: (asset: SharedAssetTarget) => void;
 }) {
+  const menu = useInterviewMenu();
   const { locale } = useUiLocale();
   const t = (label: string, values: Record<string, string | number> = {}) =>
     (locale === "ja" ? V2_COPY_JA[label] ?? menuLabel(label, locale) : label)
@@ -284,14 +287,14 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
     {briefing}
     {comparison && <section className="v2-replay-comparison" aria-labelledby="v2-replay-comparison-title"><h2 id="v2-replay-comparison-title">{comparison.title}</h2><Blocks blocks={comparison.blocks} refs={refs} idPrefix="v2-replay-cmp" /></section>}
     <header className="v2-section-head"><h2>{t("本轮面试")}</h2><button type="button" onClick={() => { savePosition(); setReading("section"); }}>{t("专注阅读")}</button></header>
-    {overview.blocks.length ? <Blocks blocks={overview.blocks} refs={refs} idPrefix="session-v2-overview" /> : <p className="v2-empty">本轮没有需要补充的内容，可从回答库打开共用话术。</p>}
+    {overview.blocks.length ? <Blocks blocks={overview.blocks} refs={refs} idPrefix="session-v2-overview" /> : <p className="v2-empty">{menu("本轮没有需要补充的内容，可从回答库打开共用话术。")}</p>}
   </section>;
   const readingTitle = primary === "story" ? t("本轮面试") : section?.title ?? t("临场备用");
 
   return <div className="session-v2" onCopy={copySelectionWithoutRuby}>
     <header className="v2-header" ref={headerRef}>
       <div className="v2-heading">
-        <p className="v2-kicker">{t("面试准备")} <span>{doc.round || "轮次未定"}</span>
+        <p className="v2-kicker">{t("面试准备")} <span>{doc.round || menu("轮次未定")}</span>
           {doc.replayOf ? <><b className="v2-replay-badge">{t("对照样稿")}</b>{doc.replayAsOf && <span className="v2-replay-asof">{t("信息截至 {date}", { date: doc.replayAsOf })}</span>}</>
             : countdown && <b className={`v2-countdown ${countdown.tone}`}>{countdownText}</b>}</p>
         <h1>{doc.company || doc.title}</h1>
@@ -306,11 +309,11 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
         {(selectedSeries?.rounds.length ?? 0) > 1 && <label>{t("轮次")}<select aria-label={t("切换当前公司的面试轮次")} value={roundPath} onChange={(event) => {
           const next = selectedSeries?.rounds.find((candidate) => candidate.note.path === event.target.value);
           if (next) select(next);
-        }}>{selectedSeries?.rounds.map((item) => <option key={item.note.path} value={item.note.path}>{item.round} · {item.date || "未定"}</option>)}</select></label>}
+        }}>{selectedSeries?.rounds.map((item) => <option key={item.note.path} value={item.note.path}>{item.round} · {item.date || menu("未定")}</option>)}</select></label>}
         {companyAction}
       </div>
       {doc.replayOf && <p className="v2-replay-note">{t("对照样稿：按 {date} 以前能拿到的信息重写，不是当时的准备稿；文末「对照」一节写当时实际发生了什么。", { date: doc.replayAsOf || doc.date })}</p>}
-      <div className="v2-logistics"><time>{overview.dateTime}</time><span>{doc.format}</span>{overview.place !== doc.format && overview.place !== "进入会议" && <span>{overview.place}</span>}<span>{doc.interviewers || "面试官未定"}</span>
+      <div className="v2-logistics"><time>{overview.dateTime}</time><span>{doc.format}</span>{overview.place !== doc.format && overview.place !== "进入会议" && <span>{overview.place}</span>}<span>{doc.interviewers || menu("面试官未定")}</span>
         {overview.meetingUrl && <a className="v2-meeting" href={overview.meetingUrl} target="_blank" rel="noopener noreferrer">{t("进入会议")} <span aria-hidden="true">↗</span></a>}
       </div>
     </header>
@@ -323,23 +326,23 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
     </nav>
     <div className={`v2-layout${primary !== "kit" ? " v2-company-layout" : ""}`}>
       {primary === "story" ? <main key="story" id="v2-panel" role="tabpanel" aria-labelledby="v2-tab-story" tabIndex={0} className="v2-company-panel v2-story-panel" ref={mainRef}>
-        <nav className="v2-story-jumps" aria-label={t("本章目录")}>{[["v2-company-story", "公司与岗位"], ["v2-interview-overview", "本轮面试"]].map(([id, label]) => <a key={id} href={`#${id}`} onClick={(event) => { event.preventDefault(); document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "instant" }); }}>{t(label)} ↓</a>)}</nav>
+        <nav className="v2-story-jumps" aria-label={t("本章目录")}>{[["v2-company-story", menu("公司与岗位")], ["v2-interview-overview", menu("本轮面试")]].map(([id, label]) => <a key={id} href={`#${id}`} onClick={(event) => { event.preventDefault(); document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "instant" }); }}>{t(label)} ↓</a>)}</nav>
         {active === "overview" && overviewBody}<div id="v2-company-story"><CompanyStory content={companyOverview} onOpenReviews={() => switchSection("reviews")} /></div>{active !== "overview" && overviewBody}
-      </main> : primary === "reviews" ? <main key="reviews" id="v2-panel" role="tabpanel" aria-labelledby="v2-tab-reviews" tabIndex={0} className="v2-company-panel v2-reviews-panel" ref={mainRef}>{externalReviews ?? <p className="v2-empty">尚未收录可核对的外部评价。</p>}</main> : <>
+      </main> : primary === "reviews" ? <main key="reviews" id="v2-panel" role="tabpanel" aria-labelledby="v2-tab-reviews" tabIndex={0} className="v2-company-panel v2-reviews-panel" ref={mainRef}>{externalReviews ?? <p className="v2-empty">{menu("尚未收录可核对的外部评价。")}</p>}</main> : <>
       <main key="kit" id="v2-panel" role="tabpanel" aria-labelledby="v2-tab-kit" tabIndex={0} className={`v2-body v2-${active}`} ref={mainRef}>
         {active === "backup" ? <><header className="v2-section-head"><h2 id="v2-section-title">{section?.title ?? t("临场备用")}</h2><button type="button" onClick={() => { savePosition(); setReading("section"); }}>{t("专注阅读")}</button></header>
-          {blocks.length ? <Blocks blocks={blocks} refs={refs} idPrefix={prefix} /> : <p className="v2-empty">本轮没有需要补充的内容，可从回答库打开共用话术。</p>}
+          {blocks.length ? <Blocks blocks={blocks} refs={refs} idPrefix={prefix} /> : <p className="v2-empty">{menu("本轮没有需要补充的内容，可从回答库打开共用话术。")}</p>}
           <div className="v2-library"><button type="button" onClick={() => refs.onOpenCard("p01")}>{t("回答库")}</button><button type="button" onClick={() => refs.onOpenWiki("自己紹介_音読台本")}>{t("自我介绍")}</button><button type="button" onClick={() => refs.onOpenWiki("当日フレーズ集")}>{t("当日短语")}</button><button type="button" onClick={() => refs.onOpenWiki("NG集_禁句と口癖")}>{t("表达提醒")}</button></div>
         </> : <><nav className="v2-kit-jumps" aria-label={t("本章目录")}>{KIT_SECTIONS.map((id) => <button type="button" key={id} aria-current={visibleKitSection === id ? "location" : undefined} onClick={() => switchSection(id)}>{t(getPrepV2Section(doc.sections, id)?.title ?? id)}</button>)}</nav>
           {KIT_SECTIONS.map((id) => { const item = getPrepV2Section(doc.sections, id); return <section className="v2-kit-section" id={`v2-kit-${id}`} key={id}>
             <header className="v2-section-head"><h2>{item?.title ?? t(id)}</h2><button type="button" onClick={() => { switchSection(id); setReading("section"); }}>{t("专注阅读")}</button></header>
-            {item?.blocks.length ? <Blocks blocks={item.blocks} refs={refs} idPrefix={`session-v2-${id}`} /> : <p className="v2-empty">本轮没有需要补充的内容，可从回答库打开共用话术。</p>}
-            {id === "resources" && sources.some((source) => !doc.externalLinks.some((current) => current.href === source.href)) && <section className="v2-carried-sources"><h3>前轮沿用资料 · 截至本轮</h3><p>本轮新增资料见上文；以下来源保留前轮的阅读范围。</p>{sourceList(sources.filter((source) => !doc.externalLinks.some((current) => current.href === source.href)))}</section>}
+            {item?.blocks.length ? <Blocks blocks={item.blocks} refs={refs} idPrefix={`session-v2-${id}`} /> : <p className="v2-empty">{menu("本轮没有需要补充的内容，可从回答库打开共用话术。")}</p>}
+            {id === "resources" && sources.some((source) => !doc.externalLinks.some((current) => current.href === source.href)) && <section className="v2-carried-sources"><h3>{menu("前轮沿用资料 · 截至本轮")}</h3><p>{menu("本轮新增资料见上文；以下来源保留前轮的阅读范围。")}</p>{sourceList(sources.filter((source) => !doc.externalLinks.some((current) => current.href === source.href)))}</section>}
           </section>; })}
         </>}
       </main>
       <aside className="v2-rail" ref={railRef} aria-label={t("章节目录与研究来源")}>
-        <div className="v2-quick"><button type="button" onClick={openMotivation}>志望動機 <span>{t("20 秒版 ↗")}</span></button><button type="button" onClick={() => switchSection("questions")}>逆質問 <span>{t("3 个主问题 →")}</span></button>
+        <div className="v2-quick"><button type="button" onClick={openMotivation}>{menu("志望動機 ")}<span>{t("20 秒版 ↗")}</span></button><button type="button" onClick={() => switchSection("questions")}>{menu("逆質問 ")}<span>{t("3 个主问题 →")}</span></button>
           {hasStageLines && <button type="button" className="v2-stage-entry" onClick={() => { savePosition(); setReading("stage"); }}>{t("临场卡")} <span>{t("只看要说的话 ↗")}</span></button>}</div>
         {headings.length > 1 && <nav className="v2-toc" aria-label={t("本章目录")}><h3>{t("本章目录")}</h3><ol>{headings.map((heading) => <li key={heading.index}><a href={`#${prefix}-h-${heading.index}`} onClick={(event) => {
           event.preventDefault();

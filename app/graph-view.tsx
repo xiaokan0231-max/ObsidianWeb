@@ -1,5 +1,7 @@
 "use client";
 
+import { STAGE_MENU_COPY, useStageMenu } from "./stage-menu-copy";
+
 import {
   memo,
   lazy,
@@ -23,11 +25,13 @@ import {
   type GraphViewMode,
   type KnowledgeGraph,
 } from "@/lib/knowledge-graph";
+import { uiCopy } from "@/lib/ui-copy";
 import { formatDate, type Note } from "@/lib/notes";
 import {
   GROUPS,
   seeded,
-  typeLabel,
+  localizedTypeLabel,
+  localizedGroupLabel,
   type GroupKey,
 } from "@/lib/memory-atlas-data";
 import { enumCodec, useUrlState, type UrlStateCodec } from "./use-url-state";
@@ -88,7 +92,9 @@ function buildKnowledgeGraphScene(
   mode: GraphViewMode,
   filter: GroupKey | "all",
   kind: GraphNodeKind | "all",
+  locale: UiLocale,
 ): GraphScene {
+  const menu = uiCopy(locale, STAGE_MENU_COPY);
   const view = selectKnowledgeGraphView(graph, { mode, group: filter, kind });
   const degree = new Map<string, number>();
   const outbound = new Map<string, number>();
@@ -111,16 +117,16 @@ function buildKnowledgeGraphScene(
         title: node.label,
         nodeKind: node.kind,
         group,
-        groupLabel: GROUPS[group].label,
+        groupLabel: localizedGroupLabel(group, locale),
         color: entityColor,
         degree: degree.get(node.id) ?? 0,
         path: node.pathLabel,
         kindLabel: node.kind === "company"
-          ? "公司实体"
+          ? menu("公司实体")
           : node.kind === "skill"
-            ? "技能实体"
-            : typeLabel(node.noteType ?? "note"),
-        updatedLabel: node.kind === "note" ? formatDate(node.updatedAt, true) : "实时派生",
+            ? menu("技能实体")
+            : localizedTypeLabel(node.noteType ?? "note", locale),
+        updatedLabel: node.kind === "note" ? formatDate(node.updatedAt, true) : menu("实时派生"),
         outbound: outbound.get(node.id) ?? 0,
         excerpt: node.excerpt,
         openable: node.openable,
@@ -130,7 +136,7 @@ function buildKnowledgeGraphScene(
       source: edge.source,
       target: edge.target,
       relation: edge.relation,
-      relationLabel: GRAPH_RELATION_LABELS[edge.relation],
+      relationLabel: menu(GRAPH_RELATION_LABELS[edge.relation]),
       directed: edge.directed,
     })),
   };
@@ -165,6 +171,7 @@ function GraphView({
   onFilter: (filter: GroupKey | "all") => void;
   onOpen: (note: Note) => void;
 }) {
+  const menu = useStageMenu();
   const { locale } = useUiLocale();
   const copy = GRAPH_COPY[locale];
   const [renderer, setRenderer] = useState<"space" | "map">(() =>
@@ -179,8 +186,8 @@ function GraphView({
   useEffect(() => window.localStorage.setItem("echo.graph.renderer", renderer), [renderer]);
   const graph = useMemo(() => buildKnowledgeGraph(notes), [notes]);
   const fullScene = useMemo(
-    () => buildKnowledgeGraphScene(graph, mode, filter, kind),
-    [filter, graph, kind, mode],
+    () => buildKnowledgeGraphScene(graph, mode, filter, kind, locale),
+    [filter, graph, kind, mode, locale],
   );
   const localScene = useMemo(() => graphNeighborhood(fullScene, focusId), [focusId, fullScene]);
   // 3D 是主动进入的探索层，保留全图；默认 2D 只承担围绕一个对象的检索。
@@ -263,7 +270,7 @@ function GraphView({
             <div>
               <small>{copy.focus}</small>
               <strong>{focusedNode.title}</strong>
-              <span>{localScene.nodes.length} 节点 · {localScene.links.length} 关系</span>
+              <span>{localScene.nodes.length}{menu(" 节点 · ")}{localScene.links.length}{menu(" 关系")}</span>
               <button type="button" onClick={() => setFocusId(null)}>{copy.reselect}</button>
             </div>
           )}
@@ -272,17 +279,15 @@ function GraphView({
       <div className="graph-layout" data-renderer={renderer}>
         {emptyGroup && (
           <div className="graph-empty-note" role="status">
-            <strong>「{GROUPS[filter as GroupKey].label}」在当前视图下没有节点</strong>
+            <strong>「{copy.groups[filter as GroupKey]}{menu("」在当前视图下没有节点")}</strong>
             {recoverableInAllMode ? (
               <>
                 <p>
-                  这个分区的笔记之间只有正文里的普通双链，没有 frontmatter 声明的强类型关系，
-                  所以「语义关系」视图不会显示它们。
-                </p>
+                  {menu("这个分区的笔记之间只有正文里的普通双链，没有 frontmatter 声明的强类型关系， 所以「语义关系」视图不会显示它们。")}</p>
                 <button type="button" onClick={() => setMode("all")}>{copy.allRelationsAction}</button>
               </>
             ) : (
-              <p>换一个分区，或把「节点类型」切回「全部」再看。</p>
+              <p>{menu("换一个分区，或把「节点类型」切回「全部」再看。")}</p>
             )}
           </div>
         )}
@@ -291,17 +296,17 @@ function GraphView({
             <header>
               <span>START LOCAL</span>
               <h2>{graphQuery ? copy.selectResult : copy.start}</h2>
-              <p>选择公司、技能或笔记后，只显示它的一跳邻域。需要鸟瞰全部关系时，再切到 3D 探索模式。</p>
+              <p>{menu("选择公司、技能或笔记后，只显示它的一跳邻域。需要鸟瞰全部关系时，再切到 3D 探索模式。")}</p>
             </header>
             <div className="graph-start-results">
               {graphSearchResults.map((node) => (
                 <button key={node.id} type="button" onClick={() => { setFocusId(node.id); setGraphQuery(""); }}>
                   <span>{node.nodeKind === "company" ? copy.kinds.company : node.nodeKind === "skill" ? copy.kinds.skill : node.kindLabel}</span>
                   <strong>{node.title}</strong>
-                  <small>{node.degree} 条直接关系</small>
+                  <small>{node.degree}{menu(" 条直接关系")}</small>
                 </button>
               ))}
-              {graphSearchResults.length === 0 && <p>没有匹配的节点。试试更短的关键词。</p>}
+              {graphSearchResults.length === 0 && <p>{menu("没有匹配的节点。试试更短的关键词。")}</p>}
             </div>
           </section>
         ) : renderer === "space" ? (
@@ -309,7 +314,7 @@ function GraphView({
             fallback={(
               <div className="space-graph-loading space-graph-loading-shell" role="status">
                 <i />
-                <span>正在载入星图引擎</span>
+                <span>{menu("正在载入星图引擎")}</span>
               </div>
             )}
           >
@@ -341,7 +346,7 @@ function GraphView({
             <span>{mode === "semantic" ? copy.typedRelations : copy.allRelations}</span>
             <strong>{legendScene.links.length}</strong>
           </div>
-          <div className="legend-rule"><span>小</span><i /><i /><i /><span>被引用多</span></div>
+          <div className="legend-rule"><span>{menu("小")}</span><i /><i /><i /><span>{menu("被引用多")}</span></div>
         </aside>
       </div>
     </section>
@@ -408,6 +413,7 @@ function CanvasKnowledgeGraph({
   links: KnowledgeGraphSceneLink[];
   onOpen: (id: string) => void;
 }) {
+  const menu = useStageMenu();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointsRef = useRef<GraphPoint[]>([]);
   const [hovered, setHovered] = useState<GraphPoint | null>(null);
@@ -533,7 +539,7 @@ function CanvasKnowledgeGraph({
       <canvas
         ref={canvasRef}
         role="img"
-        aria-label={`Obsidian 记忆关系图，共 ${nodes.length} 个节点、${links.length} 条关系`}
+        aria-label={menu("Obsidian 记忆关系图，共 {nodes} 个节点、{links} 条关系", { nodes: nodes.length, links: links.length })}
         onPointerMove={(event) => setHovered(findPoint(event))}
         onPointerLeave={() => setHovered(null)}
         onClick={(event) => {
@@ -541,12 +547,12 @@ function CanvasKnowledgeGraph({
           if (point?.node.openable) onOpen(point.node.id);
         }}
       />
-      <div className="graph-caption"><span>移动鼠标探索节点</span><strong>{nodes.length} 个节点 · {links.length} 条关系</strong></div>
+      <div className="graph-caption"><span>{menu("移动鼠标探索节点")}</span><strong>{nodes.length}{menu(" 个节点 · ")}{links.length}{menu(" 条关系")}</strong></div>
       {hovered && (
         <div className="graph-tooltip">
           <span className="accent-ink" style={{ "--accent": hovered.node.color } as CSSProperties}>{hovered.node.kindLabel} · {hovered.node.groupLabel}</span>
           <strong>{hovered.node.title}</strong>
-          <small>{hovered.degree} 条关系{hovered.node.openable ? " · 点击查看" : " · 派生实体"}</small>
+          <small>{hovered.degree}{menu(" 条关系")}{hovered.node.openable ? menu(" · 点击查看") : menu(" · 派生实体")}</small>
         </div>
       )}
     </div>

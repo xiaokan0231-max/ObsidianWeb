@@ -1,5 +1,7 @@
 "use client";
 
+import { useInterviewMenu } from "./interview-menu-copy";
+
 import { useMemo, useState } from "react";
 import {
   cardIdFromRef,
@@ -225,6 +227,7 @@ function EmbedFold({
   /** 「この節の構成」目次での採番。目次の項とカードを同じ番号で対応させる。 */
   number?: number;
 }) {
+  const menu = useInterviewMenu();
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const query = refs?.query?.trim().toLocaleLowerCase() ?? "";
   const hasHit = useMemo(
@@ -251,8 +254,8 @@ function EmbedFold({
           )}
           <b>📎 {origin.target}</b>
           {origin.section && <span className="section">› {origin.section}</span>}
-          <span className="scope">全局共用 · 各轮相同</span>
-          {!open && hasHit && <em className="hit">含命中</em>}
+          <span className="scope">{menu("全局共用 · 各轮相同")}</span>
+          {!open && hasHit && <em className="hit">{menu("含命中")}</em>}
         </button>
         {refs?.onOpenWiki && (
           <button
@@ -260,8 +263,7 @@ function EmbedFold({
             className="prep-doc-embed-open"
             onClick={() => refs.onOpenWiki?.(origin.target, origin.section || undefined)}
           >
-            全屏打开
-          </button>
+            {menu("全屏打开")}</button>
         )}
       </div>
       {open && (

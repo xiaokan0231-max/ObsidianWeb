@@ -1,5 +1,7 @@
 "use client";
 
+import { useInterviewMenu } from "./interview-menu-copy";
+
 import ScopeLoading from "./scope-loading";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { postJson } from "@/lib/client-api";
@@ -62,6 +64,7 @@ function InterviewPractice({
   /** 证据句在应用内打开复盘原文；不传时链接照常整页跳转（新标签打开也一样能用）。 */
   onOpenEvidence?: (ref: AdvisoryEvidenceRef) => void;
 }) {
+  const menu = useInterviewMenu();
   const { locale } = useUiLocale();
   const ui = (label: string) => locale === "ja" ? PRACTICE_MENU_JA[label] ?? label : label;
   const [showCompleted, setShowCompleted] = useState(false);
@@ -120,9 +123,9 @@ function InterviewPractice({
       });
       if (!payload.note) throw new Error(payload.error || "记录练习失败");
       onNoteWritten(payload.note);
-      if (action === "attempt") setMessage(`已记录：${rating ? RATING_LABEL[rating] : "本次练习"}`);
-      if (action === "complete") { setMessage("已完成，正在切换下一题。"); setRevealed(false); setSelectedKey(""); }
-      if (action === "snooze") { setMessage(`已安排到 ${payload.dueAt ?? "明日"}。`); setRevealed(false); setSelectedKey(""); }
+      if (action === "attempt") setMessage(menu("已记录：{rating}", { rating: menu(rating ? RATING_LABEL[rating] : "本次练习") }));
+      if (action === "complete") { setMessage(menu("已完成，正在切换下一题。")); setRevealed(false); setSelectedKey(""); }
+      if (action === "snooze") { setMessage(menu("已安排到 {date}。", { date: payload.dueAt ?? "明日" })); setRevealed(false); setSelectedKey(""); }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "记录练习失败");
     } finally {
@@ -189,7 +192,7 @@ function InterviewPractice({
 
   return (
     <section className="practice-view" ref={viewRef}>
-      <h1 className="sr-only">回答重练</h1>
+      <h1 className="sr-only">{menu("回答重练")}</h1>
 
       <div className="practice-tabs" role="tablist" aria-label={ui("练习队列")}>
         <button role="tab" aria-selected={!showCompleted} className={!showCompleted ? "active" : ""} onClick={() => { setShowCompleted(false); selectItem(""); }}>{ui("待练")} {current.length}</button>
@@ -208,15 +211,15 @@ function InterviewPractice({
       )}
 
       {visible.length === 0 && loading ? (
-        <ScopeLoading label="回答队列" />
+        <ScopeLoading label={menu("回答队列")} />
       ) : visible.length === 0 ? (
         <div className="practice-empty">
-          <strong>{showCompleted ? "还没有已完成的回答" : "今天的回答队列已经清空"}</strong>
-          <p>{showCompleted ? "完成一次重练后会保留在这里。" : "从面试复盘中选择“加入重练”，下一题会出现在这里。"}</p>
+          <strong>{showCompleted ? menu("还没有已完成的回答") : menu("今天的回答队列已经清空")}</strong>
+          <p>{showCompleted ? menu("完成一次重练后会保留在这里。") : menu("从面试复盘中选择“加入重练”，下一题会出现在这里。")}</p>
         </div>
       ) : (
         <div className="practice-workspace">
-          <aside className="practice-queue" aria-label="回答题目" ref={queueRef}>
+          <aside className="practice-queue" aria-label={menu("回答题目")} ref={queueRef}>
             {visible.map((item, index) => (
               <button
                 key={item.key}
@@ -234,17 +237,17 @@ function InterviewPractice({
           {selected && (
             <article className="practice-card" key={selected.key}>
               <header>
-                <span>{selected.date || "日期未知"} · {selected.company || "面试回答"}</span>
+                <span>{selected.date || menu("日期未知")} · {selected.company || menu("面试回答")}</span>
                 <strong>{selected.blockId}{selected.round ? ` · ${selected.round}` : ""}</strong>
               </header>
               <div className="practice-question">
                 <small>QUESTION</small>
                 <h2 lang="ja">{selected.questionTitle}</h2>
-                {!showCompleted && <p>请先完整说一遍，再揭示参考答案。</p>}
+                {!showCompleted && <p>{menu("请先完整说一遍，再揭示参考答案。")}</p>}
               </div>
 
               {!revealed && !showCompleted ? (
-                <button className="practice-reveal" onClick={() => setRevealed(true)}>我已经回答 · 查看改善稿 <kbd>Space</kbd></button>
+                <button className="practice-reveal" onClick={() => setRevealed(true)}>{menu("我已经回答 · 查看改善稿 ")}<kbd>Space</kbd></button>
               ) : (
                 <div className="practice-answer">
                   <small>IMPROVED ANSWER · AI DRAFT</small>
@@ -275,16 +278,16 @@ function InterviewPractice({
               {!showCompleted && revealed && (
                 <div className="practice-actions">
                   <div>
-                    <span>这次说得怎么样？</span>
+                    <span>{menu("这次说得怎么样？")}</span>
                     {(Object.keys(RATING_LABEL) as InterviewPracticeRating[]).map((rating, index) => (
                       <button key={rating} disabled={busy} onClick={() => void act("attempt", rating)}>
-                        <kbd>{index + 1}</kbd>{RATING_LABEL[rating]}
+                        <kbd>{index + 1}</kbd>{menu(RATING_LABEL[rating])}
                       </button>
                     ))}
                   </div>
                   <div>
-                    <button className="practice-complete" disabled={busy} onClick={() => void act("complete")}><kbd>Enter</kbd>完成这题</button>
-                    <button disabled={busy} onClick={() => void act("snooze")}><kbd>N</kbd>明日再练</button>
+                    <button className="practice-complete" disabled={busy} onClick={() => void act("complete")}><kbd>Enter</kbd>{menu("完成这题")}</button>
+                    <button disabled={busy} onClick={() => void act("snooze")}><kbd>N</kbd>{menu("明日再练")}</button>
                   </div>
                 </div>
               )}

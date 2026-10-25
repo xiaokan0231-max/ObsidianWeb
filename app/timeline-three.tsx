@@ -1,5 +1,7 @@
 "use client";
 
+import { useStageMenu } from "./stage-menu-copy";
+
 // 时之航道：把带日期的记忆折算成一条可穿行的 3D 航道。
 // 星图是「空间」，这里是「时间」——镜头沿 Z 轴从当下驶向过去，
 // 日期是站点环，当天的笔记是环上的星，月份是大门，滚轮就是时间机器。
@@ -9,6 +11,7 @@ import {
   type CSSProperties,
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -82,6 +85,8 @@ const ENTRY_DEPTH_LEAD = 18;
 const SPEED_FEEL_FULL = 40;
 
 export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: Props) {
+  const menu = useStageMenu();
+  const liveMenu = useEffectEvent(menu);
   const stageRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const clearSearchRef = useRef<() => void>(() => undefined);
@@ -311,7 +316,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       host,
       antialias: scene.notes.length < 1500,
       pixelRatioCap: scene.notes.length > 1500 ? 1.25 : 1.75,
-      ariaLabel: `时之航道，共 ${scene.notes.length} 篇带日期的记忆；滚轮沿时间航行，单击锁定，双击打开完整笔记，方向键按时间切换`,
+      ariaLabel: liveMenu("时之航道，共 {count} 篇带日期的记忆；滚轮沿时间航行，单击锁定，双击打开完整笔记，方向键按时间切换", { count: scene.notes.length }),
     });
     if (!stageBundle) {
       onFallbackRef.current();
@@ -1238,7 +1243,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
           return;
         }
         (label.element.children[1] as HTMLElement).textContent = station.dateLabel;
-        (label.element.children[2] as HTMLElement).textContent = station.weekdayLabel;
+        (label.element.children[2] as HTMLElement).textContent = liveMenu(station.weekdayLabel);
         // WebGL 里的雾不会作用到 HTML 标签，这里手动给一个随纵深的衰减，
         // 否则远处站牌全亮，在灭点处叠成一摞。
         label.element.style.setProperty(
@@ -1558,7 +1563,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
   }, [eventById, noteById, openNode, scene, today]);
 
   if (scene.stations.length === 0) {
-    return <div className="space-graph-empty">还没有带日期的记忆。</div>;
+    return <div className="space-graph-empty">{menu("还没有带日期的记忆。")}</div>;
   }
 
   const maxMonthCount = Math.max(1, ...scene.months.map((month) => month.noteCount + month.eventCount));
@@ -1577,28 +1582,28 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
       {!ready && (
         <div className="space-graph-loading" role="status">
           <i />
-          <span>正在铺设时间航道</span>
+          <span>{menu("正在铺设时间航道")}</span>
         </div>
       )}
       <div className="space-graph-brand" aria-hidden="true">
         <span>TIME CORRIDOR</span>
-        <strong>沿着时间，重访每一天。</strong>
+        <strong>{menu("沿着时间，重访每一天。")}</strong>
       </div>
-      {!selectedNote && currentStation && <aside className="time-corridor-day-panel" aria-label="当前日期的记录">
-        <header><span>正在回看</span><button type="button" onClick={onFallback}>时间列表 ↗</button></header>
-        <h2>{currentStation.dateLabel}</h2><p>{currentStation.weekdayLabel} · {currentDayNotes.length} 篇笔记 · {currentDayEvents.length} 场日程</p>
+      {!selectedNote && currentStation && <aside className="time-corridor-day-panel" aria-label={menu("当前日期的记录")}>
+        <header><span>{menu("正在回看")}</span><button type="button" onClick={onFallback}>{menu("时间列表 ↗")}</button></header>
+        <h2>{currentStation.dateLabel}</h2><p>{currentStation.weekdayLabel} · {currentDayNotes.length}{menu(" 篇笔记 · ")}{currentDayEvents.length}{menu(" 场日程")}</p>
         <div className="time-corridor-day-nav">
-          <button type="button" disabled={activeDayIndex === 0} onClick={() => stepStationRef.current(-1)}>← 较近一天</button>
-          <button type="button" disabled={activeDayIndex >= scene.stations.length - 1} onClick={() => stepStationRef.current(1)}>更早一天 →</button>
+          <button type="button" disabled={activeDayIndex === 0} onClick={() => stepStationRef.current(-1)}>{menu("← 较近一天")}</button>
+          <button type="button" disabled={activeDayIndex >= scene.stations.length - 1} onClick={() => stepStationRef.current(1)}>{menu("更早一天 →")}</button>
         </div>
-        <label className="time-corridor-date-jump">定位日期<input type="date" aria-label="在航道定位日期" value={currentStation.date} min={scene.stations.at(-1)?.date} max={scene.stations[0]?.date} onChange={(event) => {
+        <label className="time-corridor-date-jump">{menu("定位日期")}<input type="date" aria-label={menu("在航道定位日期")} value={currentStation.date} min={scene.stations.at(-1)?.date} max={scene.stations[0]?.date} onChange={(event) => {
           if (!event.target.value) return;
           const date = nearestTimelineDate(scene.stations.map((station) => station.date), event.target.value);
           goToStationRef.current(scene.stations.findIndex((station) => station.date === date));
         }} /></label>
         <div className="time-corridor-day-entries">
-          {currentDayEvents.map((event) => event && <button type="button" key={event.id} data-kind="event" onClick={() => openNode(event.noteId)}><small>日程 · {event.time || "时间待定"}</small><strong>{event.company}</strong><span>{event.label} ↗</span></button>)}
-          {currentDayNotes.map((note) => <button type="button" key={note.id} onClick={() => selectNodeRef.current(note.id)}><small>{note.kindLabel} · {note.groupLabel}</small><strong>{note.title}</strong><span>查看记忆 →</span></button>)}
+          {currentDayEvents.map((event) => event && <button type="button" key={event.id} data-kind="event" onClick={() => openNode(event.noteId)}><small>{menu("日程 · ")}{event.time || menu("时间待定")}</small><strong>{event.company}</strong><span>{event.label} ↗</span></button>)}
+          {currentDayNotes.map((note) => <button type="button" key={note.id} onClick={() => selectNodeRef.current(note.id)}><small>{note.kindLabel} · {note.groupLabel}</small><strong>{note.title}</strong><span>{menu("查看记忆 →")}</span></button>)}
         </div>
       </aside>}
       <StageSearchRadar
@@ -1606,13 +1611,13 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
         search={search}
         meta={(note) => `${scene.stations[note.dayIndex]?.dateLabel ?? note.date} · ${note.kindLabel}`}
         resultsId="time-corridor-search-results"
-        placeholder="搜索笔记、日程与全文"
-        inputAriaLabel="在时间航道中搜索标题与全文"
-        listAriaLabel="时间航道全文搜索结果"
-        clearAriaLabel="清空时间航道搜索"
-        hitUnit="记录"
-        enterLabel="定位记录"
-        emptyHint="尝试更短的关键词，或搜索正文中的日语、公司名和技术词。"
+        placeholder={menu("搜索笔记、日程与全文")}
+        inputAriaLabel={menu("在时间航道中搜索标题与全文")}
+        listAriaLabel={menu("时间航道全文搜索结果")}
+        clearAriaLabel={menu("清空时间航道搜索")}
+        hitUnit={menu("记录")}
+        enterLabel={menu("定位记录")}
+        emptyHint={menu("尝试更短的关键词，或搜索正文中的日语、公司名和技术词。")}
       />
       {activeNote && !selectedNote && (
         <div
@@ -1633,42 +1638,42 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
             "--node-accent": selectedNote.color,
             "--dossier-zoom": dossierZoom,
           } as CSSProperties}
-          aria-label={`${selectedNote.title}的记忆档案`}
+          aria-label={menu("{title}的记忆档案", { title: selectedNote.title })}
         >
           <i className="space-graph-dossier-scan" aria-hidden="true" />
           <header>
             <div>
-              <span>TIME SIGNAL · 已锁定</span>
+              <span>{menu("TIME SIGNAL · 已锁定")}</span>
               <small>{selectedStation?.dateLabel} · {selectedNote.groupLabel}</small>
             </div>
             <div className="space-graph-dossier-actions">
               <button
                 type="button"
-                aria-label={dossierMode === "focus" ? "将记忆档案停靠到右侧" : "居中放大记忆档案"}
+                aria-label={dossierMode === "focus" ? menu("将记忆档案停靠到右侧") : menu("居中放大记忆档案")}
                 onClick={() => setDossierMode((current) => current === "dock" ? "focus" : "dock")}
               >
-                {dossierMode === "focus" ? "停靠" : "居中"} <kbd>D</kbd>
+                {dossierMode === "focus" ? menu("停靠") : menu("居中")} <kbd>D</kbd>
               </button>
               <button
                 type="button"
-                aria-label="缩小记忆档案文字"
+                aria-label={menu("缩小记忆档案文字")}
                 onClick={() => changeDossierZoom(-0.1)}
               >
                 −
               </button>
-              <output aria-label={`记忆档案缩放 ${Math.round(dossierZoom * 100)}%`}>
+              <output aria-label={menu("记忆档案缩放 {percent}%", { percent: Math.round(dossierZoom * 100) })}>
                 {Math.round(dossierZoom * 100)}%
               </output>
               <button
                 type="button"
-                aria-label="放大记忆档案文字"
+                aria-label={menu("放大记忆档案文字")}
                 onClick={() => changeDossierZoom(0.1)}
               >
                 +
               </button>
               <button
                 type="button"
-                aria-label="收起记忆档案，留在当前日期"
+                aria-label={menu("收起记忆档案，留在当前日期")}
                 onClick={() => closeDossierRef.current()}
               >
                 ×
@@ -1686,17 +1691,17 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
               <h2>{selectedNote.title}</h2>
             </div>
             <dl>
-              <div><dt>日期</dt><dd>{selectedStation?.dateLabel}</dd></div>
-              <div><dt>星期</dt><dd>{selectedStation?.weekdayLabel}</dd></div>
-              <div><dt>更新</dt><dd>{selectedNote.updatedLabel}</dd></div>
+              <div><dt>{menu("日期")}</dt><dd>{selectedStation?.dateLabel}</dd></div>
+              <div><dt>{menu("星期")}</dt><dd>{selectedStation?.weekdayLabel}</dd></div>
+              <div><dt>{menu("更新")}</dt><dd>{selectedNote.updatedLabel}</dd></div>
             </dl>
             <div className="space-graph-dossier-copy">
-              <span>内容预览 · 可滚动查看全文</span>
-              <p>{selectedNote.excerpt || "这篇记忆暂时没有可提取的正文摘要。"}</p>
+              <span>{menu("内容预览 · 可滚动查看全文")}</span>
+              <p>{selectedNote.excerpt || menu("这篇记忆暂时没有可提取的正文摘要。")}</p>
             </div>
             {sameDayNotes.length > 0 && (
               <div className="space-graph-dossier-neighbors">
-                <span>同日的记忆</span>
+                <span>{menu("同日的记忆")}</span>
                 <div>
                   {sameDayNotes.map((note) => (
                     <button
@@ -1713,7 +1718,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
             )}
             {sameDayEvents.length > 0 && (
               <div className="space-graph-dossier-neighbors">
-                <span>当日安排</span>
+                <span>{menu("当日安排")}</span>
                 <div>
                   {sameDayEvents.map((event) => (
                     <button
@@ -1741,14 +1746,13 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
           >
             <span>
               <small>ENTER MEMORY</small>
-              展开完整记忆
-            </span>
+              {menu("展开完整记忆")}</span>
             <b aria-hidden="true">→</b>
           </button>
           <footer>
-            <span>双击星体或按 <kbd>Enter</kbd> 也可穿越</span>
+            <span>{menu("双击星体或按 ")}<kbd>Enter</kbd>{menu(" 也可穿越")}</span>
             <button type="button" onClick={() => setShortcutHelp(true)}>
-              查看快捷键 <kbd>?</kbd>
+              {menu("查看快捷键 ")}<kbd>?</kbd>
             </button>
           </footer>
         </aside>
@@ -1758,14 +1762,14 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
           accent={openingDisplay.accent}
           kicker="TIME GATE · SYNCHRONIZING"
           title={openingDisplay.title}
-          note="正在展开完整记忆"
+          note={menu("正在展开完整记忆")}
         />
       )}
       <StageControls
         fullscreen={fullscreen}
-        fullscreenAriaLabel="全屏查看时间航道，快捷键 F"
+        fullscreenAriaLabel={menu("全屏查看时间航道，快捷键 F")}
         onToggleFullscreen={() => void toggleFullscreen()}
-        resetLabel="回到当下"
+        resetLabel={menu("回到当下")}
         onResetView={() => resetViewRef.current()}
         paused={paused}
         onTogglePaused={() => setPaused((value) => !value)}
@@ -1776,48 +1780,47 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
             <button
               type="button"
               aria-pressed={viewMode === "cruise"}
-              aria-label={viewMode === "overview" ? "切换到隧道内巡航视角" : "切换到俯瞰整条时间线的视角"}
+              aria-label={viewMode === "overview" ? menu("切换到隧道内巡航视角") : menu("切换到俯瞰整条时间线的视角")}
               onClick={toggleViewMode}
             >
-              {viewMode === "overview" ? "巡航视角" : "俯瞰全线"} <kbd>V</kbd>
+              {viewMode === "overview" ? menu("巡航视角") : menu("俯瞰全线")} <kbd>V</kbd>
             </button>
           </>
         )}
       />
       {shortcutHelp && (
         <StageShortcuts
-          title="航道快捷键"
-          ariaLabel="时间航道快捷键"
+          title={menu("航道快捷键")}
+          ariaLabel={menu("时间航道快捷键")}
           onClose={() => setShortcutHelp(false)}
           entries={[
-            { keys: ["/"], label: "全文搜索" },
-            { keys: ["V"], label: "俯瞰／巡航切换" },
-            { keys: ["F"], label: "全屏" },
-            { keys: ["D"], label: "档案居中／停靠" },
-            { keys: ["O"], label: "打开完整记忆" },
-            { keys: ["＋", "－"], label: "文字缩放" },
-            { keys: ["0"], label: "恢复 100%" },
-            { keys: ["←", "→"], label: "切换日期" },
-            { keys: ["[", "]"], label: "月份跳跃" },
-            { keys: ["Home"], label: "回到当下" },
-            { keys: ["End"], label: "最早的一站" },
-            { keys: ["P"], label: "暂停／继续动态" },
-            { keys: ["R"], label: "回到当下" },
+            { keys: ["/"], label: menu("全文搜索") },
+            { keys: ["V"], label: menu("俯瞰／巡航切换") },
+            { keys: ["F"], label: menu("全屏") },
+            { keys: ["D"], label: menu("档案居中／停靠") },
+            { keys: ["O"], label: menu("打开完整记忆") },
+            { keys: ["＋", "－"], label: menu("文字缩放") },
+            { keys: ["0"], label: menu("恢复 100%") },
+            { keys: ["←", "→"], label: menu("切换日期") },
+            { keys: ["[", "]"], label: menu("月份跳跃") },
+            { keys: ["Home"], label: menu("回到当下") },
+            { keys: ["End"], label: menu("最早的一站") },
+            { keys: ["P"], label: menu("暂停／继续动态") },
+            { keys: ["R"], label: menu("回到当下") },
           ]}
         />
       )}
       <div className="space-graph-caption">
-        <span>滚轮穿行 · 单击锁定 · 双击穿越</span>
+        <span>{menu("滚轮穿行 · 单击锁定 · 双击穿越")}</span>
         <strong>
-          {scene.notes.length} 篇记忆 · {scene.stations.length} 天
-          {scene.events.length > 0 ? ` · ${scene.events.length} 场日程` : ""}
+          {scene.notes.length}{menu(" 篇记忆 · ")}{scene.stations.length}{menu(" 天")}{scene.events.length > 0 ? menu(" · {count} 场日程", { count: scene.events.length }) : ""}
         </strong>
       </div>
       <div
         ref={scrubberRef}
         className="time-corridor-scrubber"
         role="group"
-        aria-label="按月份跳转时间航道"
+        aria-label={menu("按月份跳转时间航道")}
       >
         <i className="time-corridor-scrubber-progress" aria-hidden="true" />
         <div>
@@ -1825,7 +1828,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
             <button
               type="button"
               key={month.key}
-              title={`${month.label} · ${month.noteCount} 篇笔记 · ${month.eventCount} 场日程`}
+              title={menu("{month} · {notes} 篇笔记 · {events} 场日程", { month: month.label, notes: month.noteCount, events: month.eventCount })}
               style={{
                 "--bucket-scale": Math.sqrt(month.noteCount + month.eventCount) / Math.sqrt(maxMonthCount),
               } as CSSProperties}
@@ -1838,7 +1841,7 @@ export default function ThreeTimeCorridor({ today, scene, onOpen, onFallback }: 
         </div>
       </div>
       <details className="space-graph-index">
-        <summary>用列表访问全部记忆与日程</summary>
+        <summary>{menu("用列表访问全部记忆与日程")}</summary>
         <div>
           {scene.events.map((event) => <button type="button" key={`event:${event.id}`} onClick={() => openNode(event.noteId)}><i style={{ background: WARM_ACCENT }} /><span>{event.company} · {event.label}</span><small>{event.date} {event.time}</small></button>)}
           {scene.notes.map((note) => (

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { memo, useMemo, type CSSProperties, type MouseEvent, type ReactNode, type HTMLAttributes } from "react";
 import { headingAnchor, readingDocumentLines } from "@/lib/reading-document";
 import { normalizeHeading } from "@/lib/memory-atlas-data";
 import { isAllowedHref, isAttachmentTarget, tokenizeInline, type InlineToken } from "@/lib/markdown-inline";
@@ -101,6 +101,11 @@ const MARKDOWN_COPY: Record<UiLocale, {
  * 界面语言相关的文字都放进小组件里取：MarkdownDocument 本体保持无 hook，
  * 测试会把它当普通函数直接调用来检查链接的点击行为，本体一用 hook 就会在那里崩。
  */
+function MarkdownTableRegion(props: HTMLAttributes<HTMLDivElement>) {
+  const { locale } = useUiLocale();
+  return <div {...props} role="region" aria-label={locale === "ja" ? "本文の表、横にスクロールできます" : "正文表格，可横向滚动"} tabIndex={0} />;
+}
+
 function useMarkdownCopy() {
   return MARKDOWN_COPY[useUiLocale().locale];
 }
@@ -362,8 +367,8 @@ function MarkdownDocument({
       // 独立的行网格会被各行的长文本撑成不同宽度；原生表格让所有行共用列宽。
       // 空单元格仍然占位，宽表仅在容器内滚动，不拉宽整张书页。
       blocks.push(
-        <div className="md-table" key={`table-${tableStart}`} data-reading-anchor={`md-${tableStart}`}
-          role="region" aria-label="正文表格，可横向滚动" tabIndex={0}>
+        <MarkdownTableRegion className="md-table" key={`table-${tableStart}`} data-reading-anchor={`md-${tableStart}`}
+          >
           <table className="reader-markdown-table" style={{ minWidth: `${columnCount * 8}em` }}>
             <thead>
               <tr>{Array.from({ length: columnCount }, (_, cellIndex) => (
@@ -378,15 +383,15 @@ function MarkdownDocument({
               ))}
             </tbody>
           </table>
-        </div>,
+        </MarkdownTableRegion>,
       );
       return;
     }
     // 行结构保持 div 行 + span 格（测试与周复盘样式都依赖它）；列数交给外层，
     // 各行用 subgrid 共用同一组列轨，长文本把整列一起撑宽，而不是只撑歪自己那一行。
     blocks.push(
-      <div className="md-table md-table--grid" key={`table-${tableStart}`} data-reading-anchor={`md-${tableStart}`}
-        role="region" aria-label="正文表格，可横向滚动" tabIndex={0} style={{ "--md-cols": columnCount } as CSSProperties}>
+      <MarkdownTableRegion className="md-table md-table--grid" key={`table-${tableStart}`} data-reading-anchor={`md-${tableStart}`}
+         style={{ "--md-cols": columnCount } as CSSProperties}>
         {rows.map((row, rowIndex) => (
           <div className={`md-table-row${rowIndex === 0 ? " md-table-head" : ""}`} key={rowIndex}>
             {row.map((cell, cellIndex) => (
@@ -394,7 +399,7 @@ function MarkdownDocument({
             ))}
           </div>
         ))}
-      </div>,
+      </MarkdownTableRegion>,
     );
   };
   const pushCode = (key: string) => {

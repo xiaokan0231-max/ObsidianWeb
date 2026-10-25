@@ -1,5 +1,8 @@
 "use client";
 
+import { useUiLocale } from "./ui-locale";
+import { useCompanyCopy } from "./company-copy";
+
 import { useMemo } from "react";
 import { buildCompanyHero, isJapaneseName, splitCompanyName, type CompanyHeroFact, type CompanyHeroLink, type CompanyNameParts } from "@/lib/company-hero";
 import type { CompanyOverview } from "@/lib/company-overview";
@@ -23,12 +26,13 @@ function factClass(fact: CompanyHeroFact, extra = "") {
 }
 
 function Link({ link, onOpen }: { link: CompanyHeroLink; onOpen: () => void }) {
-  if (link.muted) return <li><span className="co-hero-link-missing">{link.label}</span></li>;
+  const t = useCompanyCopy();
+  if (link.muted) return <li><span className="co-hero-link-missing">{t(link.label)}</span></li>;
   return <li>
     {link.url
-      ? <a href={link.url} target="_blank" rel="noopener noreferrer" title={link.title}>{link.label} ↗</a>
-      : <button type="button" onClick={onOpen}>{link.label} ↗</button>}
-    {link.badge && <i className={`co-hero-badge ${link.badgeTone ?? "quiet"}`}>{link.badge}</i>}
+      ? <a href={link.url} target="_blank" rel="noopener noreferrer" title={link.title}>{t(link.label)} ↗</a>
+      : <button type="button" onClick={onOpen}>{t(link.label)} ↗</button>}
+    {link.badge && <i className={`co-hero-badge ${link.badgeTone ?? "quiet"}`}>{t(link.badge)}</i>}
   </li>;
 }
 
@@ -44,36 +48,38 @@ export default function CompanyHeroCard({ context, rounds, today, linkedCase = n
   fallbackTitle?: string;
   onOpen: (note: Note) => void;
 }) {
-  const hero = useMemo(() => (context ? buildCompanyHero(context, { rounds, today, linkedCase }) : null), [context, rounds, today, linkedCase]);
+  const t = useCompanyCopy();
+  const { locale } = useUiLocale();
+  const hero = useMemo(() => (context ? buildCompanyHero(context, { rounds, today, linkedCase, locale }) : null), [context, rounds, today, linkedCase, locale]);
   if (!context || !hero) {
-    return <div className="co-hero co-hero-empty"><p className="co-kicker">公司画像</p><CompanyName name={splitCompanyName(fallbackCompany || "公司总览")} japanese={!!fallbackCompany && isJapaneseName(fallbackCompany)} /><p className="co-context-title">{fallbackTitle || "选择一个真实案件或面谈，查看公司与岗位的最新资料。"}</p></div>;
+    return <div className="co-hero co-hero-empty"><p className="co-kicker">{t("公司画像")}</p><CompanyName name={splitCompanyName(fallbackCompany || t("公司总览"))} japanese={!!fallbackCompany && isJapaneseName(fallbackCompany)} /><p className="co-context-title">{fallbackTitle || t("选择一个真实案件或面谈，查看公司与岗位的最新资料。")}</p></div>;
   }
   const openRecord = () => onOpen(context.note);
   const now = hero.now;
   // 单行会被截断，title 是看全文的唯一途径：面談段要带上「面談」二字，否则悬停分不清最后那个日期是跟进还是约定。
   const nowTitle = now ? [now.action, now.waiting, now.followUp?.label, now.event && `面談 ${now.event.label}`].filter(Boolean).join(" · ") : "";
   return <div className="co-hero">
-    <p className="co-kicker" title={hero.kickerTitle || undefined}>公司画像 · {hero.kicker}</p>
+    <p className="co-kicker" title={hero.kickerTitle || undefined}>{t("公司画像 · ")}{t(hero.kicker)}</p>
     <div className="co-hero-title-row">
       <CompanyName name={hero.name} japanese={isJapaneseName(context.company)} />
-      <em className={`co-hero-pill tone-${hero.status.tone}`} title={hero.status.note || undefined}>{hero.status.label}</em>
+      <em className={`co-hero-pill tone-${hero.status.tone}`} title={hero.status.note || undefined}>{t(hero.status.label)}</em>
     </div>
     {hero.title && <p className="co-context-title" title={hero.title}>{hero.title}</p>}
-    <ul className="co-hero-progress" aria-label={hero.kind === "meeting" ? "面谈安排" : "选考进度"}>
-      {hero.progress.map((fact) => <li key={fact.id} className={factClass(fact, fact.id === "note" ? "co-hero-note" : "")}>{fact.label && <span>{fact.label}</span>}<b title={fact.title}>{fact.value}</b></li>)}
-      {hero.kind === "meeting" && <li className="co-hero-progress-link"><button type="button" onClick={openRecord}>面谈记录 ↗</button></li>}
+    <ul className="co-hero-progress" aria-label={hero.kind === "meeting" ? t("面谈安排") : t("选考进度")}>
+      {hero.progress.map((fact) => <li key={fact.id} className={factClass(fact, fact.id === "note" ? "co-hero-note" : "")}>{fact.label && <span>{t(fact.label)}</span>}<b title={fact.title}>{fact.value}</b></li>)}
+      {hero.kind === "meeting" && <li className="co-hero-progress-link"><button type="button" onClick={openRecord}>{t("面谈记录 ↗")}</button></li>}
     </ul>
     {hero.facts.length > 0 && <div className="co-hero-facts">
-      <dl>{hero.facts.map((fact) => <div key={fact.id} className={factClass(fact)}><dt>{fact.label}</dt><dd title={fact.title}>{fact.value}</dd></div>)}</dl>
-      <ul className="co-hero-links" aria-label="打开">{hero.links.map((link) => <Link key={link.id} link={link} onOpen={openRecord} />)}</ul>
+      <dl>{hero.facts.map((fact) => <div key={fact.id} className={factClass(fact)}><dt>{t(fact.label)}</dt><dd title={fact.title}>{fact.value}</dd></div>)}</dl>
+      <ul className="co-hero-links" aria-label={t("打开")}>{hero.links.map((link) => <Link key={link.id} link={link} onOpen={openRecord} />)}</ul>
     </div>}
     {now && <p className={`co-hero-now${now.followUp?.overdue ? " overdue" : ""}${now.placeholder ? " muted" : ""}`} title={nowTitle || undefined}>
-      <span className="co-hero-now-label">下一步</span>
+      <span className="co-hero-now-label">{t("下一步")}</span>
       {now.placeholder && <span className="co-hero-now-seg">{now.placeholder}</span>}
       {now.action && <span className="co-hero-now-seg action">{now.action}</span>}
       {now.waiting && <span className="co-hero-now-seg">{now.waiting}</span>}
       {now.followUp && <span className={`co-hero-now-seg${now.followUp.overdue ? " overdue-seg" : ""}`}>{now.followUp.label}</span>}
-      {now.event && <span className={`co-hero-now-seg ${now.event.past ? "past" : "event"}`} title={now.event.borrowedFrom ? `借自准备稿 ${now.event.borrowedFrom}` : undefined}>面談 {now.event.label}</span>}
+      {now.event && <span className={`co-hero-now-seg ${now.event.past ? "past" : "event"}`} title={now.event.borrowedFrom ? t("借自准备稿 {path}", { path: now.event.borrowedFrom }) : undefined}>{t("面談 ")}{now.event.label}</span>}
     </p>}
   </div>;
 }

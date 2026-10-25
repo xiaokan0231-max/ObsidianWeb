@@ -1,5 +1,7 @@
 "use client";
 
+import { useJobLabels } from "./jobs-copy";
+
 import ScopeLoading from "./scope-loading";
 import {
   memo,
@@ -103,6 +105,7 @@ function JobsView({
    */
   onFlash?: (message: string, undo?: UndoAction) => void;
 }) {
+  const menu = useJobLabels();
   const { t, label: menuLabel } = useJobMenu();
   const [initialUrlState] = useState(() => readJobsUrlState(initialFilters));
   const [query, setQuery] = useState(initialUrlState.query);
@@ -403,7 +406,7 @@ function JobsView({
         <section className="jobs-next-pick" aria-label={t("下一项応募判断")}>
           <span className={`jobs-next-score rate-${rateTone(highlightedNextPick.rating)}`}>
             <strong>{rateText(highlightedNextPick)}</strong>
-            <small>{highlightedNextPick.rated ? "/ 10" : "未採点"}</small>
+            <small>{highlightedNextPick.rated ? "/ 10" : menu("未採点")}</small>
           </span>
           <div className="jobs-next-copy">
             <span>NEXT DECISION</span>
@@ -411,17 +414,17 @@ function JobsView({
             <p>{highlightedNextPick.position}</p>
             <small>
               {readyJobs.length > 0
-                ? clip(highlightedNextPick.reason || "达到当前可投线，打开详情确认硬性条件与风险。", 110)
-                : "当前没有达到 7 分线的未应募岗位；先复核最高分候选，不自动建议投递。"}
+                ? clip(highlightedNextPick.reason || menu("达到当前可投线，打开详情确认硬性条件与风险。"), 110)
+                : menu("当前没有达到 7 分线的未应募岗位；先复核最高分候选，不自动建议投递。")}
             </small>
           </div>
           <dl className="jobs-next-facts">
             <div>
-              <dt>年収</dt>
+              <dt>{menu("年収")}</dt>
               <dd>{salaryLabel(highlightedNextPick)}</dd>
             </div>
             <div>
-              <dt>原文</dt>
+              <dt>{menu("原文")}</dt>
               <dd>{VERIFICATION_LABEL[highlightedNextPick.verification]}</dd>
             </div>
           </dl>
@@ -514,8 +517,8 @@ function JobsView({
 
           {jobs.length === 0 && !loading && (
             <div className="jobs-empty">
-              <p>还没有可以展示的岗位机会。</p>
-              <small>在 Vault 的 <code>20_求職/</code> 下新建 <code>type: job-case</code> 的应募案件即可显示；AI 推荐只是 <code>origin</code> 的一种。</small>
+              <p>{menu("还没有可以展示的岗位机会。")}</p>
+              <small>{menu("在 Vault 的 ")}<code>{menu("20_求職/")}</code>{menu(" 下新建 ")}<code>type: job-case</code>{menu(" 的应募案件即可显示；AI 推荐只是 ")}<code>origin</code>{menu(" 的一种。")}</small>
             </div>
           )}
 
@@ -523,7 +526,7 @@ function JobsView({
           <div className="jobs-view-pane" key={viewMode}>
             {jobs.length > 0 && isJobList && matchedJobs.length === 0 && (
               <div className="jobs-empty">
-                <p>没有岗位同时满足这些条件。</p>
+                <p>{menu("没有岗位同时满足这些条件。")}</p>
                 {relaxations.length > 0 && (
                   <ul className="jobs-empty-relax" aria-label={t("逐项放宽")}>
                     {relaxations.map((item) => (
@@ -541,7 +544,7 @@ function JobsView({
             )}
 
             {jobs.length > 0 && highlightedNextPick && resultVisible.length === 0 && (
-              <div className="jobs-featured-only">当前筛选下只有上方这一项需要判断。</div>
+              <div className="jobs-featured-only">{menu("当前筛选下只有上方这一项需要判断。")}</div>
             )}
 
             {jobs.length > 0 && viewMode === "card" && resultVisible.length > 0 && (

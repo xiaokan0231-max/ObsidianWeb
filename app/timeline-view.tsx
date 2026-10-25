@@ -1,5 +1,7 @@
 "use client";
 
+import { useStageMenu } from "./stage-menu-copy";
+
 import { memo, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   buildTimelineScene,
@@ -82,6 +84,7 @@ function TimelineView({
   events: CalendarEvent[];
   onOpen: (note: Note) => void;
 }) {
+  const menu = useStageMenu();
   const { locale } = useUiLocale();
   const copy = TIMELINE_COPY[locale];
   const [renderer, setRenderer] = useState<"corridor" | "list">(() =>
@@ -163,7 +166,7 @@ function TimelineView({
             fallback={(
               <div className="space-graph-loading space-graph-loading-shell" role="status">
                 <i />
-                <span>正在铺设时间航道</span>
+                <span>{menu("正在铺设时间航道")}</span>
               </div>
             )}
           >
@@ -206,6 +209,7 @@ function TimelineListView({ today, items, events, onOpen }: {
   events: CalendarEvent[];
   onOpen: (note: Note) => void;
 }) {
+  const menu = useStageMenu();
   const { locale } = useUiLocale();
   const copy = TIMELINE_COPY[locale];
   const formatUiDate = (value: string, includeYear = false) => new Intl.DateTimeFormat(locale, {
@@ -316,11 +320,11 @@ function TimelineListView({ today, items, events, onOpen }: {
           </nav>
           {upcoming && <div className="chronicle-upcoming">
             <span><i /> {copy.upcoming}</span>
-            <time dateTime={upcoming.date}>{formatDate(upcoming.date)}{upcoming.time ? ` · ${upcoming.time}` : " · 时间待定"}</time>
+            <time dateTime={upcoming.date}>{formatDate(upcoming.date)}{upcoming.time ? ` · ${upcoming.time}` : menu(" · 时间待定")}</time>
             <strong>{upcoming.company}</strong><p>{upcoming.label}</p>
             <button type="button" onClick={() => onOpen(upcoming.note)}>{copy.schedule} <span aria-hidden="true">↗</span></button>
           </div>}
-          <p className="chronicle-source-note">笔记按记录日期归档<br />日程按发生日期排列</p>
+          <p className="chronicle-source-note">{menu("笔记按记录日期归档")}<br />{menu("日程按发生日期排列")}</p>
         </aside>
         <div className="chronicle-main">
           <header className="chronicle-month-head">
@@ -347,20 +351,20 @@ function TimelineListView({ today, items, events, onOpen }: {
             </div>
           </div>}
           {activeFilters && <div className="chronicle-filter-summary"><span>{query && `“${query}” · `}{copy.matching(filtered.length)}{selectedDate && ` · ${selectedDate}`}</span><button type="button" onClick={resetFilters}>{copy.clearFilters}</button></div>}
-          {days.length === 0 ? <div className="chronicle-empty"><span aria-hidden="true">◷</span><h3>{selectedDate ? "这一天没有匹配的记录" : "没有找到匹配的记录"}</h3><p>{entries.length ? "换一个日期，或清除筛选继续回看。" : "带日期的笔记与日程会出现在这里。"}</p>{entries.length > 0 && <button type="button" onClick={() => { resetFilters(); setMonth("all"); }}>{copy.allRecords}</button>}</div> : <div className="chronicle-feed">
-            {days.slice(0, visibleDays).map(([date, records]) => <section className="chronicle-day" key={date || "undated"} aria-label={date || "日期待确认"}>
-              <div className="chronicle-date"><strong>{date ? date.slice(8) : "—"}</strong><span>{date ? `${Number(date.slice(5, 7))} 月 · ${['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date(`${date}T00:00:00`).getDay()]}` : "日期待确认"}</span>{date === today && <b>今天</b>}{date > today && <b data-future="true">未来</b>}</div>
-              <div className="chronicle-day-content"><div className="chronicle-day-rule"><i /><span>{records.filter((entry) => entry.kind === "note").length} 篇笔记 · {records.filter((entry) => entry.kind === "event").length} 场日程</span></div>
+          {days.length === 0 ? <div className="chronicle-empty"><span aria-hidden="true">◷</span><h3>{selectedDate ? menu("这一天没有匹配的记录") : menu("没有找到匹配的记录")}</h3><p>{entries.length ? menu("换一个日期，或清除筛选继续回看。") : menu("带日期的笔记与日程会出现在这里。")}</p>{entries.length > 0 && <button type="button" onClick={() => { resetFilters(); setMonth("all"); }}>{copy.allRecords}</button>}</div> : <div className="chronicle-feed">
+            {days.slice(0, visibleDays).map(([date, records]) => <section className="chronicle-day" key={date || "undated"} aria-label={date || menu("日期待确认")}>
+              <div className="chronicle-date"><strong>{date ? date.slice(8) : "—"}</strong><span>{date ? `${Number(date.slice(5, 7))} 月 · ${[menu("周日"), menu("周一"), menu("周二"), menu("周三"), menu("周四"), menu("周五"), menu("周六")][new Date(`${date}T00:00:00`).getDay()]}` : menu("日期待确认")}</span>{date === today && <b>{menu("今天")}</b>}{date > today && <b data-future="true">{menu("未来")}</b>}</div>
+              <div className="chronicle-day-content"><div className="chronicle-day-rule"><i /><span>{records.filter((entry) => entry.kind === "note").length}{menu(" 篇笔记 · ")}{records.filter((entry) => entry.kind === "event").length}{menu(" 场日程")}</span></div>
                 {records.map((entry) => <button type="button" className="chronicle-entry" data-kind={entry.kind} key={entry.id} onClick={() => openEntry(entry)} style={{ "--entry-accent": entry.color } as CSSProperties}>
                   <span className="chronicle-entry-icon" aria-hidden="true">{entry.kind === "event" ? "◷" : "≡"}</span>
-                  <span className="chronicle-entry-body"><span className="chronicle-entry-meta"><span>{entry.kindLabel}</span><span>{entry.groupLabel}</span>{entry.kind === "event" && <b>{entry.time || "时间待定"} · {entry.date === today ? "今天" : entry.phase === "upcoming" ? "待进行" : "已过时间"}</b>}</span><strong>{entry.title}</strong>{entry.kind === "note" && <span className="chronicle-excerpt">{entry.excerpt || "暂无正文"}</span>}</span>
+                  <span className="chronicle-entry-body"><span className="chronicle-entry-meta"><span>{entry.kindLabel}</span><span>{entry.groupLabel}</span>{entry.kind === "event" && <b>{entry.time || menu("时间待定")} · {entry.date === today ? menu("今天") : entry.phase === "upcoming" ? menu("待进行") : menu("已过时间")}</b>}</span><strong>{entry.title}</strong>{entry.kind === "note" && <span className="chronicle-excerpt">{entry.excerpt || menu("暂无正文")}</span>}</span>
                   <span className="chronicle-entry-open">{entry.kind === "event" ? copy.schedule : copy.readNote}<span aria-hidden="true"> ↗</span></span>
                 </button>)}
               </div>
             </section>)}
           </div>}
           {days.length > visibleDays && <button type="button" className="chronicle-load-more" onClick={() => setVisibleDays((value) => value + 14)}>{copy.showMore(days.length - visibleDays)} <span aria-hidden="true">↓</span></button>}
-          {days.length > 0 && days.length <= visibleDays && <div className="chronicle-end">{selectedDate ? "当日记录已全部显示" : "这段时间的记录已全部显示"}</div>}
+          {days.length > 0 && days.length <= visibleDays && <div className="chronicle-end">{selectedDate ? menu("当日记录已全部显示") : menu("这段时间的记录已全部显示")}</div>}
         </div>
       </div>
     </div>

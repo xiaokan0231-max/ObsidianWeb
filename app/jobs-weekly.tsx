@@ -1,5 +1,7 @@
 "use client";
 
+import { useJobLabels } from "./jobs-copy";
+
 import { useCallback, useMemo } from "react";
 import {
   normalizeDay,
@@ -179,6 +181,7 @@ export function JobWeeklyView({
   onOpenReview: (note: Note) => void;
   onWiki: (target: string) => void;
 }) {
+  const menu = useJobLabels();
   const { t, label: menuLabel } = useJobMenu();
   const title = offset === 0 ? t("本周复盘") : offset < 0 ? t("{count} 周前", { count: -offset }) : t("{count} 周后", { count: offset });
   return (
@@ -204,9 +207,9 @@ export function JobWeeklyView({
       <div className="job-week-split">
         {/* 只有时间线是按周口径的，翻周落空时别把另外三个全量 KPI 和待办也一起藏掉。 */}
         <section className="job-week-panel">
-          <span className="job-week-label">本周动态 · TIMELINE</span>
+          <span className="job-week-label">{menu("本周动态 · TIMELINE")}</span>
           {events.length === 0 ? (
-            <p className="job-week-blank">这一周还没有求职记录。</p>
+            <p className="job-week-blank">{menu("这一周还没有求职记录。")}</p>
           ) : (
             <div className="job-week-timeline">
               {events.map((job) => (
@@ -225,9 +228,9 @@ export function JobWeeklyView({
 
         <div className="job-week-side">
           <section className="job-week-panel">
-            <span className="job-week-label">下周重点 · NEXT</span>
+            <span className="job-week-label">{menu("下周重点 · NEXT")}</span>
             <div className="job-week-focus">
-              {focus.length === 0 && <p className="panel-empty">现在没有需要跟进的选考。</p>}
+              {focus.length === 0 && <p className="panel-empty">{menu("现在没有需要跟进的选考。")}</p>}
               {focus.map((item) => (
                 <button key={item.path} type="button" onClick={() => onDetail(item.path)}>
                   <i aria-hidden="true" />
@@ -241,14 +244,14 @@ export function JobWeeklyView({
           </section>
 
           <section className="job-week-note">
-            <span>复盘提醒</span>
-            <p>本周动态来自笔记的状态与日期字段，属于「证据层」；応募优先度是时间分配判断，不代表录用概率。</p>
+            <span>{menu("复盘提醒")}</span>
+            <p>{menu("本周动态来自笔记的状态与日期字段，属于「证据层」；応募优先度是时间分配判断，不代表录用概率。")}</p>
           </section>
         </div>
       </div>
 
       <section className="job-week-panel job-week-review">
-        <span className="job-week-label">本周复盘笔记 · REVIEW</span>
+        <span className="job-week-label">{menu("本周复盘笔记 · REVIEW")}</span>
         {review ? (
           <>
             <div className="job-week-review-head">
@@ -264,9 +267,8 @@ export function JobWeeklyView({
           </>
         ) : (
           <p className="job-week-review-empty">
-            这一周还没有叙事复盘。在 <code>80_AI分析/</code> 新建 <code>YYYY-MM-DD_週次復盤_主题.md</code>
-            （type: ai-report，date 落在本周），这里就会自动显示。
-          </p>
+            {menu("这一周还没有叙事复盘。在 ")}<code>{menu("80_AI分析/")}</code>{menu(" 新建 ")}<code>{menu("YYYY-MM-DD_週次復盤_主题.md")}</code>
+            {menu("（type: ai-report，date 落在本周），这里就会自动显示。")}</p>
         )}
       </section>
     </div>
