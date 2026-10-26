@@ -132,6 +132,8 @@ Open [http://localhost:3000](http://localhost:3000).
 The startup script reads the API key from `.obsidian/plugins/obsidian-local-rest-api/data.json` and passes it to the server.
 On first run, it may download MediaPipe resources used for 3D interaction.
 
+For everyday use, `./start.sh` finds the checkout of the `main` branch and starts it on port 3000, even when launched from a temporary worktree. If dependencies are missing, it tells you to run `npm ci` in that checkout.
+
 | Environment variable | Purpose |
 | --- | --- |
 | `OBSIDIAN_VAULT_PATH` | Absolute path to the Vault |

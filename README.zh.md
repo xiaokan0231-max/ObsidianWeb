@@ -106,6 +106,8 @@ OBSIDIAN_VAULT_PATH=/absolute/path/to/your-vault npm run dev
 
 打开 [http://localhost:3000](http://localhost:3000)。启动脚本从指定 Vault 的插件配置读取 API key，只传给服务端进程。请在插件中启用与 `OBSIDIAN_API_URL` 匹配的本地服务；默认地址是 `http://127.0.0.1:27123`。
 
+日常也可运行 `./start.sh`：它会找到 `main` 分支的检出目录并在端口 3000 启动，即使从临时 worktree 打开也使用同一工作区。依赖缺失时会提示在该目录执行 `npm ci`。
+
 | 可选配置 | 用途 |
 | --- | --- |
 | `OBSIDIAN_CONFIG_PATH` | 插件配置文件不在默认位置时指定路径。 |

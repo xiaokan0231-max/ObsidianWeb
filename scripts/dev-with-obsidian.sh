@@ -2,6 +2,14 @@
 
 set -eu
 
+project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+# 缺依赖不是 Vault 数据错误；在校验和启动 bridge 之前给出可执行的修复提示。
+if [ ! -x "$project_dir/node_modules/.bin/vinext" ] || [ ! -f "$project_dir/node_modules/js-yaml/package.json" ]; then
+  printf '项目依赖未安装或不完整，请在以下目录执行 npm ci 后重试：\n%s\n' "$project_dir" >&2
+  exit 1
+fi
+
 OBSIDIAN_VAULT_PATH="${OBSIDIAN_VAULT_PATH:-$HOME/obsidian/xiaokan}"
 OBSIDIAN_CONFIG_PATH="${OBSIDIAN_CONFIG_PATH:-$OBSIDIAN_VAULT_PATH/.obsidian/plugins/obsidian-local-rest-api/data.json}"
 

@@ -131,6 +131,8 @@ OBSIDIAN_VAULT_PATH=/absolute/path/to/vault npm run dev
 起動スクリプトが `.obsidian/plugins/obsidian-local-rest-api/data.json` から API キーを読み、サーバーへ渡します。
 初回起動では、3D 操作用の MediaPipe リソース取得が走る場合があります。
 
+日常の起動には `./start.sh` も使えます。一時 worktree から実行しても `main` ブランチのチェックアウト先を使い、ポート 3000 で起動します。依存関係が足りない場合は、そのディレクトリで `npm ci` を実行するよう案内します。
+
 | 環境変数 | 用途 |
 | --- | --- |
 | `OBSIDIAN_VAULT_PATH` | 使用する Vault の絶対パス |
