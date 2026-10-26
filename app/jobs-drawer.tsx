@@ -102,7 +102,7 @@ export function JobDrawer({
       <aside ref={dialogRef} tabIndex={-1} className="note-drawer job-drawer" aria-label={t("岗位详情")} aria-modal="true" role="dialog">
         <header className="drawer-header">
           <div>
-            <span style={{ color: "var(--green)" }}>{ORIGIN_LABEL[job.origin] ?? menu("岗位机会")}</span>
+            <span style={{ color: "var(--green)" }}>{menu(ORIGIN_LABEL[job.origin] ?? "岗位机会")}</span>
             <small>{job.path}</small>
           </div>
           <button onClick={onClose} aria-label={t("关闭详情")}>×</button>
@@ -163,9 +163,9 @@ export function JobDrawer({
             <div><dt>{menu("勤務地")}</dt><dd>{job.location || "—"}</dd></div>
             <div><dt>{menu("雇用形態")}</dt><dd>{job.employment || "—"}</dd></div>
             <div><dt>{menu("来源")}</dt><dd>{job.source || "—"}</dd></div>
-            <div><dt>{menu("录入方式")}</dt><dd>{ORIGIN_LABEL[job.origin] ?? (job.origin || "—")}</dd></div>
+            <div><dt>{menu("录入方式")}</dt><dd>{menu(ORIGIN_LABEL[job.origin] ?? (job.origin || "—"))}</dd></div>
             <div><dt>{menu("案件 ID")}</dt><dd>{job.caseId || "—"}</dd></div>
-            <div><dt>{menu("官方渠道")}</dt><dd>{OFFICIAL_APPLY_LABEL[job.officialApplyStatus]}{job.officialApplyNote ? ` · ${job.officialApplyNote}` : ""}</dd></div>
+            <div><dt>{menu("官方渠道")}</dt><dd>{menu(OFFICIAL_APPLY_LABEL[job.officialApplyStatus])}{job.officialApplyNote ? ` · ${job.officialApplyNote}` : ""}</dd></div>
             {/* 「推荐日期」だと応募日と紛らわしい。frontmatter `date` は AI 推薦が入库した日。 */}
             <div><dt>{menu("入库日")}</dt><dd>{job.date ? `${job.date}${intakeAge && ` · ${intakeAge}`}` : "—"}</dd></div>
             <div><dt>{menu("笔记更新")}</dt><dd>{formatDate(job.updatedAt, true)}</dd></div>

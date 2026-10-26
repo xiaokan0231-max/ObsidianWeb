@@ -103,8 +103,8 @@ export function FitPanel({ fit }: { fit: JobFit | null }) {
       <header>
         <strong>Fit {fit.score}<small>/100</small></strong>
         <em className={`job-fit-band band-${fit.band}`}>Band {fit.band}</em>
-        <em className={`job-fit-gate gate-${fit.hardGate}`}>Gate {HARD_GATE_LABEL[fit.hardGate]}</em>
-        {fit.accessState && <span className="job-fit-access">{ACCESS_STATE_LABEL[fit.accessState]}</span>}
+        <em className={`job-fit-gate gate-${fit.hardGate}`}>Gate {menuLabel(HARD_GATE_LABEL[fit.hardGate])}</em>
+        {fit.accessState && <span className="job-fit-access">{menuLabel(ACCESS_STATE_LABEL[fit.accessState])}</span>}
       </header>
       <div className="job-fit-body">
         {/* 雷达只看形状（哪一轴拖后腿），原始分数留在右侧条形里——各轴满分不同，雷达上标原值会误读。 */}
@@ -132,7 +132,7 @@ export function FitPanel({ fit }: { fit: JobFit | null }) {
       </div>
       <p className="job-fit-gates">
         {gateKeys.map((key) => fit.gates[key] && (
-          <span key={key} className={`gate-${fit.gates[key]}`}>{JOB_FIT_GATE_LABEL[key]} {HARD_GATE_LABEL[fit.gates[key]]}</span>
+          <span key={key} className={`gate-${fit.gates[key]}`}>{JOB_FIT_GATE_LABEL[key]} {menuLabel(HARD_GATE_LABEL[fit.gates[key]])}</span>
         ))}
       </p>
     </section>

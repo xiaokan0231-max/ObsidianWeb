@@ -201,6 +201,26 @@ const EXTRA_JOB_MENU_JA: Readonly<Record<string, string>> = {
   "{status}（已动手·等对方）": "{status}（対応済み・相手の返答待ち）",
   "」需要记下实际投递渠道（写入 channel，台帳按渠道统计到达率）。没投过就选「保留」并写理由。": "」には実際の応募経路の記録が必要です（channelに保存し、台帳で経路ごとに集計します）。未応募なら「保留」を選び、理由を記入してください。",
   "（type: ai-report，date 落在本周），这里就会自动显示。": "（type: ai-report、dateが今週の日付）を作成すると、自動で表示します。",
+  "AI 发现": "AIで発見",
+  "本人录入": "本人が登録",
+  "中介推荐": "紹介会社の推薦",
+  "历史导入": "過去の記録",
+  "RA 批量投递": "RAから一括応募",
+  "企业已筛选": "企業が選考済み",
+  "直投": "直接応募",
+  "企业已收": "企業が受領済み",
+  "未发送": "未送信",
+  "仅代理": "紹介会社のみ",
+  "同职位官网直投": "同じ職種への公式応募",
+  "官网相近职位": "公式サイトの関連求人",
+  "官网招聘入口": "公式採用ページ",
+  "未找到公开直投": "公開の直接応募先なし",
+  "需确认": "要確認",
+  "企业": "企業",
+  "中介": "紹介会社",
+  "平台": "サービス",
+  "状态": "状況",
+  "原文核对": "求人原文の確認",
 };
 export const JOB_LABEL_COPY = { ...Object.fromEntries(Object.entries(JOB_MENU_COPY).map(([key, pair]) => [key, pair[1]])), ...EXTRA_JOB_MENU_JA };
 
@@ -212,6 +232,6 @@ export function useJobMenu() {
   const { locale } = useUiLocale();
   const translate = (key: JobMenuKey, values: Record<string, string | number> = {}) =>
     JOB_MENU_COPY[key][locale === "ja" ? 1 : 0].replace(/\{(\w+)\}/g, (match, name: string) => String(values[name] ?? match));
-  const label = (value: string) => Object.hasOwn(JOB_MENU_COPY, value) ? translate(value as JobMenuKey) : value;
+  const label = uiCopy(locale, JOB_LABEL_COPY);
   return { locale, t: translate, label };
 }

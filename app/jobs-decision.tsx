@@ -100,7 +100,7 @@ export function JobDecisionWorkspace({
       <article className="jobs-decision-detail">
         <header>
           <div>
-            <span>{ORIGIN_LABEL[selected.origin] ?? menu("岗位机会")}{menu(" · 応募优先度 ")}{selected.rating}/10{selected.fit && ` · Fit ${selected.fit.score} · Band ${selected.fit.band}`}</span>
+            <span>{menu(ORIGIN_LABEL[selected.origin] ?? "岗位机会")}{menu(" · 応募优先度 ")}{selected.rating}/10{selected.fit && ` · Fit ${selected.fit.score} · Band ${selected.fit.band}`}</span>
             <h2>{selected.company}</h2>
             <p>{selected.position || menu("职位未记录")}</p>
           </div>
@@ -121,7 +121,7 @@ export function JobDecisionWorkspace({
           <div><dt>{menu("年収")}</dt><dd>{salaryLabel(selected)}</dd></div>
           <div><dt>{menu("v2 採点")}</dt><dd>{selected.fit ? `Fit ${selected.fit.score} · Band ${selected.fit.band} · Gate ${HARD_GATE_LABEL[selected.fit.hardGate]}` : UNRATED_V2_LABEL}</dd></div>
           <div><dt>{menu("勤務地")}</dt><dd>{selected.location || "—"}</dd></div>
-          <div><dt>{menu("原文")}</dt><dd>{VERIFICATION_LABEL[selected.verification]}</dd></div>
+          <div><dt>{menu("原文")}</dt><dd>{menu(VERIFICATION_LABEL[selected.verification])}</dd></div>
           <div><dt>{menu("入库")}</dt><dd>{selected.date || "—"}</dd></div>
         </dl>
         {/* 判断要看的六轴与技术栈原来只在抽屉里，决策台为了它们还得另开一层。 */}

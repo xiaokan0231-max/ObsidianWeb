@@ -12,15 +12,15 @@ import {
 } from "@/lib/jobs";
 import { RadarChart } from "./radar-chart";
 import { useDialogFocus } from "./use-dialog-focus";
-import { useJobMenu } from "./jobs-copy";
+import { useJobLabels, useJobMenu } from "./jobs-copy";
 import { COMPARE_LIMIT, FIT_RADAR_AXES, fitRadarValues } from "./jobs-shared";
 
-const COMPARE_ROWS: { label: string; render: (job: JobCard) => ReactNode }[] = [
+const COMPARE_ROWS: { label: string; render: (job: JobCard, menu: ReturnType<typeof useJobLabels>) => ReactNode }[] = [
   { label: "応募优先度", render: (job) => <strong className="job-compare-rating">{job.rating} / 10</strong> },
   {
     label: "v2 採点",
-    render: (job) => job.fit
-      ? <><strong className="job-compare-rating">{job.fit.score}</strong> / 100 · Band {job.fit.band} · Gate {HARD_GATE_LABEL[job.fit.hardGate]}</>
+    render: (job, menu) => job.fit
+      ? <><strong className="job-compare-rating">{job.fit.score}</strong> / 100 · Band {job.fit.band} · Gate {menu(HARD_GATE_LABEL[job.fit.hardGate])}</>
       : <span className="job-compare-unrated">{UNRATED_V2_LABEL}</span>,
   },
   // 六軸は行を分けて並べる：合計だけ見ると「B 同士」で差が無いように見える案件が、軸単位では逆転している。
@@ -33,7 +33,7 @@ const COMPARE_ROWS: { label: string; render: (job: JobCard) => ReactNode }[] = [
   { label: "勤務地", render: (job) => job.location || "—" },
   { label: "雇用形態", render: (job) => job.employment || "—" },
   { label: "状态", render: (job) => job.status },
-  { label: "原文核对", render: (job) => VERIFICATION_LABEL[job.verification] },
+  { label: "原文核对", render: (job, menu) => menu(VERIFICATION_LABEL[job.verification]) },
   {
     label: "技術スタック",
     render: (job) => <div className="job-stack">{job.stack.map((tag) => <span key={tag}>{tag}</span>)}</div>,
@@ -59,6 +59,7 @@ export function JobCompare({
   onDetail: (path: string) => void;
 }) {
   const { t } = useJobMenu();
+  const menu = useJobLabels();
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(dialogRef);
   const scored = jobs.filter((job) => job.fit);
@@ -107,8 +108,8 @@ export function JobCompare({
             <tbody>
               {COMPARE_ROWS.map((row) => (
                 <tr key={row.label}>
-                  <th scope="row">{row.label}</th>
-                  {jobs.map((job) => <td key={job.path}>{row.render(job)}</td>)}
+                  <th scope="row">{menu(row.label)}</th>
+                  {jobs.map((job) => <td key={job.path}>{row.render(job, menu)}</td>)}
                 </tr>
               ))}
             </tbody>

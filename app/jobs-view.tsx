@@ -425,7 +425,7 @@ function JobsView({
             </div>
             <div>
               <dt>{menu("原文")}</dt>
-              <dd>{VERIFICATION_LABEL[highlightedNextPick.verification]}</dd>
+              <dd>{menu(VERIFICATION_LABEL[highlightedNextPick.verification])}</dd>
             </div>
           </dl>
           <button type="button" onClick={() => openDetail(highlightedNextPick.path)}>

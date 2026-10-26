@@ -101,3 +101,19 @@ test("发布提示直接订阅当前语言，双语文案都能渲染", async ()
   assert.match(renderToStaticMarkup(createElement(Provider, { initialLocale: "ja" }, createElement(Notice))), /公開済みの内容 · 閲覧専用/);
   assert.match(renderToStaticMarkup(createElement(Provider, { initialLocale: "zh-CN" }, createElement(Notice))), /已发布内容 · 仅供浏览/);
 });
+
+test("求人の登録経路・確認状態・比較表を翻訳し、元の説明文と案件状態は保持する", async () => {
+  const { toJobCard } = await import("../lib/jobs.ts");
+  const job = toJobCard(note("20_求職/株式会社テスト/求人.md", { type: "job-case", company: "株式会社テスト", status: "未応募", rating: 8, origin: "ai-reco" }, `# ${originalRole}\n\n## 推荐理由\n\n${originalBody}`));
+  const { JobDecisionWorkspace } = await localized("app/jobs-decision.tsx");
+  const decision = render(JobDecisionWorkspace, { jobs: [job], selected: job, today, saving: false, onSelect() {}, onStatus() {}, onOpenNote() {} });
+  assert.match(decision, /AIで発見/);
+  assert.doesNotMatch(decision, />AI 发现/);
+  assert.ok(decision.includes(originalBody));
+  assert.match(decision, /value="未応募"/);
+  const { JobCompare } = await localized("app/jobs-compare.tsx");
+  const comparison = render(JobCompare, { jobs: [job], onClose() {}, onDetail() {} });
+  assert.match(comparison, /求人原文の確認/);
+  assert.match(comparison, /未確認/);
+  assert.ok(comparison.includes(originalBody));
+});
