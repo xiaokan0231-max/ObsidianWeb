@@ -29,7 +29,8 @@ test("老师入口默认日语，七家公司完整呈现，每个岗位保留�
   assert.match(html, /選考の進み方/);
   assert.match(html, /現在の選考状況/);
   assert.match(html, /読める原稿/);
-  assert.match(html, /資料の読み方/);
+  assert.match(html, /次の一歩へ。/);
+  assert.doesNotMatch(html, /consultation-guide|consultation-feedback-help/);
   for (const company of companies) assert.ok(html.includes(company.company), company.company);
   assert.match(html, /品質エンジニア/);
   assert.match(html, /面接中/);

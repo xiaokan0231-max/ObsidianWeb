@@ -62,14 +62,19 @@ test("未登录也能发现每段的评论按钮和首次引导，但不出现�
   const { ConsultationTranscriptReader, ConsultationLibrary } = await loadAppModule("app/consultation/consultation-view.tsx");
   const html = renderToStaticMarkup(React.createElement(ConsultationTranscriptReader, { initial: transcript }));
   assert.match(html, /この部分にコメント/);
-  assert.match(html, /気になる文章を選んで/);
+  assert.match(html, /data-tour="paragraph-comment"/);
+  assert.doesNotMatch(html, /consultation-comment-hint/);
   assert.match(html, /この面接にコメント/);
   assert.doesNotMatch(html, /consultation-comment-highlight|テスト先生|コメント 1件/);
   const catalog = { companies: [], sessions: [], updatedAt: "2026-10-01" };
   const library = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial: catalog }));
   assert.match(library, /使い方/);
   assert.match(library, /コメント・返信/);
-  assert.match(library, /一言書いて送信/);
+  assert.match(library, /次の一歩へ。/);
+  assert.match(library, /data-tour="help-entry"/);
+  assert.match(library, /data-tour="feedback-entry"/);
+  assert.match(library, /data-tour="materials"/);
+  assert.doesNotMatch(library, /consultation-guide|consultation-feedback-help/);
   assert.doesNotMatch(library, /閲覧専用|必要なら Word で保存/);
 });
 

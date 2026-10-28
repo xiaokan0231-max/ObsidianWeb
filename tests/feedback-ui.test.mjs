@@ -29,12 +29,8 @@ test("从批注回原文保留所选场次和显示形式，并带话题与段�
   assert.equal(feedbackSourceHref(general), "/feedback");
 });
 
-test("新手说明直接展示段落按钮和练习保密提示，不要求先选中文字", async () => {
+test("新手引导在客户端以聚焦浮层打开，不再占用正文版面", async () => {
   const { FeedbackHelp } = await loadAppModule("app/feedback-ui.tsx");
   const html = renderToStaticMarkup(React.createElement(FeedbackHelp, { locale: "ja" }));
-  assert.match(html, /原稿を開く/);
-  assert.match(html, /この部分にコメント/);
-  assert.match(html, /練習用です。相手には送信されません。/);
-  assert.match(html, /コメント・返信/);
-  assert.doesNotMatch(html, /スレッド|コンテキスト|アンカー|<iframe/);
+  assert.equal(html, "");
 });

@@ -1,0 +1,38 @@
+/* 聚焦层独立于页面布局，老师退出后能立即回到干净的阅读界面。 */
+.teacher-tour { position: fixed; inset: 0; z-index: 6000; isolation: isolate; color: #19263e; font: 16px/1.7 var(--font-geist-sans), "Hiragino Sans", "Yu Gothic", sans-serif; }
+.teacher-tour * { box-sizing: border-box; }
+.teacher-tour-shade { position: absolute; inset: 0; }
+.teacher-tour-centered .teacher-tour-shade { background: #0c152eb3; backdrop-filter: blur(4px); }
+.teacher-tour-spotlight { position: fixed; z-index: 1; border: 2px solid #fff; border-radius: 14px; pointer-events: none; box-shadow: 0 0 0 5px #9ca4ff66, 0 0 0 9999px #0c152eb8; transition: left 180ms ease, top 180ms ease, width 180ms ease, height 180ms ease; }
+.teacher-tour-card { position: fixed; z-index: 2; width: 376px; max-width: calc(100vw - 32px); max-height: calc(100vh - 40px); overflow: auto; padding: 22px 26px 20px; border: 1px solid #ffffffd9; border-radius: 22px; background: linear-gradient(155deg, #fff 66%, #f4f3ff); box-shadow: 0 24px 90px #050e303d, 0 4px 15px #101c3424; outline: none; color-scheme: light; animation: teacher-tour-appear 180ms ease-out; }
+.teacher-tour-top { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 14px; }
+.teacher-tour-top > span { display: inline-flex; gap: 7px; align-items: center; color: #626c8a; font-size: 13px; font-weight: 600; letter-spacing: .04em; }
+.teacher-tour-top > span::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #7779e8; box-shadow: 0 0 0 4px #eeedff; }
+.teacher-tour button { font: inherit; cursor: pointer; transition: background 130ms, box-shadow 130ms; }
+.teacher-tour button:focus-visible { outline: 3px solid #8793ee; outline-offset: 3px; }
+.teacher-tour-top > button { width: 44px; height: 44px; padding: 10px; display: grid; place-items: center; border: 0; border-radius: 50%; color: #7c859a; background: #f2f4f9; }
+.teacher-tour-top > button:hover { color: #253450; background: #e8ebf4; }
+.teacher-tour-card h2 { color: #19263e; font-size: 23px; font-weight: 650; line-height: 1.55; letter-spacing: -.025em; margin: 0 0 11px; }
+.teacher-tour-card > p { color: #63708a; font-size: 16px; line-height: 1.9; margin: 0; }
+.teacher-tour-illustration { position: relative; width: 88px; height: 88px; border-radius: 27px; display: grid; place-items: center; margin: 22px auto 25px; background: linear-gradient(145deg, #ebeaff, #e8f5fa); color: #6167da; transform: rotate(-5deg); }
+.teacher-tour-illustration > svg { width: 72px; height: 72px; transform: rotate(5deg); }
+.teacher-tour-illustration > i { width: 17px; height: 17px; background: #f0b96c; border: 4px solid #fff; border-radius: 50%; position: absolute; right: -5px; top: -4px; }
+.teacher-tour-illustration > b { width: 12px; height: 12px; background: #6bb8c7; border: 3px solid #fff; border-radius: 4px; position: absolute; bottom: 3px; left: -7px; transform: rotate(20deg); }
+.teacher-tour-illustration.is-complete { color: #0e8894; background: linear-gradient(145deg, #e4f4f7, #ebf4f0); }
+.teacher-tour-progress { display: flex; align-items: center; gap: 18px; margin: 10px 0 20px; }
+.teacher-tour-progress > div { display: flex; align-items: center; gap: 5px; flex: 1; }
+.teacher-tour-progress > div > span { height: 4px; border-radius: 6px; background: #e9ecf5; flex: 1; }
+.teacher-tour-progress > div > span.is-active { background: linear-gradient(90deg, #555cdb, #8a8fee); }
+.teacher-tour-progress > span { color: #8790a7; font-size: 12px; font-variant-numeric: tabular-nums; }
+.teacher-tour-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 25px; }
+.teacher-tour-actions > button { min-height: 44px; padding: 10px 17px; border-radius: 11px; font-size: 16px; line-height: 1.5; font-weight: 600; border: 1px solid transparent; }
+.teacher-tour-secondary { color: #7a849d; background: transparent; }
+.teacher-tour-secondary:hover { background: #f0f2f8; color: #394965; }
+.teacher-tour-primary { display: inline-flex; align-items: center; justify-content: center; gap: 15px; color: #fff; background: #4f56d8; box-shadow: 0 4px 10px #4f56d833; }
+.teacher-tour-primary:hover { background: #434bc9; box-shadow: 0 5px 15px #4f56d845; }
+.teacher-tour-primary > span { font-size: 20px; font-weight: 400; line-height: 1; }
+.teacher-tour-skip { display: block; margin: 12px auto -3px; min-height: 44px; padding: 8px 10px; border: 0; background: transparent; color: #939bb0; font-size: 16px !important; }
+.teacher-tour-skip:hover { color: #5d6680; }
+@keyframes teacher-tour-appear { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .teacher-tour-card { animation: none; } .teacher-tour-spotlight, .teacher-tour button { transition: none; } }
+@media print { .teacher-tour { display: none !important; } }

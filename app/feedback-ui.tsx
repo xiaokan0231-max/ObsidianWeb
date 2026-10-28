@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { feedbackContextKey, type FeedbackContext, type FeedbackSession, type FeedbackThread } from "@/lib/feedback";
 import { useUiLocale } from "./ui-locale";
+import { TeacherTour, type TeacherTourMode } from "./feedback-tour";
 import "./feedback.css";
 
 export type FeedbackLocale = "ja" | "zh-CN";
@@ -284,14 +285,6 @@ export function FeedbackPanel({ context, threadId, onClose, locale: explicitLoca
   </aside>;
 }
 
-export function FeedbackHelp({ locale = "ja", onClose }: { locale?: FeedbackLocale; onClose?: () => void }) {
-  const [practiceOpen, setPracticeOpen] = useState(false);
-  const [practiceText, setPracticeText] = useState("");
-  const [sent, setSent] = useState(false);
-  return <section className="feedback-help" aria-label={feedbackText(locale, "コメントの使い方", "留言使用方法")}>
-    <header><div><p className="feedback-eyebrow">{feedbackText(locale, "はじめての方へ", "第一次使用")}</p><h2>{feedbackText(locale, "気づいたことを、一言から。", "发现一个问题，就可以留一句建议。")}</h2></div>{onClose && <button onClick={onClose}>{feedbackText(locale, "説明を閉じる", "收起说明")}</button>}</header>
-    <ol><li><span>1</span><div><strong>{feedbackText(locale, "原稿を開く", "打开原文")}</strong><p>{feedbackText(locale, "気になる面接の「原稿を読む」を押します。", "选择一场面试，点击阅读原文。")}</p></div></li><li><span>2</span><div><strong>{feedbackText(locale, "「この部分にコメント」を押す", "点击这段旁边的评论按钮")}</strong><p>{feedbackText(locale, "気になる段落の横にあるボタンから。文章を選ぶこともできます。", "段落旁有清楚的按钮，也可以选中一句话。")}</p></div></li><li><span>3</span><div><strong>{feedbackText(locale, "一言書いて送信", "写下一句话并发送")}</strong><p>{feedbackText(locale, "ご意見も、ご質問も。原文は自動で添えられます。", "建议或问题都可以，系统会自动附上原文。")}</p></div></li></ol>
-    <p className="feedback-help-reply">{feedbackText(locale, "返事はページ上部の「コメント・返信」から確認できます。", "回复可在页面上方的留言与回复入口查看。")}</p>
-    <details className="feedback-practice"><summary>{feedbackText(locale, "ここで一度、試してみる", "在这里练习一次")}</summary><p className="feedback-practice-label">{feedbackText(locale, "練習用です。相手には送信されません。", "这是练习，不会真实发送给任何人。")}</p><blockquote>これまでの経験を、今後の仕事に生かしたいと考えています。</blockquote><button type="button" onClick={() => setPracticeOpen(true)}>{feedbackText(locale, "この部分にコメント", "评论这段原文")}</button>{practiceOpen && <div className="feedback-practice-composer"><p><strong>{feedbackText(locale, "この部分へのコメント", "针对这段的评论")}</strong></p><blockquote>これまでの経験を、今後の仕事に生かしたいと考えています。</blockquote><label>{feedbackText(locale, "練習のコメント", "练习留言")}<textarea rows={3} value={practiceText} onChange={event => { setPracticeText(event.target.value); setSent(false); }} placeholder={feedbackText(locale, "例：どのような経験を生かしたいですか？", "例如：你想运用哪方面的经验？")} /></label><button className="feedback-primary" type="button" disabled={!practiceText.trim()} onClick={() => setSent(true)}>{feedbackText(locale, "練習として送信", "模拟发送")}</button>{sent && <div className="feedback-success" role="status"><strong>{feedbackText(locale, "練習できました。実際には送信されていません。", "练习完成，没有真实发送。")}</strong><p>{practiceText}</p></div>}</div>}</details>
-  </section>;
+export function FeedbackHelp({ locale = "ja", onClose, mode = "library" }: { locale?: FeedbackLocale; onClose?: () => void; mode?: TeacherTourMode }) {
+  return <TeacherTour mode={mode} locale={locale} active onClose={onClose} />;
 }
