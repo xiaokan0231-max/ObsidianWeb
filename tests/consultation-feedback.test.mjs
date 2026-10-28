@@ -83,6 +83,7 @@ test("登录后显示段落评论数量，并且仅高亮版本匹配的指定�
   const html = renderToStaticMarkup(React.createElement(ConsultationTranscriptReader, { initial: transcript }));
   assert.match(html, /コメント 2件/);
   assert.equal((html.match(/<mark /g) ?? []).length, 1);
+  assert.match(html, /data-feedback-threads="thread-test"/);
   assert.match(html, /開発を担当しました。<\/span><mark[^>]*>開発を担当しました。<\/mark>/);
 });
 

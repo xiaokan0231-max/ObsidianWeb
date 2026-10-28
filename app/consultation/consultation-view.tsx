@@ -268,7 +268,7 @@ function AnnotatedText({ text, ranges, onOpen }: { text: string; ranges: Annotat
   return <>{points.slice(0, -1).map((point, index) => {
     const end = points[index + 1];
     const matches = ranges.filter(range => range.start < end && range.end > point);
-    return matches.length ? <mark className="consultation-comment-highlight" key={point} role="button" tabIndex={0} title={`この部分へのコメント ${matches.length}件`} onClick={() => onOpen(matches[0].thread)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(matches[0].thread); } }}>{text.slice(point, end)}</mark> : <span key={point}>{text.slice(point, end)}</span>;
+    return matches.length ? <mark className="consultation-comment-highlight" data-feedback-threads={matches.map(match => match.thread.id).join(" ")} key={point} role="button" tabIndex={0} title={`この部分へのコメント ${matches.length}件`} onClick={() => onOpen(matches[0].thread)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(matches[0].thread); } }}>{text.slice(point, end)}</mark> : <span key={point}>{text.slice(point, end)}</span>;
   })}</>;
 }
 
@@ -326,10 +326,12 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
   useEffect(() => {
     if (!panel?.threadId || !sourceContext?.blockId || positionedThread.current === panel.threadId || !consultationContextIsCurrent(initial, sourceContext)) return;
     const rawTarget = sourceContext.blockId === "raw" ? "transcript-block-raw" : `transcript-block-${sourceContext.blockId}`;
-    const target = document.getElementById(rawTarget);
+    // 长段落居中会把被点评的句子滚出视野，优先定位准确的高亮文字。
+    const exact = document.querySelector<HTMLElement>(`[data-feedback-threads~="${CSS.escape(panel.threadId)}"]`);
+    const target = exact ?? document.getElementById(rawTarget);
     if (!target) return;
     positionedThread.current = panel.threadId;
-    window.requestAnimationFrame(() => target.scrollIntoView({ block: "center", behavior: "instant" }));
+    window.requestAnimationFrame(() => target.scrollIntoView({ block: exact ? "center" : "start", behavior: "instant" }));
   }, [panel?.threadId, sourceContext, initial, view]);
 
   function openPanel(context: FeedbackContext, threadId?: string) {
@@ -342,6 +344,7 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
     }
   }
   function closePanel() {
+    positionedThread.current = "";
     setPanel(null);
     const url = new URL(window.location.href);
     url.searchParams.delete("feedbackThread"); url.searchParams.delete("feedback");
