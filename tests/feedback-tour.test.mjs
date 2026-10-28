@@ -6,10 +6,11 @@ const tour = await loadAppModule("app/feedback-tour.tsx");
 
 test("分步引导使用实际页面目标，原文点评先介绍可见按钮，再介绍选句", () => {
   const { TEACHER_TOUR_STEPS: steps, TEACHER_TOUR_STORAGE_KEY: key } = tour;
-  assert.equal(key, "teacher-tour:seen:v2");
+  assert.equal(key, "teacher-tour:seen:v3");
   assert.equal(steps.reader[0].target, '[data-tour="paragraph-comment"]');
   assert.equal(steps.reader[1].target, '[data-feedback-text]');
-  assert.deepEqual(steps.library.map(step => step.target), ['[data-tour="reading-start"]', '[data-tour="reading-preview"]', '[data-tour="all-materials"]', '[data-tour="feedback-entry"]']);
+  assert.deepEqual(steps.library.map(step => step.target), ['[data-tour="reading-choice"]', '[data-tour="reading-preview"]', '[data-tour="all-materials"]', '[data-tour="feedback-entry"]']);
+  assert.match(steps.library[0].text[0], /最近の面接、最終面接、ほかの面接/);
   assert.ok(steps.feedback.some(step => step.target.includes("feedback-login")));
   for (const mode of Object.values(steps)) for (const step of mode.flatMap(step => step.fallback ? [step, step.fallback] : [step])) {
     assert.ok(step.title[0] && step.title[1] && step.text[0] && step.text[1]);
@@ -54,6 +55,26 @@ test("浮层优先放在按钮旁，空间不足时放在上方且不覆盖被�
     assert.ok(placement.left + card.width <= viewport.width);
     assert.ok(placement.top + card.height <= viewport.height);
   }
+});
+
+test("实际浮层变高时，宽入口先移向顶部以便在下方完整介绍", () => {
+  const viewport = { width: 1280, height: 720 };
+  const entry = { left: 24, top: 367, width: 1232, height: 96 };
+  assert.equal(tour.teacherTourNeedsStartScroll(entry, viewport, { width: 376, height: 300 }), false);
+  assert.equal(tour.teacherTourNeedsStartScroll(entry, viewport, { width: 376, height: 434 }), true);
+  const afterScroll = { ...entry, top: 80 };
+  const placement = tour.teacherTourPlacement(afterScroll, viewport, { width: 376, height: 434 });
+  assert.equal(placement.side, "bottom");
+  assert.ok(placement.top >= afterScroll.top + afterScroll.height);
+  assert.ok(placement.top + 434 <= viewport.height - 24);
+  assert.equal(tour.teacherTourNeedsStartScroll(afterScroll, viewport, { width: 376, height: 434 }), false);
+});
+
+test("窗口无法容纳目标与浮层时不反复尝试腾出空间", () => {
+  const viewport = { width: 1280, height: 600 };
+  const entry = { left: 24, top: 250, width: 1232, height: 244 };
+  assert.equal(tour.teacherTourNeedsStartScroll(entry, viewport, { width: 376, height: 434 }), false);
+  assert.equal(tour.teacherTourNeedsStartScroll({ left: 30, top: 200, width: 180, height: 44 }, viewport, { width: 376, height: 350 }), false);
 });
 
 test("开始和完成提示居中，避免在页面底部留下说明区块", () => {

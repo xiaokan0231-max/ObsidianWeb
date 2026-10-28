@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildConsultationCatalog, findConsultationTranscript } from "../lib/consultation-library.ts";
-import { selectConsultationReadingStarts } from "../lib/consultation-reading-start.ts";
+import { selectConsultationReadingGroups } from "../lib/consultation-reading-start.ts";
 
 const root = "20_求職/株式会社テスト";
 const note = (name, frontmatter, content = "") => ({ path: `${root}/${name}.md`, frontmatter, content, tags: [], stat: { ctime: 0, mtime: 0, size: content.length } });
@@ -21,10 +21,11 @@ test("阅读起点的岗位只取同场明确所属案件，不借用同公司�
 });
 
 test("重点和介绍来自明确 frontmatter，整理稿优先且空值可清除原稿设置", () => {
-  const source = raw("linked", { teacher_featured: true, teacher_intro_ja: "元の紹介です。", teacher_request_ja: "質問の伝え方をご覧ください。" });
-  const readable = study("linked", { source_note: "[[linked]]", teacher_featured: false, teacher_intro_ja: "整理稿の紹介です。" });
+  const source = raw("linked", { teacher_featured: true, teacher_example: true, teacher_intro_ja: "元の紹介です。", teacher_request_ja: "質問の伝え方をご覧ください。" });
+  const readable = study("linked", { source_note: "[[linked]]", teacher_featured: false, teacher_example: false, teacher_intro_ja: "整理稿の紹介です。" });
   let guide = buildConsultationCatalog([source, readable]).sessions[0].readingGuide;
   assert.equal(guide.featured, false);
+  assert.equal(guide.example, false);
   assert.equal(guide.introduction, "整理稿の紹介です。");
   assert.equal(guide.request, "質問の伝え方をご覧ください。");
   readable.frontmatter.teacher_intro_ja = "";
@@ -35,7 +36,9 @@ test("重点和介绍来自明确 frontmatter，整理稿优先且空值可清�
   assert.equal(guide.request, undefined);
   assert.equal(guide.featured, false);
   delete readable.frontmatter.teacher_featured;
+  delete readable.frontmatter.teacher_example;
   assert.equal(buildConsultationCatalog([source, readable]).sessions[0].readingGuide.featured, true);
+  assert.equal(buildConsultationCatalog([source, readable]).sessions[0].readingGuide.example, true);
 });
 
 test("老师介绍限制长度并隐藏联系方式和内部资料地址", () => {
@@ -108,16 +111,24 @@ test("记忆重构和原始稿不冒充已确认逐字问题预览，人工介�
 
 const session = (id, date, featured = false, extra = {}) => ({ id, companyId: "company-test", company: "株式会社テスト", date, round: "一次面接", outcome: "進行中", outcomeKind: "waiting", hasReadable: true, hasRaw: false, readingGuide: { featured, excerpts: [], blockCount: 1 }, ...extra });
 
-test("起点只取最近一场加最多两场明确重点，保留原完整清单且不按结果推荐", () => {
-  const sessions = [session("latest", "2026-10-05", false, { outcome: "不採用", outcomeKind: "rejected" }), session("offer", "2026-10-04", false, { outcome: "内定", outcomeKind: "offer" }), session("featured-a", "2026-10-03", true), session("featured-b", "2026-10-02", true), session("featured-c", "2026-10-01", true)];
-  assert.deepEqual(selectConsultationReadingStarts(sessions).map(item => item.id), ["latest", "featured-a", "featured-b"]);
-  assert.equal(sessions.length, 5);
-  assert.deepEqual(selectConsultationReadingStarts(sessions.filter(item => !item.readingGuide.featured)).map(item => item.id), ["latest"]);
+test("入口分最近、明确终面和稳定补充例子三组，每组最多两场且不按结果排序", () => {
+  const sessions = [session("latest", "2026-10-07", false, { outcome: "不採用", outcomeKind: "rejected" }), session("offer", "2026-10-06", false, { outcome: "内定", outcomeKind: "offer" }), session("final-a", "2026-10-05", false, { stage: "final" }), session("final-b", "2026-10-04", false, { stage: "final", recordKind: "memory" }), session("example-a", "2026-10-03", true), session("example-b", "2026-10-02", false, { readingGuide: { example: true } }), session("example-c", "2026-10-01", true)];
+  const groups = selectConsultationReadingGroups(sessions);
+  assert.deepEqual(groups.map(group => [group.id, group.sessions.map(item => item.id)]), [["recent", ["latest", "offer"]], ["final", ["final-a", "final-b"]], ["examples", ["example-a", "example-b"]]]);
+  assert.equal(groups[1].sessions[1].recordKind, "memory");
+  assert.equal(sessions.length, 7);
+  assert.deepEqual(selectConsultationReadingGroups(sessions.slice(0, 2)).map(group => group.id), ["recent"]);
+  assert.deepEqual(selectConsultationReadingGroups(sessions), groups);
 });
 
 test("没有日期的记录不超过已知日期，重复和无稿重点不占起点", () => {
   const latest = session("known", "2026-10-01", true);
-  assert.deepEqual(selectConsultationReadingStarts([session("undated", "", true), latest, { ...latest }, session("no-record", "2026-11-01", true, { hasReadable: false })]).map(item => item.id), ["known", "undated"]);
-  assert.deepEqual(selectConsultationReadingStarts([session("undated-b", ""), session("undated-a", "")]).map(item => item.id), ["undated-a"]);
-  assert.deepEqual(selectConsultationReadingStarts([]), []);
+  assert.deepEqual(selectConsultationReadingGroups([session("undated", "", true), latest, { ...latest }, session("no-record", "2026-11-01", true, { hasReadable: false })])[0].sessions.map(item => item.id), ["known", "undated"]);
+  assert.deepEqual(selectConsultationReadingGroups([session("undated-b", ""), session("undated-a", "")])[0].sessions.map(item => item.id), ["undated-a", "undated-b"]);
+  assert.deepEqual(selectConsultationReadingGroups([]), []);
+});
+
+test("原问句预览跳过声音检查整段，同段追问不占据两个入口", () => {
+  const content = "## q01 音声確認\n- **s001｜面**\n    - 正:: 失礼しました。こちらはいかがですか。\n## q02 業務内容\n- **s002｜面**\n    - 正:: 最近担当された仕事を教えてください。\n- **s003｜面**\n    - 正:: いつから担当していますか。\n## q03 志望動機\n- **s004｜面**\n    - 正:: 弊社の志望理由を教えてください。";
+  assert.deepEqual(buildConsultationCatalog([study("preview", {}, content)]).sessions[0].readingGuide.excerpts.map(item => item.blockId), ["q02", "q03"]);
 });

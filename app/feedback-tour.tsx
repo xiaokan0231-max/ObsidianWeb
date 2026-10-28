@@ -12,10 +12,10 @@ type TourRect = { left: number; top: number; width: number; height: number };
 type TourViewport = { width: number; height: number };
 type TourPlacement = { left: number; top: number; side: "top" | "bottom" | "left" | "right" | "center" };
 
-export const TEACHER_TOUR_STORAGE_KEY = "teacher-tour:seen:v2";
+export const TEACHER_TOUR_STORAGE_KEY = "teacher-tour:seen:v3";
 export const TEACHER_TOUR_STEPS: Record<TeacherTourMode, TourStep[]> = {
   library: [
-    { target: '[data-tour="reading-start"]', title: ["まずは、少ない入口から", "先从少量入口开始"], text: ["最近の原稿から、気になる面接を一つ選べます。本人からの相談が添えられた原稿では、見てほしい点も確認できます。", "先选一份最近的原文。若有本人指定的请教场次，卡片还会附上想请教的内容。"] },
+    { target: '[data-tour="reading-choice"]', title: ["読み始める入口を選ぶ", "先选一种阅读入口"], text: ["最近の面接、最終面接、ほかの面接の例を、入口ごとに少しずつご紹介します。気になる入口を選び、その下の原稿を一つ開いてみてください。", "从最近的面试、终面或其他面试例子中选一组，每次只展示少量原稿。选好入口后，打开下面的一份原稿即可。"] },
     { target: '[data-tour="reading-preview"]', title: ["このやりとりから読む", "从这段交流开始"], text: ["原文の質問を一部表示しています。気になる項目を押すと、原稿のその部分へ移動できます。", "这里展示原文中的问题摘录，点击即可进入对应的那一段。"], fallback: {
       target: '[data-tour="start-reading"]', title: ["原稿を開いて、コメント", "打开原文并留言"], text: ["このボタンから原稿を開けます。会話の横にある「この部分にコメント」から、ご意見やご質問を送れます。", "从这个按钮打开原文，再点对话旁的“评论这段”即可留下建议或问题。"],
     } },
@@ -57,6 +57,13 @@ export function teacherTourPlacement(rect: TourRect | null, viewport: TourViewpo
   if (viewport.height - rect.top - rect.height - gap >= card.height + edge) return { left: centeredX, top: rect.top + rect.height + gap, side: "bottom" };
   if (rect.top - gap >= card.height + edge) return { left: centeredX, top: rect.top - gap - card.height, side: "top" };
   return { left: viewport.width - card.width - edge, top: viewport.height - card.height - edge, side: "center" };
+}
+
+// 浮层高度取实际测量值；宽入口居中时没有足够的上下空间，要把入口移向阅读区顶部。
+export function teacherTourNeedsStartScroll(rect: TourRect, viewport: TourViewport, card: { width: number; height: number }): boolean {
+  if (teacherTourPlacement(rect, viewport, card).side !== "center") return false;
+  // 不可滚动的固定入口或过矮窗口也可能无法腾出空间；只为可容纳的组合尝试一次定位。
+  return rect.height + card.height + 22 + 48 <= viewport.height;
 }
 
 function findTarget(selector: string): HTMLElement | null {
@@ -146,7 +153,9 @@ export function TeacherTour({ mode = "library", active = true, locale = "ja", on
     const target = stage >= 0 && stage < steps.length ? findStepTarget(steps[stage])?.target : null;
     if (target) {
       const rect = target.getBoundingClientRect();
-      if (rect.top < 100 || rect.bottom > window.innerHeight - 30 || rect.left < 12 || rect.right > window.innerWidth - 12) target.scrollIntoView({ block: rect.height > 244 ? "start" : "center", inline: "center", behavior: "instant" });
+      const nextViewport = { width: window.innerWidth, height: window.innerHeight };
+      const needsRoom = teacherTourNeedsStartScroll(teacherTourSpotlight(rect, nextViewport), nextViewport, cardSize);
+      if (needsRoom || rect.top < 100 || rect.bottom > window.innerHeight - 30 || rect.left < 12 || rect.right > window.innerWidth - 12) target.scrollIntoView({ block: needsRoom || rect.height > 244 ? "start" : "center", inline: "center", behavior: "instant" });
     }
     measure();
     const observer = new ResizeObserver(measure);
@@ -154,7 +163,7 @@ export function TeacherTour({ mode = "library", active = true, locale = "ja", on
     if (card.current) observer.observe(card.current);
     window.addEventListener("resize", measure); window.addEventListener("scroll", measure, true);
     return () => { cancelAnimationFrame(frame); observer.disconnect(); window.removeEventListener("resize", measure); window.removeEventListener("scroll", measure, true); };
-  }, [visible, stage, steps]);
+  }, [visible, stage, steps, cardSize, viewport.width, viewport.height]);
   if (!visible) return null;
 
   const begin = () => {

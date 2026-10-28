@@ -12,31 +12,44 @@ function catalog(sessions) {
 }
 function startSection(html) { return html.match(/<section class="consultation-reading-start"[^]*?<\/section>/)?.[0] ?? ""; }
 
-test("起点只展示最近场次和本人明确指定的重点，完整目录仍保留全部公司", async () => {
+test("起点以最近两场开始，终面和补充例子有独立入口，完整目录保留全部公司", async () => {
   const { ConsultationLibrary } = await loadAppModule("app/consultation/consultation-view.tsx");
-  const items = [session("recent", "2026-10-23"), session("focus-a", "2026-10-20", { featured: true, introduction: "経験の伝え方について相談したい面接です。", request: "この説明で意図が伝わるか教えてください。" }), session("focus-b", "2026-10-18", { featured: true }), session("other", "2026-10-19")];
+  const items = [session("recent", "2026-10-23"), session("second", "2026-10-22", { introduction: "開発経験について話した面談です。" }), session("final", "2026-10-18", {}, { stage: "final", round: "最終面接" }), session("other", "2026-10-19", { example: true })];
   const html = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial: catalog(items) }));
   const start = startSection(html);
-  assert.equal((start.match(/<article /g) ?? []).length, 3);
+  assert.equal((start.match(/<article /g) ?? []).length, 2);
   assert.match(start, /最近の面接/);
-  assert.match(start, /本人からの相談/);
-  assert.match(start, /経験の伝え方について相談したい面接です。/);
-  assert.match(start, /この説明で意図が伝わるか教えてください。/);
-  assert.doesNotMatch(start, /株式会社テストother/);
+  assert.match(start, /最終面接/);
+  assert.match(start, /ほかの面接/);
+  assert.match(start, /開発経験について話した面談です。/);
+  assert.doesNotMatch(start, /株式会社テストfinal|株式会社テストother/);
+  assert.equal((start.match(/aria-pressed="true"/g) ?? []).length, 1);
+  assert.equal((start.match(/aria-pressed="false"/g) ?? []).length, 2);
   for (const item of items) assert.ok(html.includes(item.company), item.company);
   assert.match(html, /選考の進み方|現在の選考状況/);
-  assert.match(html, /data-tour="all-materials"/);
+  assert.match(start, /data-tour="reading-choice"/);
+  assert.match(start, /data-tour="all-materials"/);
   assert.match(html, /id="consultation-materials"/);
 });
 
-test("没有指定重点时只给一个真实起点，不补占位或替本人编造咨询意图", async () => {
+test("资料不足时只展示实际可读起点，不制造空的终面或补充入口", async () => {
   const { ConsultationLibrary } = await loadAppModule("app/consultation/consultation-view.tsx");
-  const html = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial: catalog([session("old", "2026-10-01"), session("new", "2026-10-20")]) }));
+  const html = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial: catalog([session("only", "2026-10-20")]) }));
   const start = startSection(html);
   assert.equal((start.match(/<article /g) ?? []).length, 1);
   assert.match(start, /is-single/);
-  assert.match(start, /株式会社テストnew/);
+  assert.match(start, /株式会社テストonly/);
+  assert.equal((start.match(/aria-pressed=/g) ?? []).length, 1);
   assert.doesNotMatch(start, /本人からの相談|相談したいこと|おすすめ|AI評価/);
+});
+
+test("终面和补充卡片使用所选入口标签，不误标成最近面试", async () => {
+  const { ReadingStartCard } = await loadAppModule("app/consultation/consultation-view.tsx");
+  for (const label of ["最終面接", "ほかの面接"]) {
+    const html = renderToStaticMarkup(React.createElement(ReadingStartCard, { session: session("sample", "2026-09-20"), recent: false, label, onOpen() {}, onExcerpt() {} }));
+    assert.ok(html.includes(label));
+    assert.doesNotMatch(html, /最近の面接/);
+  }
 });
 
 test("起点原问句直接带真实场景，显示为文字而不是HTML", async () => {
@@ -60,7 +73,7 @@ test("记忆重构和未知日期保持限制，不把重构文字包装为原�
   assert.match(html, /日付未確認/);
   assert.doesNotMatch(html, /原稿にある質問|不应当作逐字原句|最近の面接/);
   const start = startSection(renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial: catalog([memory]) })));
-  assert.doesNotMatch(start, /最近の面接/);
+  assert.doesNotMatch(start, /class="reading-start-recent"/);
 });
 
 test("场景参数随场次和显示形式往返，批注参数仍独立保留", async () => {

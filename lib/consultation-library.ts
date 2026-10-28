@@ -9,10 +9,10 @@ import { joinReviewNotes, type JoinedReviewNotes } from "./review-join.ts";
 import { plainSei } from "./review.ts";
 import { includeRuntimeNote } from "./vault-boundary.mjs";
 
-export { selectConsultationReadingStarts } from "./consultation-reading-start.ts";
+export { selectConsultationReadingGroups } from "./consultation-reading-start.ts";
 
 export type ConsultationReadingGuide = {
-  featured: boolean; introduction?: string; request?: string;
+  featured: boolean; example?: boolean; introduction?: string; request?: string;
   excerpts: { blockId: string; text: string }[]; blockCount: number;
 };
 
@@ -175,18 +175,22 @@ function readingGuide(source: SourceSession, blocks: ConsultationTranscript["blo
   const excerpts: ConsultationReadingGuide["excerpts"] = [];
   if (!isMemory(source)) {
     for (const block of blocks) {
+      const sourceTitle = source.readable?.parsed.blocks.find(candidate => candidate.id === block.id)?.title ?? "";
+      if (/音声|接続確認|挨拶|あいさつ|録音|録画|录音|寒暄|开场|開場/.test(sourceTitle)) continue;
       for (const turn of block.turns) {
         // 介绍只摘录能核对的面试官问题，不把开场确认、未知话者或内部摘要当成内容提要。
         if (turn.speaker !== "interviewer" || turn.uncertain || turn.text.length < 10 ||
           /録音|録画|文字起こし|ネットワーク|接続|画面|音声|聞こえ|お間違い|お名前|よろしく|よろしいでしょうか/.test(turn.text) ||
           !/[?？]|か[。！？?]?$|教えて|お聞かせ|お伺い|伺って|ご紹介.*(?:ください|お願い)|自己紹介.*(?:ください|お願い)/.test(turn.text)) continue;
-        if (!excerpts.some(excerpt => excerpt.text === turn.text)) excerpts.push({ blockId: block.id, text: turn.text });
-        if (excerpts.length === 2) break;
+        if (!excerpts.some(excerpt => excerpt.text === turn.text)) {
+          excerpts.push({ blockId: block.id, text: turn.text });
+          break;
+        }
       }
       if (excerpts.length === 2) break;
     }
   }
-  return { featured: teacherField(source, "teacher_featured") === true,
+  return { featured: teacherField(source, "teacher_featured") === true, example: teacherField(source, "teacher_example") === true,
     ...(introduction ? { introduction } : {}), ...(request ? { request } : {}), excerpts,
     blockCount: blocks.filter(block => block.turns.some(turn => turn.text.trim())).length };
 }

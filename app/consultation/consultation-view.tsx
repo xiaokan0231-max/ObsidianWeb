@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { ConsultationCatalog, ConsultationCompany, ConsultationInterview, ConsultationSessionSummary, ConsultationTranscript } from "@/lib/consultation-library";
-import { selectConsultationReadingStarts } from "@/lib/consultation-reading-start";
+import { selectConsultationReadingGroups } from "@/lib/consultation-reading-start";
 import type { FeedbackContext, FeedbackThread } from "@/lib/feedback";
 import { consultationBlockText, consultationContextIsCurrent, consultationFeedbackContext, feedbackQuoteRange } from "@/lib/feedback-annotations";
 import { FeedbackEntry, FeedbackHelp, FeedbackPanel, useFeedback } from "../feedback-ui";
@@ -233,7 +233,10 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
   const query = route.query.trim().toLocaleLowerCase();
   const companies = useMemo(() => [...initial.companies].sort((a, b) => b.latestDate.localeCompare(a.latestDate) || a.company.localeCompare(b.company, "ja")), [initial.companies]);
   const sessions = useMemo(() => initial.sessions.filter(hasRecord).sort((a, b) => b.date.localeCompare(a.date) || a.company.localeCompare(b.company, "ja")), [initial.sessions]);
-  const readingStarts = useMemo(() => selectConsultationReadingStarts(initial.sessions), [initial.sessions]);
+  const readingGroups = useMemo(() => selectConsultationReadingGroups(initial.sessions), [initial.sessions]);
+  const [readingGroupId, setReadingGroupId] = useState("recent");
+  const readingGroup = readingGroups.find(group => group.id === readingGroupId) ?? readingGroups[0];
+  const readingStarts = readingGroup?.sessions ?? [];
   const manuscriptCompanyCount = new Set(sessions.map(session => session.companyId)).size;
   const selectedCompany = initial.companies.find(company => company.id === route.companyId);
   const visibleCompanies = filterConsultationCompanies(companies, sessions, query, route.outcome, route.progress);
@@ -249,9 +252,13 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
           <div className="consultation-intro-copy"><p className="consultation-eyebrow"><span />先生との相談スペース</p><h1>面接の記録から、<span>次の一歩へ。</span></h1><p className="consultation-lead">まずは一つの原稿から。気になる表現にコメントできます。</p></div>
         </section>
         <section className="consultation-reading-start" data-tour="reading-start" aria-labelledby="reading-start-title">
-          <header className="consultation-reading-start-heading"><div><p className="consultation-eyebrow">READING START</p><h2 id="reading-start-title">まずは、ここから</h2><p>{readingStarts.some(session => session.readingGuide?.featured) ? "最近の原稿と、本人から相談したい原稿をまとめています。" : "最近の原稿を一つ、読み始められます。"}</p></div><button data-tour="all-materials" className="consultation-all-materials" onClick={showAllMaterials}>すべての資料を見る<span aria-hidden="true">→</span></button></header>
-          <div className={`consultation-reading-start-grid${readingStarts.length === 1 ? " is-single" : ""}`}>
-            {readingStarts.map((session, index) => <ReadingStartCard key={session.id} session={session} recent={index === 0 && Boolean(session.date)} onOpen={() => openSession(session)} onExcerpt={blockId => openExcerpt(session, blockId)} />)}
+          <header className="consultation-reading-start-heading"><div><p className="consultation-eyebrow">READING START</p><h2 id="reading-start-title">まずは、ここから</h2><p>気になる入口を選んで、一つの原稿からご覧ください。</p></div><button data-tour="all-materials" className="consultation-all-materials" onClick={showAllMaterials}>すべての資料を見る<span aria-hidden="true">→</span></button></header>
+          {readingGroups.length > 0 && <div className="consultation-reading-choices" data-tour="reading-choice" role="group" aria-label="読み始める面接の種類">{readingGroups.map(group => <button key={group.id} className={`consultation-reading-choice is-${group.id}`} aria-pressed={readingGroup?.id === group.id} aria-controls="consultation-reading-selection" onClick={() => setReadingGroupId(group.id)}><span className="consultation-reading-choice-icon" aria-hidden="true"><ReadingGroupIcon group={group.id} /></span><span><strong>{group.title}</strong><small>{group.id === "recent" ? "まずは直近のやり取りから" : group.id === "final" ? "選考の終盤で話したこと" : "違う話題や企業も見てみる"}</small></span><span className="consultation-reading-choice-count">{group.sessions.length}<small>件</small></span></button>)}</div>}
+          <div id="consultation-reading-selection" className={`consultation-reading-selection is-${readingGroup?.id ?? "recent"}`} aria-live="polite" aria-atomic="false">
+            {readingGroup && <p className="consultation-reading-group-description">{readingGroup.description}</p>}
+            <div className={`consultation-reading-start-grid${readingStarts.length === 1 ? " is-single" : ""}`}>
+              {readingStarts.map(session => <ReadingStartCard key={session.id} session={session} recent={readingGroup?.id === "recent" && Boolean(session.date)} label={readingGroup?.id === "recent" ? undefined : readingGroup?.title} onOpen={() => openSession(session)} onExcerpt={blockId => openExcerpt(session, blockId)} />)}
+            </div>
           </div>
           {readingStarts.length === 0 && <p className="consultation-reading-start-empty">原稿が登録されると、ここから読み始められます。企業一覧から、確認できている面接の履歴をご覧いただけます。</p>}
         </section>
@@ -276,13 +283,17 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
   </div>;
 }
 
-export function ReadingStartCard({ session, recent, onOpen, onExcerpt }: { session: ConsultationSessionSummary; recent: boolean; onOpen: () => void; onExcerpt: (blockId: string) => void }) {
+function ReadingGroupIcon({ group }: { group: string }) {
+  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{group === "recent" ? <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></> : group === "final" ? <><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z" /></> : <><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><path d="M14 17.5h7m-3.5-3.5v7" /></>}</svg>;
+}
+
+export function ReadingStartCard({ session, recent, label, onOpen, onExcerpt }: { session: ConsultationSessionSummary; recent: boolean; label?: string; onOpen: () => void; onExcerpt: (blockId: string) => void }) {
   const guide = session.readingGuide;
   const excerpts = session.hasReadable && session.recordKind !== "memory" ? (guide?.excerpts ?? []).slice(0, 2) : [];
   const introduction = guide?.introduction || (session.recordKind === "memory" ? "当日の記憶から再構成した記録です。会話の内容を中心にご覧いただけます。" : session.date ? `${dateLabel(session.date)}の${stageLabel(session)}です。気になるやり取りからコメントできます。` : "日付未確認の面接記録です。原稿から、確認できるやり取りをご覧いただけます。");
   return <article className={`consultation-reading-start-card${guide?.featured ? " is-featured" : ""}${excerpts.length ? " has-preview" : ""}`}>
     <div className="consultation-reading-start-main">
-      <div className="consultation-reading-start-badges">{recent && <span className="reading-start-recent">最近の面接</span>}{guide?.featured && <span className="reading-start-featured">本人からの相談</span>}{!recent && !guide?.featured && <span>読み始める原稿</span>}</div>
+      <div className="consultation-reading-start-badges">{recent && <span className="reading-start-recent">最近の面接</span>}{guide?.featured && <span className="reading-start-featured">本人からの相談</span>}{!recent && !guide?.featured && <span>{label || "読み始める原稿"}</span>}</div>
       <h3>{session.company}</h3>
       <div className="consultation-reading-start-meta"><time dateTime={session.date || undefined}>{dateLabel(session.date)}</time><span>{stageLabel(session)}</span>{session.recordKind === "memory" ? <span className="reading-start-memory">記憶から再構成</span> : <span>{session.hasReadable ? "可読整理稿" : "原始転写"}</span>}</div>
       {session.position && <p className="consultation-reading-start-position">{session.position}</p>}
