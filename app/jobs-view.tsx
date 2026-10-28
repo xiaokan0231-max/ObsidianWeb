@@ -34,6 +34,7 @@ import { isTypingTarget } from "@/lib/keyboard";
 import { parseAppliedLedger } from "@/lib/job-stats.mjs";
 import { opportunityAppliedOn } from "@/lib/job-opportunity";
 import { JOB_CASE_TYPE } from "@/lib/vault-boundary.mjs";
+import { selectionNoticesForSession } from "@/lib/selection-notice";
 import { getType, type Note } from "@/lib/notes";
 import type { UndoAction } from "./undo-flash";
 import { URL_CHANGE_EVENT } from "./use-url-state";
@@ -571,6 +572,7 @@ function JobsView({
               <JobDecisionWorkspace
                 jobs={visible}
                 selected={decisionDetail}
+                selectionNotices={selectionNoticesForSession(decisionDetail.note, notes)}
                 today={today}
                 saving={savingPaths.includes(decisionDetail.path)}
                 keyboard={!compareOpen}

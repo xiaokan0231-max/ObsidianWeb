@@ -18,6 +18,9 @@ import { OPEN_NOTE_LABEL } from "@/lib/ui-labels";
 import { useJobMenu } from "./jobs-copy";
 import { FitPanel, ORIGIN_LABEL } from "./jobs-shared";
 import { StatusPicker } from "./jobs-status";
+import type { SelectionNotice } from "@/lib/selection-notice";
+import SelectionNoticePanel from "./selection-notice";
+import { useUiLocale } from "./ui-locale";
 
 export function JobDecisionWorkspace({
   jobs,
@@ -28,6 +31,7 @@ export function JobDecisionWorkspace({
   onSelect,
   onStatus,
   onOpenNote,
+  selectionNotices = [],
 }: {
   jobs: JobCard[];
   selected: JobCard;
@@ -43,8 +47,10 @@ export function JobDecisionWorkspace({
     expectedMtime?: number,
   ) => Promise<string | null>;
   onOpenNote: () => void;
+  selectionNotices?: SelectionNotice[];
 }) {
   const menu = useJobLabels();
+  const { locale } = useUiLocale();
   const { t, label: menuLabel } = useJobMenu();
   const queueRef = useRef<HTMLElement>(null);
 
@@ -117,6 +123,7 @@ export function JobDecisionWorkspace({
             onChange={onStatus}
           />
         </header>
+        <SelectionNoticePanel key={selected.path} notices={selectionNotices} locale={locale} rejected={selected.status === "不採用"} />
         <dl>
           <div><dt>{menu("年収")}</dt><dd>{salaryLabel(selected)}</dd></div>
           <div><dt>{menu("v2 採点")}</dt><dd>{selected.fit ? `Fit ${selected.fit.score} · Band ${selected.fit.band} · Gate ${HARD_GATE_LABEL[selected.fit.hardGate]}` : UNRATED_V2_LABEL}</dd></div>
