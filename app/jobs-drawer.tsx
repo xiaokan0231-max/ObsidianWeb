@@ -17,6 +17,9 @@ import { useDialogFocus } from "./use-dialog-focus";
 import { useJobMenu } from "./jobs-copy";
 import { COMPARE_LIMIT, FitPanel, ORIGIN_LABEL } from "./jobs-shared";
 import { StatusPicker } from "./jobs-status";
+import { selectionNoticesForSession } from "@/lib/selection-notice";
+import SelectionNoticePanel from "./selection-notice";
+import { useUiLocale } from "./ui-locale";
 
 const WAITING_FOR_OPTIONS = [
   { value: "", label: "没有外部等待" },
@@ -72,6 +75,8 @@ export function JobDrawer({
 }) {
   const menu = useJobLabels();
   const { t, label: menuLabel } = useJobMenu();
+  const { locale } = useUiLocale();
+  const selectionNotices = selectionNoticesForSession(job.note, notes);
   const intakeAge = intakeRelative(job.date, today);
   const dialogRef = useRef<HTMLElement>(null);
   useDialogFocus(dialogRef);
@@ -157,6 +162,16 @@ export function JobDrawer({
             )}
             <button type="button" className="job-detail" onClick={() => onOpenNote()}>{menuLabel(OPEN_NOTE_LABEL)}</button>
           </div>
+
+          <SelectionNoticePanel
+            notices={selectionNotices}
+            locale={locale}
+            rejected={job.status === "不採用"}
+            onOpenNote={(path) => {
+              const note = notes.find((item) => item.path === path);
+              if (note) onOpenNote(note);
+            }}
+          />
 
           <dl className="job-detail-facts">
             <div><dt>{menu("年収")}</dt><dd>{job.salaryText || "—"}</dd></div>

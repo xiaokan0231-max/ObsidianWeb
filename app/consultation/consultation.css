@@ -425,3 +425,7 @@
 .consultation-materials { scroll-margin-top: 20px; }
 .consultation-conversation-block:focus { outline: none; }
 @media print { .consultation-reading-start { display: none; } }
+
+/* 拒绝通知与面试转写分开，脱敏说明紧跟原文，避免误作企业原话。 */
+.consultation-shell .selection-notice-panel { --notice-accent: var(--green); }
+.consultation-notice-privacy { margin: -12px 0 24px; color: var(--text-secondary, #65736a); font-size: 11px; line-height: 1.8; }

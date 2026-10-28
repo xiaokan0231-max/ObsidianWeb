@@ -68,6 +68,8 @@ import { RadarChart, type RadarSeries } from "./radar-chart";
 import ReviewCompanyAnalysis from "./review-company-analysis";
 import { JapanSignalsPanel, SignalOutcomeTable, signalOutcomeComparison, signalsCopy } from "./interview-japan-signals";
 import { resolveInterviewOutcomes, type SignalOutcomeComparison } from "@/lib/interview-outcome";
+import { selectionNoticesForSession } from "@/lib/selection-notice";
+import SelectionNoticePanel from "./selection-notice";
 
 // 面接復盤：整理稿（派生層）を読む・批注（事実層）へ追記する、の2操作だけを持つ。
 // 整理稿の中身をここで書き換える経路は意図的に存在しない（唯一writer表を参照）。
@@ -743,6 +745,8 @@ function InterviewReview({
           onLanguageChange={switchNovelLang}
           onExit={() => switchMode(previousMode.current)}
           onBack={backToList}
+          headerExtra={<SelectionNoticePanel notices={selectionNoticesForSession(doc.note, notes)} locale={locale}
+            rejected={outcomes.get(doc.note.path)?.kind === "rejected"} />}
           // 阅读层 portal 到 body 并把外壳设为 inert，写入提示留在外壳里就关不掉，所以随阅读层一起挂。
           overlay={<ReviewWriteAlerts alerts={writeAlerts} onDismiss={dismissWriteAlert} />}
         />
@@ -884,6 +888,10 @@ function InterviewReview({
         </div>
 
       </header>
+
+      <SelectionNoticePanel key={doc.key} notices={selectionNoticesForSession(doc.note, notes)} locale={locale}
+        rejected={outcomes.get(doc.note.path)?.kind === "rejected"}
+        onOpenNote={onOpenNote ? path => { const note = notes.find(item => item.path === path); if (note) onOpenNote(note); } : undefined} />
 
       <nav className="rv-section-tabs" aria-label={t("面试复盘内容")}>
         {([['source', menu("原文阅读")], ['advisory', menu("全文理解")], ['quality', menu("回答评价")]] as const).map(([value, label]) => <button type="button" key={value}

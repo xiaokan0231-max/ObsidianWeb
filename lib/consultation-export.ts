@@ -172,6 +172,19 @@ export function exportConsultationTranscript(transcript: ConsultationTranscript,
     : "記録にある発言を話者ごとに掲載しています。聞き取りや話者が未確認の箇所は、そのまま明示しています。整理方法と聞き取りの状況は、以下の注記をご確認ください。";
   const parts = [paragraph(title, "Title"), metadata("面接日", shown(transcript.date, "日付未確認")), metadata("面接段階", shown(transcript.round, "面接・面談")), metadata("選考結果", shown(transcript.outcome)), metadata("資料の種類", sourceType), paragraph(introduction)];
   if (transcript.notice) parts.push(paragraph(transcript.notice));
+  if (transcript.selectionNotices?.length) {
+    parts.push(paragraph("選考結果と企業からの原文", "Heading1"));
+    parts.push(paragraph("同じ応募案件に届いた通知です。面談と通知の選考段階は異なる場合があります。連絡先・内部リンクは非表示です。"));
+    for (const item of transcript.selectionNotices) {
+      parts.push(metadata("通知", `${item.date}${item.time ? ` ${item.time}` : ""} JST　${item.stage}　${item.channel}`));
+      parts.push(paragraph(item.capture === "excerpt" ? "原文の抜粋" : "原文全文"));
+      if (item.reasonStatus === "not-stated") parts.push(paragraph(item.capture === "excerpt" ? "収録した抜粋には、具体的な理由の記載がありません。" : "この通知には、具体的な理由の記載がありません。"));
+      for (const line of item.original.split(/\r\n|\r|\n/)) parts.push(paragraph(line));
+    }
+  }
+  if (transcript.outcomeKind === "rejected" && !transcript.selectionNotices?.some(item => item.outcome === "rejected")) {
+    parts.push(paragraph("不採用の記録がありますが、通知の原文は未収録です。企業が理由を伝えたかどうかは判断できません。"));
+  }
   if (raw) {
     parts.push(paragraph(sourceType, "Heading1"));
     // 按原始行拆分段落，使长稿自然分页，同时保留空行。

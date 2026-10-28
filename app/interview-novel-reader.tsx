@@ -72,7 +72,7 @@ export function novelChapterId(id: string) {
  * 以前这里自己实现了一遍同样的外壳，字号不记、重进从头读，改一处阅读体验要写两遍。
  */
 export default function InterviewNovelReader({
-  company, date, round, parsed, decisionTasks, language, onLanguageChange, onExit, onBack, documentKey, overlay,
+  company, date, round, parsed, decisionTasks, language, onLanguageChange, onExit, onBack, documentKey, overlay, headerExtra,
 }: {
   company: string;
   date: string;
@@ -87,6 +87,8 @@ export default function InterviewNovelReader({
   documentKey?: string;
   /** 复盘页的写入提示：阅读层打开时外壳 inert，提示要挂进阅读层里才点得到。 */
   overlay?: ReactNode;
+  /** 连读模式也保留案件通知，避免记住阅读模式后丢失企业结果入口。 */
+  headerExtra?: ReactNode;
 }) {
   const copy = NOVEL_COPY[useUiLocale().locale];
   const chapters = useMemo(() => {
@@ -139,6 +141,7 @@ export default function InterviewNovelReader({
       headings={headings}
       languageSwitch={{ value: language, options: LANGUAGE_OPTIONS, onChange: (value) => onLanguageChange(value === "zh" ? "zh" : "ja") }}
       headerNote={<>
+        {headerExtra}
         <p className="nr-reading-note">{copy.version(language)}<span> · </span>{copy.readingNote}</p>
         {language === "zh" && missingTranslations > 0 && <p className="nr-translation-note">{copy.missing(missingTranslations)}</p>}
       </>}

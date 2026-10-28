@@ -8,6 +8,7 @@ import { companyIdentity, getString, getType, stripFrontmatter, type Note } from
 import { joinReviewNotes, type JoinedReviewNotes } from "./review-join.ts";
 import { plainSei } from "./review.ts";
 import { includeRuntimeNote } from "./vault-boundary.mjs";
+import { selectionNoticesForSession, type SelectionNotice } from "./selection-notice.ts";
 
 export { selectConsultationReadingGroups } from "./consultation-reading-start.ts";
 
@@ -42,6 +43,7 @@ export type ConsultationCatalog = { companies: ConsultationCompany[]; sessions: 
 export type ConsultationTranscript = ConsultationSessionSummary & {
   blocks: { id: string; title: string; turns: { id: string; speaker: "interviewer" | "self" | "unknown"; text: string; uncertain: boolean }[] }[];
   raw: string; notice: string;
+  selectionNotices?: SelectionNotice[];
 };
 
 type SourceSession = { note: Note; raw?: Note; readable?: JoinedReviewNotes };
@@ -64,8 +66,9 @@ function safeText(value: string) {
     .replace(/!?\[\[[^\]]*\]\]/g, "［関連資料］")
     .replace(/https?:\/\/[^\s<>「」]+/g, "［リンク非表示］")
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, "［メール非表示］")
-    .replace(/(?:\+81[-\s]?|0)\d{1,4}[-\s]\d{1,4}[-\s]\d{3,4}/g, "［電話非表示］")
-    .replace(/\b0\d{9,10}\b/g, "［電話非表示］")
+    .replace(/(?:\+81[-\s(（]*|[0０])[\d０-９]{1,4}[-\s()（）‐‑‒–—―ー－]+[\d０-９]{1,4}[-\s()（）‐‑‒–—―ー－]+[\d０-９]{3,4}/g, "［電話非表示］")
+    .replace(/[0０][\d０-９]{9,10}/g, "［電話非表示］")
+    .replace(/[A-Za-z]:[\\/][^\s<>「」]*/g, "［内部資料非表示］")
     .replace(/(?:\/Users\/|file:\/\/|(?:20_求職|99_系统|90_归档)\/)[^\s<>「」]*/g, "［内部資料非表示］")
     .trim();
 }
@@ -463,5 +466,11 @@ export function findConsultationTranscript(notes: Note[], id: string): Consultat
   const notice = isMemory(source) ? "本人の記憶から再構成した資料です。実際の逐語発言とは区別してください。"
     : summary.hasReadable ? "読みやすく整理した記録です。フィラー等が省略されている場合があります。原音は未確認です。"
     : "原始転写のみの記録です。話者の分離や聞き取りには未確認の箇所があります。原音は未確認です。";
-  return { ...summary, blocks, raw: summary.hasRaw ? rawText(source) : "", notice };
+  // 老师页只投影脱敏正文和稳定 ID，不把邮箱入口、内部文件路径带给浏览器。
+  const selectionNotices = selectionNoticesForSession(source.note, notes).map(item => ({
+    id: stableId("notice", item.id), date: item.date, time: item.time,
+    stage: safeText(item.stage), outcome: item.outcome, channel: safeText(item.channel),
+    reasonStatus: item.reasonStatus, capture: item.capture, original: safeText(item.original),
+  }));
+  return { ...summary, blocks, raw: summary.hasRaw ? rawText(source) : "", notice, selectionNotices };
 }

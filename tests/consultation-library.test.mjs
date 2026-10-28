@@ -9,6 +9,22 @@ const raw = (id, extra = {}, content = "質問です。\n回答です。") => no
 const studyBody = "## q01 中文摘要\n- **s001｜面**\n    - 正:: 経験を教えてください。\n    - 訳:: 请介绍经历。\n    - 注:: INTERNAL-ANNOTATION\n- **s002｜私?**\n    - 正:: 開発を担当しました。\n    - 誤:: AI-EVALUATION";
 const study = (id, extra = {}, content = studyBody) => note(`${root}/${id}_整理稿.md`, { type: "transcript-study", company: "株式会社テスト", date: "2026-09-20", round: "一次面接", ...extra }, content);
 
+test("老师原文保留拒绝措辞与阶段，隐藏联系方式和来源路径，目录不夹带全文", () => {
+  const original = "慎重に検討しましたが、今回はご希望に添えません。\n\n採用担当 test@example.com 03-1234-5678 TEL:03(1234)5678 ０３（１２３４）５６７８\nC:\\Users\\sample\\private.pdf\nhttps://example.com/private";
+  const notes = [job("notice-role"), study("notice-study", { case: "[[notice-role]]" }),
+    note(`${root}/notice.md`, { type: "selection-notice", case: "[[notice-role]]", date: "2026-09-22", time: "12:20", stage: "書類選考", channel: "テスト媒体", outcome: "rejected", source_verified: true, capture: "full", reason_status: "not-stated", source_url: "https://example.com/message" }, `<!-- selection-notice:original -->\n${original}\n<!-- /selection-notice:original -->`)];
+  const catalog = buildConsultationCatalog(notes);
+  const detail = findConsultationTranscript(notes, catalog.sessions[0].id);
+  assert.equal(detail.selectionNotices.length, 1);
+  const notification = detail.selectionNotices[0];
+  assert.equal(notification.stage, "書類選考");
+  assert.equal(notification.reasonStatus, "not-stated");
+  assert.match(notification.original, /慎重に検討しましたが、今回はご希望に添えません。\n\n/);
+  assert.match(notification.original, /メール非表示/);
+  assert.doesNotMatch(JSON.stringify(notification), /example\.com|03-1234|03\(1234\)|０３|sample|private\.pdf|20_求職|sourcePath|sourceUrl/);
+  assert.doesNotMatch(JSON.stringify(catalog), /慎重に検討しましたが/);
+});
+
 test("有面试记录的公司不限五家，只保留面试过的岗位，无面试公司与准备稿不进入清单", () => {
   const jobs = Array.from({ length: 8 }, (_, index) => job(`test-${index}`, "不採用", { company: `株式会社テスト${index}`, position: "エンジニア" }));
   const studies = jobs.map((item, index) => study(`test-study-${index}`, { company: item.frontmatter.company, case_id: item.frontmatter.case_id }));

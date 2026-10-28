@@ -57,6 +57,25 @@ function plain(document) {
   return document.replace(/<w:br\s*\/>/g, "\n").replace(/<w:tab\s*\/>/g, "\t").replace(/<\/w:p>/g, "\n").replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 }
 
+test("选考通知在两种Word导出中保留换行、阶段和缺口，不与面试发言混写", () => {
+  const original = "今回はご希望に添えません。\n\n株式会社テスト 採用担当";
+  const notice = { id: "notice-a", date: "2026-10-18", time: "12:20", stage: "書類選考", outcome: "rejected", channel: "テスト媒体", capture: "full", reasonStatus: "not-stated", original };
+  for (const mode of ["raw", "readable"]) {
+    const text = plain(unpack(exportConsultationTranscript({ ...transcript, selectionNotices: [notice] }, mode)).get("word/document.xml"));
+    assert.ok(text.includes(original));
+    assert.match(text, /2026-10-18 12:20 JST/);
+    assert.match(text, /書類選考/);
+    assert.match(text, /具体的な理由の記載がありません/);
+    assert.ok(text.indexOf(original) < text.indexOf("自己紹介をお願いします。"));
+    const missing = plain(unpack(exportConsultationTranscript({ ...transcript, outcomeKind: "rejected" }, mode)).get("word/document.xml"));
+    assert.match(missing, /原文は未収録/);
+    assert.doesNotMatch(missing, /具体的な理由の記載がありません/);
+    const oldPassOnly = plain(unpack(exportConsultationTranscript({ ...transcript, outcomeKind: "rejected", selectionNotices: [{ ...notice, outcome: "passed", reasonStatus: "unknown", original: "次の選考へお進みください。" }] }, mode)).get("word/document.xml"));
+    assert.match(oldPassOnly, /次の選考へお進みください/);
+    assert.match(oldPassOnly, /原文は未収録/);
+  }
+});
+
 test("exports a real DOCX package with OpenXML relationships, Japanese typography and A4 layout", () => {
   const files = unpack(exportConsultationTranscript(transcript, "readable"));
   assert.equal(files.size, 8);

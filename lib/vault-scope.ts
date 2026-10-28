@@ -13,7 +13,7 @@ const COMMITMENT_TYPES = new Set(["job-case", "todo", "interview-prep", "review"
 const OVERVIEW_REVIEW_TYPES = new Set(["interview-answer-practice", "transcript-study", "study-annotation", "interview-answer-review"]);
 const INTERVIEW_TYPES = new Set([
   "interview-prep", "interview-prep-replay", "interview-prep-library", "transcript", "transcript-study", "study-annotation",
-  "review", "interview-answer-review", "interview-answer-practice", "interview-answer-feedback",
+  "review", "interview-answer-review", "interview-answer-practice", "interview-answer-feedback", "selection-notice",
   "interview-insights", "interview-insights-feedback", "interview-advisory-state",
   // material＝自己紹介台本・転職理由台本・当日フレーズ集・単語文法帳・NG集・横断傾向。
   // 準備稿の ![[…]] の展開先であり、全局共用資産の入口が開く実体でもある。
@@ -48,7 +48,7 @@ export function noteInVaultScope(note: Note, scope: VaultScope) {
   if (scope === "actions") return COMMITMENT_TYPES.has(type) || type === "outbound-draft" || type === "company" || type === "interview-answer-review"
     || (type === "ai-report" && note.frontmatter.report_kind === "interview-reassessment" && note.frontmatter.report_role === "session");
   if (scope === "jobs") {
-    return type === "job-case" || Boolean(note.frontmatter.case_id) || ["ledger", "job-queue", "job-audit", "job_platform_sync", "ai-report"].includes(type);
+    return type === "job-case" || type === "selection-notice" || Boolean(note.frontmatter.case_id) || ["ledger", "job-queue", "job-audit", "job_platform_sync", "ai-report"].includes(type);
   }
   if (scope === "interview") return INTERVIEW_TYPES.has(type) || COMMITMENT_TYPES.has(type) || type === "company" || type === "self"
     || (type === "ai-report" && ["company-fit", "company-summary", "interview-reassessment"].includes(String(note.frontmatter.report_kind)));
