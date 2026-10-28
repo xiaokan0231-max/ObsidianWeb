@@ -6,15 +6,28 @@ const tour = await loadAppModule("app/feedback-tour.tsx");
 
 test("分步引导使用实际页面目标，原文点评先介绍可见按钮，再介绍选句", () => {
   const { TEACHER_TOUR_STEPS: steps, TEACHER_TOUR_STORAGE_KEY: key } = tour;
-  assert.equal(key, "teacher-tour:seen:v1");
+  assert.equal(key, "teacher-tour:seen:v2");
   assert.equal(steps.reader[0].target, '[data-tour="paragraph-comment"]');
   assert.equal(steps.reader[1].target, '[data-feedback-text]');
-  assert.ok(steps.library.some(step => step.target === '[data-tour="open-transcript"]'));
+  assert.deepEqual(steps.library.map(step => step.target), ['[data-tour="reading-start"]', '[data-tour="reading-preview"]', '[data-tour="all-materials"]', '[data-tour="feedback-entry"]']);
   assert.ok(steps.feedback.some(step => step.target.includes("feedback-login")));
-  for (const mode of Object.values(steps)) for (const step of mode) {
+  for (const mode of Object.values(steps)) for (const step of mode.flatMap(step => step.fallback ? [step, step.fallback] : [step])) {
     assert.ok(step.title[0] && step.title[1] && step.text[0] && step.text[1]);
     assert.doesNotMatch(step.text[0], /スレッド|コンテキスト|アンカー/);
   }
+});
+
+test("有真实摘录时引导直接定位原问句，没有摘录时只介绍实际阅读按钮", () => {
+  const step = tour.TEACHER_TOUR_STEPS.library[1];
+  const preview = tour.teacherTourStepVariant(step, selector => selector === '[data-tour="reading-preview"]' || selector === '[data-tour="start-reading"]');
+  assert.equal(preview.target, '[data-tour="reading-preview"]');
+  assert.match(preview.text[0], /その部分へ移動/);
+
+  const fallback = tour.teacherTourStepVariant(step, selector => selector === '[data-tour="start-reading"]');
+  assert.equal(fallback.target, '[data-tour="start-reading"]');
+  assert.match(fallback.text[0], /このボタンから原稿を開けます/);
+  assert.doesNotMatch(fallback.text[0], /質問を一部表示|その部分へ移動/);
+  assert.equal(tour.teacherTourStepVariant(step, () => false), null);
 });
 
 test("大型资料区域的聚焦框受可见范围限制，不把超长列表全部照亮", () => {

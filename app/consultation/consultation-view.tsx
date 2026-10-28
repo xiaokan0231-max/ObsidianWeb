@@ -3,17 +3,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { ConsultationCatalog, ConsultationCompany, ConsultationInterview, ConsultationSessionSummary, ConsultationTranscript } from "@/lib/consultation-library";
+import { selectConsultationReadingStarts } from "@/lib/consultation-reading-start";
 import type { FeedbackContext, FeedbackThread } from "@/lib/feedback";
 import { consultationBlockText, consultationContextIsCurrent, consultationFeedbackContext, feedbackQuoteRange } from "@/lib/feedback-annotations";
 import { FeedbackEntry, FeedbackHelp, FeedbackPanel, useFeedback } from "../feedback-ui";
+import { TEACHER_TOUR_STORAGE_KEY } from "../feedback-tour";
 import { UiLocaleProvider } from "../ui-locale";
 import "./consultation.css";
 
 type OutcomeFilter = "all" | "rejected" | "waiting" | "positive" | "unknown" | "not-applicable";
 type TranscriptView = "readable" | "raw";
 type ProgressFilter = "all" | "final" | "passed";
-type LibraryRoute = { tab: "companies" | "sessions"; query: string; outcome: OutcomeFilter; progress: ProgressFilter; companyId: string; sessionId: string; view: TranscriptView; feedbackThread: string };
-const DEFAULT_ROUTE: LibraryRoute = { tab: "companies", query: "", outcome: "all", progress: "all", companyId: "", sessionId: "", view: "readable", feedbackThread: "" };
+type LibraryRoute = { tab: "companies" | "sessions"; query: string; outcome: OutcomeFilter; progress: ProgressFilter; companyId: string; sessionId: string; view: TranscriptView; feedbackThread: string; blockId: string };
+const DEFAULT_ROUTE: LibraryRoute = { tab: "companies", query: "", outcome: "all", progress: "all", companyId: "", sessionId: "", view: "readable", feedbackThread: "", blockId: "" };
 const FILTERS: { value: OutcomeFilter; label: string }[] = [
   { value: "all", label: "すべての結果" }, { value: "rejected", label: "不採用" }, { value: "waiting", label: "進行中" },
   { value: "positive", label: "内定・通過" }, { value: "unknown", label: "未確認" },
@@ -42,6 +44,7 @@ export function parseConsultationLibraryRoute(search: string): LibraryRoute {
     progress: PROGRESS_FILTERS.some(filter => filter.value === params.get("progress")) ? params.get("progress") as ProgressFilter : "all",
     companyId: params.get("company") || "", sessionId: params.get("session") || "", view: params.get("view") === "raw" ? "raw" : "readable",
     feedbackThread: params.get("feedbackThread") || params.get("feedback") || "",
+    blockId: params.get("block") || "",
   };
 }
 export function consultationLibraryHref(route: LibraryRoute) {
@@ -54,6 +57,7 @@ export function consultationLibraryHref(route: LibraryRoute) {
   if (route.sessionId) params.set("session", route.sessionId);
   if (route.view === "raw") params.set("view", route.view);
   if (route.feedbackThread) params.set("feedbackThread", route.feedbackThread);
+  if (route.blockId) params.set("block", route.blockId);
   return `/consultation${params.size ? `?${params}` : ""}`;
 }
 function exportHref(sessionId: string, view: TranscriptView) {
@@ -158,7 +162,7 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
     let frame = 0;
     const params = new URLSearchParams(window.location.search);
     let firstVisit = true;
-    try { firstVisit = localStorage.getItem("teacher-tour:seen:v1") !== "1"; } catch { /* 无法保存偏好时仍允许手动关闭。 */ }
+    try { firstVisit = localStorage.getItem(TEACHER_TOUR_STORAGE_KEY) !== "1"; } catch { /* 无法保存偏好时仍允许手动关闭。 */ }
     if (params.get("help") === "1" || (firstVisit && !params.has("session"))) {
       frame = window.requestAnimationFrame(() => setHelpOpen(true));
     }
@@ -166,7 +170,7 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
   }, []);
   function closeHelp() {
     setHelpOpen(false);
-    try { localStorage.setItem("teacher-tour:seen:v1", "1"); } catch { /* 不阻止继续阅读。 */ }
+    try { localStorage.setItem(TEACHER_TOUR_STORAGE_KEY, "1"); } catch { /* 不阻止继续阅读。 */ }
   }
   const [route, setRoute] = useState<LibraryRoute>(DEFAULT_ROUTE);
   const [detail, setDetail] = useState<{ id: string; data?: ConsultationTranscript; error?: string }>({ id: "" });
@@ -212,15 +216,24 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
   }
   function closeReader() {
     if (window.history.state?.consultationFromLibrary) window.history.back();
-    else navigate({ sessionId: "" }, true);
+    else navigate({ sessionId: "", blockId: "", feedbackThread: "" }, true);
   }
   function openSession(session: ConsultationSessionSummary) {
     lastSession.current = session.id;
-    navigate({ sessionId: session.id, view: session.hasReadable ? "readable" : "raw", feedbackThread: "" });
+    navigate({ sessionId: session.id, view: session.hasReadable ? "readable" : "raw", feedbackThread: "", blockId: "" });
+  }
+  function openExcerpt(session: ConsultationSessionSummary, blockId: string) {
+    lastSession.current = session.id;
+    navigate({ sessionId: session.id, view: "readable", blockId, feedbackThread: "" });
+  }
+  function showAllMaterials() {
+    navigate({ tab: "sessions", query: "", outcome: "all", progress: "all", companyId: "", sessionId: "", blockId: "", feedbackThread: "" });
+    window.requestAnimationFrame(() => document.getElementById("consultation-materials")?.scrollIntoView({ block: "start", behavior: "instant" }));
   }
   const query = route.query.trim().toLocaleLowerCase();
   const companies = useMemo(() => [...initial.companies].sort((a, b) => b.latestDate.localeCompare(a.latestDate) || a.company.localeCompare(b.company, "ja")), [initial.companies]);
   const sessions = useMemo(() => initial.sessions.filter(hasRecord).sort((a, b) => b.date.localeCompare(a.date) || a.company.localeCompare(b.company, "ja")), [initial.sessions]);
+  const readingStarts = useMemo(() => selectConsultationReadingStarts(initial.sessions), [initial.sessions]);
   const manuscriptCompanyCount = new Set(sessions.map(session => session.companyId)).size;
   const selectedCompany = initial.companies.find(company => company.id === route.companyId);
   const visibleCompanies = filterConsultationCompanies(companies, sessions, query, route.outcome, route.progress);
@@ -233,8 +246,14 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
     <div className="consultation-library-scroll" ref={listScroll} hidden={readerOpen}>
       <main className="consultation-library">
         <section className="consultation-intro">
-          <div className="consultation-intro-copy"><p className="consultation-eyebrow"><span />先生との相談スペース</p><h1>面接の記録から、<span>次の一歩へ。</span></h1><p className="consultation-lead">原稿を読みながら、気になる部分にコメントできます。</p></div>
-          <div className="consultation-intro-actions">{sessions[0] && <button data-tour="open-transcript" className="consultation-start-reading" onClick={() => openSession(sessions[0])}><BookIcon small />最新の原稿を読む<span aria-hidden="true">→</span></button>}<p>短いコメントも、ご質問も歓迎です。</p></div>
+          <div className="consultation-intro-copy"><p className="consultation-eyebrow"><span />先生との相談スペース</p><h1>面接の記録から、<span>次の一歩へ。</span></h1><p className="consultation-lead">まずは一つの原稿から。気になる表現にコメントできます。</p></div>
+        </section>
+        <section className="consultation-reading-start" data-tour="reading-start" aria-labelledby="reading-start-title">
+          <header className="consultation-reading-start-heading"><div><p className="consultation-eyebrow">READING START</p><h2 id="reading-start-title">まずは、ここから</h2><p>{readingStarts.some(session => session.readingGuide?.featured) ? "最近の原稿と、本人から相談したい原稿をまとめています。" : "最近の原稿を一つ、読み始められます。"}</p></div><button data-tour="all-materials" className="consultation-all-materials" onClick={showAllMaterials}>すべての資料を見る<span aria-hidden="true">→</span></button></header>
+          <div className={`consultation-reading-start-grid${readingStarts.length === 1 ? " is-single" : ""}`}>
+            {readingStarts.map((session, index) => <ReadingStartCard key={session.id} session={session} recent={index === 0 && Boolean(session.date)} onOpen={() => openSession(session)} onExcerpt={blockId => openExcerpt(session, blockId)} />)}
+          </div>
+          {readingStarts.length === 0 && <p className="consultation-reading-start-empty">原稿が登録されると、ここから読み始められます。企業一覧から、確認できている面接の履歴をご覧いただけます。</p>}
         </section>
         <section className="consultation-coverage" aria-label="資料の収録範囲">
           <div><span className="consultation-stat-icon" aria-hidden="true"><CompanyIcon /></span><div><span>面接・面談した企業</span><strong>{companies.length}<small>社</small></strong></div></div>
@@ -242,7 +261,7 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
           <div><span className="consultation-stat-icon" aria-hidden="true"><DocumentIcon /></span><div><span>読める原稿</span><strong>{sessions.length}<small>件</small></strong></div></div>
           <p>記録で確認できる範囲です。すべての面接履歴を網羅した件数ではありません。</p>
         </section>
-        <section className="consultation-materials" aria-label="相談資料">
+        <section className="consultation-materials" id="consultation-materials" aria-label="相談資料">
           <div data-tour="materials" className="consultation-materials-top"><div className="consultation-tabs" role="tablist" aria-label="資料の種類"><button role="tab" id="companies-tab" aria-selected={route.tab === "companies"} aria-controls="companies-panel" onClick={() => navigate({ tab: "companies", companyId: "" })}>面接・面談した企業<span>{companies.length}</span></button><button role="tab" id="sessions-tab" aria-selected={route.tab === "sessions"} aria-controls="sessions-panel" onClick={() => navigate({ tab: "sessions" })}>読める原稿<span>{sessions.length}</span></button></div><a className="consultation-download-link" href="/api/consultation/export?format=companies" download><DownloadIcon />企業一覧を Word で保存</a></div>
           <div className="consultation-filters"><label className="consultation-search"><SearchIcon /><span className="consultation-sr-only">企業名・職種で検索</span><input type="search" placeholder="企業名・職種で検索" value={route.query} onChange={event => navigate({ query: event.target.value }, true)} /></label><label className="consultation-result-filter"><span>選考の進み方</span><select value={route.progress} onChange={event => navigate({ progress: event.target.value as ProgressFilter }, true)}>{PROGRESS_FILTERS.map(filter => <option key={filter.value} value={filter.value}>{filter.label}</option>)}</select></label><label className="consultation-result-filter"><span>{route.tab === "companies" ? "現在の選考状況" : "この回の結果"}</span><select value={route.outcome} onChange={event => navigate({ outcome: event.target.value as OutcomeFilter }, true)}>{FILTERS.map(filter => <option key={filter.value} value={filter.value}>{filter.value === "all" && route.tab === "companies" ? "すべての状況" : filter.value === "positive" && route.tab === "companies" ? "内定・書類通過" : filter.value === "unknown" && route.tab === "companies" ? "保留・未確認" : filter.label}</option>)}</select></label><span className="consultation-sort-label">面接・面談日の新しい順 ↓</span></div>
           {selectedCompany && route.tab === "sessions" && <div className="consultation-company-filter"><span>{selectedCompany.company} の読める原稿</span><button onClick={() => navigate({ companyId: "" }, true)} aria-label="企業の絞り込みを解除">絞り込みを解除 ×</button></div>}
@@ -253,8 +272,28 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
         <footer className="consultation-library-footer"><span><BookIcon small />面接相談の資料 · コメントできます</span><span>資料更新：{dateLabel(initial.updatedAt)}<span className="consultation-footer-separator">／</span>時刻のある日程は日本時間（JST）</span></footer>
       </main>
     </div>
-    {readerOpen && (selectedDetail?.data ? <ConsultationTranscriptReader key={selectedDetail.data.id} initial={selectedDetail.data} requestedThreadId={route.feedbackThread} view={route.view} onView={view => navigate({ view }, true)} onClose={closeReader} /> : <main className="consultation-reader-loading"><button className="consultation-back" onClick={closeReader}>← 一覧に戻る</button><div><BookIcon /><h1>面接記録</h1><p role={selectedDetail?.error ? "alert" : "status"}>{selectedDetail?.error || "面接の原稿を読み込んでいます…"}</p>{selectedDetail?.error && <button className="consultation-primary" onClick={() => setDetailRetry(value => value + 1)}>もう一度読み込む</button>}</div></main>)}
+    {readerOpen && (selectedDetail?.data ? <ConsultationTranscriptReader key={selectedDetail.data.id} initial={selectedDetail.data} requestedThreadId={route.feedbackThread} requestedBlockId={route.blockId} view={route.view} onView={view => navigate({ view }, true)} onClose={closeReader} /> : <main className="consultation-reader-loading"><button className="consultation-back" onClick={closeReader}>← 一覧に戻る</button><div><BookIcon /><h1>面接記録</h1><p role={selectedDetail?.error ? "alert" : "status"}>{selectedDetail?.error || "面接の原稿を読み込んでいます…"}</p>{selectedDetail?.error && <button className="consultation-primary" onClick={() => setDetailRetry(value => value + 1)}>もう一度読み込む</button>}</div></main>)}
   </div>;
+}
+
+export function ReadingStartCard({ session, recent, onOpen, onExcerpt }: { session: ConsultationSessionSummary; recent: boolean; onOpen: () => void; onExcerpt: (blockId: string) => void }) {
+  const guide = session.readingGuide;
+  const excerpts = session.hasReadable && session.recordKind !== "memory" ? (guide?.excerpts ?? []).slice(0, 2) : [];
+  const introduction = guide?.introduction || (session.recordKind === "memory" ? "当日の記憶から再構成した記録です。会話の内容を中心にご覧いただけます。" : session.date ? `${dateLabel(session.date)}の${stageLabel(session)}です。気になるやり取りからコメントできます。` : "日付未確認の面接記録です。原稿から、確認できるやり取りをご覧いただけます。");
+  return <article className={`consultation-reading-start-card${guide?.featured ? " is-featured" : ""}${excerpts.length ? " has-preview" : ""}`}>
+    <div className="consultation-reading-start-main">
+      <div className="consultation-reading-start-badges">{recent && <span className="reading-start-recent">最近の面接</span>}{guide?.featured && <span className="reading-start-featured">本人からの相談</span>}{!recent && !guide?.featured && <span>読み始める原稿</span>}</div>
+      <h3>{session.company}</h3>
+      <div className="consultation-reading-start-meta"><time dateTime={session.date || undefined}>{dateLabel(session.date)}</time><span>{stageLabel(session)}</span>{session.recordKind === "memory" ? <span className="reading-start-memory">記憶から再構成</span> : <span>{session.hasReadable ? "可読整理稿" : "原始転写"}</span>}</div>
+      {session.position && <p className="consultation-reading-start-position">{session.position}</p>}
+      <p className="consultation-reading-start-introduction">{introduction}</p>
+      {guide?.request && <div className="consultation-reading-start-request"><strong>相談したいこと</strong><p>{guide.request}</p></div>}
+    </div>
+    <div className="consultation-reading-start-side">
+      {excerpts.length > 0 && <div className="consultation-reading-preview" data-tour="reading-preview"><h4>原稿にある質問</h4>{excerpts.map(excerpt => <button key={`${excerpt.blockId}:${excerpt.text}`} title={excerpt.text} onClick={() => onExcerpt(excerpt.blockId)}><span>「{excerpt.text}」</span><small>このやり取りを見る<span aria-hidden="true">↗</span></small></button>)}</div>}
+      <div className="consultation-reading-start-footer"><span><BookIcon small />{session.hasReadable && (guide?.blockCount ?? 0) > 0 ? `${guide!.blockCount}の会話区分` : session.recordKind === "memory" ? "内容の確認・ご相談に" : "原文を確認できます"}</span><button data-tour="start-reading" className="consultation-reading-start-open" onClick={onOpen}>この原稿を読む<span aria-hidden="true">→</span></button></div>
+    </div>
+  </article>;
 }
 
 function CompanyRow({ company, sessions, onOpen, onBrowse }: { company: ConsultationCompany; sessions: ConsultationSessionSummary[]; onOpen: (session: ConsultationSessionSummary) => void; onBrowse: () => void }) {
@@ -285,7 +324,12 @@ function AnnotatedText({ text, ranges, onOpen }: { text: string; ranges: Annotat
   })}</>;
 }
 
-export function ConsultationTranscriptReader({ initial, view = "readable", requestedThreadId = "", onView = () => {}, onClose = () => {} }: { initial: ConsultationTranscript; view?: TranscriptView; requestedThreadId?: string; onView?: (view: TranscriptView) => void; onClose?: () => void }) {
+export function consultationReadingBlockTarget(transcript: ConsultationTranscript, blockId: string, view: TranscriptView, feedbackThread = ""): string | null {
+  if (feedbackThread || view !== "readable" || !blockId || !transcript.blocks.some(block => block.id === blockId)) return null;
+  return `transcript-block-${blockId}`;
+}
+
+export function ConsultationTranscriptReader({ initial, view = "readable", requestedThreadId = "", requestedBlockId = "", onView = () => {}, onClose = () => {} }: { initial: ConsultationTranscript; view?: TranscriptView; requestedThreadId?: string; requestedBlockId?: string; onView?: (view: TranscriptView) => void; onClose?: () => void }) {
   const [fontSize, setFontSize] = useState(18);
   const [panel, setPanel] = useState<{ context: FeedbackContext; threadId?: string } | null>(null);
   const [selection, setSelection] = useState<{ context: FeedbackContext; left: number; top: number } | null>(null);
@@ -296,6 +340,7 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
   const currentView = useRef(view);
   const openedRequest = useRef("");
   const positionedThread = useRef("");
+  const positionedBlock = useRef("");
   const readable = view === "readable";
   const available = readable ? initial.hasReadable && initial.blocks.some(block => block.turns.length > 0) : initial.hasRaw && Boolean(initial.raw.trim());
   const related = threads.filter(thread => thread.context.sessionId === initial.id && !thread.hidden);
@@ -305,6 +350,19 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
   const stale = Boolean(sourceContext?.blockId && !consultationContextIsCurrent(initial, sourceContext));
 
   useEffect(() => { title.current?.focus({ preventScroll: true }); }, [initial.id]);
+  useEffect(() => {
+    const targetId = consultationReadingBlockTarget(initial, requestedBlockId, view, requestedThreadId || panel?.threadId);
+    const key = `${initial.id}:${targetId}`;
+    if (!targetId || positionedBlock.current === key) return;
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    const frame = window.requestAnimationFrame(() => {
+      positionedBlock.current = key;
+      target.scrollIntoView({ block: "start", behavior: "instant" });
+      target.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [initial, requestedBlockId, requestedThreadId, view, panel?.threadId]);
   useEffect(() => {
     if (currentView.current === view) return;
     positions.current[currentView.current] = scroll.current?.scrollTop || 0;
@@ -437,7 +495,7 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
       {available ? readable ? <div className="consultation-conversation">{initial.blocks.map((block, index) => {
         const blockThreads = related.filter(thread => thread.context.blockId === block.id);
         const context = consultationFeedbackContext(initial, view, { blockId: block.id, text: consultationBlockText(block) });
-        return <section className="consultation-conversation-block" key={block.id} id={`transcript-block-${block.id}`} data-feedback-block={block.id}><div className="consultation-block-heading"><h2><span>{String(index + 1).padStart(2, "0")}</span>{block.title || `会話 ${index + 1}`}</h2><button data-tour="paragraph-comment" className="consultation-comment-button" onClick={() => openPanel(context)}>この部分にコメント</button>{blockThreads.length > 0 && <button className="consultation-comment-count" onClick={() => openPanel(context)}>コメント {blockThreads.length}件</button>}</div>{block.turns.map(turn => <div className={`consultation-turn consultation-turn-${turn.speaker}`} key={turn.id}><div className="consultation-speaker"><span>{turn.speaker === "self" ? "私" : turn.speaker === "interviewer" ? "面接官" : "話者未確認"}</span></div><div><p data-feedback-text="true" data-feedback-turn={turn.id}><AnnotatedText text={turn.text} ranges={turnRanges(block, turn)} onOpen={openThread} /></p>{turn.uncertain && <small className="consultation-uncertain">話者・転写に未確認の箇所があります</small>}</div></div>)}</section>;
+        return <section className="consultation-conversation-block" key={block.id} id={`transcript-block-${block.id}`} tabIndex={-1} data-feedback-block={block.id}><div className="consultation-block-heading"><h2><span>{String(index + 1).padStart(2, "0")}</span>{block.title || `会話 ${index + 1}`}</h2><button data-tour="paragraph-comment" className="consultation-comment-button" onClick={() => openPanel(context)}>この部分にコメント</button>{blockThreads.length > 0 && <button className="consultation-comment-count" onClick={() => openPanel(context)}>コメント {blockThreads.length}件</button>}</div>{block.turns.map(turn => <div className={`consultation-turn consultation-turn-${turn.speaker}`} key={turn.id}><div className="consultation-speaker"><span>{turn.speaker === "self" ? "私" : turn.speaker === "interviewer" ? "面接官" : "話者未確認"}</span></div><div><p data-feedback-text="true" data-feedback-turn={turn.id}><AnnotatedText text={turn.text} ranges={turnRanges(block, turn)} onOpen={openThread} /></p>{turn.uncertain && <small className="consultation-uncertain">話者・転写に未確認の箇所があります</small>}</div></div>)}</section>;
       })}</div> : <div className="consultation-raw-transcript" id="transcript-block-raw" data-feedback-block="raw">{initial.raw.split("\n").map((line, index) => <div className="consultation-raw-line" key={index} id={`transcript-block-raw-line-${index}`}><p><span aria-hidden="true">{index + 1}</span><span data-feedback-text="true" data-feedback-line={index}><AnnotatedText text={line || " "} ranges={rawRanges(line, index)} onOpen={openThread} /></span></p>{line.trim() && <button data-tour="paragraph-comment" className="consultation-comment-button" onClick={() => openPanel(consultationFeedbackContext(initial, view, { blockId: `raw-line-${index}`, text: line }))}>この部分にコメント</button>}</div>)}</div> : <div className="consultation-empty"><BookIcon /><h2>{readable ? "可読整理稿はまだありません" : "原始転写はまだありません"}</h2><p>{readable && initial.hasRaw ? "原始転写で、元の文字起こしをお読みいただけます。" : !readable && initial.hasReadable ? "可読整理稿で、当日の会話をお読みいただけます。" : "この面接の原稿は登録されていません。"}</p>{readable && initial.hasRaw ? <button onClick={() => onView("raw")}>原始転写を読む →</button> : !readable && initial.hasReadable ? <button onClick={() => onView("readable")}>可読整理稿を読む →</button> : null}</div>}
       {available && <footer className="consultation-transcript-end"><BookIcon small /><span>{initial.recordKind === "memory" ? "記録は以上です" : "原稿は以上です"}</span><button onClick={onClose}>一覧に戻る →</button></footer>}
     </main>{panel ? <aside className="consultation-feedback-aside" aria-label="この原稿へのコメント">{stale && <p className="consultation-source-updated" role="status">元の資料が更新されています。送信時の原文はコメント内に残っています。</p>}<FeedbackPanel key={`${panel.threadId ?? "new"}:${panel.context.blockId ?? "session"}:${panel.context.turnId ?? ""}:${panel.context.quoteStart ?? ""}`} locale="ja" inline context={panel.context} threadId={panel.threadId} onClose={closePanel} /></aside> : <aside className="consultation-reader-aside"><p className="consultation-eyebrow">この原稿について</p><dl><div><dt>面接日</dt><dd>{dateLabel(initial.date)}</dd></div><div><dt>形式・ラウンド</dt><dd>{stageLabel(initial)}</dd></div><div><dt>この回の結果</dt><dd><Badge kind={initial.outcomeKind} /></dd></div></dl>{readable && initial.blocks.length > 0 && <nav aria-label="原稿の目次"><h2>会話の目次</h2>{initial.blocks.map((block, index) => <button key={block.id} onClick={() => document.getElementById(`transcript-block-${block.id}`)?.scrollIntoView({ block: "start", behavior: "instant" })}><span>{String(index + 1).padStart(2, "0")}</span>{block.title || `会話 ${index + 1}`}</button>)}</nav>}<p className="consultation-aside-help">気になる会話の「この部分にコメント」から、ご意見やご質問をその場で送れます。</p></aside>}</div></div>

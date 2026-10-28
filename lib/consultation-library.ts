@@ -9,12 +9,21 @@ import { joinReviewNotes, type JoinedReviewNotes } from "./review-join.ts";
 import { plainSei } from "./review.ts";
 import { includeRuntimeNote } from "./vault-boundary.mjs";
 
+export { selectConsultationReadingStarts } from "./consultation-reading-start.ts";
+
+export type ConsultationReadingGuide = {
+  featured: boolean; introduction?: string; request?: string;
+  excerpts: { blockId: string; text: string }[]; blockCount: number;
+};
+
 export type ConsultationSessionSummary = {
   id: string; companyId: string; company: string; date: string; round: string;
   outcome: string; outcomeKind: "offer" | "passed" | "rejected" | "waiting" | "unknown" | "not-applicable";
   hasRaw: boolean; hasReadable: boolean;
   recordKind?: "transcript" | "memory";
   stage?: string;
+  position?: string;
+  readingGuide?: ConsultationReadingGuide;
 };
 export type ConsultationCompany = {
   id: string; company: string;
@@ -132,6 +141,54 @@ function sessionId(source: SourceSession) { return stableId("session", source.ra
 function isMemory(source: SourceSession) {
   return [source.note, source.raw].some(note => note && (note.frontmatter.verbatim === false ||
     getString(note.frontmatter.reconstruction) === "memory" || getString(note.frontmatter.assessment_scope) === "memory"));
+}
+
+function projectBlocks(source: SourceSession): ConsultationTranscript["blocks"] {
+  const speakerDecisions = new Map<string, string | undefined>();
+  for (const task of source.readable?.decisionTasks ?? []) {
+    if (task.target === "speaker" && !speakerDecisions.has(task.sentenceId)) speakerDecisions.set(task.sentenceId, task.resolution);
+  }
+  return source.readable?.parsed.blocks.map((block, index) => ({
+    id: block.id, title: `やり取り ${index + 1}`,
+    turns: block.sentences.map(sentence => {
+      const decision = speakerDecisions.get(sentence.id);
+      const speaker = decision === "speaker-interviewer" ? "interviewer" : decision === "speaker-self" ? "self"
+        : sentence.uncertainSpeaker ? "unknown" : sentence.speaker === "面" ? "interviewer" : "self";
+      return { id: sentence.id, speaker: speaker as "interviewer" | "self" | "unknown", text: safeText(plainSei(sentence)), uncertain: speaker === "unknown" };
+    }),
+  })) ?? [];
+}
+
+function teacherField(source: SourceSession, key: string): unknown {
+  return Object.hasOwn(source.note.frontmatter, key) ? source.note.frontmatter[key] : source.raw?.frontmatter[key];
+}
+
+function teacherText(source: SourceSession, key: string, maximum: number): string {
+  const value = teacherField(source, key);
+  if (typeof value !== "string") return "";
+  return [...safeText(value).replace(/[A-Za-z]:[\\/][^\s<>「」]*/g, "［内部資料非表示］")].slice(0, maximum).join("");
+}
+
+function readingGuide(source: SourceSession, blocks: ConsultationTranscript["blocks"]): ConsultationReadingGuide {
+  const introduction = teacherText(source, "teacher_intro_ja", 300);
+  const request = teacherText(source, "teacher_request_ja", 500);
+  const excerpts: ConsultationReadingGuide["excerpts"] = [];
+  if (!isMemory(source)) {
+    for (const block of blocks) {
+      for (const turn of block.turns) {
+        // 介绍只摘录能核对的面试官问题，不把开场确认、未知话者或内部摘要当成内容提要。
+        if (turn.speaker !== "interviewer" || turn.uncertain || turn.text.length < 10 ||
+          /録音|録画|文字起こし|ネットワーク|接続|画面|音声|聞こえ|お間違い|お名前|よろしく|よろしいでしょうか/.test(turn.text) ||
+          !/[?？]|か[。！？?]?$|教えて|お聞かせ|お伺い|伺って|ご紹介.*(?:ください|お願い)|自己紹介.*(?:ください|お願い)/.test(turn.text)) continue;
+        if (!excerpts.some(excerpt => excerpt.text === turn.text)) excerpts.push({ blockId: block.id, text: turn.text });
+        if (excerpts.length === 2) break;
+      }
+      if (excerpts.length === 2) break;
+    }
+  }
+  return { featured: teacherField(source, "teacher_featured") === true,
+    ...(introduction ? { introduction } : {}), ...(request ? { request } : {}), excerpts,
+    blockCount: blocks.filter(block => block.turns.some(turn => turn.text.trim())).length };
 }
 
 function rawText(source: SourceSession) {
@@ -257,6 +314,7 @@ function model(notes: Note[]) {
     return note;
   }), ...structuredInvitations(available), ...evidence.filter(entry => entry.date).map(entry => entry.note)];
   const outcomes = resolveInterviewOutcomes(outcomeNotes);
+  const blocksBySession = new Map(sources.map(source => [sessionId(source), projectBlocks(source)]));
   const sessions = sources.map(source => {
     const owner = interviewSessionOwner(source.note, outcomeNotes);
     // 品牌与法人名称可以不同，只有明确案件归属才允许沿用案件公司的分组与显示名。
@@ -267,6 +325,8 @@ function model(notes: Note[]) {
       ...resultFor(source, outcomes.get(source.note.path), outcomeNotes), hasRaw: hasRawContent(source),
       hasReadable: hasReadableContent(source), stage: interviewRound(getString(source.note.frontmatter.round)),
       recordKind: isMemory(source) ? "memory" as const : "transcript" as const,
+      ...(owner && getType(owner) === JOB_CASE_TYPE && safeText(jobPosition(owner)) ? { position: safeText(jobPosition(owner)) } : {}),
+      readingGuide: readingGuide(source, blocksBySession.get(sessionId(source))!),
     };
   }).sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
   for (const entry of evidence.filter(item => item.kind === "review")) {
@@ -286,7 +346,7 @@ function model(notes: Note[]) {
     // 同场明确复盘结果在共同模型里判定，目录、详情和导出必须读到同一个当轮结果。
     if (matches.length === 1 && !["offer", "passed"].includes(matches[0].outcomeKind)) Object.assign(matches[0], explicit);
   }
-  return { available, sources, sessions, evidence, outcomes, outcomeNotes };
+  return { available, sources, sessions, evidence, outcomes, outcomeNotes, blocksBySession };
 }
 
 export function buildConsultationCatalog(notes: Note[]): ConsultationCatalog {
@@ -391,17 +451,11 @@ export function buildConsultationCatalog(notes: Note[]): ConsultationCatalog {
 }
 
 export function findConsultationTranscript(notes: Note[], id: string): ConsultationTranscript | null {
-  const { sources, sessions } = model(notes);
+  const { sources, sessions, blocksBySession } = model(notes);
   const summary = sessions.find(session => session.id === id);
   const source = sources.find(candidate => sessionId(candidate) === id);
   if (!summary || !source) return null;
-  const tasks = source.readable?.decisionTasks ?? [];
-  const blocks = source.readable?.parsed.blocks.map((block, index) => ({ id: block.id, title: `やり取り ${index + 1}`, turns: block.sentences.map(sentence => {
-    const decision = tasks.find(task => task.sentenceId === sentence.id && task.target === "speaker");
-    const speaker = decision?.resolution === "speaker-interviewer" ? "interviewer" : decision?.resolution === "speaker-self" ? "self"
-      : sentence.uncertainSpeaker ? "unknown" : sentence.speaker === "面" ? "interviewer" : "self";
-    return { id: sentence.id, speaker: speaker as "interviewer" | "self" | "unknown", text: safeText(plainSei(sentence)), uncertain: speaker === "unknown" };
-  }) })) ?? [];
+  const blocks = blocksBySession.get(id) ?? [];
   const notice = isMemory(source) ? "本人の記憶から再構成した資料です。実際の逐語発言とは区別してください。"
     : summary.hasReadable ? "読みやすく整理した記録です。フィラー等が省略されている場合があります。原音は未確認です。"
     : "原始転写のみの記録です。話者の分離や聞き取りには未確認の箇所があります。原音は未確認です。";

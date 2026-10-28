@@ -6,18 +6,21 @@ import "./feedback-tour.css";
 
 export type TeacherTourMode = "library" | "reader" | "feedback";
 type TourLocale = "ja" | "zh-CN";
-type TourStep = { target: string; title: [string, string]; text: [string, string] };
+type TourStepCopy = { target: string; title: [string, string]; text: [string, string] };
+type TourStep = TourStepCopy & { fallback?: TourStepCopy };
 type TourRect = { left: number; top: number; width: number; height: number };
 type TourViewport = { width: number; height: number };
 type TourPlacement = { left: number; top: number; side: "top" | "bottom" | "left" | "right" | "center" };
 
-export const TEACHER_TOUR_STORAGE_KEY = "teacher-tour:seen:v1";
+export const TEACHER_TOUR_STORAGE_KEY = "teacher-tour:seen:v2";
 export const TEACHER_TOUR_STEPS: Record<TeacherTourMode, TourStep[]> = {
   library: [
-    { target: '[data-tour="materials"]', title: ["まず、読みたい資料を", "先选择想看的资料"], text: ["ここに企業と面接の記録が並びます。気になる原稿から、自由にお読みいただけます。", "这里列出公司与面试记录，可以选择感兴趣的原文阅读。"] },
-    { target: '[data-tour="open-transcript"]', title: ["このボタンで原稿へ", "从这里打开原文"], text: ["原稿を開くと、会話の横から直接コメントできます。資料をダウンロードする必要はありません。", "打开后就能在对话旁直接评论，无需先下载资料。"] },
-    { target: '[data-tour="feedback-entry"]', title: ["返事は、ここに届きます", "回复在这里查看"], text: ["先生方のコメントと本人からの返事を、ここから確認できます。新しい返事があると件数が表示されます。", "从这里查看老师的建议与本人回复，有新回复时会显示数量。"] },
-    { target: '[data-tour="help-entry"]', title: ["いつでも、もう一度", "随时重新查看引导"], text: ["操作に迷ったら、この「使い方」から案内を開けます。まずは原稿を一つ、読んでみてください。", "需要帮助时，随时从这里重新打开引导。接下来可以先读一份原文。"] },
+    { target: '[data-tour="reading-start"]', title: ["まずは、少ない入口から", "先从少量入口开始"], text: ["最近の原稿から、気になる面接を一つ選べます。本人からの相談が添えられた原稿では、見てほしい点も確認できます。", "先选一份最近的原文。若有本人指定的请教场次，卡片还会附上想请教的内容。"] },
+    { target: '[data-tour="reading-preview"]', title: ["このやりとりから読む", "从这段交流开始"], text: ["原文の質問を一部表示しています。気になる項目を押すと、原稿のその部分へ移動できます。", "这里展示原文中的问题摘录，点击即可进入对应的那一段。"], fallback: {
+      target: '[data-tour="start-reading"]', title: ["原稿を開いて、コメント", "打开原文并留言"], text: ["このボタンから原稿を開けます。会話の横にある「この部分にコメント」から、ご意見やご質問を送れます。", "从这个按钮打开原文，再点对话旁的“评论这段”即可留下建议或问题。"],
+    } },
+    { target: '[data-tour="all-materials"]', title: ["ほかの面接も、ここから", "从这里查看完整资料"], text: ["もっと見たいときは、一覧を開けます。企業や日付を見ながら、ご自身のペースで選べます。", "想看其他场次时，从这里打开完整列表，再根据公司、日期等选择。"] },
+    { target: '[data-tour="feedback-entry"]', title: ["コメントと返事を確認", "集中查看留言与回复"], text: ["送ったコメントや本人からの返事を、ここから確認できます。操作に迷ったら、隣の「使い方」でこの案内を開けます。", "从这里查看留言和回复。需要帮助时，点旁边的“使用方法”可重新打开引导。"] },
   ],
   reader: [
     { target: '[data-tour="paragraph-comment"]', title: ["気になる部分に、一言", "直接点评这一段"], text: ["このボタンを押すと、横にコメント欄が開きます。原文は自動で添えられるので、場所の説明は不要です。", "点击就会在旁边打开评论框，并自动附上原文，不用另行描述位置。"] },
@@ -63,6 +66,18 @@ function findTarget(selector: string): HTMLElement | null {
   }) ?? null;
 }
 
+// 没有原文摘录时改为介绍真实的阅读按钮，避免说明一个当前不存在的功能入口。
+export function teacherTourStepVariant(step: TourStep, hasTarget: (selector: string) => boolean): TourStepCopy | null {
+  if (hasTarget(step.target)) return step;
+  if (step.fallback && hasTarget(step.fallback.target)) return step.fallback;
+  return null;
+}
+
+function findStepTarget(step: TourStep) {
+  const copy = teacherTourStepVariant(step, selector => Boolean(findTarget(selector)));
+  return copy ? { copy, target: findTarget(copy.target)! } : null;
+}
+
 export function TeacherTour({ mode = "library", active = true, locale = "ja", onClose }: { mode?: TeacherTourMode; active?: boolean; locale?: TourLocale; onClose?: () => void }) {
   const steps = useMemo(() => TEACHER_TOUR_STEPS[mode], [mode]);
   const [mounted, setMounted] = useState(false);
@@ -85,7 +100,8 @@ export function TeacherTour({ mode = "library", active = true, locale = "ja", on
     try { localStorage.setItem(TEACHER_TOUR_STORAGE_KEY, "1"); } catch { /* 浏览器不允许存储时仍可结束引导。 */ }
     setDismissed(true); onCloseRef.current?.();
     if (useNow) requestAnimationFrame(() => {
-      const target = findTarget(mode === "reader" ? '[data-tour="paragraph-comment"]' : mode === "library" ? '[data-tour="open-transcript"]' : '[data-tour="new-question"], .feedback-login input');
+      const target = mode === "library" ? findTarget('[data-tour="start-reading"]') ?? findTarget('[data-tour="open-transcript"]')
+        : findTarget(mode === "reader" ? '[data-tour="paragraph-comment"]' : '[data-tour="new-question"], .feedback-login input');
       target?.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); target?.focus({ preventScroll: true });
     });
   }, [mode]);
@@ -120,14 +136,14 @@ export function TeacherTour({ mode = "library", active = true, locale = "ja", on
         const next = { width: window.innerWidth, height: window.innerHeight };
         setViewport(old => old.width === next.width && old.height === next.height ? old : next);
         if (stage >= 0 && stage < steps.length) {
-          const target = findTarget(steps[stage].target);
+          const target = findStepTarget(steps[stage])?.target;
           if (target) { const rect = teacherTourSpotlight(target.getBoundingClientRect(), next); setGeometry({ stage, rect }); }
         }
         const size = card.current?.getBoundingClientRect();
         if (size) setCardSize(old => old.width === size.width && old.height === size.height ? old : { width: size.width, height: size.height });
       });
     };
-    const target = stage >= 0 && stage < steps.length ? findTarget(steps[stage].target) : null;
+    const target = stage >= 0 && stage < steps.length ? findStepTarget(steps[stage])?.target : null;
     if (target) {
       const rect = target.getBoundingClientRect();
       if (rect.top < 100 || rect.bottom > window.innerHeight - 30 || rect.left < 12 || rect.right > window.innerWidth - 12) target.scrollIntoView({ block: rect.height > 244 ? "start" : "center", inline: "center", behavior: "instant" });
@@ -142,17 +158,18 @@ export function TeacherTour({ mode = "library", active = true, locale = "ja", on
   if (!visible) return null;
 
   const begin = () => {
-    const indices = steps.flatMap((step, index) => findTarget(step.target) ? [index] : []);
+    const indices = steps.flatMap((step, index) => findStepTarget(step) ? [index] : []);
     setAvailable(indices); setStage(indices[0] ?? steps.length);
   };
   const index = available.indexOf(stage);
   const welcome = stage < 0;
   const complete = stage >= steps.length;
-  const step = steps[stage];
-  const rect = !welcome && !complete && geometry?.stage === stage ? geometry.rect : null;
+  const activeStep = !welcome && !complete ? findStepTarget(steps[stage]) : null;
+  const step = activeStep?.copy ?? steps[stage];
+  const rect = activeStep && geometry?.stage === stage ? geometry.rect : null;
   const position = teacherTourPlacement(rect, viewport, cardSize);
   const next = () => {
-    const remaining = available.slice(index + 1).filter(candidate => findTarget(steps[candidate].target));
+    const remaining = available.slice(index + 1).filter(candidate => findStepTarget(steps[candidate]));
     if (!remaining.length) { try { localStorage.setItem(TEACHER_TOUR_STORAGE_KEY, "1"); } catch { /* 完成状态不依赖存储是否可用。 */ } }
     setStage(remaining[0] ?? steps.length);
   };
@@ -166,7 +183,7 @@ export function TeacherTour({ mode = "library", active = true, locale = "ja", on
       {(welcome || complete) && <div className={`teacher-tour-illustration${complete ? " is-complete" : ""}`} aria-hidden="true"><svg viewBox="0 0 72 72" fill="none"><rect x="12" y="15" width="39" height="29" rx="9" stroke="currentColor" strokeWidth="2.5" /><path d="m22 43-5 9 15-9M24 27h16M24 34h10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /><rect x="34" y="32" width="25" height="21" rx="7" fill="currentColor" opacity=".16" /><path d="m44 42 4 4 7-8" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg><i /><b /></div>}
       {!welcome && !complete && <div className="teacher-tour-progress" aria-label={`${index + 1} / ${available.length}`}><div>{available.map((item, number) => <span key={item} className={number <= index ? "is-active" : ""} />)}</div><span>{index + 1} / {available.length}</span></div>}
       <h2 id="teacher-tour-title">{welcome ? t("読む、その場で伝える。", "看到哪里，就聊到哪里。") : complete ? t("気軽に、一言から。", "从一句建议开始。") : t(...step.title)}</h2>
-      <p id="teacher-tour-description">{welcome ? t("資料の読み方とコメントの送り方を、画面を見ながらご案内します。", "跟随页面上的重点，了解怎样阅读资料、留下评论和查看回复。") : complete ? t("気になる部分からコメントすると、原文も一緒に届きます。ご質問も、短いご意見も歓迎です。", "从原文旁发起评论，就会自动附上那段内容。一句建议或一个问题都可以。") : t(...step.text)}</p>
+      <p id="teacher-tour-description">{welcome ? mode === "library" ? t("最初に読む原稿の選び方と、コメントの送り方を、画面に沿ってご案内します。", "跟随页面重点，了解怎样从少量入口选择原文、查看介绍并留下评论。") : t("資料の読み方とコメントの送り方を、画面を見ながらご案内します。", "跟随页面上的重点，了解怎样阅读资料、留下评论和查看回复。") : complete ? t("気になる部分からコメントすると、原文も一緒に届きます。ご質問も、短いご意見も歓迎です。", "从原文旁发起评论，就会自动附上那段内容。一句建议或一个问题都可以。") : t(...step.text)}</p>
       <footer className="teacher-tour-actions"><button type="button" className="teacher-tour-secondary" onClick={welcome || complete ? () => finish() : back}>{welcome ? t("あとで", "以后再看") : complete ? t("閉じる", "关闭") : t("戻る", "上一步")}</button><button type="button" className="teacher-tour-primary" onClick={welcome ? begin : complete ? () => finish(true) : next}>{welcome ? t("案内をはじめる", "开始引导") : complete ? t(mode === "library" ? "原稿を選ぶ" : mode === "reader" ? "コメントしてみる" : "相談をはじめる", "开始使用") : index === available.length - 1 ? t("終了", "完成") : t("次へ", "下一步")}<span aria-hidden="true">→</span></button></footer>
       {!welcome && !complete && <button type="button" className="teacher-tour-skip" onClick={() => finish()}>{t("案内をスキップ", "跳过引导")}</button>}
     </section>
