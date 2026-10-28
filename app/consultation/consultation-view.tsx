@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { ConsultationCatalog, ConsultationCompany, ConsultationInterview, ConsultationSessionSummary, ConsultationTranscript } from "@/lib/consultation-library";
 import { selectConsultationReadingGroups } from "@/lib/consultation-reading-start";
+import type { ConsultationReadingHistory } from "@/lib/consultation-reading-start";
+import { consultationPage, paginationPageNumbers } from "@/lib/consultation-pagination";
 import type { FeedbackContext, FeedbackThread } from "@/lib/feedback";
 import { consultationBlockText, consultationContextIsCurrent, consultationFeedbackContext, feedbackQuoteRange } from "@/lib/feedback-annotations";
 import { FeedbackEntry, FeedbackHelp, FeedbackPanel, useFeedback } from "../feedback-ui";
@@ -210,6 +212,7 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
   }, [route.sessionId, detailRetry]);
   function navigate(patch: Partial<LibraryRoute>, replace = false) {
     const next = { ...route, ...patch };
+    if (["tab", "query", "outcome", "progress", "companyId"].some(key => next[key as keyof LibraryRoute] !== route[key as keyof LibraryRoute])) setPageSelection({ scope: "", page: 1 });
     if (!route.sessionId && next.sessionId) listPosition.current = listScroll.current?.scrollTop || 0;
     const state = next.sessionId && !route.sessionId ? { consultationFromLibrary: true, consultationListScroll: listPosition.current } : window.history.state;
     window.history[replace ? "replaceState" : "pushState"](state, "", consultationLibraryHref(next));
@@ -228,13 +231,14 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
     navigate({ sessionId: session.id, view: "readable", blockId, feedbackThread: "" });
   }
   function showAllMaterials() {
+    setPageSelection({ scope: "", page: 1 });
     navigate({ tab: "sessions", query: "", outcome: "all", progress: "all", companyId: "", sessionId: "", blockId: "", feedbackThread: "" });
     window.requestAnimationFrame(() => document.getElementById("consultation-materials")?.scrollIntoView({ block: "start", behavior: "instant" }));
   }
   const query = route.query.trim().toLocaleLowerCase();
   const companies = useMemo(() => [...initial.companies].sort((a, b) => b.latestDate.localeCompare(a.latestDate) || a.company.localeCompare(b.company, "ja")), [initial.companies]);
   const sessions = useMemo(() => initial.sessions.filter(hasRecord).sort((a, b) => b.date.localeCompare(a.date) || a.company.localeCompare(b.company, "ja")), [initial.sessions]);
-  const readingGroups = useMemo(() => selectConsultationReadingGroups(initial.sessions), [initial.sessions]);
+  const readingGroups = useMemo(() => selectConsultationReadingGroups(initial.sessions, initial.companies), [initial.sessions, initial.companies]);
   const [readingGroupId, setReadingGroupId] = useState("recent");
   const readingGroup = readingGroups.find(group => group.id === readingGroupId) ?? readingGroups[0];
   const readingStarts = readingGroup?.sessions ?? [];
@@ -242,6 +246,20 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
   const selectedCompany = initial.companies.find(company => company.id === route.companyId);
   const visibleCompanies = filterConsultationCompanies(companies, sessions, query, route.outcome, route.progress);
   const visibleSessions = filterConsultationSessions(companies, sessions, query, route.outcome, route.progress, route.companyId);
+  const pageScope = JSON.stringify([route.tab, query, route.outcome, route.progress, route.companyId]);
+  const [pageSelection, setPageSelection] = useState({ scope: "", page: 1 });
+  const requestedPage = pageSelection.scope === pageScope ? pageSelection.page : 1;
+  const companyPage = consultationPage(visibleCompanies, requestedPage);
+  const sessionPage = consultationPage(visibleSessions, requestedPage);
+  const currentPage = route.tab === "companies" ? companyPage : sessionPage;
+  function changePage(page: number) {
+    setPageSelection({ scope: pageScope, page });
+    window.requestAnimationFrame(() => document.getElementById("consultation-materials")?.scrollIntoView({ block: "start", behavior: "instant" }));
+  }
+  function browseHistory(company: string) {
+    navigate({ tab: "companies", query: company, outcome: "all", progress: "all", companyId: "", sessionId: "", blockId: "", feedbackThread: "" });
+    window.requestAnimationFrame(() => document.getElementById("consultation-materials")?.scrollIntoView({ block: "start", behavior: "instant" }));
+  }
   const hasFilters = Boolean(route.query || route.outcome !== "all" || route.progress !== "all" || route.companyId);
   const selectedDetail = detail.id === route.sessionId ? detail : null;
   return <div className={`consultation-shell${readerOpen ? " consultation-reader-open" : ""}`} lang="ja">
@@ -249,19 +267,17 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
     {helpOpen && <FeedbackHelp locale="ja" mode={readerOpen ? "reader" : "library"} onClose={closeHelp} />}
     <div className="consultation-library-scroll" ref={listScroll} hidden={readerOpen}>
       <main className="consultation-library">
-        <section className="consultation-intro">
-          <div className="consultation-intro-copy"><p className="consultation-eyebrow"><span />先生との相談スペース</p><h1>面接の記録から、<span>次の一歩へ。</span></h1><p className="consultation-lead">まずは一つの原稿から。気になる表現にコメントできます。</p></div>
-        </section>
         <section className="consultation-reading-start" data-tour="reading-start" aria-labelledby="reading-start-title">
-          <header className="consultation-reading-start-heading"><div><p className="consultation-eyebrow">READING START</p><h2 id="reading-start-title">まずは、ここから</h2><p>気になる入口を選んで、一つの原稿からご覧ください。</p></div><button data-tour="all-materials" className="consultation-all-materials" onClick={showAllMaterials}>すべての資料を見る<span aria-hidden="true">→</span></button></header>
-          {readingGroups.length > 0 && <div className="consultation-reading-choices" data-tour="reading-choice" role="group" aria-label="読み始める面接の種類">{readingGroups.map(group => <button key={group.id} className={`consultation-reading-choice is-${group.id}`} aria-pressed={readingGroup?.id === group.id} aria-controls="consultation-reading-selection" onClick={() => setReadingGroupId(group.id)}><span className="consultation-reading-choice-icon" aria-hidden="true"><ReadingGroupIcon group={group.id} /></span><span><strong>{group.title}</strong><small>{group.id === "recent" ? "まずは直近のやり取りから" : group.id === "final" ? "選考の終盤で話したこと" : "違う話題や企業も見てみる"}</small></span><span className="consultation-reading-choice-count">{group.sessions.length}<small>件</small></span></button>)}</div>}
+          <header className="consultation-reading-start-heading"><div><h1 id="reading-start-title">面接相談の資料</h1><p>原稿を選び、気になる部分にコメントできます。</p></div><button data-tour="all-materials" className="consultation-all-materials" onClick={showAllMaterials}>すべての資料を見る<span aria-hidden="true">→</span></button></header>
+          {readingGroups.length > 0 && <div className="consultation-reading-choices" data-tour="reading-choice" role="group" aria-label="読み始める面接の種類">{readingGroups.map(group => <button key={group.id} className={`consultation-reading-choice is-${group.id}`} aria-pressed={readingGroup?.id === group.id} aria-controls="consultation-reading-selection" onClick={() => setReadingGroupId(group.id)}><span className="consultation-reading-choice-icon" aria-hidden="true"><ReadingGroupIcon group={group.id} /></span><strong>{group.title}</strong><span className="consultation-reading-choice-count">{group.sessions.length + group.histories.length}<small>{group.id === "final" ? "社" : "件"}</small></span></button>)}</div>}
           <div id="consultation-reading-selection" className={`consultation-reading-selection is-${readingGroup?.id ?? "recent"}`} aria-live="polite" aria-atomic="false">
             {readingGroup && <p className="consultation-reading-group-description">{readingGroup.description}</p>}
-            <div className={`consultation-reading-start-grid${readingStarts.length === 1 ? " is-single" : ""}`}>
+            <div className={`consultation-reading-start-grid${readingStarts.length + (readingGroup?.histories.length ?? 0) === 1 ? " is-single" : ""}${readingGroup?.id === "final" ? " is-final" : ""}`}>
               {readingStarts.map(session => <ReadingStartCard key={session.id} session={session} recent={readingGroup?.id === "recent" && Boolean(session.date)} label={readingGroup?.id === "recent" ? undefined : readingGroup?.title} onOpen={() => openSession(session)} onExcerpt={blockId => openExcerpt(session, blockId)} />)}
+              {readingGroup?.histories.map(history => <ReadingHistoryCard key={history.companyId} history={history} onBrowse={() => browseHistory(history.company)} />)}
             </div>
           </div>
-          {readingStarts.length === 0 && <p className="consultation-reading-start-empty">原稿が登録されると、ここから読み始められます。企業一覧から、確認できている面接の履歴をご覧いただけます。</p>}
+          {!readingGroup && <p className="consultation-reading-start-empty">原稿が登録されると、ここから読み始められます。企業一覧から、確認できている面接の履歴をご覧いただけます。</p>}
         </section>
         <section className="consultation-coverage" aria-label="資料の収録範囲">
           <div><span className="consultation-stat-icon" aria-hidden="true"><CompanyIcon /></span><div><span>面接・面談した企業</span><strong>{companies.length}<small>社</small></strong></div></div>
@@ -273,9 +289,10 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
           <div data-tour="materials" className="consultation-materials-top"><div className="consultation-tabs" role="tablist" aria-label="資料の種類"><button role="tab" id="companies-tab" aria-selected={route.tab === "companies"} aria-controls="companies-panel" onClick={() => navigate({ tab: "companies", companyId: "" })}>面接・面談した企業<span>{companies.length}</span></button><button role="tab" id="sessions-tab" aria-selected={route.tab === "sessions"} aria-controls="sessions-panel" onClick={() => navigate({ tab: "sessions" })}>読める原稿<span>{sessions.length}</span></button></div><a className="consultation-download-link" href="/api/consultation/export?format=companies" download><DownloadIcon />企業一覧を Word で保存</a></div>
           <div className="consultation-filters"><label className="consultation-search"><SearchIcon /><span className="consultation-sr-only">企業名・職種で検索</span><input type="search" placeholder="企業名・職種で検索" value={route.query} onChange={event => navigate({ query: event.target.value }, true)} /></label><label className="consultation-result-filter"><span>選考の進み方</span><select value={route.progress} onChange={event => navigate({ progress: event.target.value as ProgressFilter }, true)}>{PROGRESS_FILTERS.map(filter => <option key={filter.value} value={filter.value}>{filter.label}</option>)}</select></label><label className="consultation-result-filter"><span>{route.tab === "companies" ? "現在の選考状況" : "この回の結果"}</span><select value={route.outcome} onChange={event => navigate({ outcome: event.target.value as OutcomeFilter }, true)}>{FILTERS.map(filter => <option key={filter.value} value={filter.value}>{filter.value === "all" && route.tab === "companies" ? "すべての状況" : filter.value === "positive" && route.tab === "companies" ? "内定・書類通過" : filter.value === "unknown" && route.tab === "companies" ? "保留・未確認" : filter.label}</option>)}</select></label><span className="consultation-sort-label">面接・面談日の新しい順 ↓</span></div>
           {selectedCompany && route.tab === "sessions" && <div className="consultation-company-filter"><span>{selectedCompany.company} の読める原稿</span><button onClick={() => navigate({ companyId: "" }, true)} aria-label="企業の絞り込みを解除">絞り込みを解除 ×</button></div>}
-          <div className="consultation-results-caption" aria-live="polite"><span>{route.tab === "companies" ? `${visibleCompanies.length} 社` : `${visibleSessions.length} 件`}{hasFilters && " が見つかりました"}</span><small>{route.tab === "companies" ? "原稿未登録の企業も含みます。現在の状況と、過去に進んだ段階を分けて表示しています。" : "ここには読める原稿のみ掲載しています。各回の結果は、後の選考結果と分けて表示しています。"}</small></div>
-          {route.tab === "companies" ? <div role="tabpanel" id="companies-panel" aria-labelledby="companies-tab"><div className="consultation-table"><div className="consultation-table-head" aria-hidden="true"><span>企業・応募職種</span><span>現在の選考状況</span><span>応募日</span><span>読める原稿</span></div>{visibleCompanies.map(company => <CompanyRow key={company.id} company={company} sessions={sessions.filter(session => session.companyId === company.id)} onOpen={openSession} onBrowse={() => navigate({ tab: "sessions", companyId: company.id, outcome: "all" })} />)}</div>{visibleCompanies.length === 0 && <EmptyState filtered={hasFilters} onReset={() => navigate({ query: "", outcome: "all", progress: "all", companyId: "" }, true)} />}</div>
-            : <div role="tabpanel" id="sessions-panel" aria-labelledby="sessions-tab" className="consultation-session-list">{visibleSessions.map(session => <SessionRow key={session.id} session={session} onOpen={() => openSession(session)} />)}{visibleSessions.length === 0 && <EmptyState filtered={hasFilters} onReset={() => navigate({ query: "", outcome: "all", progress: "all", companyId: "" }, true)} />}</div>}
+          <div className="consultation-results-caption" aria-live="polite"><span>{currentPage.total > 0 ? `${currentPage.start}–${currentPage.end} / ${currentPage.total}` : "0"} {route.tab === "companies" ? "社" : "件"}{hasFilters && " が見つかりました"}</span><small>{route.tab === "companies" ? "原稿未登録の企業も含みます。現在の状況と、過去に進んだ段階を分けて表示しています。" : "ここには読める原稿のみ掲載しています。各回の結果は、後の選考結果と分けて表示しています。"}</small></div>
+          {route.tab === "companies" ? <div role="tabpanel" id="companies-panel" aria-labelledby="companies-tab"><div className="consultation-table"><div className="consultation-table-head" aria-hidden="true"><span>企業・応募職種</span><span>現在の選考状況</span><span>応募日</span><span>読める原稿</span></div>{companyPage.items.map(company => <CompanyRow key={company.id} company={company} sessions={sessions.filter(session => session.companyId === company.id)} onOpen={openSession} onBrowse={() => navigate({ tab: "sessions", companyId: company.id, outcome: "all" })} />)}</div>{visibleCompanies.length === 0 && <EmptyState filtered={hasFilters} onReset={() => navigate({ query: "", outcome: "all", progress: "all", companyId: "" }, true)} />}</div>
+            : <div role="tabpanel" id="sessions-panel" aria-labelledby="sessions-tab" className="consultation-session-list">{sessionPage.items.map(session => <SessionRow key={session.id} session={session} onOpen={() => openSession(session)} />)}{visibleSessions.length === 0 && <EmptyState filtered={hasFilters} onReset={() => navigate({ query: "", outcome: "all", progress: "all", companyId: "" }, true)} />}</div>}
+          {currentPage.total > 0 && <ConsultationPagination page={currentPage.page} pageCount={currentPage.pageCount} onChange={changePage} />}
         </section>
         <footer className="consultation-library-footer"><span><BookIcon small />面接相談の資料 · コメントできます</span><span>資料更新：{dateLabel(initial.updatedAt)}<span className="consultation-footer-separator">／</span>時刻のある日程は日本時間（JST）</span></footer>
       </main>
@@ -284,27 +301,34 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
   </div>;
 }
 
+export function ConsultationPagination({ page, pageCount, onChange }: { page: number; pageCount: number; onChange: (page: number) => void }) {
+  return <nav className="consultation-pagination" aria-label="資料一覧のページ"><span>{page} / {pageCount} ページ</span><div><button disabled={page === 1} onClick={() => onChange(page - 1)}>← 前へ</button>{paginationPageNumbers(page, pageCount).map(number => <button key={number} aria-label={`${number}ページ目`} aria-current={number === page ? "page" : undefined} onClick={() => onChange(number)}>{number}</button>)}<button disabled={page === pageCount} onClick={() => onChange(page + 1)}>次へ →</button></div></nav>;
+}
+
+export function ReadingHistoryCard({ history, onBrowse }: { history: ConsultationReadingHistory; onBrowse: () => void }) {
+  return <article className="consultation-reading-start-card consultation-reading-history"><div className="consultation-reading-start-main"><h3>{history.company}</h3><div className="consultation-reading-start-meta"><time dateTime={history.interview.date || undefined}>{dateLabel(history.interview.date)}</time><span>最終面接</span><span className="reading-start-memory">原稿未登録</span></div></div><p className="consultation-reading-start-introduction">最終面接の履歴です。逐字の原稿は登録されていません。</p><div className="consultation-reading-start-footer"><span>日付・結果を確認できます</span><button className="consultation-reading-start-open" onClick={onBrowse}>面接履歴を見る<span aria-hidden="true">→</span></button></div></article>;
+}
+
 function ReadingGroupIcon({ group }: { group: string }) {
   return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{group === "recent" ? <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></> : group === "final" ? <><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z" /></> : <><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><path d="M14 17.5h7m-3.5-3.5v7" /></>}</svg>;
 }
 
-export function ReadingStartCard({ session, recent, label, onOpen, onExcerpt }: { session: ConsultationSessionSummary; recent: boolean; label?: string; onOpen: () => void; onExcerpt: (blockId: string) => void }) {
+export function ReadingStartCard({ session, onOpen, onExcerpt }: { session: ConsultationSessionSummary; recent: boolean; label?: string; onOpen: () => void; onExcerpt: (blockId: string) => void }) {
   const guide = session.readingGuide;
   const excerpts = session.hasReadable && session.recordKind !== "memory" ? (guide?.excerpts ?? []).slice(0, 2) : [];
   const introduction = guide?.introduction || (session.recordKind === "memory" ? "当日の記憶から再構成した記録です。会話の内容を中心にご覧いただけます。" : session.date ? `${dateLabel(session.date)}の${stageLabel(session)}です。気になるやり取りからコメントできます。` : "日付未確認の面接記録です。原稿から、確認できるやり取りをご覧いただけます。");
   return <article className={`consultation-reading-start-card${guide?.featured ? " is-featured" : ""}${excerpts.length ? " has-preview" : ""}`}>
     <div className="consultation-reading-start-main">
-      <div className="consultation-reading-start-badges">{recent && <span className="reading-start-recent">最近の面接</span>}{guide?.featured && <span className="reading-start-featured">本人からの相談</span>}{!recent && !guide?.featured && <span>{label || "読み始める原稿"}</span>}</div>
       <h3>{session.company}</h3>
       <div className="consultation-reading-start-meta"><time dateTime={session.date || undefined}>{dateLabel(session.date)}</time><span>{stageLabel(session)}</span>{session.recordKind === "memory" ? <span className="reading-start-memory">記憶から再構成</span> : <span>{session.hasReadable ? "可読整理稿" : "原始転写"}</span>}</div>
       {session.position && <p className="consultation-reading-start-position">{session.position}</p>}
-      <p className="consultation-reading-start-introduction">{introduction}</p>
-      {guide?.request && <div className="consultation-reading-start-request"><strong>相談したいこと</strong><p>{guide.request}</p></div>}
     </div>
     <div className="consultation-reading-start-side">
-      {excerpts.length > 0 && <div className="consultation-reading-preview" data-tour="reading-preview"><h4>原稿にある質問</h4>{excerpts.map(excerpt => <button key={`${excerpt.blockId}:${excerpt.text}`} title={excerpt.text} onClick={() => onExcerpt(excerpt.blockId)}><span>「{excerpt.text}」</span><small>このやり取りを見る<span aria-hidden="true">↗</span></small></button>)}</div>}
-      <div className="consultation-reading-start-footer"><span><BookIcon small />{session.hasReadable && (guide?.blockCount ?? 0) > 0 ? `${guide!.blockCount}の会話区分` : session.recordKind === "memory" ? "内容の確認・ご相談に" : "原文を確認できます"}</span><button data-tour="start-reading" className="consultation-reading-start-open" onClick={onOpen}>この原稿を読む<span aria-hidden="true">→</span></button></div>
+      <p className="consultation-reading-start-introduction">{introduction}</p>
+      {guide?.request && <div className="consultation-reading-start-request"><strong>相談したいこと</strong><p>{guide.request}</p></div>}
+      {excerpts.length > 0 && <div className="consultation-reading-preview" data-tour="reading-preview"><h4>原稿にある質問</h4>{excerpts.map(excerpt => <button key={`${excerpt.blockId}:${excerpt.text}`} title={excerpt.text} aria-label={`「${excerpt.text}」 このやり取りを見る`} onClick={() => onExcerpt(excerpt.blockId)}><span>「{excerpt.text}」</span><span aria-hidden="true">↗</span></button>)}</div>}
     </div>
+    <div className="consultation-reading-start-footer"><span><BookIcon small />{session.hasReadable && (guide?.blockCount ?? 0) > 0 ? `${guide!.blockCount}の会話区分` : session.recordKind === "memory" ? "内容の確認・ご相談に" : "原文を確認できます"}</span><button data-tour="start-reading" className="consultation-reading-start-open" onClick={onOpen}>この原稿を読む<span aria-hidden="true">→</span></button></div>
   </article>;
 }
 

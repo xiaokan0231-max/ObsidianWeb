@@ -10,7 +10,10 @@ test("分步引导使用实际页面目标，原文点评先介绍可见按钮�
   assert.equal(steps.reader[0].target, '[data-tour="paragraph-comment"]');
   assert.equal(steps.reader[1].target, '[data-feedback-text]');
   assert.deepEqual(steps.library.map(step => step.target), ['[data-tour="reading-choice"]', '[data-tour="reading-preview"]', '[data-tour="all-materials"]', '[data-tour="feedback-entry"]']);
-  assert.match(steps.library[0].text[0], /最近の面接、最終面接、ほかの面接/);
+  assert.match(steps.library[0].text[0], /最近の面接.*最終面接/);
+  assert.match(steps.library[0].text[0], /原稿未登録.*履歴/);
+  assert.doesNotMatch(steps.library[0].text[0], /ほかの面接|三つ|3つ/);
+  assert.doesNotMatch(steps.library[0].text[1], /其他面试例子|三组/);
   assert.ok(steps.feedback.some(step => step.target.includes("feedback-login")));
   for (const mode of Object.values(steps)) for (const step of mode.flatMap(step => step.fallback ? [step, step.fallback] : [step])) {
     assert.ok(step.title[0] && step.title[1] && step.text[0] && step.text[1]);

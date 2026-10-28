@@ -12,7 +12,7 @@ function catalog(sessions) {
 }
 function startSection(html) { return html.match(/<section class="consultation-reading-start"[^]*?<\/section>/)?.[0] ?? ""; }
 
-test("起点以最近两场开始，终面和补充例子有独立入口，完整目录保留全部公司", async () => {
+test("紧凑首页以最近两场开始，仅保留终面入口和完整目录", async () => {
   const { ConsultationLibrary } = await loadAppModule("app/consultation/consultation-view.tsx");
   const items = [session("recent", "2026-10-23"), session("second", "2026-10-22", { introduction: "開発経験について話した面談です。" }), session("final", "2026-10-18", {}, { stage: "final", round: "最終面接" }), session("other", "2026-10-19", { example: true })];
   const html = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial: catalog(items) }));
@@ -20,11 +20,13 @@ test("起点以最近两场开始，终面和补充例子有独立入口，完�
   assert.equal((start.match(/<article /g) ?? []).length, 2);
   assert.match(start, /最近の面接/);
   assert.match(start, /最終面接/);
-  assert.match(start, /ほかの面接/);
+  assert.doesNotMatch(start, /ほかの面接/);
+  assert.match(start, /<h1 id="reading-start-title">面接相談の資料<\/h1>/);
+  assert.doesNotMatch(start, /READING START|次の一歩へ|まずは、ここから/);
   assert.match(start, /開発経験について話した面談です。/);
   assert.doesNotMatch(start, /株式会社テストfinal|株式会社テストother/);
   assert.equal((start.match(/aria-pressed="true"/g) ?? []).length, 1);
-  assert.equal((start.match(/aria-pressed="false"/g) ?? []).length, 2);
+  assert.equal((start.match(/aria-pressed="false"/g) ?? []).length, 1);
   for (const item of items) assert.ok(html.includes(item.company), item.company);
   assert.match(html, /選考の進み方|現在の選考状況/);
   assert.match(start, /data-tour="reading-choice"/);
@@ -43,13 +45,23 @@ test("资料不足时只展示实际可读起点，不制造空的终面或补�
   assert.doesNotMatch(start, /本人からの相談|相談したいこと|おすすめ|AI評価/);
 });
 
-test("终面和补充卡片使用所选入口标签，不误标成最近面试", async () => {
+test("卡片显示实际轮次和说明，省略重复的分类标签", async () => {
   const { ReadingStartCard } = await loadAppModule("app/consultation/consultation-view.tsx");
-  for (const label of ["最終面接", "ほかの面接"]) {
-    const html = renderToStaticMarkup(React.createElement(ReadingStartCard, { session: session("sample", "2026-09-20"), recent: false, label, onOpen() {}, onExcerpt() {} }));
-    assert.ok(html.includes(label));
-    assert.doesNotMatch(html, /最近の面接/);
-  }
+  const html = renderToStaticMarkup(React.createElement(ReadingStartCard, { session: session("sample", "2026-09-20", { introduction: "経験について話した面接です。" }, { stage: "final" }), recent: false, label: "最終面接", onOpen() {}, onExcerpt() {} }));
+  assert.match(html, /最終面接/);
+  assert.match(html, /経験について話した面接です。/);
+  assert.doesNotMatch(html, /consultation-reading-start-badges|最近の面接/);
+});
+
+test("无原稿终面卡片只提供历史入口，不创建虚构阅读或批注按钮", async () => {
+  const { ReadingHistoryCard } = await loadAppModule("app/consultation/consultation-view.tsx");
+  const history = { companyId: "company-history", company: "株式会社テスト履歴", interview: { id: "history-final", date: "2026-09-10", round: "最終面接", stage: "final", outcome: "不採用", outcomeKind: "rejected", evidenceKind: "history" } };
+  const html = renderToStaticMarkup(React.createElement(ReadingHistoryCard, { history, onBrowse() {} }));
+  assert.match(html, /株式会社テスト履歴/);
+  assert.match(html, /2026.09.10/);
+  assert.match(html, /原稿未登録/);
+  assert.match(html, /面接履歴を見る/);
+  assert.doesNotMatch(html, /この原稿を読む|data-tour="start-reading"|data-tour="reading-preview"|session=/);
 });
 
 test("起点原问句直接带真实场景，显示为文字而不是HTML", async () => {
@@ -58,7 +70,8 @@ test("起点原问句直接带真实场景，显示为文字而不是HTML", asyn
   const html = renderToStaticMarkup(React.createElement(ReadingStartCard, { session: item, recent: true, onOpen() {}, onExcerpt() {} }));
   assert.match(html, /原稿にある質問/);
   assert.match(html, /担当した業務を教えてください。/);
-  assert.equal((html.match(/このやり取りを見る/g) ?? []).length, 2);
+  assert.equal((html.match(/aria-label="[^"]*このやり取りを見る"/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /<small>このやり取りを見る/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.doesNotMatch(html, /<img /);
   assert.match(html, /data-tour="reading-preview"/);
@@ -87,4 +100,34 @@ test("场景参数随场次和显示形式往返，批注参数仍独立保留",
   assert.equal(consultationReadingBlockTarget(transcript, "missing", "readable"), null);
   assert.equal(consultationReadingBlockTarget(transcript, "../../private", "readable"), null);
   assert.equal(consultationReadingBlockTarget(transcript, "q02", "raw"), null);
+});
+
+
+test("完整目录初次只显示六行，后续资料由分页保留", async () => {
+  const { ConsultationLibrary } = await loadAppModule("app/consultation/consultation-view.tsx");
+  const items = Array.from({ length: 8 }, (_, index) => session(`row${index + 1}`, `2026-10-0${index + 1}`));
+  const initial = catalog(items);
+  const html = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial }));
+  assert.equal((html.match(/class="consultation-company-row"/g) ?? []).length, 6);
+  assert.match(html, /1–6 \/ 8/);
+  assert.match(html, /1 \/ 2 ページ/);
+  assert.match(html, /aria-current="page"/);
+  assert.doesNotMatch(html, /株式会社テストrow1|株式会社テストrow2/);
+  assert.equal(initial.companies.length, 8);
+  assert.equal(initial.sessions.length, 8);
+});
+
+test("分页说明当前页并禁用首尾边界，数字按钮仍可选择", async () => {
+  const { ConsultationPagination } = await loadAppModule("app/consultation/consultation-view.tsx");
+  const render = page => renderToStaticMarkup(React.createElement(ConsultationPagination, { page, pageCount: 3, onChange() {} }));
+  const first = render(1), middle = render(2), last = render(3);
+  assert.match(first, /<button disabled="">← 前へ<\/button>/);
+  assert.match(first, /<button>次へ →<\/button>/);
+  assert.match(last, /<button>← 前へ<\/button>/);
+  assert.match(last, /<button disabled="">次へ →<\/button>/);
+  for (const [index, html] of [first, middle, last].entries()) {
+    assert.match(html, /aria-label="資料一覧のページ"/);
+    assert.equal((html.match(/aria-current="page"/g) ?? []).length, 1);
+    assert.ok(html.includes(`aria-label="${index + 1}ページ目" aria-current="page"`));
+  }
 });

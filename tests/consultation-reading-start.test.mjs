@@ -109,16 +109,52 @@ test("记忆重构和原始稿不冒充已确认逐字问题预览，人工介�
   assert.equal(rawOnly.readingGuide.blockCount, 0);
 });
 
-const session = (id, date, featured = false, extra = {}) => ({ id, companyId: "company-test", company: "株式会社テスト", date, round: "一次面接", outcome: "進行中", outcomeKind: "waiting", hasReadable: true, hasRaw: false, readingGuide: { featured, excerpts: [], blockCount: 1 }, ...extra });
+const session = (id, date, featured = false, extra = {}) => ({ id, companyId: `company-${id}`, company: "株式会社テスト", date, round: "一次面接", outcome: "進行中", outcomeKind: "waiting", hasReadable: true, hasRaw: false, readingGuide: { featured, excerpts: [], blockCount: 1 }, ...extra });
 
-test("入口分最近、明确终面和稳定补充例子三组，每组最多两场且不按结果排序", () => {
-  const sessions = [session("latest", "2026-10-07", false, { outcome: "不採用", outcomeKind: "rejected" }), session("offer", "2026-10-06", false, { outcome: "内定", outcomeKind: "offer" }), session("final-a", "2026-10-05", false, { stage: "final" }), session("final-b", "2026-10-04", false, { stage: "final", recordKind: "memory" }), session("example-a", "2026-10-03", true), session("example-b", "2026-10-02", false, { readingGuide: { example: true } }), session("example-c", "2026-10-01", true)];
+test("最近两场按日期展示，终面按企业去重且不按结果或隐式重点选择", () => {
+  const sessions = [
+    session("latest", "2026-10-07", false, { outcome: "不採用", outcomeKind: "rejected" }),
+    session("offer", "2026-10-06", false, { outcome: "内定", outcomeKind: "offer" }),
+    session("final-a", "2026-10-05", false, { stage: "final" }),
+    session("final-b", "2026-10-04", false, { stage: "final", recordKind: "memory" }),
+    session("flagged", "2026-10-03", true, { readingGuide: { featured: true, example: true } }),
+    session("final-c", "2026-10-02", false, { stage: "final" }),
+    session("old-final-a", "2026-10-01", false, { stage: "final", companyId: "company-final-a" }),
+  ];
   const groups = selectConsultationReadingGroups(sessions);
-  assert.deepEqual(groups.map(group => [group.id, group.sessions.map(item => item.id)]), [["recent", ["latest", "offer"]], ["final", ["final-a", "final-b"]], ["examples", ["example-a", "example-b"]]]);
+  assert.deepEqual(groups.map(group => [group.id, group.sessions.map(item => item.id)]), [["recent", ["latest", "offer"]], ["final", ["final-a", "final-b", "final-c"]]]);
   assert.equal(groups[1].sessions[1].recordKind, "memory");
+  assert.ok(groups.every(group => group.histories.length === 0));
   assert.equal(sessions.length, 7);
   assert.deepEqual(selectConsultationReadingGroups(sessions.slice(0, 2)).map(group => group.id), ["recent"]);
   assert.deepEqual(selectConsultationReadingGroups(sessions), groups);
+});
+
+test("缺少原稿的全部已确认终面保留历史，不伪造场次或截断为两家", () => {
+  const final = session("recorded-final", "2026-10-05", false, { stage: "final" });
+  const interview = (id, date, stage = "final") => ({ id, date, stage, round: stage === "final" ? "最終面接" : "一次面接", outcome: "不採用", outcomeKind: "rejected", evidenceKind: "history" });
+  const company = (id, interviews) => ({ id, company: `株式会社テスト${id}`, applications: [], sessionIds: [], latestDate: "", outcome: "不採用", interviews });
+  const missing = interview("history-only", "2026-10-02");
+  const companies = [
+    company(final.companyId, [interview("same-company-history", "2026-10-06")]),
+    company("company-third", [missing, interview("older-third", "2026-09-01")]),
+    company("company-fourth", [interview("another-final", "2026-10-03")]),
+    company("company-fourth", [interview("duplicate-company", "2026-10-03")]),
+    { ...company("not-final", [interview("first-round", "2026-10-04", "round-1")]), reachedFinal: true },
+  ];
+  const original = structuredClone(companies);
+  const group = selectConsultationReadingGroups([final], companies).find(item => item.id === "final");
+  assert.deepEqual(group.sessions.map(item => item.id), [final.id]);
+  assert.deepEqual(group.histories.map(item => item.companyId), ["company-fourth", "company-third"]);
+  assert.equal(group.sessions.length + group.histories.length, 3);
+  assert.equal(group.histories[1].interview, missing);
+  assert.equal(group.histories[1].interview.sessionId, undefined);
+  assert.equal(group.histories[1].sessionId, undefined);
+  assert.deepEqual(companies, original);
+  const historyOnly = selectConsultationReadingGroups([], companies.filter(item => item.id === "company-third"));
+  assert.deepEqual(historyOnly.map(item => item.id), ["final"]);
+  assert.equal(historyOnly[0].sessions.length, 0);
+  assert.equal(historyOnly[0].histories.length, 1);
 });
 
 test("没有日期的记录不超过已知日期，重复和无稿重点不占起点", () => {
