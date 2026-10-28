@@ -70,6 +70,20 @@ test("实际浮层变高时，宽入口先移向顶部以便在下方完整介�
   assert.equal(tour.teacherTourNeedsStartScroll(afterScroll, viewport, { width: 376, height: 434 }), false);
 });
 
+test("首次引导腾出空间后，后续实际尺寸测量不会把可见入口重新居中", () => {
+  const viewport = { width: 1280, height: 720 };
+  const entry = { left: 42, top: 375, width: 1196, height: 80 };
+  assert.equal(tour.teacherTourScrollAlignment(entry, viewport, { width: 376, height: 434 }), "start");
+  const atReadingTop = { ...entry, top: 72 };
+  for (const height of [462, 434, 425]) {
+    assert.equal(tour.teacherTourScrollAlignment(atReadingTop, viewport, { width: 376, height }), null);
+    const placement = tour.teacherTourPlacement(tour.teacherTourSpotlight(atReadingTop, viewport), viewport, { width: 376, height });
+    assert.equal(placement.side, "bottom");
+    assert.ok(placement.top >= atReadingTop.top + atReadingTop.height);
+  }
+  assert.equal(tour.teacherTourScrollAlignment({ left: 42, top: -20, width: 200, height: 80 }, viewport, { width: 376, height: 434 }), "nearest");
+});
+
 test("窗口无法容纳目标与浮层时不反复尝试腾出空间", () => {
   const viewport = { width: 1280, height: 600 };
   const entry = { left: 24, top: 250, width: 1232, height: 244 };

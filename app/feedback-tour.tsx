@@ -66,6 +66,13 @@ export function teacherTourNeedsStartScroll(rect: TourRect, viewport: TourViewpo
   return rect.height + card.height + 22 + 48 <= viewport.height;
 }
 
+export function teacherTourScrollAlignment(rect: TourRect, viewport: TourViewport, card: { width: number; height: number }): "start" | "nearest" | null {
+  if (teacherTourNeedsStartScroll(teacherTourSpotlight(rect, viewport), viewport, card)) return "start";
+  // 阅读区顶部可能在固定页头下方；已经可见的目标不能再次居中，否则会撤销刚腾出的浮层空间。
+  if (rect.top < 0 || rect.top + rect.height > viewport.height || rect.left < 0 || rect.left + rect.width > viewport.width) return rect.height > 244 ? "start" : "nearest";
+  return null;
+}
+
 function findTarget(selector: string): HTMLElement | null {
   return [...document.querySelectorAll<HTMLElement>(selector)].find(element => {
     const rect = element.getBoundingClientRect();
@@ -146,16 +153,17 @@ export function TeacherTour({ mode = "library", active = true, locale = "ja", on
           const target = findStepTarget(steps[stage])?.target;
           if (target) { const rect = teacherTourSpotlight(target.getBoundingClientRect(), next); setGeometry({ stage, rect }); }
         }
-        const size = card.current?.getBoundingClientRect();
-        if (size) setCardSize(old => old.width === size.width && old.height === size.height ? old : { width: size.width, height: size.height });
+        // 进入动画会缩放视觉边框，布局尺寸才是动画结束后真正需要的空间。
+        const size = card.current ? { width: card.current.offsetWidth, height: card.current.offsetHeight } : null;
+        if (size) setCardSize(old => old.width === size.width && old.height === size.height ? old : size);
       });
     };
     const target = stage >= 0 && stage < steps.length ? findStepTarget(steps[stage])?.target : null;
     if (target) {
       const rect = target.getBoundingClientRect();
       const nextViewport = { width: window.innerWidth, height: window.innerHeight };
-      const needsRoom = teacherTourNeedsStartScroll(teacherTourSpotlight(rect, nextViewport), nextViewport, cardSize);
-      if (needsRoom || rect.top < 100 || rect.bottom > window.innerHeight - 30 || rect.left < 12 || rect.right > window.innerWidth - 12) target.scrollIntoView({ block: needsRoom || rect.height > 244 ? "start" : "center", inline: "center", behavior: "instant" });
+      const alignment = teacherTourScrollAlignment(rect, nextViewport, cardSize);
+      if (alignment) target.scrollIntoView({ block: alignment, inline: "center", behavior: "instant" });
     }
     measure();
     const observer = new ResizeObserver(measure);
