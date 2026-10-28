@@ -3,8 +3,9 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { publishedRequestResponse } from "../lib/server/published-access";
 import { createPublishedVaultResponseHandler } from "../lib/server/published-vault-response";
+import { dispatchFeedbackRequest, type FeedbackDispatchEnv } from "../lib/server/feedback-dispatch";
 
-interface Env {
+interface Env extends FeedbackDispatchEnv {
   OBSIDIAN_DATA_SOURCE?: string;
   ASSETS: Fetcher;
   DB: D1Database;
@@ -34,6 +35,8 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const published = env.OBSIDIAN_DATA_SOURCE === "published";
+    // 留言有独立鉴权；只为这一组精确路径放行，不能解除其他资料的只读保护。
+    if (url.pathname.startsWith("/api/feedback/")) return dispatchFeedbackRequest(request, env);
     const guarded = publishedRequestResponse(request, published);
     if (guarded) return guarded;
 

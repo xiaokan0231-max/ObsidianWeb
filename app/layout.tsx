@@ -5,6 +5,7 @@ import { APP_BRANDING, resolveUiLocale, UI_LOCALE_COOKIE } from "@/lib/ui-locale
 import { DEFAULT_UI_SKIN, resolveUiSkin, resolveUiTheme, UI_MOTION_KEY, UI_SKIN_COOKIE, UI_THEME_COOKIE } from "@/lib/ui-theme";
 import { PublishedReadOnlyNotice, UiLocaleProvider } from "./ui-locale";
 import { UiThemeProvider } from "./ui-theme";
+import { FeedbackProvider } from "./feedback-ui";
 import "./globals.css";
 /*
  * 外观层与写入主题属性的 layout 一起引入：先确定皮肤 token，再由 chroma 给工作区着色。
@@ -89,7 +90,7 @@ export default async function RootLayout({
         />
         <UiLocaleProvider initialLocale={locale}>
           {process.env.OBSIDIAN_DATA_SOURCE === "published" && <PublishedReadOnlyNotice />}
-          <UiThemeProvider initialTheme={theme} initialSkin={skin}>{children}</UiThemeProvider>
+          <UiThemeProvider initialTheme={theme} initialSkin={skin}><FeedbackProvider>{children}</FeedbackProvider></UiThemeProvider>
         </UiLocaleProvider>
       </body>
     </html>

@@ -98,8 +98,8 @@ test("错误恢复、加载状态和正文表格提供日语界面，错误与�
 
 test("发布提示直接订阅当前语言，双语文案都能渲染", async () => {
   const { PublishedReadOnlyNotice: Notice, UiLocaleProvider: Provider } = await loadAppModule("app/ui-locale.tsx");
-  assert.match(renderToStaticMarkup(createElement(Provider, { initialLocale: "ja" }, createElement(Notice))), /公開済みの内容 · 閲覧専用/);
-  assert.match(renderToStaticMarkup(createElement(Provider, { initialLocale: "zh-CN" }, createElement(Notice))), /已发布内容 · 仅供浏览/);
+  assert.match(renderToStaticMarkup(createElement(Provider, { initialLocale: "ja" }, createElement(Notice))), /資料は閲覧専用 · コメントできます/);
+  assert.match(renderToStaticMarkup(createElement(Provider, { initialLocale: "zh-CN" }, createElement(Notice))), /资料仅供浏览 · 可留言交流/);
 });
 
 test("求人の登録経路・確認状態・比較表を翻訳し、元の説明文と案件状態は保持する", async () => {

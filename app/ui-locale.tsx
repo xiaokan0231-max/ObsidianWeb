@@ -43,6 +43,6 @@ export function LanguageSwitch() {
 export function PublishedReadOnlyNotice() {
   const { locale } = useUiLocale();
   return <aside style={{ position: "fixed", bottom: 12, right: 16, zIndex: 1000, padding: "6px 12px", borderRadius: 8, background: "var(--color-bg, #fff)", color: "var(--color-text, #222)", border: "1px solid var(--color-border, #ddd)", fontSize: 14 }}>
-    {locale === "ja" ? "公開済みの内容 · 閲覧専用" : "已发布内容 · 仅供浏览"}
+    {locale === "ja" ? "資料は閲覧専用 · コメントできます" : "资料仅供浏览 · 可留言交流"}
   </aside>;
 }

@@ -18,6 +18,12 @@ Next(vinext/Cloudflare Workers) 前端，**读 Obsidian vault 作为唯一数据
   页面数据来自 `app/api/vault/route.ts` → `readAllNotes()` → Obsidian Local REST API。
 - `npm run dev` 会先从 Obsidian 插件配置里读 API key，不要直接跑 `dev:web`。
 
+### 老师交流信箱
+
+- 求职资料仍以 Vault 为正本；`/api/feedback/*` 是独立的私有交流接口，使用 R2 文件信箱，不增加 SQL 数据库。
+- 老师留言和引用不能写入公开 Vault 快照、源码、测试资料或自动 AI 输入。共用访问码和管理凭据只放运行时秘密配置。
+- 仅留言接口执行独立鉴权后可在线写入；其他资料的公开只读保护必须保留。本机用服务端代理读取同一个云端信箱。
+
 ## 🔴 求职数据：改一处不等于改完
 
 同一个事实散在多处。下面每组**必须同时更新**，只改一处就是没改完。

@@ -228,3 +228,49 @@
 .consultation-company-history small { font-size: 10px; color: var(--text-tertiary); white-space: nowrap; }
 .consultation-company-history .consultation-badge { font-size: 10px; padding: 3px 7px; }
 .consultation-record-absence { font-size: 10px; color: var(--text-tertiary); line-height: 1.8; }
+
+/* 批注入口始终露出，老师不需要先发现选中文字或悬停的操作。 */
+.consultation-header-actions { gap: 12px; }
+.consultation-header .consultation-help-button,
+.consultation-comment-hint .consultation-help-button,
+.consultation-shell .consultation-comment-button,
+.consultation-shell .consultation-comment-count { min-height: 44px; padding: 9px 14px; font-size: 16px; line-height: 1.5; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--green-deep); cursor: pointer; }
+.consultation-header .consultation-help-button:hover,
+.consultation-shell .consultation-comment-button:hover,
+.consultation-shell .consultation-comment-count:hover { background: var(--success-wash); }
+.consultation-shell .consultation-comment-button > span { margin-left: 8px; font-size: 14px; }
+.consultation-header .consultation-home-link { min-height: 44px; font-size: 14px; }
+.consultation-header .consultation-header-note { font-size: 14px; }
+.consultation-feedback-help { margin: 0 0 26px; font-size: 16px; }
+.consultation-guide strong { font-size: 16px; }
+.consultation-guide p { font-size: 14px; }
+.consultation-guide h2 { font-size: 16px; }
+.consultation-reader-toolbar { padding: 12px 28px; gap: 15px; }
+.consultation-reader-switch { margin-left: 0; flex-shrink: 0; }
+.consultation-reader-actions { gap: 12px; }
+.consultation-reader-switch button, .consultation-shell .consultation-back { font-size: 14px; min-height: 44px; }
+.consultation-reader-layout-commenting { width: min(1440px, calc(100% - 64px)); grid-template-columns: minmax(0, 1fr) 360px; gap: 28px; }
+.consultation-reader-layout-commenting .consultation-reading-paper { padding-left: 38px; padding-right: 38px; }
+.consultation-feedback-aside { position: sticky; top: 20px; min-width: 0; max-height: calc(100vh - 200px); overflow: auto; scrollbar-width: thin; }
+.consultation-feedback-aside > .feedback-panel { width: 100%; }
+.consultation-source-updated { font-size: 16px; line-height: 1.7; color: var(--warning); background: var(--warning-wash); padding: 14px; border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; }
+.consultation-comment-hint { position: relative; margin: 24px 0; padding: 20px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--success-wash); font-size: 16px; line-height: 1.8; }
+.consultation-comment-hint > strong { display: block; padding-right: 36px; font-weight: 600; color: var(--green-deep); }
+.consultation-comment-hint p { font-size: 16px; margin: 10px 0 14px; }
+.consultation-comment-hint > button:first-child { position: absolute; right: 6px; top: 6px; min-height: 44px; min-width: 44px; padding: 5px; border: 0; background: transparent; font-size: 22px; color: var(--text-secondary); }
+.consultation-block-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding-bottom: 16px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+.consultation-block-heading h2 { flex: 1 1 240px; min-width: 0; border-bottom: 0; margin: 0; padding: 0; }
+.consultation-shell .consultation-comment-count { background: var(--success-wash); }
+.consultation-comment-highlight { border-radius: 3px; background: #f7e8b0; color: inherit; cursor: pointer; box-shadow: inset 0 -2px #c09c39; }
+.consultation-comment-highlight:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.consultation-selection-action { position: fixed; z-index: 1200; min-height: 44px; padding: 10px 16px; font-size: 16px; line-height: 1.5; background: var(--green-deep, #27564a); color: var(--on-fill, white); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: 0 4px 18px #0002; cursor: pointer; }
+.consultation-raw-line { padding: 15px 0; border-bottom: 1px solid var(--line-soft); }
+.consultation-raw-line p { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 16px; margin: 0; line-height: 2.05; white-space: pre-wrap; overflow-wrap: anywhere; }
+.consultation-raw-line p > span:first-child { color: var(--text-tertiary); user-select: none; font-size: 11px; padding-top: 5px; text-align: right; font-variant-numeric: tabular-nums; }
+.consultation-raw-line > .consultation-comment-button { margin-top: 8px; margin-left: 44px; }
+.consultation-aside-help { font-size: 16px; }
+
+@media print {
+  .consultation-feedback-aside, .consultation-comment-hint, .consultation-feedback-help, .consultation-comment-button, .consultation-comment-count, .consultation-selection-action { display: none !important; }
+  .consultation-comment-highlight { background: transparent; box-shadow: none; }
+}

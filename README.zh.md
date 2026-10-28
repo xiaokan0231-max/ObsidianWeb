@@ -142,6 +142,16 @@ Vault 是外部数据，因此校验与代码测试分开运行。`npm run dev` 
 
 ## 发布与资料边界
 
+### 老师交流与原文批注
+
+`/consultation` 提供日文三步引导、不会发送真实留言的练习，以及段落／选句批注。`/feedback` 集中查看建议、回复和处理状态；全站也能针对当前页面发起咨询。
+
+老师通过共用访问码和显示名进入，受邀老师与本人共同查看交流。本人使用独立管理凭据，可更换访问码、隐藏误发话题和标记处理进度；更换访问码会撤销老师已有会话。普通访客只能阅读资料。
+
+交流记录单独保存在私有 R2 信箱中，不进入 Vault 快照或自动 AI 输入。运行时需要 `FEEDBACK_SESSION_SECRET`、`FEEDBACK_OWNER_SECRET`（均至少 32 字符）和初始 `FEEDBACK_ACCESS_CODE`（至少 8 字符），通过 Sites 秘密环境变量配置；`.openai/hosting.json` 只声明 `FEEDBACK_BUCKET` 绑定，不放凭据。
+
+本机私有 `.env.feedback.local` 可配置同名变量和 `FEEDBACK_REMOTE_URL`，仅由开发服务器读取。启用远端地址后，本机通过服务端代理以本人身份读写同一个云端信箱，浏览器不持有管理密钥。发布构建不注入这些开发变量。
+
 运行 `npm run publish:prepare` 会重新导出 Vault 并构建网站。线上运行时设置 `OBSIDIAN_DATA_SOURCE=published`，并通过 Cloudflare `ASSETS` 绑定读取部署内的快照。
 
 发布快照位于 Git 忽略的 `public/_published-vault/`，只进入部署产物。它包含实际笔记内容，发布前应确认适合目标访问范围。只更新代码不会自动更新线上笔记。
