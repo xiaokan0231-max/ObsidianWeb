@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { UI_LOCALE_COOKIE, type UiLocale } from "@/lib/ui-locale";
 
 type UiLocaleContextValue = { locale: UiLocale; setLocale: (locale: UiLocale) => void };
@@ -42,6 +43,9 @@ export function LanguageSwitch() {
 /** 发布提示也订阅语言，切换后无需刷新整页。 */
 export function PublishedReadOnlyNotice() {
   const { locale } = useUiLocale();
+  const pathname = usePathname();
+  // 老师页面已有独立日文说明，避免主站语言的浮条遮挡批注或造成混合文案。
+  if (/^\/(consultation|feedback)(\/|$)/.test(pathname ?? "")) return null;
   return <aside style={{ position: "fixed", bottom: 12, right: 16, zIndex: 1000, padding: "6px 12px", borderRadius: 8, background: "var(--color-bg, #fff)", color: "var(--color-text, #222)", border: "1px solid var(--color-border, #ddd)", fontSize: 14 }}>
     {locale === "ja" ? "資料は閲覧専用 · コメントできます" : "资料仅供浏览 · 可留言交流"}
   </aside>;

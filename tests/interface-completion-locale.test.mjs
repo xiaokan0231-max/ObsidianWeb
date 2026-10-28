@@ -102,6 +102,13 @@ test("发布提示直接订阅当前语言，双语文案都能渲染", async ()
   assert.match(renderToStaticMarkup(createElement(Provider, { initialLocale: "zh-CN" }, createElement(Notice))), /资料仅供浏览 · 可留言交流/);
 });
 
+test("老师页面使用自身说明，不叠加主站语言的发布浮条", async () => {
+  for (const pathname of ["/consultation", "/feedback"]) {
+    const { PublishedReadOnlyNotice: Notice } = await loadAppModule("app/ui-locale.tsx", { stubs: { "next/navigation": { usePathname: () => pathname } } });
+    assert.equal(renderToStaticMarkup(createElement(Notice)), "");
+  }
+});
+
 test("求人の登録経路・確認状態・比較表を翻訳し、元の説明文と案件状態は保持する", async () => {
   const { toJobCard } = await import("../lib/jobs.ts");
   const job = toJobCard(note("20_求職/株式会社テスト/求人.md", { type: "job-case", company: "株式会社テスト", status: "未応募", rating: 8, origin: "ai-reco" }, `# ${originalRole}\n\n## 推荐理由\n\n${originalBody}`));
