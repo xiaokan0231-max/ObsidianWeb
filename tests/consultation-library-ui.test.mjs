@@ -3,7 +3,6 @@ import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
-import { consultationPage } from "../lib/consultation-pagination.ts";
 
 const companies = Array.from({ length: 7 }, (_, index) => ({
   id: `company-${index}`, company: `株式会社テスト${index + 1}`, latestDate: `2026-10-${String(index + 1).padStart(2, "0")}`, outcome: "不採用",
@@ -20,7 +19,7 @@ function transcript(patch = {}) {
   ] }], raw: "質問の原始転写\n回答の原始転写", notice: "文字起こしは原音未確認です。", ...patch };
 }
 
-test("老师入口默认日语，七家公司保留总量并分页呈现，岗位保留当前状态和应募日期", async () => {
+test("老师入口默认日语，七家公司完整呈现，每个岗位保留当前状态和应募日期", async () => {
   const { ConsultationLibrary } = await loadAppModule("app/consultation/consultation-view.tsx");
   const initial = structuredClone(catalog);
   initial.companies[6].applications.push({ id: "second-role", position: "品質エンジニア", status: "面接中", appliedOn: "2026-09-15", updatedOn: "2026-10-07", channel: "直接応募" });
@@ -30,18 +29,9 @@ test("老师入口默认日语，七家公司保留总量并分页呈现，岗�
   assert.match(html, /選考の進み方/);
   assert.match(html, /現在の選考状況/);
   assert.match(html, /読める原稿/);
-  assert.match(html, /面接相談の資料/);
+  assert.match(html, /次の一歩へ。/);
   assert.doesNotMatch(html, /consultation-guide|consultation-feedback-help/);
-  for (const company of companies.slice(1)) assert.ok(html.includes(company.company), company.company);
-  assert.doesNotMatch(html, /株式会社テスト1/);
-  assert.equal((html.match(/class="consultation-company-row"/g) ?? []).length, 6);
-  assert.match(html, /1–6 \/ 7/);
-  assert.match(html, /1 \/ 2 ページ/);
-  assert.match(html, /aria-label="2ページ目"/);
-  assert.match(html, /<button>次へ →<\/button>/);
-  const sorted = [...initial.companies].sort((left, right) => right.latestDate.localeCompare(left.latestDate));
-  assert.deepEqual(consultationPage(sorted, 2).items.map(company => company.id), [companies[0].id]);
-  assert.equal(consultationPage(sorted, 2).total, 7);
+  for (const company of companies) assert.ok(html.includes(company.company), company.company);
   assert.match(html, /品質エンジニア/);
   assert.match(html, /面接中/);
   assert.match(html, /2026\.09\.15/);
@@ -86,8 +76,6 @@ test("记忆重构在企业入口和原稿详情都明确标识，不冒充录�
   const { ConsultationLibrary, ConsultationTranscriptReader } = await loadAppModule("app/consultation/consultation-view.tsx");
   const initial = structuredClone(catalog);
   initial.sessions[0].recordKind = "memory";
-  initial.companies = [initial.companies[0]];
-  initial.sessions = [initial.sessions[0]];
   const libraryHtml = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial }));
   assert.match(libraryHtml, /記憶から再構成/);
   assert.match(libraryHtml, /最新の記録を読む/);
@@ -153,8 +141,6 @@ test("公司标记历史终面和通过进展，原稿明确标示本轮结果",
   const initial = structuredClone(catalog);
   initial.companies[0].reachedFinal = true;
   initial.companies[0].hasPassedInterview = true;
-  initial.companies = [initial.companies[0]];
-  initial.sessions = [initial.sessions[0]];
   const html = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial }));
   assert.match(html, /最終面接に進行/);
   assert.match(html, /面接通過あり/);

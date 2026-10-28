@@ -70,7 +70,7 @@ test("未登录也能发现每段的评论按钮和首次引导，但不出现�
   const library = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial: catalog }));
   assert.match(library, /使い方/);
   assert.match(library, /コメント・返信/);
-  assert.match(library, /面接相談の資料/);
+  assert.match(library, /次の一歩へ。/);
   assert.match(library, /data-tour="help-entry"/);
   assert.match(library, /data-tour="feedback-entry"/);
   assert.match(library, /data-tour="materials"/);
