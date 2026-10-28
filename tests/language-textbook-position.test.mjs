@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createContext } from "react";
 import { languageChapterHref } from "../lib/language-textbook.ts";
 import { normalizeTextbookPosition, resolveTextbookPosition, textbookChapterLink, textbookPositionKey } from "../lib/language-textbook-position.ts";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
@@ -46,7 +47,7 @@ test("真实位置写入覆盖换章返回、刷新、back 与过期 effect，�
   try {
     const hooks = await loadAppModule("app/use-textbook-position.ts", {
       globals: { window: fakeWindow },
-      stubs: { react: { useCallback: callback => callback, useSyncExternalStore: (_subscribe, snapshot) => snapshot(), useEffect: effect => effects.push(effect) } },
+      stubs: { react: { createContext, useContext: () => undefined, useCallback: callback => callback, useSyncExternalStore: (_subscribe, snapshot) => snapshot(), useEffect: effect => effects.push(effect) } },
     });
     const render = id => hooks.useTextbookPosition(id, ["a", "b"], learningModule);
     const [, selectA] = render("a");

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createElement } from "react";
+import { createContext, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { buildUserActions } from "../lib/user-actions.ts";
 import { ConflictError } from "../lib/client-api.ts";
@@ -43,7 +43,7 @@ async function interactive({ entry = todo(), notes = [job, entry], locale = "zh-
   let cursor = 0, refCursor = 0;
   const states = [], refs = [], opened = [], written = [], messages = [];
   const componentModule = await loadAppModule("app/user-actions-view.tsx", { stubs: {
-    react: { useEffect() {}, useMemo: (fn) => fn(), useState(initial) { const slot = cursor++; if (!(slot in states)) states[slot] = typeof initial === "function" ? initial() : initial; return [states[slot], (next) => { states[slot] = typeof next === "function" ? next(states[slot]) : next; }]; }, useRef(initial) { const slot = refCursor++; return refs[slot] ??= { current: initial }; } },
+    react: { createContext, useContext: () => undefined, useSyncExternalStore: (_subscribe, snapshot) => snapshot(), useEffect() {}, useMemo: (fn) => fn(), useState(initial) { const slot = cursor++; if (!(slot in states)) states[slot] = typeof initial === "function" ? initial() : initial; return [states[slot], (next) => { states[slot] = typeof next === "function" ? next(states[slot]) : next; }]; }, useRef(initial) { const slot = refCursor++; return refs[slot] ??= { current: initial }; } },
     "./ui-locale": { useUiLocale: () => ({ locale }) }, "@/lib/client-api": { postJson, ConflictError },
   } });
   let currentItem = Object.values(buildUserActions(notes, today)).flat().find((item) => item.note.path === entry.path);
@@ -82,6 +82,7 @@ async function interactivePage({ search = "", notes = mixed() } = {}) {
     window, document: { getElementById: (id) => ({ focus: () => focused.push(id) }) },
   }, stubs: {
     react: {
+      createContext, useContext: () => undefined, useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
       useMemo: (fn) => fn(),
       useState(initial) { const slot = cursor++; if (!(slot in states)) states[slot] = typeof initial === "function" ? initial() : initial; return [states[slot], (next) => { states[slot] = typeof next === "function" ? next(states[slot]) : next; }]; },
       useRef(initial) { const slot = refCursor++; return refs[slot] ??= { current: initial }; },

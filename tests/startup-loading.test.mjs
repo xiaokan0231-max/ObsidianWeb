@@ -64,3 +64,19 @@ test("非时间线首屏不扫描全文派生统计，时间线仍在需要时�
   assert.deepEqual(derivedCalls[0].notes, []);
   assert.ok(derivedCalls[0].now instanceof Date);
 });
+
+test("刷新日历时服务端保留请求月份和周视图，重复参数不丢失", async () => {
+  const { default: Section } = await loadAppModule("app/[section]/[[...rest]]/page.tsx", {
+    stubs: { "next/navigation": { notFound() { throw new Error("not found"); }, redirect() { throw new Error("redirect"); } } },
+  });
+  const render = (search) => Section({ params: Promise.resolve({ section: "calendar" }), searchParams: Promise.resolve(search) });
+  const month = await render({ month: "2026-07", tag: ["甲", "乙"], omitted: undefined });
+  const shell = month.props.children.find((child) => child.props.initialView);
+  assert.deepEqual([...new URLSearchParams(shell.props.initialSearch)], [["month", "2026-07"], ["tag", "甲"], ["tag", "乙"]]);
+  assert.match(renderToStaticMarkup(month), /2026年7月/);
+  const week = await render({ month: "2026-07", calview: "week", calweek: "2026-07-06" });
+  const html = renderToStaticMarkup(week);
+  assert.match(html, /class="calendar-week-view"/);
+  assert.match(html, /7月6日 – 12日/);
+  assert.doesNotMatch(html, /role="grid"/);
+});

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { createElement } from "react";
+import { createContext, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { buildRecentProgress } from "../lib/recent-progress.ts";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
@@ -49,7 +49,7 @@ async function interactive(search = "", pathname = "/activity", inputNotes = not
     back() { if (index === 0) return; index--; locate(stack[index].url); for (const fn of listeners.get("popstate") || []) fn(); },
   };
   const viewModule = await loadAppModule("app/recent-progress-view.tsx", { stubs: {
-    react: { useLayoutEffect() {}, useMemo: (fn) => fn(), useState(initial) { const slot = cursor++; if (!(slot in states)) states[slot] = typeof initial === "function" ? initial() : initial; return [states[slot], (next) => { states[slot] = typeof next === "function" ? next(states[slot]) : next; }]; },
+    react: { createContext, useContext: () => undefined, useSyncExternalStore: (_subscribe, snapshot) => snapshot(), useLayoutEffect() {}, useMemo: (fn) => fn(), useState(initial) { const slot = cursor++; if (!(slot in states)) states[slot] = typeof initial === "function" ? initial() : initial; return [states[slot], (next) => { states[slot] = typeof next === "function" ? next(states[slot]) : next; }]; },
       useRef(initial) { const slot = refCursor++; return refs[slot] ??= { current: initial }; },
       useEffect(fn, deps) { const slot = effectCursor++; if (!effects[slot] || deps.some((value, i) => !Object.is(value, effects[slot].deps[i]))) { effects[slot]?.cleanup?.(); effects[slot] = { deps }; pending.push(() => { effects[slot].cleanup = fn(); }); } },
     }, "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) },

@@ -1,6 +1,27 @@
 "use client";
 
-import { useEffect, useEffectEvent, useState, type SetStateAction } from "react";
+import { createContext, createElement, useContext, useEffect, useEffectEvent, useState, useSyncExternalStore, type ReactNode, type SetStateAction } from "react";
+
+const UrlSearchContext = createContext<string | undefined>(undefined);
+const subscribeInitialSearch = () => () => {};
+
+function browserSearch() {
+  return typeof window === "undefined" ? "" : window.location.search;
+}
+
+/** 服务端把请求参数带到客户端，翻月或切换周视图后的刷新不能先画默认页。 */
+export function UrlSearchProvider({ initialSearch, children }: { initialSearch: string; children: ReactNode }) {
+  return createElement(UrlSearchContext.Provider, { value: initialSearch }, children);
+}
+
+/**
+ * 水合首帧沿用同一个请求快照；站内切页新挂载的组件则读当前地址。
+ * 这里只给 useState 提供初值，后续前进／后退仍由各调用方现有的监听器负责。
+ */
+export function useInitialUrlSearch() {
+  const initialSearch = useContext(UrlSearchContext);
+  return useSyncExternalStore(subscribeInitialSearch, browserSearch, () => initialSearch ?? browserSearch());
+}
 
 /*
  * 页内状态（标签・筛选・选中项）放进 URL。
@@ -74,13 +95,17 @@ export function useUrlState<T>(
   codec: UrlStateCodec<T>,
   { enabled = true }: { enabled?: boolean } = {},
 ): [T, (next: SetStateAction<T>) => void] {
+  const initialSearch = useInitialUrlSearch();
   const serialize = codec.serialize ?? ((value: T) => String(value));
   const readFromUrl = (): T => {
     const raw = readUrlParam(key);
     if (raw === null) return fallback;
     return codec.parse(raw) ?? fallback;
   };
-  const [value, setValue] = useState<T>(() => (enabled ? readFromUrl() : fallback));
+  const [value, setValue] = useState<T>(() => {
+    const raw = enabled ? new URLSearchParams(initialSearch).get(key) : null;
+    return raw === null ? fallback : codec.parse(raw) ?? fallback;
+  });
 
   // 依赖用序列化后的字符串：调用方的 fallback / codec 常是内联字面量，按引用比较会每次渲染都写一遍 URL。
   const encoded = serialize(value);

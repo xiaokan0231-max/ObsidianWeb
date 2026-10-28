@@ -9,7 +9,7 @@ import CalendarApplicationPanel, { CalendarApplicationTrigger, ApplicationProgre
 import { buildCalendarEventOrigins, type CalendarEventOrigin } from "@/lib/calendar-event-origin";
 import { CalendarOriginBadge, CalendarOriginLegend } from "./calendar-origin-badge";
 import { CountUp } from "./count-up";
-import { enumCodec, useUrlState, type UrlStateCodec } from "./use-url-state";
+import { enumCodec, useInitialUrlSearch, useUrlState, type UrlStateCodec } from "./use-url-state";
 import { isTypingTarget } from "@/lib/keyboard";
 import { calendarMonthDays } from "@/lib/calendar-month";
 import { buildCalendarWeek, calendarWeekDays, calendarWeekRangeLabel, calendarWeekStart, jstClock, minutesLabel, stepWeekSelection } from "@/lib/calendar-week";
@@ -385,8 +385,9 @@ function CalendarView({
   const { locale } = useUiLocale();
   const copy = CALENDAR_COPY[locale];
   const sectionRef = useRef<HTMLElement>(null);
+  const initialSearch = useInitialUrlSearch();
   const [month, setMonth] = useState(() => {
-    const requested = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("month") ?? "";
+    const requested = new URLSearchParams(initialSearch).get("month") ?? "";
     return /^20\d{2}-\d{2}$/.test(requested) ? monthOf(`${requested}-01`) : monthOf(today);
   });
   // 只记录用户翻月的方向；首次进入不带方向，入场交给视图转场，不和月格滑入叠在一起。

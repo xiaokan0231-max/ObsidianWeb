@@ -38,7 +38,7 @@ import {
   type NavIconName,
 } from "./navigation";
 import { useUndoFlash, UndoFlashBar } from "./undo-flash";
-import { notifyUrlChange, SHELL_URL_KEYS } from "./use-url-state";
+import { notifyUrlChange, SHELL_URL_KEYS, UrlSearchProvider, useInitialUrlSearch } from "./use-url-state";
 import { describeConnectionError } from "@/lib/connection-error";
 import { postJson } from "@/lib/client-api";
 import { createVaultReader, type VaultReadOptions } from "@/lib/vault-reader";
@@ -460,7 +460,8 @@ function useQuickDueBadge(loaded: boolean, viewRef: { readonly current: string }
   return { quickDue, onQuickSummary };
 }
 
-function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
+function MemoryAtlasContent({ initialView = "calendar" }: { initialView?: AppView }) {
+  const initialSearch = useInitialUrlSearch();
   const { locale, setLocale } = useUiLocale();
   const { theme, setTheme } = useUiTheme();
   const ui = SHELL_MESSAGES[locale];
@@ -479,9 +480,7 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
     start: (update) => startViewTransition(document, update, document.documentElement),
     scheduler: { wait: (ms) => new Promise<void>((resolve) => window.setTimeout(resolve, ms)) },
   }));
-  const [interviewRouteSearch, setInterviewRouteSearch] = useState(() =>
-    typeof window === "undefined" ? "" : window.location.search,
-  );
+  const [interviewRouteSearch, setInterviewRouteSearch] = useState(initialSearch);
   const [interviewRouteVersion, setInterviewRouteVersion] = useState(0);
   const interviewNavigation = useRef("");
   // 本场面试を残したまま、その上に全幅で開く回答库カード
@@ -501,10 +500,10 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
   const statsTimer = useRef<number | null>(null);
   // 写回后的「已改为 X · 撤销」全壳只有一条；各页拿到的是稳定的 show。
   const [selectedPath, setSelectedPath] = useState<string | null>(() =>
-    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("note"),
+    new URLSearchParams(initialSearch).get("note"),
   );
   const [selectedSection, setSelectedSection] = useState<string | null>(() =>
-    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("section"),
+    new URLSearchParams(initialSearch).get("section"),
   );
   // 详情・场景阅读层先播退场再走原来的关闭逻辑；退场途中换了篇就取消（见 lib/exit-transition.ts）。
   const { exiting: noteExiting, exit: exitNote } = useExitTransition(selectedPath);
@@ -515,13 +514,12 @@ function MemoryAtlas({ initialView = "calendar" }: { initialView?: AppView }) {
    * 这个 state 只服务资料库自己的搜索框。
    */
   const [libraryQuery, setLibraryQuery] = useState(() =>
-    typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("q") ?? "",
+    new URLSearchParams(initialSearch).get("q") ?? "",
   );
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [groupFilter, setGroupFilter] = useState<GroupKey | "all">(() => {
-    if (typeof window === "undefined") return "all";
-    const group = new URLSearchParams(window.location.search).get("group");
+    const group = new URLSearchParams(initialSearch).get("group");
     return group === "all" || (group !== null && group in GROUPS)
       ? group as GroupKey | "all"
       : "all";
@@ -2007,4 +2005,6 @@ function ConnectionError({ error, onRetry }: { error: string; onRetry: () => voi
   );
 }
 
-export default MemoryAtlas;
+export default function MemoryAtlas({ initialView = "calendar", initialSearch = "" }: { initialView?: AppView; initialSearch?: string }) {
+  return <UrlSearchProvider initialSearch={initialSearch}><MemoryAtlasContent initialView={initialView} /></UrlSearchProvider>;
+}

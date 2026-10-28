@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { loadAppModule } from "./helpers/render-tsx.mjs";
 import {
   enumCodec,
   readUrlParam,
@@ -91,6 +94,58 @@ test("textCodec 原样接收任意字符串", () => {
   assert.equal(textCodec.parse("p07"), "p07");
   assert.equal(textCodec.parse(""), "");
   assert.equal(textCodec.parse("全部"), "全部");
+});
+
+function renderUrlProbe(urlModule, initialSearch) {
+  function Probe() {
+    const search = urlModule.useInitialUrlSearch();
+    const [mode] = urlModule.useUrlState("calview", "month", urlModule.enumCodec(["month", "week"]));
+    const [week] = urlModule.useUrlState("calweek", "", urlModule.textCodec);
+    return React.createElement("output", { "data-mode": mode, "data-week": week }, search);
+  }
+  return renderToStaticMarkup(React.createElement(urlModule.UrlSearchProvider, { initialSearch }, React.createElement(Probe)));
+}
+
+test("请求参数作为 SSR 和水合首帧的共同快照，不受浏览器另一份地址影响", async () => {
+  const requestSearch = "?month=2026-11&calview=week&calweek=2026-11-02";
+  const server = await loadAppModule("app/use-url-state.ts", { globals: { window: undefined } });
+  const serverHtml = renderUrlProbe(server, requestSearch);
+  assert.match(serverHtml, /data-mode="week" data-week="2026-11-02"/);
+  assert.match(serverHtml, /month=2026-11/);
+
+  // React 水合时调用 getServerSnapshot；显式模拟这一帧，防止恢复成直接读 window 的初始化。
+  const hydration = await loadAppModule("app/use-url-state.ts", {
+    globals: { window: { location: { search: "?month=2026-10&calview=month" } } },
+    stubs: { react: { ...React, useSyncExternalStore: (_subscribe, _getSnapshot, getServerSnapshot) => getServerSnapshot() } },
+  });
+  assert.equal(renderUrlProbe(hydration, requestSearch), serverHtml);
+});
+
+test("站内切页新挂载时读取当前地址，不沿用首次请求的旧参数", async () => {
+  const urlModule = await loadAppModule("app/use-url-state.ts", {
+    globals: { window: { location: { search: "?month=2026-12&calview=week&calweek=2026-12-07" } } },
+    stubs: { react: { ...React, useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot() } },
+  });
+  const html = renderUrlProbe(urlModule, "?month=2026-11&calview=month");
+  assert.match(html, /data-mode="week" data-week="2026-12-07"/);
+  assert.match(html, /month=2026-12/);
+});
+
+test("带周视图参数刷新后首次写回保留月份、其它参数、hash 和 history.state", async () => {
+  const effects = [];
+  const urlModule = await loadAppModule("app/use-url-state.ts", {
+    stubs: { react: { ...React, useEffect: (effect) => { effects.push(effect); }, useEffectEvent: (callback) => callback } },
+  });
+  withFakeWindow("/calendar?month=2026-11&calview=week&calweek=2026-11-02&note=example.md#day", (fake, calls) => {
+    const original = { ...fake.location };
+    renderUrlProbe(urlModule, fake.location.search);
+    // 每个 useUrlState 先注册写回，再注册前进／后退监听；这里只运行首次写回。
+    effects[0]();
+    effects[2]();
+    assert.deepEqual(fake.location, original);
+    assert.equal(calls.length, 0);
+    assert.deepEqual(fake.history.state, { __echoAppView: "timeline" });
+  });
 });
 
 // 视图的键与外壳的键同名时，两边会互相覆盖（例如关系图若用 q，就会和外壳的全局检索打架）。

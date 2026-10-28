@@ -44,7 +44,7 @@ test('Japanese interface translates point and partial labels while preserving so
 });
 
 test('the actual native scored event button dispatches the exact interview target; no extra button changes touch/keyboard behavior',async()=>{
- const opened=[];const fake={...React,useState(initial){return [typeof initial==='function'?initial():initial,()=>{}];},useMemo(fn){return fn();},useRef(initial){return {current:initial};},useEffect(){},useLayoutEffect(){},useCallback(fn){return fn;},useEffectEvent(fn){return fn;}};
+ const opened=[];const fake={...React,useContext(){return null;},useSyncExternalStore(_subscribe,read){return read();},useState(initial){return [typeof initial==='function'?initial():initial,()=>{}];},useMemo(fn){return fn();},useRef(initial){return {current:initial};},useEffect(){},useLayoutEffect(){},useCallback(fn){return fn;},useEffectEvent(fn){return fn;}};
  const c=await load('?month=2026-09','zh-CN',fake);const component=c.default.type??c.default;
  const tree=component({...props,onInterview:e=>opened.push(e.id)});
  function walk(node){if(!React.isValidElement(node))return [];return [node,...React.Children.toArray(node.props.children).flatMap(walk)];}

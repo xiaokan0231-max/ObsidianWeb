@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createElement } from "react";
+import { createContext, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
@@ -21,7 +21,7 @@ test("进展与事项共用标题，保留两种浏览入口且不再挂常驻�
 
 test("工作区切换走应用导航，修饰点击保留浏览器的打开行为", async () => {
   const navigated = [];
-  const interactive = await loadAppModule("app/progress-workspace.tsx", { stubs: { react: { useMemo: (fn) => fn() }, "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) } } });
+  const interactive = await loadAppModule("app/progress-workspace.tsx", { stubs: { react: { createContext, useContext: () => undefined, useSyncExternalStore: (_subscribe, snapshot) => snapshot(), useMemo: (fn) => fn() }, "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) } } });
   const tree = interactive.default({ ...props, onNavigate: (view) => navigated.push(view) });
   const walk = (value) => !value || typeof value !== "object" ? [] : Array.isArray(value) ? value.flatMap(walk) : [value, ...walk(value.props?.children)];
   const link = walk(tree).find((node) => node.type === "a" && node.props.href === "/actions");

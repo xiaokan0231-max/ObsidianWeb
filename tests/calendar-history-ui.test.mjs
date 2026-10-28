@@ -45,7 +45,7 @@ async function interactive() {
   const target = { view: "review", path: historyNotes[0].path, sourcePath: historyNotes[0].path, company: historyNotes[0].frontmatter.company, date: historyNotes[0].frontmatter.date, label: "一次面接", caseId: "" };
   const viewModule = await loadAppModule("app/calendar-view.tsx", {
     stubs: { react: { memo: (component) => component, useMemo: (fn) => fn(), useEffect() {}, useLayoutEffect() {}, useRef(initial) { return refs[refCursor++] ??= { current: initial }; }, useState(initial) { const slot = cursor++; if (!(slot in states)) states[slot] = typeof initial === "function" ? initial() : initial; return [states[slot], (next) => { states[slot] = typeof next === "function" ? next(states[slot]) : next; }]; } },
-      "./use-url-state": { enumCodec: (values) => ({ parse: (raw) => values.includes(raw) ? raw : null }), useUrlState: (key, initial) => [initial, () => {}] },
+      "./use-url-state": { enumCodec: (values) => ({ parse: (raw) => values.includes(raw) ? raw : null }), useInitialUrlSearch: () => "?month=2026-07", useUrlState: (key, initial) => [initial, () => {}] },
       "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) },
     }, globals: { window: { location: { search: "?month=2026-07" } } },
   });

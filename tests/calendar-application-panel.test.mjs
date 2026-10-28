@@ -40,7 +40,7 @@ async function harness(exportName, initialProps, { locale = "zh-CN", file = "app
         useRef(initial) { const slot = refCursor++; return refs[slot] ??= { current: initial }; }, useEffect: effect, useLayoutEffect: effect, useMemo: fn => fn() },
       "./ui-locale": { useUiLocale: () => ({ locale }) },
       "react-dom": { createPortal: (children, target) => { assert.equal(target, portalBody); return children; } },
-      "./use-url-state": { enumCodec: () => ({}), useUrlState: (key, fallback) => [browser.location.searchParams.get(key) ?? fallback, () => {}] },
+      "./use-url-state": { enumCodec: () => ({}), useInitialUrlSearch: () => browser.location.search, useUrlState: (key, fallback) => [browser.location.searchParams.get(key) ?? fallback, () => {}] },
     },
   });
   const Component = components[exportName];

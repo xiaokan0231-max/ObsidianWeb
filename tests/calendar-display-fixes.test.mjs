@@ -197,7 +197,7 @@ test("代投入口只在面板开着时屏蔽翻页键；关闭后焦点留在�
           return [states[slot], (next) => { states[slot] = typeof next === "function" ? next(states[slot]) : next; }];
         },
       },
-      "./use-url-state": { enumCodec: (values) => ({ parse: (raw) => values.includes(raw) ? raw : null }), useUrlState: (key, initial) => [initial, () => {}] },
+      "./use-url-state": { enumCodec: (values) => ({ parse: (raw) => values.includes(raw) ? raw : null }), useInitialUrlSearch: () => browser.location.search, useUrlState: (key, initial) => [initial, () => {}] },
       "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) },
     },
   });
