@@ -86,7 +86,7 @@ export function TeacherTour({ mode = "library", active = true, locale = "ja", on
     setDismissed(true); onCloseRef.current?.();
     if (useNow) requestAnimationFrame(() => {
       const target = findTarget(mode === "reader" ? '[data-tour="paragraph-comment"]' : mode === "library" ? '[data-tour="open-transcript"]' : '[data-tour="new-question"], .feedback-login input');
-      target?.scrollIntoView({ block: "center", behavior: "instant" }); target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); target?.focus({ preventScroll: true });
     });
   }, [mode]);
   const visible = active && mounted && !dismissed;
@@ -130,7 +130,7 @@ export function TeacherTour({ mode = "library", active = true, locale = "ja", on
     const target = stage >= 0 && stage < steps.length ? findTarget(steps[stage].target) : null;
     if (target) {
       const rect = target.getBoundingClientRect();
-      if (rect.top < 100 || rect.bottom > window.innerHeight - 30) target.scrollIntoView({ block: rect.height > 244 ? "start" : "center", behavior: "instant" });
+      if (rect.top < 100 || rect.bottom > window.innerHeight - 30 || rect.left < 12 || rect.right > window.innerWidth - 12) target.scrollIntoView({ block: rect.height > 244 ? "start" : "center", inline: "center", behavior: "instant" });
     }
     measure();
     const observer = new ResizeObserver(measure);
