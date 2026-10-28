@@ -26,7 +26,7 @@
   --on-fill: #ffffff;
   color-scheme: light;
   height: 100dvh;
-  min-width: 1080px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: var(--paper);
