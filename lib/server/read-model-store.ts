@@ -79,6 +79,29 @@ function normalizedQuery(input: LibraryQuery) {
 /** 统一的 D1 查询层；请求只读取目录或命中候选的索引文本，不把全库 Note[] 送到浏览器。 */
 export function createReadModel(db: Database) {
   const inflight = new Map<string, Promise<ReadModelStatus>>();
+  const results = new Map<string, { json: string; bytes: number }>();
+  let resultBytes = 0;
+  const resultBudget = 8_000_000;
+  function cachedResult<T>(key: string): T | undefined {
+    const cached = results.get(key);
+    if (!cached) return undefined;
+    results.delete(key); results.set(key, cached);
+    // 缓存只保存不可变的小 DTO；调用端改动返回值也不会污染下一次查询。
+    return JSON.parse(cached.json) as T;
+  }
+  function rememberResult(key: string, value: LibraryPage | SearchPage) {
+    const json = JSON.stringify(value);
+    const bytes = Math.max(json.length * 2, new TextEncoder().encode(json).byteLength) + key.length * 2 + 128;
+    if (bytes > resultBudget) return;
+    const previous = results.get(key);
+    if (previous) { results.delete(key); resultBytes -= previous.bytes; }
+    results.set(key, { json, bytes }); resultBytes += bytes;
+    while (results.size > 64 || resultBytes > resultBudget) {
+      const oldest = results.keys().next().value;
+      if (oldest === undefined) break;
+      resultBytes -= results.get(oldest)!.bytes; results.delete(oldest);
+    }
+  }
   const texts = new Map<string, string>();
   let textBytes = 0;
   const textBudget = 8_000_000;
@@ -267,6 +290,9 @@ export function createReadModel(db: Database) {
     const version = await ready(revision), normalized = normalizedQuery(input);
     const key = await readModelHash(JSON.stringify(normalized));
     const offset = decodeCursor(input.cursor, revision, key), limit = Math.max(1, Math.min(24, input.limit ?? 24));
+    const resultKey = JSON.stringify(["library", revision, tokyoParts().date, key, offset, limit]);
+    const cached = cachedResult<LibraryPage>(resultKey);
+    if (cached) return cached;
     const found = await candidates(revision, normalized.query);
     const tagged = found.filter((row) => normalized.tags.every((tag) => (JSON.parse(row.tags_json) as string[]).includes(tag)));
     const inGroup = (row: CatalogRow) => normalized.group === "all" || row.group_key === normalized.group;
@@ -285,21 +311,28 @@ export function createReadModel(db: Database) {
       : normalized.sort === "connections" ? (JSON.parse(b.card_json) as NoteCard).links - (JSON.parse(a.card_json) as NoteCard).links || b.mtime - a.mtime
       : normalized.sort === "title" ? collator.compare((JSON.parse(a.card_json) as NoteCard).title, (JSON.parse(b.card_json) as NoteCard).title) : b.mtime - a.mtime);
     const page = filtered.slice(offset, offset + limit);
-    return { revision, items: await resultCards(page, normalized.query, hits), total: filtered.length,
+    const result: LibraryPage = { revision, items: await resultCards(page, normalized.query, hits), total: filtered.length,
       nextCursor: offset + limit < filtered.length ? encodeCursor(revision, key, offset + limit) : null,
       facets: { groups, scopes, tags: tagFacet }, effectiveSort: normalized.sort, sourceUpdatedAt: version.sourceUpdatedAt, indexedAt: version.indexedAt };
+    rememberResult(resultKey, result);
+    return result;
   }
   async function search(revision: string, rawQuery = "", limit = 8, recentPaths: string[] = []): Promise<SearchPage> {
     const version = await ready(revision);
-    const found = await candidates(revision, rawQuery);
     const size = Math.max(1, Math.min(8, limit));
+    const resultKey = JSON.stringify(["search", revision, tokyoParts().date, rawQuery, size, rawQuery.trim() ? [] : [...new Set(recentPaths)]]);
+    const cached = cachedResult<SearchPage>(resultKey);
+    if (cached) return cached;
+    const found = await candidates(revision, rawQuery);
     let selected: CatalogRow[];
     if (!rawQuery.trim() && recentPaths.length) {
       const byPath = new Map(found.map((row) => [row.path, row]));
       selected = [...new Set(recentPaths)].flatMap((path) => byPath.has(path) ? [byPath.get(path)!] : []).slice(0, size);
       if (!selected.length) selected = found.sort((a, b) => b.mtime - a.mtime).slice(0, size);
     } else selected = (!rawQuery.trim() ? found.sort((a, b) => b.mtime - a.mtime) : found).slice(0, size);
-    return { revision, items: await resultCards(selected, rawQuery, undefined, true), total: found.length, sourceUpdatedAt: version.sourceUpdatedAt, indexedAt: version.indexedAt };
+    const result = { revision, items: await resultCards(selected, rawQuery, undefined, true), total: found.length, sourceUpdatedAt: version.sourceUpdatedAt, indexedAt: version.indexedAt };
+    rememberResult(resultKey, result);
+    return result;
   }
   async function resolve(revision: string, input: string, section?: string): Promise<NoteResolution> {
     await ready(revision);

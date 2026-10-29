@@ -174,3 +174,83 @@ test("完成后回收超过24小时的中断导入，保留近期续传与三个
   await model.finish("recent-building");
   assert.equal((await model.library("recent-building")).total, 2);
 });
+
+test("热资料库和搜索只校验版本，跳过目录与全文命中计算，返回值改动不污染缓存", async (t) => {
+  const storage = database(t);
+  const notes = Array.from({ length: 30 }, (_, index) => note(`30_資料/资料${index}.md`, "重复检索正文。".repeat(10), {}, [], index));
+  const { model } = await imported(storage, notes);
+  const first = await model.library("test", { query: "检索" }), expected = structuredClone(first);
+  first.items[0].title = "调用方修改";
+  const before = storage.calls.length;
+  const hot = await model.library("test", { query: "检索" });
+  assert.deepEqual(hot, expected);
+  assert.equal(storage.calls.length, before + 1);
+  assert.match(storage.calls.at(-1)[0].sql, /read_model_revisions/);
+  assert.doesNotMatch(storage.calls.at(-1)[0].sql, /read_model_catalog|read_model_chunks/);
+  hot.items[0].summary = "再次修改";
+  assert.deepEqual(await model.library("test", { query: "检索" }), expected);
+  const search = await model.search("test", "检索");
+  const beforeSearch = storage.calls.length;
+  assert.deepEqual(await model.search("test", "检索"), search);
+  assert.equal(storage.calls.length, beforeSearch + 1);
+  const recent = [notes[1].path, notes[0].path];
+  assert.deepEqual(paths((await model.search("test", "", 8, recent)).items), recent);
+  const recentHot = storage.calls.length;
+  await model.search("test", "", 8, recent);
+  assert.equal(storage.calls.length, recentHot + 1);
+  assert.deepEqual(paths((await model.search("test", "", 8, [...recent].reverse())).items), [...recent].reverse());
+  storage.failOn("FROM read_model_revisions");
+  await assert.rejects(model.library("test", { query: "检索" }), /数据库故障/);
+  storage.failOn(null);
+  storage.sqlite.prepare("DELETE FROM read_model_revisions WHERE revision=?").run("test");
+  await assert.rejects(model.library("test", { query: "检索" }), { status: 409 });
+  await assert.rejects(model.search("test", "检索"), { status: 409 });
+});
+
+test("结果缓存区分游标与JST日期，跨日重算行动标记", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-29T14:59:59Z") });
+  const storage = database(t);
+  const notes = Array.from({ length: 30 }, (_, index) => note(`20_求職/准备${index}.md`, "面接准备", { type: "interview-prep", next_event_at: "2026-10-29 17:00" }, [], index));
+  const { model } = await imported(storage, notes);
+  const first = await model.library("test");
+  assert.equal(first.items[0].decision.semantic, "action");
+  const next = await model.library("test", { cursor: first.nextCursor });
+  assert.equal(next.items.length, 6);
+  assert.ok(next.items.every((item) => !paths(first.items).includes(item.path)));
+  const beforeCursor = storage.calls.length;
+  assert.deepEqual(await model.library("test", { cursor: first.nextCursor }), next);
+  assert.equal(storage.calls.length, beforeCursor + 1);
+  const searchBefore = await model.search("test", "面接");
+  assert.equal(searchBefore.items[0].decision.semantic, "action");
+  t.mock.timers.tick(2_000);
+  const beforeMidnight = storage.calls.length;
+  const tomorrow = await model.library("test");
+  assert.equal(tomorrow.items[0].decision.semantic, "risk");
+  assert.ok(storage.calls.slice(beforeMidnight).flat().some(({ sql }) => sql.includes("FROM read_model_catalog")));
+  assert.equal((await model.search("test", "面接")).items[0].decision.semantic, "risk");
+});
+
+test("结果LRU最多64项，较新的结果仍命中，最旧目录结果被逐出", async (t) => {
+  const storage = database(t), { model } = await imported(storage, [note("30_資料/测试.md", "正文")]);
+  await model.library("test", { query: "最旧查询" });
+  for (let index = 0; index < 64; index++) await model.library("test", { query: `不存在${index}` });
+  const recent = storage.calls.length;
+  await model.library("test", { query: "不存在63" });
+  assert.equal(storage.calls.length, recent + 1);
+  const before = storage.calls.length;
+  await model.library("test", { query: "最旧查询" });
+  assert.ok(storage.calls.slice(before).flat().some(({ sql }) => sql.includes("FROM read_model_catalog")));
+});
+
+test("结果缓存同时受8MB约束，少于64个大键也会逐出旧结果", async (t) => {
+  const storage = database(t), { model } = await imported(storage, [note("30_資料/测试.md", "正文")]);
+  const query = (index) => `未命中${index}${"x".repeat(220_000)}`;
+  await model.search("test", query(0));
+  for (let index = 1; index < 21; index++) await model.search("test", query(index));
+  const hot = storage.calls.length;
+  await model.search("test", query(20));
+  assert.equal(storage.calls.length, hot + 1);
+  const before = storage.calls.length;
+  await model.search("test", query(0));
+  assert.ok(storage.calls.slice(before).flat().some(({ sql }) => sql.includes("FROM read_model_catalog")));
+});

@@ -41,7 +41,7 @@ test("索引每次只导入两批，当前未完整时保留上一完整资料�
   assert.equal(first.revision, "old");
   assert.equal(first.syncState, "building");
   assert.equal(runtime.states.get("new").completedBatches, 2);
-  assert.equal(runtime.requests.filter((file) => file !== "manifest.json").length, 4, "只读取两次小清单和两批索引");
+  assert.equal(runtime.requests.filter((file) => file !== "manifest.json").length, 3, "不可变清单只读取一次，其余是两批索引");
   const second = await runtime.readModelRuntime();
   assert.equal(second.revision, "old");
   assert.equal(runtime.states.get("new").completedBatches, 4);
@@ -49,6 +49,7 @@ test("索引每次只导入两批，当前未完整时保留上一完整资料�
   assert.equal(last.revision, "new");
   assert.equal(last.syncState, "ready");
   assert.equal(runtime.states.get("new").completedBatches, 5);
+  assert.equal(runtime.requests.filter((file) => file === "manifest.json").length, 1, "同一部署的多次查询复用清单");
   assert.equal(runtime.external.mock.callCount(), 0);
 });
 

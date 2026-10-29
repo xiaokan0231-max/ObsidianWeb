@@ -550,7 +550,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   const calendarModel = calendarRead.model;
   const compactCalendar = view === "calendar";
   const loading = compactCalendar ? calendarRead.loading || !calendarRead.revision && !calendarRead.error
-    : indexedInterview ? !interviewRead.ready && interviewRead.notes.length === 0 && !interviewRead.error : view === "library" ? false
+    : indexedInterview ? !interviewRead.fetchedAt && !interviewRead.error : view === "library" ? false
     : vaultState.loading || vaultState.readyScopes.size === 0 && vaultState.errors.size === 0;
   const activeScope = vaultScopeForView(view);
   const error = compactCalendar ? calendarRead.error : indexedInterview ? interviewRead.error : view === "library" ? "" : vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
@@ -562,8 +562,9 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   const fetchedAt = compactCalendar ? calendarRead.fetchedAt : indexedInterview ? interviewRead.fetchedAt : vaultState.checkedAt.get(activeScope) ?? vaultState.checkedAt.get("all") ?? null;
   // どの scope が手元に揃ったか。視図はこれで「まだ来ていない」と「本当に無い」を分ける（假空态の根）。
   const readyScopes = vaultState.readyScopes;
-  const interviewScopeReady = indexedInterview ? interviewRead.ready || interviewRead.notes.length > 0 : readyScopes.has("all") || readyScopes.has("interview");
-  const scopeReady = compactCalendar ? Boolean(calendarRead.revision) : indexedInterview ? Boolean(interviewRead.catalog) : view === "library" ? true : readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
+  // 目录可能先到，完整场次首次到齐后再挂载；刷新空正文的复盘目录也不能卸载已打开的页面。
+  const interviewScopeReady = indexedInterview ? Boolean(interviewRead.fetchedAt) : readyScopes.has("all") || readyScopes.has("interview");
+  const scopeReady = compactCalendar ? Boolean(calendarRead.revision) : indexedInterview ? Boolean(interviewRead.fetchedAt) : view === "library" ? true : readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
   const actionsReady = readyScopes.has("all") || readyScopes.has("actions");
   const activityReady = readyScopes.has("all") || readyScopes.has("activity");
   const activityError = vaultState.errors.get("activity") ?? vaultState.errors.get("all") ?? "";

@@ -7,6 +7,7 @@ type Source = { manifest: ReadModelManifest; publishedAt: string; batch(index: n
 type Model = ReturnType<typeof createReadModel>;
 const models = new WeakMap<D1Database, Model>();
 const flights = new Map<string, Promise<void>>();
+const publishedSources = new WeakMap<Fetcher, Map<string, Promise<Source>>>();
 const assetName = /^[a-f0-9]{24}\.json(?:\.gz)?$/;
 
 export class ReadModelError extends Error {
@@ -37,6 +38,12 @@ async function source(requestedRevision?: string, baseRevision?: string): Promis
   const { env } = await import("cloudflare:workers");
   const assets = env.ASSETS;
   if (!assets) throw new ReadModelError("发布资料索引不可用");
+  let cached = publishedSources.get(assets);
+  if (!cached) { cached = new Map(); publishedSources.set(assets, cached); }
+  const cacheKey = requestedRevision || "current";
+  const previous = cached.get(cacheKey);
+  if (previous) return previous;
+  const pending = (async (): Promise<Source> => {
   async function asset<T>(file: string): Promise<T> {
     if (file !== "manifest.json" && !assetName.test(file)) throw new ReadModelError("发布索引路径无效");
     const response = await assets!.fetch(new Request(`http://localhost/_published-vault/${file}`, file.endsWith(".gz") ? { headers: { "Accept-Encoding": "identity" } } : undefined));
@@ -53,13 +60,20 @@ async function source(requestedRevision?: string, baseRevision?: string): Promis
   if (requestedRevision && !index) throw new ReadModelError("资料版本已过期，请重新读取", 409);
   if (!index) throw new ReadModelError("此发布版本尚未包含资料索引");
   const manifest = await asset<ReadModelManifest>(index.manifestFile);
+  let bodyIndex: Promise<Record<string, string>> | undefined;
   return { manifest, publishedAt: published.publishedAt,
     batch: (position) => asset(index.batches[position]),
     note: async (path) => {
-      const bodies = await asset<Record<string, string>>(index.bodyIndexFile);
+      bodyIndex ??= asset<Record<string, string>>(index.bodyIndexFile).catch((error) => { bodyIndex = undefined; throw error; });
+      const bodies = await bodyIndex;
       return bodies[path] ? asset<Note>(bodies[path]) : null;
     },
   };
+  })().catch((error) => { cached!.delete(cacheKey); throw error; });
+  // 同一部署的资源不可变；只缓存目录清单，不把完整正文或索引批次留在 Worker 内存。
+  cached.set(cacheKey, pending);
+  while (cached.size > 4) cached.delete(cached.keys().next().value!);
+  return pending;
 }
 
 async function model() {
@@ -73,7 +87,7 @@ async function model() {
 /** 每次请求只导入少量已生成批次；整库构建不在 Worker 中执行。 */
 export async function warmReadModel(limit = 2) {
   const store = await model();
-  const input = await source(undefined, (await store.latest())?.revision);
+  const input = await source(undefined, process.env.OBSIDIAN_DATA_SOURCE === "published" ? undefined : (await store.latest())?.revision);
   const revision = input.manifest.revision;
   const existing = await store.status(revision);
   if (existing?.state === "ready") return { ...existing, publishedAt: input.publishedAt };
@@ -97,7 +111,7 @@ export async function warmReadModel(limit = 2) {
 export async function readModelRuntime(requestedRevision?: string | null) {
   const store = await model();
   let input: Source;
-  try { input = await source(undefined, (await store.latest())?.revision); }
+  try { input = await source(undefined, process.env.OBSIDIAN_DATA_SOURCE === "published" ? undefined : (await store.latest())?.revision); }
   catch (error) {
     const previous = requestedRevision ? await store.status(requestedRevision) : await store.latest();
     if (previous?.state === "ready") return { revision: previous.revision, model: store, sourceUpdatedAt: previous.sourceUpdatedAt, indexedAt: previous.indexedAt, syncState: "failed" };
