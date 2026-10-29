@@ -40,3 +40,15 @@ export const calendarProjectionEvents = sqliteTable("calendar_projection_events"
   index("calendar_events_revision_ordinal").on(table.revision, table.ordinal),
   index("calendar_events_revision_date").on(table.revision, table.eventDate),
 ]);
+
+export const calendarProjectionSummaries = sqliteTable("calendar_projection_summaries", {
+  revision: text("revision").notNull(),
+  asOfDate: text("as_of_date").notNull(),
+  month: text("month").notNull(),
+  companyCount: integer("company_count").notNull(),
+  positionCount: integer("position_count").notNull(),
+  bucketCountsJson: text("bucket_counts_json").notNull(),
+  waitingCount: integer("waiting_count").notNull(),
+  historicalCount: integer("historical_count").notNull(),
+  historicalTotal: integer("historical_total").notNull(),
+}, (table) => [primaryKey({ columns: [table.revision, table.asOfDate, table.month] })]);

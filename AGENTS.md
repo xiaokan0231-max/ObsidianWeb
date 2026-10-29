@@ -17,6 +17,8 @@ Next(vinext/Cloudflare Workers) 前端，**读 Obsidian vault 作为唯一数据
 - **Vault 是唯一事实正本。** 页面数据来自 `readAllNotes()` → Obsidian Local REST API；
   D1 只存可重建的日历查询投影（`db/schema.ts`），不承接事实写入、不引入第二套选考状态。
   本地与线上数据库独立，线上只从同版本已发布快照建立索引；正文仍按需读取原有分片。
+- 日历首屏统计从 D1 月度汇总读取并随 HTML 返回；详情另外加载。不要为显示一个计数读取整套日历明细。
+  汇总按资料版本与 JST 日期隔离，沿用统一的公司去重和选考状态口径。
 - `npm run dev` 会先从 Obsidian 插件配置里读 API key，不要直接跑 `dev:web`。
 
 ### 老师交流信箱

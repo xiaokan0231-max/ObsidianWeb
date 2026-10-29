@@ -1,4 +1,6 @@
 import type { CalendarSnapshot } from "../calendar-snapshot.ts";
+import { AI_APPLICATION_BUCKETS, type AiApplicationBucket } from "../calendar-applications.ts";
+import { buildCalendarPulseSummaries, type CalendarPulseSummary } from "../calendar-pulse-summary.ts";
 import { companyIdentity, getString, getType, type Note } from "../notes.ts";
 
 type Database = Pick<D1Database, "prepare" | "batch">;
@@ -20,6 +22,16 @@ type NoteRow = {
   projection_json: string;
 };
 type EventRow = { id: string; ordinal: number; event_date: string; projection_json: string };
+type SummaryRow = {
+  as_of_date: string;
+  month: string;
+  company_count: number;
+  position_count: number;
+  bucket_counts_json: string;
+  waiting_count: number;
+  historical_count: number;
+  historical_total: number;
+};
 
 const invalid = () => new Error("日历数据库投影不完整或格式无效");
 const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
@@ -61,6 +73,28 @@ function requireRevision(revision: string) {
   if (typeof revision !== "string" || !revision.trim()) throw new Error("日历发布版本不能为空");
 }
 
+function requireSummaryDate(today: string, month: string) {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(today) ? new Date(`${today}T00:00:00Z`) : null;
+  if (!date || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== today
+    || (month !== "" && !/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))) throw new Error("日历汇总日期无效");
+}
+
+function summaryFromRow(row: SummaryRow, today: string): CalendarPulseSummary {
+  const buckets: unknown = JSON.parse(row.bucket_counts_json);
+  if (row.as_of_date !== today || !count(row.company_count) || !count(row.position_count)
+    || !count(row.waiting_count) || !count(row.historical_count) || !count(row.historical_total)
+    || row.position_count < row.company_count || row.historical_count > row.historical_total
+    || !object(buckets) || Object.keys(buckets).length !== AI_APPLICATION_BUCKETS.length
+    || AI_APPLICATION_BUCKETS.some((key) => !count(buckets[key]))
+    || AI_APPLICATION_BUCKETS.reduce((total, key) => total + (buckets[key] as number), 0) !== row.company_count
+    || (row.month === "" && (row.company_count !== 0 || row.position_count !== 0))) throw invalid();
+  return {
+    today, month: row.month,
+    applications: { companyCount: row.company_count, positionCount: row.position_count, bucketCounts: buckets as Record<AiApplicationBucket, number> },
+    waitingCount: row.waiting_count, historicalCount: row.historical_count, historicalTotal: row.historical_total,
+  };
+}
+
 function rows<T>(result: D1Result<unknown>): T[] {
   if (!result?.success || !Array.isArray(result.results)) throw new Error("日历数据库读取失败");
   return result.results as T[];
@@ -72,6 +106,7 @@ function rows<T>(result: D1Result<unknown>): T[] {
  */
 export function createCalendarReadModel(db: Database) {
   const inflight = new Map<string, Promise<CalendarSnapshot>>();
+  const summaryFlights = new Map<string, Promise<void>>();
   // 发布版本内容不可变；同一 Worker 热请求不必重复跨区读取、解析整份 D1 行集。
   // 只保留最近四个版本，部署交接不会让进程内存随历史版本无限增长。
   const snapshots = new Map<string, CalendarSnapshot>();
@@ -161,5 +196,61 @@ export function createCalendarReadModel(db: Database) {
     return task;
   }
 
-  return { read, ensure };
+  async function readSummary(revision: string, today: string, month: string): Promise<CalendarPulseSummary | null> {
+    requireRevision(revision);
+    requireSummaryDate(today, month);
+    // 主键定位最多两行，不读取任何申请、日程或正文详情。
+    const results = await db.batch([db.prepare(`SELECT as_of_date, month, company_count, position_count, bucket_counts_json,
+      waiting_count, historical_count, historical_total FROM calendar_projection_summaries
+      WHERE revision = ? AND as_of_date = ? AND (month = ? OR month = '')`).bind(revision, today, month)]);
+    if (results.length !== 1) throw invalid();
+    const summaries = rows<SummaryRow>(results[0]);
+    if (summaries.length === 0) return null;
+    if (summaries.length > 2 || summaries.some((row) => row.month !== "" && row.month !== month)) throw invalid();
+    const sentinel = summaries.find((row) => row.month === "");
+    if (!sentinel) throw invalid();
+    const fallback = summaryFromRow(sentinel, today);
+    const requested = summaries.find((row) => row.month === month);
+    if (!requested) return { ...fallback, month };
+    const summary = summaryFromRow(requested, today);
+    if (summary.waitingCount !== fallback.waitingCount || summary.historicalCount !== fallback.historicalCount
+      || summary.historicalTotal !== fallback.historicalTotal) throw invalid();
+    return summary;
+  }
+
+  async function ensureSummary(revision: string, today: string, month: string, loadSnapshot: () => Promise<CalendarSnapshot>, publishedAt = ""): Promise<CalendarPulseSummary> {
+    const cached = await readSummary(revision, today, month);
+    if (cached) return cached;
+    const key = JSON.stringify([revision, today]);
+    let pending = summaryFlights.get(key);
+    if (!pending) {
+      const task = (async () => {
+        const snapshot = await ensure(revision, loadSnapshot, publishedAt);
+        const summaries = buildCalendarPulseSummaries(snapshot, today).map((summary) => ({
+          month: summary.month, company_count: summary.applications.companyCount, position_count: summary.applications.positionCount,
+          bucket_counts: summary.applications.bucketCounts, waiting_count: summary.waitingCount,
+          historical_count: summary.historicalCount, historical_total: summary.historicalTotal,
+        }));
+        // 每个发布版本、JST 日期只生成一次全部月份；单条 SQL 原子写入包含完成哨兵的整批汇总。
+        const results = await db.batch([db.prepare(`INSERT INTO calendar_projection_summaries
+          (revision, as_of_date, month, company_count, position_count, bucket_counts_json, waiting_count, historical_count, historical_total)
+          SELECT ?1, ?2, json_extract(value, '$.month'), json_extract(value, '$.company_count'), json_extract(value, '$.position_count'),
+            json_extract(value, '$.bucket_counts'), json_extract(value, '$.waiting_count'), json_extract(value, '$.historical_count'), json_extract(value, '$.historical_total')
+          FROM json_each(?3) WHERE NOT EXISTS (SELECT 1 FROM calendar_projection_summaries WHERE revision = ?1 AND as_of_date = ?2 AND month = '')
+          ON CONFLICT (revision, as_of_date, month) DO UPDATE SET company_count = excluded.company_count,
+            position_count = excluded.position_count, bucket_counts_json = excluded.bucket_counts_json,
+            waiting_count = excluded.waiting_count, historical_count = excluded.historical_count, historical_total = excluded.historical_total`)
+          .bind(revision, today, JSON.stringify(summaries))]);
+        if (results.length !== 1 || !results[0]?.success) throw new Error("日历数据库汇总失败");
+      })().finally(() => { if (summaryFlights.get(key) === task) summaryFlights.delete(key); });
+      summaryFlights.set(key, task);
+      pending = task;
+    }
+    await pending;
+    const stored = await readSummary(revision, today, month);
+    if (!stored) throw invalid();
+    return stored;
+  }
+
+  return { read, ensure, readSummary, ensureSummary };
 }

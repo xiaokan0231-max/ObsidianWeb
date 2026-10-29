@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { buildCalendarSnapshot } from "../lib/server/calendar-snapshot.ts";
 import { createCalendarReadModel } from "../lib/server/calendar-read-model.ts";
+import { buildCalendarPulseSummary, buildCalendarPulseSummaries } from "../lib/calendar-pulse-summary.ts";
 
 function database(t) {
   const sqlite = new DatabaseSync(":memory:");
@@ -198,4 +199,116 @@ test("数据库读取失败不进入热缓存，修复后同一版本可重试�
   const afterRecovery = storage.calls.length;
   assert.equal(await model.ensure("recover", async () => { throw new Error("不应重新加载"); }), restored);
   assert.equal(storage.calls.length, afterRecovery);
+});
+
+function summarySnapshot() {
+  const data = snapshot(4);
+  const applications = [
+    { case_id: "same-case", company: "株式会社テスト", applied_on: "2026-10-01", status: "応募済" },
+    { case_id: "second-case", company: "テスト", applied_on: "2026-10-02", status: "面接中" },
+    { case_id: "closed-case", company: "株式会社ダミー", applied_on: "2026-10-02", status: "不採用" },
+    { case_id: "same-case", company: "株式会社テスト", applied_on: "2026-10-03", status: "応募済" },
+    { case_id: "future-case", company: "株式会社未来テスト", applied_on: "2026-10-04", status: "応募済" },
+    { case_id: "earlier-case", company: "株式会社旧テスト", applied_on: "2026-09-30", status: "応募済" },
+  ];
+  data.applicationNotes = applications.map((fields, index) => ({ ...data.applicationNotes[0], path: `テスト/申請${index}.md`,
+    frontmatter: { ...data.applicationNotes[0].frontmatter, ...fields } }));
+  for (const [index, entry] of data.events.entries()) {
+    entry.event.date = ["2026-10-01", "2026-10-02", "2026-10-03", "2026-11-01"][index];
+    if (index < 2) entry.past.progress = { ...entry.past.progress, tone: "waiting", code: "waiting-case", ownerKey: "case:shared-owner", occurred: true };
+    if (index === 2) {
+      const progress = { ...entry.upcoming.progress, tone: "neutral", code: "unrecorded", occurred: true };
+      entry.upcoming.progress = progress;
+      entry.past.progress = progress;
+    }
+  }
+  return data;
+}
+
+test("预聚合沿用月度公司与案件去重、六桶优先级和等待历史口径", () => {
+  const data = summarySnapshot();
+  const summary = buildCalendarPulseSummary(data, "2026-10-03", "2026-10");
+  assert.deepEqual(summary, {
+    today: "2026-10-03", month: "2026-10",
+    applications: { companyCount: 2, positionCount: 3,
+      bucketCounts: { "needs-user": 0, progressing: 1, unknown: 0, waiting: 0, paused: 0, closed: 1 } },
+    waitingCount: 1, historicalCount: 1, historicalTotal: 3,
+  });
+  const all = buildCalendarPulseSummaries(data, "2026-10-03");
+  assert.deepEqual(all.map((item) => item.month), ["", "2026-09", "2026-10"]);
+  for (const item of all) assert.deepEqual(item, buildCalendarPulseSummary(data, item.today, item.month));
+});
+
+test("汇总命中只做一次小 SELECT，跨进程或未知月份也不读取明细", async (t) => {
+  const { db, calls, sqlite } = database(t);
+  const model = createCalendarReadModel(db);
+  const data = summarySnapshot();
+  const revision = "summary'); DROP TABLE calendar_projection_summaries; --";
+  assert.equal(await model.readSummary(revision, "2026-10-03", "2026-10"), null);
+  assert.deepEqual(await model.ensureSummary(revision, "2026-10-03", "2026-10", async () => data),
+    buildCalendarPulseSummary(data, "2026-10-03", "2026-10"));
+  const fresh = createCalendarReadModel(db);
+  const before = calls.length;
+  assert.deepEqual(await fresh.ensureSummary(revision, "2026-10-03", "2026-10", async () => { throw new Error("汇总命中不应加载详情"); }),
+    buildCalendarPulseSummary(data, "2026-10-03", "2026-10"));
+  assert.equal(calls.length, before + 1);
+  assert.equal(calls.at(-1).length, 1);
+  assert.match(calls.at(-1)[0].sql, /^SELECT .*as_of_date/s);
+  assert.doesNotMatch(calls.at(-1)[0].sql, /calendar_projection_notes|calendar_projection_events/);
+  const absent = await fresh.ensureSummary(revision, "2026-10-03", "2030-12", async () => { throw new Error("未知月份只读取哨兵"); });
+  assert.deepEqual(absent, buildCalendarPulseSummary(data, "2026-10-03", "2030-12"));
+  assert.equal(absent.applications.companyCount, 0);
+  assert.equal(absent.waitingCount, 1);
+  assert.equal(sqlite.prepare("SELECT count(*) AS n FROM calendar_projection_summaries WHERE revision=?").get(revision).n, 3);
+});
+
+test("跨 JST 午夜重建当天全部月汇总，前一天汇总与其他发布版本互不污染", async (t) => {
+  const { db, sqlite } = database(t);
+  const model = createCalendarReadModel(db);
+  const data = summarySnapshot();
+  const old = await model.ensureSummary("daily", "2026-10-03", "2026-10", async () => data);
+  assert.equal(await model.readSummary("daily", "2026-10-04", "2026-10"), null);
+  const next = await model.ensureSummary("daily", "2026-10-04", "2026-10", async () => { throw new Error("版本未变，可复用已验证快照"); });
+  assert.deepEqual(next, buildCalendarPulseSummary(data, "2026-10-04", "2026-10"));
+  assert.equal(old.applications.companyCount, 2);
+  assert.equal(next.applications.companyCount, 3);
+  assert.equal(next.applications.positionCount, 4);
+  assert.deepEqual(await model.readSummary("daily", "2026-10-03", "2026-10"), old);
+  assert.equal(await model.readSummary("another-version", "2026-10-04", "2026-10"), null);
+  assert.equal(sqlite.prepare("SELECT count(DISTINCT as_of_date) AS n FROM calendar_projection_summaries").get().n, 2);
+});
+
+test("同日不同月份的并发汇总只导入一次，失败可重试且无半成品哨兵", async (t) => {
+  const storage = database(t);
+  const model = createCalendarReadModel(storage.db);
+  const data = summarySnapshot();
+  let loads = 0;
+  await Promise.all(["2026-09", "2026-10", "2026-12"].map((month) =>
+    model.ensureSummary("parallel", "2026-10-03", month, async () => { loads++; return data; })));
+  assert.equal(loads, 1);
+  assert.equal(storage.calls.flat().filter(({ sql }) => sql.startsWith("INSERT INTO calendar_projection_summaries")).length, 1);
+  storage.failOn("INSERT INTO calendar_projection_summaries");
+  await assert.rejects(model.ensureSummary("parallel", "2026-10-04", "2026-10", async () => data), /数据库故障/);
+  assert.equal(await model.readSummary("parallel", "2026-10-04", "2026-10"), null);
+  storage.failOn(null);
+  assert.deepEqual(await model.ensureSummary("parallel", "2026-10-04", "2026-10", async () => data),
+    buildCalendarPulseSummary(data, "2026-10-04", "2026-10"));
+  await assert.rejects(model.readSummary("parallel", "2026-02-30", "2026-10"), /日期无效/);
+  await assert.rejects(model.readSummary("parallel", "2026-10-04", "2026-13"), /日期无效/);
+});
+
+test("汇总缺完成哨兵、坏桶计数或全局数字冲突时拒绝返回假数字", async (t) => {
+  const { db, sqlite } = database(t);
+  const model = createCalendarReadModel(db);
+  const changes = [
+    "DELETE FROM calendar_projection_summaries WHERE revision=? AND month=''",
+    "UPDATE calendar_projection_summaries SET bucket_counts_json='{}' WHERE revision=? AND month='2026-10'",
+    "UPDATE calendar_projection_summaries SET waiting_count=99 WHERE revision=? AND month='2026-10'",
+  ];
+  for (const [index, sql] of changes.entries()) {
+    const revision = `broken-summary-${index}`;
+    await model.ensureSummary(revision, "2026-10-03", "2026-10", async () => summarySnapshot());
+    sqlite.prepare(sql).run(revision);
+    await assert.rejects(model.readSummary(revision, "2026-10-03", "2026-10"), /不完整|无效/);
+  }
 });

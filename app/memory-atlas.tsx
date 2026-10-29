@@ -44,6 +44,7 @@ import { postJson } from "@/lib/client-api";
 import { createVaultReader, type VaultReadOptions } from "@/lib/vault-reader";
 import { calendarModelFromSnapshot } from "@/lib/calendar-snapshot";
 import { useCalendarSnapshot } from "./use-calendar-snapshot";
+import type { CalendarPulseSummary } from "@/lib/calendar-pulse-summary";
 import { createWikiNavigator, type WikiNavigationNotice } from "@/lib/wiki-navigation";
 import ViewErrorBoundary from "./view-error-boundary";
 import {
@@ -460,7 +461,7 @@ function useQuickDueBadge(loaded: boolean, viewRef: { readonly current: string }
   return { quickDue, onQuickSummary };
 }
 
-function MemoryAtlasContent({ initialView = "calendar" }: { initialView?: AppView }) {
+function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { initialView?: AppView; initialSummary?: CalendarPulseSummary | null }) {
   const initialSearch = useInitialUrlSearch();
   const { locale, setLocale } = useUiLocale();
   const { theme, setTheme } = useUiTheme();
@@ -1724,6 +1725,7 @@ function MemoryAtlasContent({ initialView = "calendar" }: { initialView?: AppVie
               )}
               {view === "calendar" && (
                 <CalendarView
+                  initialSummary={initialSummary}
                   model={calendarModel}
                   events={calendarEvents}
                   notes={notes}
@@ -2005,6 +2007,6 @@ function ConnectionError({ error, onRetry }: { error: string; onRetry: () => voi
   );
 }
 
-export default function MemoryAtlas({ initialView = "calendar", initialSearch = "" }: { initialView?: AppView; initialSearch?: string }) {
-  return <UrlSearchProvider initialSearch={initialSearch}><MemoryAtlasContent initialView={initialView} /></UrlSearchProvider>;
+export default function MemoryAtlas({ initialView = "calendar", initialSearch = "", initialSummary }: { initialView?: AppView; initialSearch?: string; initialSummary?: CalendarPulseSummary | null }) {
+  return <UrlSearchProvider initialSearch={initialSearch}><MemoryAtlasContent initialView={initialView} initialSummary={initialSummary} /></UrlSearchProvider>;
 }

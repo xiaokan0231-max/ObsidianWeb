@@ -80,3 +80,26 @@ test("刷新日历时服务端保留请求月份和周视图，重复参数不�
   assert.match(html, /7月6日 – 12日/);
   assert.doesNotMatch(html, /role="grid"/);
 });
+
+test("首屏 HTML 已包含月度汇总，不等待浏览器请求日历明细", async () => {
+  const calls = [];
+  const { default: Section } = await loadAppModule("app/[section]/[[...rest]]/page.tsx", {
+    stubs: {
+      "next/navigation": { notFound() { throw new Error("not found"); }, redirect() { throw new Error("redirect"); } },
+      "../../calendar-server": { calendarPulseSummary: async (month, today) => {
+        calls.push(month);
+        return { today, month, applications: { companyCount: 189, positionCount: 200,
+          bucketCounts: { "needs-user": 0, progressing: 2, unknown: 0, waiting: 60, paused: 0, closed: 127 } },
+        waitingCount: 3, historicalCount: 10, historicalTotal: 34 };
+      } },
+    },
+  });
+  const tree = await Section({ params: Promise.resolve({ section: "calendar" }), searchParams: Promise.resolve({ month: "2026-08" }) });
+  const html = renderToStaticMarkup(tree);
+  const pulse = html.slice(html.indexOf('class="calendar-pulse"'), html.indexOf('class="calendar-layout"'));
+  assert.match(pulse, /<strong>189<\/strong>/);
+  assert.doesNotMatch(pulse, /skeleton|正在读取申请记录/);
+  assert.deepEqual(calls, ["2026-08"]);
+  await Section({ params: Promise.resolve({ section: "calendar" }), searchParams: Promise.resolve({ calview: "week", calweek: "2026-08-31", month: "2026-09" }) });
+  assert.equal(calls.at(-1), "2026-08", "周视图概况取该周周一所在月");
+});

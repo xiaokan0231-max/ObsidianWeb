@@ -22,6 +22,53 @@ const event = (id, fields) => ({
 const render = (module, props) => renderToStaticMarkup(createElement(module.default, {
   today: "2026-08-10", notes: [], events: [], interviewTargets: new Map(), onOpen() {}, onInterview() {}, ...props,
 }));
+const initialSummary = {
+  today: "2026-08-10", month: "2026-08",
+  applications: { companyCount: 189, positionCount: 201, bucketCounts: { "needs-user": 4, progressing: 11, unknown: 7, waiting: 63, paused: 5, closed: 99 } },
+  waitingCount: 6, historicalCount: 8, historicalTotal: 12,
+};
+const pulse = (html) => {
+  const region = html.match(/<div class="calendar-pulse"[\s\S]*?<div class="calendar-layout">/)?.[0];
+  assert.ok(region);
+  return region;
+};
+
+test("详情还在读取时，首屏直接展示匹配日期月份的189家公司汇总与分桶", () => {
+  for (const viewModule of [zh, ja]) {
+    const region = pulse(render(viewModule, { loading: true, initialSummary }));
+    assert.match(region, /<strong>189<\/strong><span>(?:家公司|社)<\/span>/);
+    assert.match(region, /201 (?:个岗位|求人)/);
+    assert.match(region, /data-bucket="waiting"[^>]*title="(?:等待对方|返信待ち) 63"/);
+    assert.match(region, /data-bucket="closed"[^>]*title="(?:已结束|終了) 99"/);
+    assert.match(region, /<span>(?:等回复案件|返信待ちの案件)<\/span><strong>6<\/strong>/);
+    assert.match(region, /aria-label="(?:无当前状态的历史场次 8 \/ 12 场 · 不限月份|現在の状態がない過去の予定 8 \/ 12 件 · 期間を問わず)"/);
+    assert.match(region, /<strong>8<\/strong><small>\/ 12 (?:场 · 不限月份|件 · 期間を問わず)<\/small>/);
+    assert.doesNotMatch(region, /aria-busy|calendar-stat-skeleton|正在读取申请记录|応募記録を読み込み中/);
+    assert.equal((region.match(/<button[^>]*disabled=""/g) ?? []).length, 2, "汇总可读，依赖详情的操作仍需等待");
+  }
+});
+
+test("首屏汇总日期或月份不匹配时保持骨架，周视图也以当前周所在月为准", async () => {
+  const week = await loadAppModule("app/calendar-view.tsx", {
+    stubs: noCounterAnimation, globals: { window: { location: { search: "?calview=week&calweek=2026-09-07" } } },
+  });
+  for (const [viewModule, summary] of [[zh, { ...initialSummary, today: "2026-08-09" }], [zh, { ...initialSummary, month: "2026-07" }], [week, initialSummary]]) {
+    const region = pulse(render(viewModule, { loading: true, initialSummary: summary }));
+    assert.match(region, /aria-busy="true"/);
+    assert.match(region, /calendar-stat-skeleton/);
+    assert.match(region, /正在读取申请记录/);
+    assert.doesNotMatch(region, /<strong>(?:189|0)<\/strong>|data-bucket=/);
+  }
+});
+
+test("详情齐全后采用完整资料的当前计数，不再用首屏汇总覆盖", () => {
+  const region = pulse(render(zh, { loading: false, initialSummary }));
+  assert.match(region, /<strong>0<\/strong><span>家公司<\/span>/);
+  assert.match(region, /<span>等回复案件<\/span><strong>0<\/strong>/);
+  assert.match(region, /<span>历史状态说明<\/span><strong>0<\/strong><small>\/ 0 场/);
+  assert.match(region, /当前月份暂无已确认的 AI 代投/);
+  assert.doesNotMatch(region, /189|201|data-bucket=|disabled=""|aria-busy/);
+});
 
 test("投递概况加载时说明正在读取，不先显示零或空态", () => {
   const html = render(zh, { loading: true });

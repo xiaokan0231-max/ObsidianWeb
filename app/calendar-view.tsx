@@ -3,6 +3,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { type Note } from "@/lib/notes";
 import type { CalendarModel } from "@/lib/calendar-snapshot";
+import type { CalendarPulseSummary } from "@/lib/calendar-pulse-summary";
 import { type UiLocale } from "@/lib/ui-locale";
 import { useUiLocale } from "./ui-locale";
 import CalendarApplicationPanel, { CalendarApplicationTrigger, ApplicationProgressBar, type OpenApplicationDay } from "./calendar-application-panel";
@@ -368,6 +369,7 @@ function CalendarView({
   fetchedAt,
   onOpenCompany,
   model,
+  initialSummary,
 }: {
   events: CalendarEvent[];
   notes: Note[];
@@ -378,6 +380,7 @@ function CalendarView({
   fetchedAt?: number | null;
   onOpenCompany?: (company: string, contextNote: Note) => void;
   model?: CalendarModel | null;
+  initialSummary?: CalendarPulseSummary | null;
   /** 「今日」は殻が持つ。memo 越しなので中で求めると日付を跨いでも昨日のままになる。 */
   today: string;
 }) {
@@ -469,6 +472,13 @@ function CalendarView({
   const recent = events
     .filter((event) => event.phase === "past" || progressByEvent.get(event.id)?.occurred)
     .sort((left, right) => right.date.localeCompare(left.date) || right.time.localeCompare(left.time));
+  // 首屏汇总可先于详情到达；只借用同一天、同月份的结果，翻月或详情齐全后不能沿用旧数字。
+  const pulseSummary = loading && initialSummary?.today === today && initialSummary.month === overviewMonth ? initialSummary : null;
+  const statsLoading = loading && !pulseSummary;
+  const displayedApplications = pulseSummary?.applications ?? monthApplications;
+  const displayedWaitingCount = pulseSummary?.waitingCount ?? summary.waitingCount;
+  const displayedHistoricalCount = pulseSummary?.historicalCount ?? summary.historicalCount;
+  const displayedHistoricalTotal = pulseSummary?.historicalTotal ?? recent.length;
   const selectedEvents = selectedDay ? eventsByDate.get(selectedDay) ?? [] : [];
   const selectedApplications = selectedDay && selectedDay !== today ? applicationsByDate.get(selectedDay) : undefined;
 
@@ -640,25 +650,25 @@ function CalendarView({
   return (
     <section className="calendar-view" ref={sectionRef} data-focus-tone={focusTone || undefined}>
       <h1 className="sr-only">{copy.calendar}</h1>
-      <div className="calendar-pulse" role="region" aria-label={copy.stats} aria-busy={loading || undefined}>
+      <div className="calendar-pulse" role="region" aria-label={copy.stats} aria-busy={statsLoading || undefined}>
         <div className="calendar-month-applications">
           <div className="calendar-month-metric"><span>{copy.statMonthAi}<time>{overviewMonth}</time></span>
-            {loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : <div><strong>{monthApplications.companyCount}</strong><span>{copy.applicationCompanyUnit}</span>
-              {monthApplications.positionCount !== monthApplications.companyCount && <small> · {copy.applicationPositionCount(monthApplications.positionCount)}</small>}
+            {statsLoading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : <div><strong>{displayedApplications.companyCount}</strong><span>{copy.applicationCompanyUnit}</span>
+              {displayedApplications.positionCount !== displayedApplications.companyCount && <small> · {copy.applicationPositionCount(displayedApplications.positionCount)}</small>}
             </div>}
           </div>
           <div className="calendar-month-graphic">
-            {loading ? <p className="calendar-month-empty">{copy.applicationsLoading}</p> : monthApplications.companyCount
-              ? <ApplicationProgressBar bucketCounts={monthApplications.bucketCounts} legend="labels" />
+            {statsLoading ? <p className="calendar-month-empty">{copy.applicationsLoading}</p> : displayedApplications.companyCount
+              ? <ApplicationProgressBar bucketCounts={displayedApplications.bucketCounts} legend="labels" />
               : <p className="calendar-month-empty">{copy.monthApplicationsEmpty}</p>}
           </div>
         </div>
         <div className="calendar-pulse-actions">
           <button type="button" className="calendar-pulse-action status-waiting" aria-pressed={focusTone === "waiting"} title={copy.focusTone(copy.progress.waiting)} disabled={loading} onClick={() => toggleFocusTone("waiting")}>
-            <i className="calendar-status-dot" aria-hidden="true" /><span>{copy.statWaiting}</span>{!loading && <strong>{summary.waitingCount}</strong>}
+            <i className="calendar-status-dot" aria-hidden="true" /><span>{copy.statWaiting}</span>{!statsLoading && <strong>{displayedWaitingCount}</strong>}
           </button>
-          <button type="button" className="calendar-pulse-action status-neutral" aria-label={`${copy.statHistoricalCount} ${summary.historicalCount} ${copy.historicalScope(recent.length)}`} aria-expanded={historyExplanationOpen} aria-controls="calendar-historical-explanation" title={copy.historicalOpen} disabled={loading} onClick={() => setHistoryExplanationOpen((open) => !open)}>
-            <span>{copy.statHistorical}</span>{!loading && <><strong>{summary.historicalCount}</strong><small>{copy.historicalScope(recent.length)}</small></>}
+          <button type="button" className="calendar-pulse-action status-neutral" aria-label={`${copy.statHistoricalCount} ${displayedHistoricalCount} ${copy.historicalScope(displayedHistoricalTotal)}`} aria-expanded={historyExplanationOpen} aria-controls="calendar-historical-explanation" title={copy.historicalOpen} disabled={loading} onClick={() => setHistoryExplanationOpen((open) => !open)}>
+            <span>{copy.statHistorical}</span>{!statsLoading && <><strong>{displayedHistoricalCount}</strong><small>{copy.historicalScope(displayedHistoricalTotal)}</small></>}
           </button>
         </div>
       </div>
