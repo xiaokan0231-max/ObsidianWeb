@@ -14,6 +14,7 @@ import { buildCalendarEventOrigins, type CalendarEventOrigin } from "@/lib/calen
 import { CalendarOriginBadge, CalendarOriginLegend } from "./calendar-origin-badge";
 import { enumCodec, useInitialUrlSearch, useUrlState, type UrlStateCodec } from "./use-url-state";
 import { isTypingTarget } from "@/lib/keyboard";
+import { prefersReducedMotion } from "@/lib/motion";
 import { calendarMonthDays } from "@/lib/calendar-month";
 import { buildCalendarWeek, calendarWeekDays, calendarWeekRangeLabel, calendarWeekStart, jstClock, minutesLabel, stepWeekSelection } from "@/lib/calendar-week";
 import { buildAiApplicationDays, summarizeAiApplicationDays } from "@/lib/calendar-applications";
@@ -395,6 +396,57 @@ function CalendarView({
   const copy = CALENDAR_COPY[locale];
   const openSource = (note: Note) => projection && onOpenPath ? onOpenPath(note.path, projection.revision) : onOpen(note);
   const sectionRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || typeof section.addEventListener !== "function") return;
+    const finePointer = window.matchMedia?.("(hover: hover) and (pointer: fine)");
+    let frame = 0;
+    let active: HTMLElement | null = null;
+    // 指针反馈只更新局部 CSS 变量，不让整个月历跟着鼠标重新渲染。
+    const clear = () => {
+      cancelAnimationFrame(frame);
+      active?.style.removeProperty("--calendar-tilt-x");
+      active?.style.removeProperty("--calendar-tilt-y");
+      active = null;
+      section.querySelector<HTMLElement>(".calendar-board")?.removeAttribute("data-spotlight");
+    };
+    const move = (event: PointerEvent) => {
+      if (event.pointerType !== "mouse" || !finePointer?.matches || prefersReducedMotion()) {
+        clear();
+        return;
+      }
+      cancelAnimationFrame(frame);
+      const target = event.target instanceof Element ? event.target : null;
+      const { clientX, clientY } = event;
+      frame = requestAnimationFrame(() => {
+        const board = section.querySelector<HTMLElement>(".calendar-board");
+        if (board && target && board.contains(target)) {
+          const rect = board.getBoundingClientRect();
+          board.style.setProperty("--calendar-pointer-x", `${clientX - rect.left}px`);
+          board.style.setProperty("--calendar-pointer-y", `${clientY - rect.top}px`);
+          board.setAttribute("data-spotlight", "");
+        } else board?.removeAttribute("data-spotlight");
+        const card = target?.closest<HTMLElement>(".calendar-event-item, .agenda-item, .calendar-ai-applications") ?? null;
+        if (active !== card) {
+          active?.style.removeProperty("--calendar-tilt-x");
+          active?.style.removeProperty("--calendar-tilt-y");
+          active = card;
+        }
+        if (card) {
+          const rect = card.getBoundingClientRect();
+          card.style.setProperty("--calendar-tilt-x", `${(0.5 - (clientY - rect.top) / rect.height) * 5}deg`);
+          card.style.setProperty("--calendar-tilt-y", `${((clientX - rect.left) / rect.width - 0.5) * 5}deg`);
+        }
+      });
+    };
+    section.addEventListener("pointermove", move);
+    section.addEventListener("pointerleave", clear);
+    return () => {
+      clear();
+      section.removeEventListener("pointermove", move);
+      section.removeEventListener("pointerleave", clear);
+    };
+  }, []);
   const initialSearch = useInitialUrlSearch();
   const [month, setMonth] = useState(() => {
     const requested = new URLSearchParams(initialSearch).get("month") ?? "";

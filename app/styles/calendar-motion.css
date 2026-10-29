@@ -1,9 +1,47 @@
-/* 动效只跟随导航和局部反馈，不用循环闪动抢走日程正文的注意力。 */
+/* 操作反馈短促，概览光晕缓慢流动；正文与状态标记保持稳定。 */
 .calendar-view {
   --calendar-motion-ease: cubic-bezier(.22, 1, .36, 1);
 }
 
-.calendar-view .calendar-board { overflow: clip; }
+.calendar-view .calendar-board { position: relative; overflow: clip; }
+
+/* 光照层不接收指针，不改变卡片状态色，也不遮挡按钮。 */
+.calendar-view .calendar-board::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0;
+  background: radial-gradient(320px circle at var(--calendar-pointer-x, 50%) var(--calendar-pointer-y, 0%), color-mix(in oklab, var(--calendar-cyan) 13%, transparent), transparent 75%);
+  transition: opacity 350ms ease;
+}
+.calendar-view .calendar-board[data-spotlight]::after { opacity: 1; }
+
+.calendar-view .calendar-pulse { position: relative; isolation: isolate; overflow: hidden; }
+.calendar-view .calendar-pulse::before {
+  content: "";
+  position: absolute;
+  inset: -100%;
+  z-index: -1;
+  pointer-events: none;
+  background: conic-gradient(from 0deg, transparent 20%, color-mix(in oklab, var(--calendar-cyan) 16%, transparent), transparent 45%, color-mix(in oklab, var(--calendar-violet) 18%, transparent), transparent 80%);
+  animation: calendar-aurora-orbit 24s linear infinite;
+}
+.calendar-view :is(.calendar-event-item, .agenda-item) { position: relative; }
+.calendar-view :is(.calendar-event-item, .agenda-item, .calendar-ai-applications)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 30%, color-mix(in oklab, var(--highlight) 25%, transparent) 48%, transparent 65%);
+  background-size: 300% 100%;
+  background-position: 100% 0;
+  opacity: 0;
+}
+.calendar-view .calendar-ai-applications { position: relative; }
 
 /* 按周错开入场，最长不到半秒；不逐张动画，避免密集月份拖成长队。 */
 .calendar-view .calendar-grid {
@@ -66,11 +104,29 @@
 @media (hover: hover) and (pointer: fine) {
   .calendar-view :is(.calendar-day-select, .cw-day-select):hover { scale: 1.08; }
   .calendar-view :is(.calendar-event-item, .cw-event-shell, .agenda-item):hover { translate: 0 -3px; }
+  .calendar-view :is(.calendar-event-item, .agenda-item, .calendar-ai-applications) {
+    transform: perspective(700px) rotateX(var(--calendar-tilt-x, 0deg)) rotateY(var(--calendar-tilt-y, 0deg));
+    transition: transform 180ms ease-out, translate 220ms var(--calendar-motion-ease), box-shadow 250ms ease;
+  }
+  .calendar-view :is(.calendar-event-item, .agenda-item, .calendar-ai-applications):hover::after {
+    opacity: 1;
+    animation: calendar-card-shine 850ms ease-out both;
+  }
+  .calendar-view .calendar-day:hover {
+    background-color: color-mix(in oklab, var(--calendar-cyan) 5%, var(--surface));
+  }
+}
+
+@keyframes calendar-aurora-orbit { to { transform: rotate(360deg); } }
+@keyframes calendar-card-shine {
+  from { background-position: 100% 0; opacity: 0; }
+  25% { opacity: 1; }
+  to { background-position: 0% 0; opacity: 0; }
 }
 
 @keyframes calendar-surface-enter {
-  from { opacity: .35; transform: translateX(var(--calendar-enter-x)); }
-  to { opacity: 1; transform: translateX(0); }
+  from { opacity: .25; transform: perspective(1200px) translateX(var(--calendar-enter-x)) rotateY(-2deg) scale(.985); }
+  to { opacity: 1; transform: perspective(1200px) translateX(0) rotateY(0) scale(1); }
 }
 @keyframes calendar-row-enter {
   from { opacity: .3; transform: translateY(7px); }
@@ -108,3 +164,17 @@
   translate: none !important;
   scale: none !important;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-view :is(.calendar-event-item, .agenda-item, .calendar-ai-applications) { transform: none !important; }
+}
+:root[data-motion="reduce"] .calendar-view :is(.calendar-event-item, .agenda-item, .calendar-ai-applications) { transform: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-view .calendar-board::after,
+  .calendar-view .calendar-pulse::before,
+  .calendar-view :is(.calendar-event-item, .agenda-item, .calendar-ai-applications)::after { display: none; }
+}
+:root[data-motion="reduce"] .calendar-view .calendar-board::after,
+:root[data-motion="reduce"] .calendar-view .calendar-pulse::before,
+:root[data-motion="reduce"] .calendar-view :is(.calendar-event-item, .agenda-item, .calendar-ai-applications)::after { display: none; }
