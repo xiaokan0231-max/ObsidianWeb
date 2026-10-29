@@ -1,4 +1,4 @@
-import { buildCompanyOverviews, resolveCompanyOverviewFrom, resolveCompanyReference } from "./company-overview.ts";
+import { buildCompanyOverviews, resolveCompanyOverviewFrom, resolveCompanyReference, type CompanyOverview, type CompanySummary, type CompanyFitAssessment } from "./company-overview.ts";
 import { buildCompanyCompareCandidates, companyComparePreset } from "./company-compare.ts";
 import { buildContextPickerGroups, type ContextPickerGroup } from "./context-picker.ts";
 import { findInterviewPrepDocs, findInterviewPrepReplay, prepWikiTarget } from "./interview-prep-doc.ts";
@@ -20,6 +20,7 @@ import { selectionNoticesForSession, type SelectionNotice } from "./selection-no
 export const INTERVIEW_RECORDS = {
   catalog: "interview-catalog", context: "interview-context", review: "interview-review",
   block: "interview-review-block", section: "interview-review-section", practice: "interview-practice",
+  company: "interview-company",
 } as const;
 
 /** 目录引用不能加入完整正文缓存；它没有 content，也不冒充 Note。 */
@@ -55,6 +56,12 @@ export type InterviewContext = {
   kind: "interview-context"; source: InterviewSourceRef; contextPath: string | null;
   /** 只取本轮原稿、对照稿、明确的公司材料及实际嵌入依赖。 */
   paths: string[];
+};
+/** 公司图景在完整资料上验证；证据只保留引用，不能为了验证存在而下载所有证据正文。 */
+export type InterviewCompanyProjection = Omit<CompanyOverview, "kind" | "note" | "dossier" | "summary" | "assessment"> & {
+  kind: "interview-company"; contextKind: CompanyOverview["kind"]; sourcePath: string; dossierPath: string | null;
+  summary: { sourcePath: string; data: Omit<CompanySummary, "note"> } | null;
+  assessment: { sourcePath: string; data: Omit<CompanyFitAssessment, "note"> } | null;
 };
 export type InterviewSentenceIndex = Pick<ReviewSentence, "id" | "speaker" | "uncertainSpeaker"> & {
   errors: Pick<ReviewSentence["errors"][number], "index" | "kind" | "pattern">[]; goCount: number;
@@ -95,6 +102,29 @@ export function interviewSourceRef(note: Note): InterviewSourceRef {
 }
 const sourceRef = interviewSourceRef;
 
+export function projectInterviewCompany(context: CompanyOverview): InterviewCompanyProjection {
+  const { kind, note, dossier, summary, assessment, ...fields } = context;
+  const summaryFields = summary ? (({ note, ...data }) => ({ data, sourcePath: note.path }))(summary) : null;
+  const assessmentFields = assessment ? (({ note, ...data }) => ({ data, sourcePath: note.path }))(assessment) : null;
+  return { ...fields, kind: "interview-company", contextKind: kind, sourcePath: note.path, dossierPath: dossier?.path ?? null,
+    summary: summaryFields, assessment: assessmentFields };
+}
+
+/** 只用真正取回的完整笔记还原 Note 字段；目录和证据引用不会冒充正文。 */
+export function hydrateInterviewCompany(projection: InterviewCompanyProjection, notes: Note[]): CompanyOverview | null {
+  const byPath = new Map(notes.map((note) => [note.path, note]));
+  const note = byPath.get(projection.sourcePath);
+  const dossier = projection.dossierPath ? byPath.get(projection.dossierPath) : null;
+  const summaryNote = projection.summary ? byPath.get(projection.summary.sourcePath) : null;
+  const assessmentNote = projection.assessment ? byPath.get(projection.assessment.sourcePath) : null;
+  if (!note || (projection.dossierPath && !dossier) || (projection.summary && !summaryNote) || (projection.assessment && !assessmentNote)) return null;
+  return { key: projection.key, kind: projection.contextKind, company: projection.company, title: projection.title, caseId: projection.caseId,
+    profile: projection.profile, profileStatus: projection.profileStatus, summaryStatus: projection.summaryStatus, assessmentStatus: projection.assessmentStatus,
+    issues: projection.issues, note, dossier: dossier ?? null,
+    summary: projection.summary && summaryNote ? { ...projection.summary.data, note: summaryNote } : null,
+    assessment: projection.assessment && assessmentNote ? { ...projection.assessment.data, note: assessmentNote } : null };
+}
+
 function reassessment(notes: Note[], path: string) {
   return notes.filter((note) => getType(note) === "ai-report" && note.frontmatter.report_kind === "interview-reassessment"
     && note.frontmatter.report_role === "session" && note.frontmatter.source_path === path)
@@ -120,6 +150,11 @@ function embeddedDependencies(note: Note, notes: Note[], visited: Set<string>) {
 function companyPaths(context: ReturnType<typeof buildCompanyOverviews>[number] | null, notes: Note[]) {
   if (!context) return [];
   const paths = [context.note.path, context.dossier?.path, context.assessment?.note.path, context.summary?.note.path].filter((path): path is string => Boolean(path));
+  // 不完整报告仍保留明确的原稿入口；只加载正本采用的材料，不递归读取所有证据正文。
+  for (const reference of [context.note.frontmatter.company_dossier, context.note.frontmatter.fit_assessment, context.dossier?.frontmatter.company_summary]) {
+    const referenced = typeof reference === "string" ? resolveDependency(notes, reference) : null;
+    if (referenced) paths.push(referenced.path);
+  }
   // 独立面谈借用案件的日程时，不能丢掉这份明确关联的正本。
   if (context.kind === "meeting" && context.caseId) {
     const matches = notes.filter((note) => getType(note) === "job-case" && getString(note.frontmatter.case_id) === context.caseId);
@@ -155,6 +190,7 @@ export function buildInterviewReadModelRecords(notes: Note[], options: { today?:
   if (next) defaults.session = next.note.path;
 
   for (const context of contexts) {
+    put(INTERVIEW_RECORDS.company, context.note.path, projectInterviewCompany(context));
     put(INTERVIEW_RECORDS.context, context.note.path, { kind: "interview-context", source: sourceRef(context.note),
       contextPath: context.note.path, paths: [...new Set(companyPaths(context, notes))] } satisfies InterviewContext);
   }

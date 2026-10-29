@@ -1,22 +1,58 @@
 import { createHash } from "node:crypto";
 import { copyFile, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { buildApplicationReadModel } from "./read-model-source.mjs";
+
+const BATCH_BYTES = 480_000;
+const compare = (left, right) => left < right ? -1 : left > right ? 1 : 0;
+
+/** 正文块按哈希桶独立打包，mtime 改变源顺序时只更新目录，不重写整库发布资源。 */
+function stablePublishedArtifact(artifact) {
+  const batches = [];
+  const pack = (kind, rows) => {
+    let batch = [], bytes = 24;
+    for (const row of rows) {
+      const size = Buffer.byteLength(JSON.stringify(row)) + 40;
+      if (size + 24 > BATCH_BYTES) throw new Error("单条发布索引超过批次上限");
+      if (bytes + size > BATCH_BYTES) { batches.push({ [kind]: batch }); batch = []; bytes = 24; }
+      batch.push(row); bytes += size;
+    }
+    if (batch.length) batches.push({ [kind]: batch });
+  };
+  const buckets = Array.from({ length: 16 }, () => []);
+  for (const batch of artifact.batches) for (const chunk of batch.chunks ?? []) {
+    const bucket = buckets[Number.parseInt(chunk.hash[0], 16)];
+    if (!bucket) throw new Error("发布正文哈希无效");
+    bucket.push(chunk);
+  }
+  for (const bucket of buckets) pack("chunks", bucket.sort((a, b) => compare(a.hash, b.hash) || compare(a.channel, b.channel) || a.ordinal - b.ordinal));
+  const families = {
+    catalog: (a, b) => compare(a.path, b.path),
+    aliases: (a, b) => compare(a.target, b.target) || compare(a.path, b.path) || a.exact - b.exact,
+    links: (a, b) => compare(a.source_path, b.source_path) || compare(a.target, b.target),
+    records: (a, b) => compare(a.kind, b.kind) || compare(a.key, b.key),
+  };
+  for (const [kind, sort] of Object.entries(families)) pack(kind, artifact.batches.flatMap((batch) => batch[kind] ?? []).sort(sort));
+  const manifest = { ...artifact.manifest, revision: `rm-pub-v3-${artifact.manifest.revision}`, batchCount: batches.length,
+    batchDigests: batches.map((batch) => createHash("sha256").update(JSON.stringify(batch)).digest("hex")) };
+  return { manifest, batches };
+}
 
 /** 只处理明确发布的同一批资料；全文资源和索引始终指向同一版本。 */
 export async function writeReadModelAssets(notes, directory, publishedAt) {
-  const write = async (value) => {
+  const write = async (value, compressed = false) => {
     const text = JSON.stringify(value);
-    const file = `${createHash("sha256").update(text).digest("hex").slice(0, 24)}.json`;
-    await writeFile(join(directory, file), text, { mode: 0o600 });
+    const file = `${createHash("sha256").update(text).digest("hex").slice(0, 24)}.json${compressed ? ".gz" : ""}`;
+    await writeFile(join(directory, file), compressed ? gzipSync(text, { level: 9 }) : text, { mode: 0o600 });
     return file;
   };
   const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
-  const artifact = await buildApplicationReadModel(notes, today, publishedAt);
+  const artifact = stablePublishedArtifact(await buildApplicationReadModel(notes, today, publishedAt));
   const batches = [];
-  for (const batch of artifact.batches) batches.push(await write(batch));
+  for (const batch of artifact.batches) batches.push(await write(batch, true));
   const bodies = {};
-  for (const note of notes) bodies[note.path] = await write(note);
+  for (const note of [...notes].sort((a, b) => compare(a.path, b.path))) bodies[note.path] = await write(note, true);
   return { revision: artifact.manifest.revision, manifestFile: await write(artifact.manifest), batches, bodyIndexFile: await write(bodies) };
 }
 

@@ -1,4 +1,4 @@
-import { createReadModel } from "@/lib/server/read-model";
+import { createReadModel, readModelHash } from "@/lib/server/read-model";
 import type { ReadModelBatch, ReadModelManifest } from "@/lib/read-model";
 import type { Note } from "@/lib/notes";
 
@@ -7,7 +7,7 @@ type Source = { manifest: ReadModelManifest; publishedAt: string; batch(index: n
 type Model = ReturnType<typeof createReadModel>;
 const models = new WeakMap<D1Database, Model>();
 const flights = new Map<string, Promise<void>>();
-const assetName = /^[a-f0-9]{24}\.json$/;
+const assetName = /^[a-f0-9]{24}\.json(?:\.gz)?$/;
 
 export class ReadModelError extends Error {
   readonly status: number;
@@ -39,8 +39,13 @@ async function source(requestedRevision?: string, baseRevision?: string): Promis
   if (!assets) throw new ReadModelError("发布资料索引不可用");
   async function asset<T>(file: string): Promise<T> {
     if (file !== "manifest.json" && !assetName.test(file)) throw new ReadModelError("发布索引路径无效");
-    const response = await assets!.fetch(new Request(`http://localhost/_published-vault/${file}`));
+    const response = await assets!.fetch(new Request(`http://localhost/_published-vault/${file}`, file.endsWith(".gz") ? { headers: { "Accept-Encoding": "identity" } } : undefined));
     if (!response.ok) throw new ReadModelError("发布资料尚未准备完成");
+    // 索引批次与单篇正文直接以 gzip 存盘，避免部署归档保存多份膨胀的 JSON。
+    if (file.endsWith(".gz")) {
+      if (!response.body) throw new ReadModelError("发布资料内容不完整");
+      return new Response(response.body.pipeThrough(new DecompressionStream("gzip"))).json() as Promise<T>;
+    }
     return response.json() as Promise<T>;
   }
   const published = await asset<{ publishedAt: string; readModel?: PublishedIndex; readModels?: PublishedIndex[] }>("manifest.json");
@@ -126,7 +131,20 @@ export async function readModelSource() {
 }
 
 export async function readModelNote(path: string, revision: string) {
-  if (process.env.OBSIDIAN_DATA_SOURCE !== "published") return (await bridge<{ note: Note }>(`/read-model/note?${new URLSearchParams({ revision, path })}`)).note;
+  if (process.env.OBSIDIAN_DATA_SOURCE !== "published") {
+    try { return (await bridge<{ note: Note }>(`/read-model/note?${new URLSearchParams({ revision, path })}`)).note; }
+    catch (error) {
+      if (!(error instanceof ReadModelError) || error.status !== 409) throw error;
+      // Bridge 重启会丢失内存中的旧正文，但 D1 仍有完整旧版。只有正文和元数据哈希完全相同才可恢复。
+      const store = await model();
+      const card = await store.getCard(revision, path);
+      if (!card) throw error;
+      const current = await source(undefined, (await store.latest())?.revision);
+      const note = await current.note(path);
+      if (!note || await readModelHash(JSON.stringify({ path: note.path, content: note.content, frontmatter: note.frontmatter })) !== card.bodyHash) throw error;
+      return note;
+    }
+  }
   const input = await source(revision);
   if (input.manifest.revision !== revision) throw new ReadModelError("资料版本已更新，请重新读取", 409);
   const note = await input.note(path);

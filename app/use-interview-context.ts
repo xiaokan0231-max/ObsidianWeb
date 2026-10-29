@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { interviewDefaultSource, type InterviewCatalog, type InterviewContext, type InterviewQualitySection, type InterviewReviewBlock, type InterviewReviewProjection } from "@/lib/interview-read-model";
+import { hydrateInterviewCompany, interviewDefaultSource, type InterviewCatalog, type InterviewContext, type InterviewCompanyProjection, type InterviewQualitySection, type InterviewReviewBlock, type InterviewReviewProjection } from "@/lib/interview-read-model";
 import type { InterviewAnswerBlockReview, InterviewAnswerReview } from "@/lib/review-deep";
 import type { InterviewAdvisory } from "@/lib/interview-advisory";
 import type { Note } from "@/lib/notes";
 import type { ReviewBlock } from "@/lib/review";
 import type { InterviewTrends } from "@/lib/interview-trends.mjs";
+import type { CalendarInterviewTarget } from "@/lib/calendar-interview";
+import { ReadModelFetchError } from "./read-model-resource";
+import type { CompanyOverview } from "@/lib/company-overview";
 
 export type InterviewView = "session" | "prep" | "review" | "insights" | "practice";
-export type InterviewSelection = { sourcePath?: string; contextPath?: string; company?: string; paths?: string[]; overviewOnly?: boolean };
+export type InterviewSelection = { sourcePath?: string; contextPath?: string; company?: string; paths?: string[]; overviewOnly?: boolean; calendar?: CalendarInterviewTarget };
 export type InterviewRemoteReview = {
   projection: InterviewReviewProjection; blocks: Record<string, ReviewBlock>;
   quality: InterviewAnswerReview | null; advisory: InterviewAdvisory | null;
@@ -19,12 +22,12 @@ export type InterviewRemoteReview = {
   loadSection: (section: "quality" | "advisory") => Promise<void>;
   loadQualityBlock: (id: string) => Promise<void>;
 };
-type State = { notes: Note[]; catalog: InterviewCatalog | null; digest: InterviewTrends | null; revision: string; fetchedAt: number | null; syncState: "ready" | "building" | "failed"; ready: boolean; loading: boolean; error: string; sourcePath: string; contextPath: string; review: InterviewRemoteReview | null };
+type State = { notes: Note[]; companyContexts?: CompanyOverview[]; catalog: InterviewCatalog | null; digest: InterviewTrends | null; target: CalendarInterviewTarget | null; revision: string; fetchedAt: number | null; syncState: "ready" | "building" | "failed"; ready: boolean; loading: boolean; error: string; sourcePath: string; contextPath: string; review: InterviewRemoteReview | null };
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 /** 正文、目录、分块各有独立缓存，迟到的 A 场请求不能覆盖刚选中的 B 场。 */
 export function createInterviewContextResource(fetcher: Fetcher = fetch) {
-  const initial: State = { notes: [], catalog: null, digest: null, revision: "", fetchedAt: null, syncState: "ready", ready: false, loading: false, error: "", sourcePath: "", contextPath: "", review: null };
+  const initial: State = { notes: [], catalog: null, digest: null, target: null, revision: "", fetchedAt: null, syncState: "ready", ready: false, loading: false, error: "", sourcePath: "", contextPath: "", review: null };
   let state = initial;
   let activeView: InterviewView = "session";
   let activeSelection: InterviewSelection = {};
@@ -54,7 +57,7 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
       response = await fetcher(url, { cache: "no-store", signal });
     }
     const value = await response.json();
-    if (!response.ok) throw new Error((value as { error?: string }).error || `面试资料读取失败（${response.status}）`);
+    if (!response.ok) throw new ReadModelFetchError((value as { error?: string }).error || `面试资料读取失败（${response.status}）`, response.status);
     return value as T;
   }
   const endpoint = (path: string, revision: string, extra: Record<string, string>) => {
@@ -168,13 +171,25 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
       if (id !== generation) return;
       const { revision, catalog } = payload;
       if (catalog?.kind !== "interview-catalog" || typeof revision !== "string") throw new Error("面试目录格式无效");
-      const sourcePath = view === "session" ? (selection.overviewOnly && selection.contextPath ? selection.contextPath : interviewDefaultSource(catalog, selection))
-        : view === "review" ? selection.sourcePath ?? "" : "";
+      let target: CalendarInterviewTarget | null = null;
+      if (selection.calendar) {
+        const requested = selection.calendar;
+        const extra: Record<string, string> = { view: requested.view, date: requested.date, event: requested.sourcePath,
+          company: requested.company, round: requested.label, case: requested.caseId };
+        if (requested.time) extra.time = requested.time;
+        if (requested.path) extra[requested.view === "session" ? "prep" : "review"] = requested.path;
+        const resolved = await json<{ revision: string; target: CalendarInterviewTarget }>(endpoint("target", revision, extra), signal);
+        if (resolved.revision !== revision) throw new Error("日历场次版本不一致，请刷新重试");
+        target = resolved.target;
+      }
+      const sourcePath = view === "session" ? target ? target.path || target.sourcePath
+        : selection.overviewOnly && selection.contextPath ? selection.contextPath : interviewDefaultSource(catalog, selection)
+        : view === "review" ? target ? target.path ?? "" : selection.sourcePath ?? "" : "";
       const roots = view === "prep" ? catalog.libraryPaths : view === "practice" ? catalog.practicePaths
         : view === "insights" ? selection.paths ?? catalog.compareDefaults
           : sourcePath ? [sourcePath] : [];
       const [contexts, trendPayload] = await Promise.all([
-        Promise.all([...new Set(roots)].map((path) => json<{ revision: string; context: InterviewContext }>(endpoint("context", revision, { path }), signal))),
+        Promise.all([...new Set(roots)].map((path) => json<{ revision: string; context: InterviewContext; company?: InterviewCompanyProjection | null }>(endpoint("context", revision, { path }), signal))),
         view === "session" ? json<{ digest: InterviewTrends | null }>(endpoint("trends", revision, {}), signal) : Promise.resolve({ digest: null }),
       ]);
       if (contexts.some((item) => item.revision !== revision)) throw new Error("资料版本不一致，请刷新重试");
@@ -185,6 +200,12 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
         if (sourcePath !== written.sourcePath && view !== "practice") continue;
         notes = notes.some((item) => item.path === path) ? notes.map((item) => item.path === path ? written.note : item) : [...notes, written.note];
       }
+      const companyProjections = contexts.flatMap((item) => item.company ? [item.company] : []);
+      const companyContexts = companyProjections.length ? [...new Map(companyProjections.map((projection) => {
+        const company = hydrateInterviewCompany(projection, notes);
+        if (!company) throw new Error("本场公司材料版本不完整，请重新读取");
+        return [company.note.path, company] as const;
+      })).values()] : undefined;
       let review: InterviewRemoteReview | null = null;
       if (view === "review" && sourcePath) {
         const payload = await json<{ revision: string; review: InterviewReviewProjection }>(endpoint("review", revision, { path: sourcePath }), signal);
@@ -210,14 +231,20 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
           }
         }
       }
-      if (id === generation) publish({ notes, catalog, digest: trendPayload.digest, revision, fetchedAt: Date.now(), syncState: payload.syncState ?? "ready", ready: true, loading: false, error: "", sourcePath,
+      if (id === generation) publish({ notes, companyContexts, catalog, digest: trendPayload.digest, target, revision, fetchedAt: Date.now(), syncState: payload.syncState ?? "ready", ready: true, loading: false, error: "", sourcePath,
         contextPath: contexts[0]?.context.contextPath ?? "", review });
       if (id === generation && payload.syncState === "building" && Date.now() < pollDeadline) pollTimer = setTimeout(() => {
         pollTimer = null; void query(view, selection, true, true);
       }, 1_000);
     } catch (error) {
       if (id !== generation || signal.aborted) return;
-      publish({ ...state, loading: false, error: error instanceof Error ? error.message : "面试资料读取失败" });
+      if (error instanceof ReadModelFetchError && error.status === 409 && Date.now() < pollDeadline) {
+        // 本地桥重启可能已回收旧正文快照；等同版目录和正文恢复，不把暂时不可读误报为没有准备稿。
+        publish({ ...state, ready: false, loading: true, syncState: "building", error: "" });
+        pollTimer = setTimeout(() => { pollTimer = null; void query(view, selection, true, true); }, 1_000);
+        return;
+      }
+      publish({ ...state, loading: false, syncState: "failed", error: error instanceof Error ? error.message : "面试资料读取失败" });
     }
   }
   return {
@@ -248,7 +275,7 @@ function qualityFromSection(section: InterviewQualitySection): InterviewAnswerRe
 export function useInterviewContext(options: InterviewSelection & { enabled: boolean; view: InterviewView; today?: string }) {
   const resource = useMemo(() => createInterviewContextResource(), []);
   const state = useSyncExternalStore(resource.subscribe, resource.getState, resource.getServerState);
-  const selectionKey = JSON.stringify({ sourcePath: options.sourcePath, contextPath: options.contextPath, company: options.company, paths: options.paths, overviewOnly: options.overviewOnly });
+  const selectionKey = JSON.stringify({ sourcePath: options.sourcePath, contextPath: options.contextPath, company: options.company, paths: options.paths, overviewOnly: options.overviewOnly, calendar: options.calendar });
   useEffect(() => {
     if (options.enabled) void resource.query(options.view, JSON.parse(selectionKey), true);
   }, [resource, options.enabled, options.view, options.today, selectionKey]);

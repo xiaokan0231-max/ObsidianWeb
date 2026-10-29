@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
 import test from "node:test";
 import { buildApplicationReadModel, createLocalReadModelSource } from "../scripts/read-model-source.mjs";
 import { writeReadModelAssets } from "../scripts/read-model-published.mjs";
@@ -10,6 +12,10 @@ import { createReadModel } from "../lib/server/read-model.ts";
 import { database } from "./read-model-db.mjs";
 
 const makeNote = (path, content = "# 测试资料\n\n完整正文结尾。", mtime = 1) => ({ path, content, frontmatter: { type: "material" }, tags: ["test"], stat: { ctime: 1, mtime, size: Buffer.byteLength(content) } });
+async function readAsset(directory, file) {
+  const content = await readFile(join(directory, file));
+  return JSON.parse((file.endsWith(".gz") ? gunzipSync(content) : content).toString("utf8"));
+}
 function sourceFixture(notes, build = buildApplicationReadModel) {
   const files = new Map(notes.map((note) => [note.path, note])), calls = [];
   let statsFail = false;
@@ -141,8 +147,15 @@ test("发布索引只接收给定快照，单篇长正文末尾完整，快照�
   assert.equal(manifest.indexedAt, Date.parse(publishedAt));
   const bodies = JSON.parse(await readFile(join(directory, index.bodyIndexFile), "utf8"));
   assert.deepEqual(Object.keys(bodies), [notes[0].path]);
-  assert.deepEqual(JSON.parse(await readFile(join(directory, bodies[notes[0].path]), "utf8")), notes[0]);
+  assert.match(bodies[notes[0].path], /^[a-f0-9]{24}\.json\.gz$/);
+  assert.deepEqual(await readAsset(directory, bodies[notes[0].path]), notes[0]);
   assert.ok(index.batches.length > 5);
+  for (const [ordinal, file] of index.batches.entries()) {
+    assert.equal(file, `${manifest.batchDigests[ordinal].slice(0, 24)}.json.gz`);
+    assert.ok(await readAsset(directory, file));
+  }
+  const compressedBody = await readFile(join(directory, bodies[notes[0].path]));
+  assert.ok(compressedBody.length < Buffer.byteLength(JSON.stringify(notes[0])) / 10);
 });
 
 test("暂存目录复制最近三个已发布索引，退休资源回收不删除当前正文或共享文件", async (t) => {
@@ -166,10 +179,84 @@ test("暂存目录复制最近三个已发布索引，退休资源回收不删�
   assert.ok(!latest.readModels.some((index) => index.revision === first.readModel.revision));
   await assert.rejects(readFile(join(previous, first.readModel.manifestFile)), { code: "ENOENT" });
   const bodies = JSON.parse(await readFile(join(previous, latest.readModel.bodyIndexFile), "utf8"));
-  assert.deepEqual(JSON.parse(await readFile(join(previous, bodies["30_資料/共享.md"]), "utf8")), makeNote("30_資料/共享.md"));
+  assert.deepEqual(await readAsset(previous, bodies["30_資料/共享.md"]), makeNote("30_資料/共享.md"));
   const changed = [makeNote("30_資料/共享.md"), makeNote("30_資料/变更.md", "# 第五版", 8)];
   const fifth = await writePublishedVaultAssets(changed, previous, "2026-10-01T00:00:00Z");
   assert.equal(fifth.manifest.readModels.length, 3);
   assert.equal(new Set(fifth.manifest.readModels.map((index) => index.revision)).size, 3);
   await assert.rejects(readFile(join(previous, latest.readModels.at(-1).manifestFile)), { code: "ENOENT" });
+});
+
+test("同版本由原始JSON升级为gzip时回收旧表示，仍完整读取当前索引和正文", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "read-model-compression-upgrade-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const notes = [makeNote("30_資料/测试.md")], publishedAt = "2026-10-01T00:00:00Z";
+  const { manifest } = await writePublishedVaultAssets(notes, directory, publishedAt);
+  const legacy = { ...manifest.readModel, batches: [] };
+  const uncompress = async (file) => { const target = file.replace(/\.gz$/, ""); await writeFile(join(directory, target), gunzipSync(await readFile(join(directory, file)))); return target; };
+  for (const file of manifest.readModel.batches) legacy.batches.push(await uncompress(file));
+  const bodies = await readAsset(directory, manifest.readModel.bodyIndexFile);
+  for (const path of Object.keys(bodies)) bodies[path] = await uncompress(bodies[path]);
+  const text = JSON.stringify(bodies);
+  legacy.bodyIndexFile = `${createHash("sha256").update(text).digest("hex").slice(0, 24)}.json`;
+  await writeFile(join(directory, legacy.bodyIndexFile), text);
+  await writeFile(join(directory, "manifest.json"), JSON.stringify({ ...manifest, readModel: legacy, readModels: [legacy] }));
+  const next = await writePublishedVaultAssets(notes, directory, publishedAt);
+  assert.equal(next.manifest.readModel.revision, legacy.revision);
+  for (const file of [...legacy.batches, ...Object.values(bodies), legacy.bodyIndexFile]) await assert.rejects(readFile(join(directory, file)), { code: "ENOENT" });
+  const currentBodies = await readAsset(directory, next.manifest.readModel.bodyIndexFile);
+  assert.deepEqual(await readAsset(directory, currentBodies[notes[0].path]), notes[0]);
+});
+
+test("发布正文按16个稳定哈希桶打包，mtime重排只改变目录，单篇变更只重打受影响桶", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "read-model-stable-packing-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const notes = Array.from({ length: 36 }, (_, index) => makeNote(`30_資料/资料${String(index).padStart(2, "0")}.md`, `# 资料${index}\n检索原文 ${"正文完整内容。".repeat(4_000)}`, index + 1));
+  const publishedAt = "2026-10-01T00:00:00Z";
+  const one = await writeReadModelAssets(notes, directory, publishedAt);
+  assert.match(one.revision, /^rm-pub-v3-/);
+  assert.deepEqual(await writeReadModelAssets(notes, directory, publishedAt), one);
+  async function inspect(index) {
+    const chunks = new Map(), metadata = [];
+    for (const file of index.batches) {
+      const batch = await readAsset(directory, file);
+      assert.ok(Buffer.byteLength(JSON.stringify(batch)) <= 480_000);
+      if (batch.chunks) {
+        const buckets = new Set(batch.chunks.map((chunk) => chunk.hash[0]));
+        assert.equal(buckets.size, 1);
+        assert.deepEqual(Object.keys(batch), ["chunks"]);
+        chunks.set(file, [...buckets][0]);
+      } else metadata.push(file);
+    }
+    return { chunks, metadata, bodies: await readAsset(directory, index.bodyIndexFile) };
+  }
+  const first = await inspect(one);
+  const changedPath = notes[0].path;
+  const reordered = [...notes].reverse().map((note) => note.path === changedPath ? { ...note, stat: { ...note.stat, mtime: 500 } } : note);
+  const two = await writeReadModelAssets(reordered, directory, publishedAt), second = await inspect(two);
+  assert.notEqual(two.revision, one.revision);
+  assert.deepEqual([...second.chunks.keys()].sort(), [...first.chunks.keys()].sort(), "mtime与顺序变化不重新生成任一正文桶");
+  assert.ok(second.metadata.some((file) => !first.metadata.includes(file)), "目录保留实际变化的mtime和原始ordinal");
+  for (const note of notes) assert.equal(second.bodies[note.path] === first.bodies[note.path], note.path !== changedPath, note.path);
+  const contentChanged = reordered.map((note) => note.path === changedPath ? { ...note, content: note.content + "新增独占证据" } : note);
+  const three = await writeReadModelAssets(contentChanged, directory, publishedAt), third = await inspect(three);
+  const oldHashes = [...(await Promise.all(two.batches.map((file) => readAsset(directory, file))))].flatMap((batch) => batch.catalog ?? []);
+  const newHashes = [...(await Promise.all(three.batches.map((file) => readAsset(directory, file))))].flatMap((batch) => batch.catalog ?? []);
+  const affected = new Set([oldHashes.find((row) => row.path === changedPath).hash[0], newHashes.find((row) => row.path === changedPath).hash[0]]);
+  for (const [file, bucket] of second.chunks) if (!affected.has(bucket)) assert.ok(third.chunks.has(file), `未受影响的${bucket}桶资源复用`);
+  for (const note of contentChanged) if (note.path !== changedPath) assert.equal(third.bodies[note.path], second.bodies[note.path]);
+
+  const store = createReadModel(database(t).db);
+  const artifact = { manifest: await readAsset(directory, three.manifestFile), batches: await Promise.all(three.batches.map((file) => readAsset(directory, file))) };
+  await store.importArtifact(three.revision, artifact);
+  const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
+  const canonical = await buildApplicationReadModel(contentChanged, today, publishedAt);
+  await store.importArtifact(canonical.manifest.revision, canonical);
+  for (const query of [{ query: "检索原文" }, { query: "新增独占证据" }, { sort: "title" }, { sort: "recent" }]) {
+    const expected = await store.library(canonical.manifest.revision, query), actual = await store.library(three.revision, query);
+    assert.deepEqual(actual.items, expected.items);
+    assert.deepEqual(actual.facets, expected.facets);
+    assert.equal(actual.total, expected.total);
+  }
+  assert.deepEqual((await store.search(three.revision, "检索原文")).items, (await store.search(canonical.manifest.revision, "检索原文")).items, "SQL按保留ordinal重现原始搜索顺序");
 });

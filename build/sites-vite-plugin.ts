@@ -28,6 +28,14 @@ export function sites(): Plugin {
       const outputDirectory = resolve(root, "dist", ".openai");
       const hostingConfig = resolve(root, ".openai", "hosting.json");
       const drizzleSource = resolve(root, "drizzle");
+      const publishedSource = resolve(root, "public", "_published-vault");
+      const publishedOutput = resolve(root, "dist", "client", "_published-vault");
+
+      // Vite 的多环境构建不会清掉上轮公共文件；退休索引不能重新混入部署归档。
+      if (await exists(publishedSource)) {
+        await rm(publishedOutput, { recursive: true, force: true });
+        await cp(publishedSource, publishedOutput, { recursive: true });
+      }
 
       await rm(outputDirectory, { recursive: true, force: true });
       await mkdir(outputDirectory, { recursive: true });

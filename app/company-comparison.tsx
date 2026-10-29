@@ -19,6 +19,7 @@ import type { InterviewCompareSummary } from "@/lib/interview-read-model";
 
 type CompanyComparisonProps = {
   notes: Note[];
+  companyContexts?: CompanyOverview[];
   today: string;
   loading?: boolean;
   onOpenCompany: (context: CompanyOverview) => void;
@@ -27,9 +28,9 @@ type CompanyComparisonProps = {
   onRemoteSelect?: (selection: InterviewSelection) => void;
 };
 
-function CompanyComparisonReady({ notes, today, onOpenCompany, onOpenWiki }: CompanyComparisonProps) {
+function CompanyComparisonReady({ notes, today, onOpenCompany, onOpenWiki, companyContexts }: CompanyComparisonProps) {
   const t = useCompanyCopy();
-  const contexts = useMemo(() => buildCompanyOverviews(notes), [notes]);
+  const contexts = useMemo(() => companyContexts ?? buildCompanyOverviews(notes), [notes, companyContexts]);
   const candidates = useMemo(() => buildCompanyCompareCandidates(contexts, notes, today), [contexts, notes, today]);
   const [selection, setSelection] = useState(() => resolveCompanyComparisonSelection(contexts, notes, today, typeof window === "undefined" ? "" : window.location.search));
   const [choosing, setChoosing] = useState(selection.length < 2);
@@ -86,7 +87,7 @@ export default function CompanyComparison(props: CompanyComparisonProps) {
     : props.catalog ? <ProjectedCompanyComparison {...props} catalog={props.catalog} /> : <CompanyComparisonReady {...props} />;
 }
 
-function ProjectedCompanyComparison({ notes, today, catalog, onRemoteSelect, onOpenCompany, onOpenWiki }: CompanyComparisonProps & { catalog: InterviewCatalog }) {
+function ProjectedCompanyComparison({ notes, today, catalog, onRemoteSelect, onOpenCompany, onOpenWiki, companyContexts }: CompanyComparisonProps & { catalog: InterviewCatalog }) {
   const t = useCompanyCopy();
   const initialSearch = useInitialUrlSearch();
   const selectionFrom = (search: string) => {
@@ -120,7 +121,7 @@ function ProjectedCompanyComparison({ notes, today, catalog, onRemoteSelect, onO
     }).catch((error) => { if (active) setOptionsError(error instanceof Error ? error.message : "选择目录读取失败"); });
     return () => { active = false; };
   }, [choosing, optionsReady, catalog.revision]);
-  const contexts = useMemo(() => buildCompanyOverviews(notes), [notes]);
+  const contexts = useMemo(() => companyContexts ?? buildCompanyOverviews(notes), [notes, companyContexts]);
   const selected = selection.flatMap((path) => { const context = contexts.find((item) => item.note.path === path); return context ? [context] : []; });
   const selectedSet = new Set(selection);
   const full = selection.length >= COMPANY_COMPARE_LIMIT;

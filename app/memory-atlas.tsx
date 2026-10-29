@@ -536,7 +536,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   const indexedInterview = ["session", "prep", "review", "insights", "practice"].includes(view);
   const interviewSeed = new URLSearchParams(interviewRouteSearch);
   const interviewRequested = calendarInterviewFromSearch(view, interviewRouteSearch);
-  const interviewRead = useInterviewContext({ enabled: indexedInterview, view: view as InterviewView, today: calendarToday,
+  const interviewRead = useInterviewContext({ enabled: indexedInterview, view: view as InterviewView, today: calendarToday, calendar: interviewRequested ?? undefined,
     sourcePath: interviewSeed.get(view === "review" ? "review" : "prep") || undefined,
     contextPath: interviewSeed.get("context") || interviewSeed.get("event") || undefined,
     company: interviewSeed.get("company") || undefined,
@@ -550,7 +550,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   const calendarModel = calendarRead.model;
   const compactCalendar = view === "calendar";
   const loading = compactCalendar ? calendarRead.loading || !calendarRead.revision && !calendarRead.error
-    : indexedInterview ? !interviewRead.catalog && !interviewRead.error : view === "library" ? false
+    : indexedInterview ? !interviewRead.ready && interviewRead.notes.length === 0 && !interviewRead.error : view === "library" ? false
     : vaultState.loading || vaultState.readyScopes.size === 0 && vaultState.errors.size === 0;
   const activeScope = vaultScopeForView(view);
   const error = compactCalendar ? calendarRead.error : indexedInterview ? interviewRead.error : view === "library" ? "" : vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
@@ -562,7 +562,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   const fetchedAt = compactCalendar ? calendarRead.fetchedAt : indexedInterview ? interviewRead.fetchedAt : vaultState.checkedAt.get(activeScope) ?? vaultState.checkedAt.get("all") ?? null;
   // どの scope が手元に揃ったか。視図はこれで「まだ来ていない」と「本当に無い」を分ける（假空态の根）。
   const readyScopes = vaultState.readyScopes;
-  const interviewScopeReady = indexedInterview ? Boolean(interviewRead.catalog) : readyScopes.has("all") || readyScopes.has("interview");
+  const interviewScopeReady = indexedInterview ? interviewRead.ready || interviewRead.notes.length > 0 : readyScopes.has("all") || readyScopes.has("interview");
   const scopeReady = compactCalendar ? Boolean(calendarRead.revision) : indexedInterview ? Boolean(interviewRead.catalog) : view === "library" ? true : readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
   const actionsReady = readyScopes.has("all") || readyScopes.has("actions");
   const activityReady = readyScopes.has("all") || readyScopes.has("activity");
@@ -1159,9 +1159,9 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
     const requested = calendarInterviewFromSearch(view, interviewRouteSearch);
     if (!requested) return null;
     // 完整资料加载后只补齐所选材料，不能把“准备”改成自动判定的“复盘”。
-    if (indexedInterview && interviewRead.catalog) return requested;
+    if (indexedInterview && interviewRead.target) return interviewRead.target;
     return resolveCalendarInterviewRequest(requested, notes, calendarEvents, calendarToday);
-  }, [view, interviewRouteSearch, notes, calendarEvents, calendarToday, indexedInterview, interviewRead.catalog]);
+  }, [view, interviewRouteSearch, notes, calendarEvents, calendarToday, indexedInterview, interviewRead.target]);
   const interviewParams = new URLSearchParams(interviewRouteSearch);
   const reviewInitialKey = calendarInterview?.path ?? interviewParams.get("review");
   const prepInitialPath = calendarInterview ? calendarInterview.path ?? "" : interviewParams.get("prep") ?? "";
@@ -1590,9 +1590,9 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
           <LanguageSwitch />
         </header>
 
-        {error && notes.length === 0 && !calendarModel && view !== "settings" ? (
+        {error && notes.length === 0 && view !== "calendar" && view !== "settings" ? (
           <ConnectionError error={error} onRetry={() => void loadVault()} />
-        ) : loading && notes.length === 0 && !calendarModel && view !== "settings" && view !== "calendar" ? (
+        ) : loading && notes.length === 0 && view !== "settings" && view !== "calendar" ? (
           <LoadingState view={view} />
         ) : (
           <ViewErrorBoundary key={view} label={view}>
@@ -1652,6 +1652,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
               )}
               {view === "review" && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && calendarInterview.path)) && (
                 <InterviewReview
+                  companyContexts={interviewRead.companyContexts}
                   loading={!scopeReady}
                   key={interviewRouteVersion}
                   notes={notes}
@@ -1673,7 +1674,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
                   onOpenSession={openReviewSession}
                 />
               )}
-              {view === "insights" && <CompanyComparison catalog={interviewRead.catalog} onRemoteSelect={interviewRead.select} notes={notes} today={calendarToday} loading={!scopeReady}
+              {view === "insights" && <CompanyComparison companyContexts={interviewRead.companyContexts} catalog={interviewRead.catalog} onRemoteSelect={interviewRead.select} notes={notes} today={calendarToday} loading={!scopeReady}
                 onOpenCompany={(context) => openApplicationCompany(context.company, context.note)} onOpenWiki={openWikiLink} />}
               {view === "practice" && (
                 <InterviewPractice
@@ -1684,8 +1685,9 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
                   onOpenEvidence={openReviewEvidence}
                 />
               )}
-              {view === "session" && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && (calendarInterview.path || calendarCompanyContext))) && (
+              {view === "session" && interviewScopeReady && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && (calendarInterview.path || calendarCompanyContext))) && (
                 <InterviewSession
+                  companyContexts={interviewRead.companyContexts}
                   key={interviewRouteVersion}
                   catalog={interviewRead.catalog}
                   remoteDigest={interviewRead.digest}

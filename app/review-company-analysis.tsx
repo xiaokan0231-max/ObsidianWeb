@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { buildCompanyOverviews, resolveCompanyReference } from "@/lib/company-overview";
+import { buildCompanyOverviews, resolveCompanyReference, type CompanyOverview } from "@/lib/company-overview";
 import { REVIEW_COMPANY_PARAM, reviewCompanyHref, reviewCompanyMatch } from "@/lib/review-company";
 import type { Note } from "@/lib/notes";
 import CompanyOverviewContent from "./company-overview";
@@ -10,6 +10,7 @@ import MarkdownDocument from "./markdown-document";
 import { useUiLocale } from "./ui-locale";
 import { useDialogFocus } from "./use-dialog-focus";
 import { notifyUrlChange, readUrlParam, URL_CHANGE_EVENT } from "./use-url-state";
+import { useInterviewOverlayNotes } from "./use-interview-overlay-notes";
 
 function subscribe(listener: () => void) {
   window.addEventListener("popstate", listener);
@@ -23,16 +24,19 @@ const readPanel = () => readUrlParam(REVIEW_COMPANY_PARAM);
 const serverPanel = () => null;
 const readHref = () => `${window.location.pathname}${window.location.search}${window.location.hash}`;
 
-export default function ReviewCompanyAnalysis({ notes, source, sourcePath = source?.path ?? "", contextPath, company, filter = "all", pattern = null }: {
+export default function ReviewCompanyAnalysis({ notes, source, sourcePath = source?.path ?? "", contextPath, company, filter = "all", pattern = null, companyContexts, revision }: {
   notes: Note[]; source?: Note; sourcePath?: string; contextPath?: string | null; company: string; filter?: string; pattern?: string | null;
+  companyContexts?: CompanyOverview[];
+  revision?: string;
 }) {
   const { locale } = useUiLocale();
   const ja = locale === "ja";
   const match = useMemo(() => {
-    if (source) return reviewCompanyMatch(notes, source, company);
-    const context = contextPath ? buildCompanyOverviews(notes).find((item) => item.note.path === contextPath) ?? null : null;
+    const contexts = companyContexts ?? buildCompanyOverviews(notes);
+    if (source) return reviewCompanyMatch(notes, source, company, contexts);
+    const context = contextPath ? contexts.find((item) => item.note.path === contextPath) ?? null : null;
     return { context, status: context ? "ready" as const : "missing" as const };
-  }, [notes, source, company, contextPath]);
+  }, [notes, source, company, contextPath, companyContexts]);
   const selectedPath = useSyncExternalStore(subscribe, readPanel, serverPanel);
   const defaultHref = `/interview/review?review=${encodeURIComponent(sourcePath)}`;
   const href = useSyncExternalStore(subscribe, readHref, () => defaultHref);
@@ -63,25 +67,30 @@ export default function ReviewCompanyAnalysis({ notes, source, sourcePath = sour
     }}>{ja ? "会社分析" : "公司分析"} ↗</a>
       : <span className="rv-company-unavailable" data-company-status={match.status}>{unavailable}</span>}
     {open && createPortal(<CompanyPanel company={company} close={close}>
-      {context && context.note.path === selectedPath ? <AnalysisContent notes={notes} context={context} />
+      {context && context.note.path === selectedPath ? <AnalysisContent notes={notes} context={context} revision={revision} />
         : <p role="status">{ja ? "この振り返りに対応する会社資料を特定できません。関連ノートをご確認ください。" : "无法确定这场复盘对应的公司资料，请核对关联笔记。"}</p>}
     </CompanyPanel>, document.querySelector(".app-shell") ?? document.body)}
   </>;
 }
 
-function AnalysisContent({ notes, context }: { notes: Note[]; context: NonNullable<ReturnType<typeof reviewCompanyMatch>["context"]> }) {
+function AnalysisContent({ notes, context, revision }: { notes: Note[]; context: NonNullable<ReturnType<typeof reviewCompanyMatch>["context"]>; revision?: string }) {
   const { locale } = useUiLocale();
   const [note, setNote] = useState<Note | null>(null);
   const [missing, setMissing] = useState(false);
+  const [target, setTarget] = useState("");
+  const remote = useInterviewOverlayNotes({ asset: revision && target ? { note: target, label: target, hint: "" } : null, revision, seed: notes });
+  const shownNote = revision ? remote.sharedNote : note;
+  const hasSource = revision ? Boolean(target) : Boolean(note);
   const openWiki = (target: string) => {
+    if (revision) { setTarget(target); return; }
     const resolved = resolveCompanyReference(notes, target);
     setMissing(!resolved);
     if (resolved) setNote(resolved);
   };
   // 资料在同一个焦点边界内阅读，避免在分析层下面打开被隔离的抽屉。
   return <>
-    {note ? <><button type="button" autoFocus onClick={() => setNote(null)}>{locale === "ja" ? "← 会社分析に戻る" : "← 返回公司分析"}</button>
-      <MarkdownDocument content={note.content} onWikiLink={openWiki} reading /></>
+    {hasSource ? <><button type="button" autoFocus onClick={() => { setNote(null); setTarget(""); }}>{locale === "ja" ? "← 会社分析に戻る" : "← 返回公司分析"}</button>
+      {shownNote ? <MarkdownDocument content={shownNote.content} onWikiLink={openWiki} reading /> : remote.error ? <p role="alert">{locale === "ja" ? "参照資料を読み込めませんでした。" : "引用资料读取失败。"}<button type="button" onClick={() => void remote.retry()}>{locale === "ja" ? "再試行" : "重试"}</button></p> : <p role="status">{locale === "ja" ? "参照資料を読み込み中…" : "正在读取引用资料…"}</p>}</>
       : <CompanyOverviewContent context={context} onOpenWiki={openWiki} />}
     {missing && <p role="status">{locale === "ja" ? "参照ノートが見つかりません。" : "引用笔记不存在或无法唯一确定。"}</p>}
   </>;

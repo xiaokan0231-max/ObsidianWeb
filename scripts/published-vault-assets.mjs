@@ -73,8 +73,9 @@ export async function writePublishedVaultAssets(notes, directory, publishedAt = 
   }));
   const readModel = await writeReadModelAssets(notes, directory, publishedAt);
   let previous = [];
-  try { const old = JSON.parse(await readFile(join(previousDirectory, "manifest.json"), "utf8")); previous = [old.readModel, ...(old.readModels ?? [])].filter((value, index, all) => value?.revision && value.revision !== readModel.revision && all.findIndex((item) => item?.revision === value.revision) === index); } catch { /* 初次发布没有旧目录。 */ }
-  const retained = previousDirectory === directory ? previous.slice(0, 2) : await copyRetainedReadModelAssets(previousDirectory, directory, previous.slice(0, 2));
+  try { const old = JSON.parse(await readFile(join(previousDirectory, "manifest.json"), "utf8")); previous = [old.readModel, ...(old.readModels ?? [])].filter((value, index, all) => value?.revision && all.findIndex((item) => item?.revision === value.revision) === index); } catch { /* 初次发布没有旧目录。 */ }
+  const eligible = previous.filter((value) => value.revision !== readModel.revision).slice(0, 2);
+  const retained = previousDirectory === directory ? eligible : await copyRetainedReadModelAssets(previousDirectory, directory, eligible);
   const readModels = [readModel, ...retained];
   const manifest = { schemaVersion: 2, publishedAt, scopes, chunks, responses, calendar, readModel, readModels };
   const temporary = join(directory, "manifest.read-model.tmp");

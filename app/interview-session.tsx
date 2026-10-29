@@ -50,7 +50,7 @@ import {
 import { Blocks, Inlines } from "./prep-doc-render";
 import PrepMaterialReader from "./prep-material-reader";
 import InterviewSessionV2 from "./interview-session-v2";
-import { buildCompanyOverviews, resolveCompanyOverview, resolveCompanyOverviewFrom, type CompanyOverview } from "@/lib/company-overview";
+import { buildCompanyOverviews, resolveCompanyOverviewFrom, type CompanyOverview } from "@/lib/company-overview";
 import CompanyOverviewContent from "./company-overview";
 import ContextPicker from "./context-picker";
 import CompanyHeroCard from "./company-hero";
@@ -1127,8 +1127,10 @@ function InterviewSession({
   catalog,
   remoteDigest,
   onRemoteSelect,
+  companyContexts,
 }: {
   notes: Note[];
+  companyContexts?: CompanyOverview[];
   onOpen: (note: Note) => void;
   onOpenWiki: (target: string, section?: string) => void;
   onOpenCard: (cardId: string) => void;
@@ -1155,7 +1157,7 @@ function InterviewSession({
   const docs = useMemo(() => findInterviewPrepDocs(notes), [notes]);
   const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
   const digest = useMemo(() => catalog ? remoteDigest ?? null : buildDigest(notes), [notes, catalog, remoteDigest]);
-  const contexts = useMemo(() => buildCompanyOverviews(notes), [notes]);
+  const contexts = useMemo(() => companyContexts ?? buildCompanyOverviews(notes), [notes, companyContexts]);
   const docContexts = useMemo(() => new Map(docs.map((doc) => [doc.note.path, resolveCompanyOverviewFrom(contexts, notes, doc.note)])), [contexts, docs, notes]);
   const pickerGroups = useMemo(() => catalog?.pickerGroups ?? buildContextPickerGroups({ contexts, series, docs, docContexts, today }), [catalog, contexts, series, docs, docContexts, today]);
   const [selection, setSelection] = useState<{ prepPath: string | null; contextPath: string | null }>(() => {
@@ -1163,7 +1165,7 @@ function InterviewSession({
     const exact = initialPath ? docs.find((doc) => doc.note.path === initialPath
       || (replayTarget !== "" && [noteBasename(doc.note.path), doc.note.path.replace(/\.md$/, "")].includes(replayTarget))) ?? null : null;
     if (exact) return { prepPath: exact.note.path, contextPath: docContexts.get(exact.note.path)?.note.path ?? null };
-    const context = initialContextPath ? resolveCompanyOverview(notes, initialContextPath) : null;
+    const context = initialContextPath ? resolveCompanyOverviewFrom(contexts, notes, initialContextPath) : null;
     if (context) {
       if (forceOverviewOnly) return { prepPath: null, contextPath: context.note.path };
       const next = selectRelevantInterviewPrepDoc(docs.filter((doc) => docContexts.get(doc.note.path)?.key === context.key), today);
@@ -1200,7 +1202,7 @@ function InterviewSession({
     onRemoteSelect?.({ sourcePath: doc.note.path, contextPath: nextContext?.note.path });
   };
   const selectContext = (nextContext: CompanyOverview) => {
-    const calendarContext = forceOverviewOnly && initialContextPath ? resolveCompanyOverview(notes, initialContextPath) : null;
+    const calendarContext = forceOverviewOnly && initialContextPath ? resolveCompanyOverviewFrom(contexts, notes, initialContextPath) : null;
     const next = calendarContext?.key === nextContext.key ? null : selectRelevantInterviewPrepDoc(docs.filter((doc) => docContexts.get(doc.note.path)?.key === nextContext.key), today);
     setSelection({ prepPath: next?.note.path ?? null, contextPath: nextContext.note.path });
     setLegacyPrepPath(null);

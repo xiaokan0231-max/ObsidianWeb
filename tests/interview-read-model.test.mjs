@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { buildInterviewReadModelRecords, INTERVIEW_RECORDS, interviewBlockKey } from "../lib/interview-read-model.ts";
+import { buildInterviewReadModelRecords, hydrateInterviewCompany, INTERVIEW_RECORDS, interviewBlockKey } from "../lib/interview-read-model.ts";
 import { interviewQuery, InterviewRevisionError } from "../lib/server/interview-read-model.ts";
 import { computeStats, parseSeirikou } from "../lib/review.ts";
 import { joinReviewNotes } from "../lib/review-join.ts";
 import { normalizeInterviewAnswerReview, renderInterviewAnswerReview } from "../lib/review-deep.ts";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
+import { buildCalendarReadModelRecords } from "../lib/calendar-query-model.ts";
+import { resolveIndexedInterviewTarget } from "../lib/interview-read-model-target.ts";
+import { buildCompanyOverviews, COMPANY_FIT_DIMENSIONS } from "../lib/company-overview.ts";
 
 const today = "2026-10-29";
 const note = (path, frontmatter, content = "") => ({ path, frontmatter, content, tags: [], stat: { ctime: 0, mtime: 1, size: content.length } });
@@ -21,6 +24,64 @@ function reader(records, revision = "r1") {
   return { async readRecord(version, kind, path) { return version === revision ? index.get(key(kind, path)) ?? null : null; } };
 }
 const record = (records, kind, path) => records.find((item) => item.kind === kind && item.key === path)?.value;
+
+function calendarFixture() {
+  const owner = note(`${root}/日历案件.md`, { type: "job-case", company: "株式会社テスト", case_id: "calendar-role",
+    status: "面接中", next_event_at: `${today} 13:00`, next_event_label: "カジュアル面談" });
+  const prep = note(`${root}/日历准备.md`, { type: "interview-prep", company: "株式会社テスト", case: `[[${owner.path}]]`,
+    date: today, round: "オンライン面談（カジュアル面談）", time: "13:00", prep_version: 2 }, "# 约定场次准备\n\n## 快速导读\n明确属于这一场的准备正文。\n");
+  const notes = [owner, prep];
+  const records = [...buildInterviewReadModelRecords(notes, { today }), ...buildCalendarReadModelRecords(notes, today)];
+  const entries = record(records, "calendar-day", today);
+  const entry = entries.find((item) => item.event.note.path === owner.path);
+  const requested = { ...entry.destinations.session, path: null };
+  return { notes, owner, prep, records, entries, requested };
+}
+
+test("旧日历链接未携带prep时读取已生成的明确场次目标，不把已有准备误报为缺失", async () => {
+  const fixture = calendarFixture();
+  const resolved = resolveIndexedInterviewTarget(fixture.requested, fixture.entries);
+  assert.equal(resolved.path, fixture.prep.path);
+  assert.equal(resolved.view, "session");
+  const params = new URLSearchParams({ view: "session", date: today, event: fixture.owner.path, round: "轻松面谈", time: "13:00", case: "calendar-role" });
+  const result = await interviewQuery(reader(fixture.records), "r1", new URL(`http://localhost/api/interview/target?${params}`));
+  assert.equal(result.revision, "r1");
+  assert.equal(result.target.path, fixture.prep.path);
+  assert.equal(result.target.sourcePath, fixture.owner.path);
+  assert.equal(resolveIndexedInterviewTarget({ ...fixture.requested, view: "review" }, fixture.entries).path, null);
+});
+
+test("日历目标只按完整来源和日期、轮次、时间、案件取已有投影，歧义不借用另一场", () => {
+  const fixture = calendarFixture();
+  for (const changes of [{ sourcePath: "20_求職/另一岗位/案件.md" }, { date: "2026-10-28" }, { label: "二次面接" }, { time: "14:00" }, { caseId: "another-role" }]) {
+    assert.equal(resolveIndexedInterviewTarget({ ...fixture.requested, ...changes }, fixture.entries).path, null);
+  }
+  const entry = fixture.entries.find((item) => item.event.note.path === fixture.owner.path);
+  const other = { ...entry, event: { ...entry.event, time: "14:00" }, destinations: { ...entry.destinations,
+    session: { ...entry.destinations.session, time: "14:00", path: "20_求職/测试/另一准备.md" } } };
+  assert.equal(resolveIndexedInterviewTarget({ ...fixture.requested, time: undefined }, [entry, other]).path, null);
+  assert.equal(resolveIndexedInterviewTarget(fixture.requested, [entry, other]).path, fixture.prep.path);
+});
+
+test("客户端先恢复日历的明确准备路径，再读取本场依赖，overviewOnly不能冻结旧链接的空路径", async () => {
+  const { createInterviewContextResource } = await loadAppModule("app/use-interview-context.ts");
+  const fixture = calendarFixture();
+  const model = reader(fixture.records);
+  const requests = [];
+  const resource = createInterviewContextResource(async (url) => {
+    requests.push(url);
+    const parsed = new URL(url, "http://localhost");
+    if (parsed.pathname === "/api/note") return Response.json({ note: fixture.notes.find((note) => note.path === parsed.searchParams.get("path")) });
+    return Response.json(await interviewQuery(model, "r1", parsed));
+  });
+  await resource.query("session", { calendar: fixture.requested, contextPath: fixture.owner.path, overviewOnly: true });
+  assert.equal(resource.getState().ready, true);
+  assert.equal(resource.getState().sourcePath, fixture.prep.path);
+  assert.equal(resource.getState().target.path, fixture.prep.path);
+  assert.ok(resource.getState().notes.some((note) => note.path === fixture.prep.path));
+  assert.ok(requests.findIndex((url) => url.startsWith("/api/interview/target?")) < requests.findIndex((url) => url.startsWith("/api/interview/context?")));
+  resource.dispose();
+});
 
 test("本场依赖只包含明确案件、当前准备稿、对照稿和实际嵌入的共用素材", () => {
   const caseA = note(`${root}/岗位A/案件.md`, { type: "job-case", company: "株式会社テスト", case_id: "test-a", status: "面接中" });
@@ -39,6 +100,62 @@ test("本场依赖只包含明确案件、当前准备稿、对照稿和实际�
   assert.equal(catalog.preps.length, 2);
   assert.equal(catalog.preps.find((item) => item.path === prepB.path).contextPath, caseB.path);
   assert.equal(Object.hasOwn(catalog.preps[0], "content"), false);
+});
+
+test("公司总结和六维评价使用完整资料验证后的投影，证据正文不为存在校验而整批下载", async () => {
+  const evidence = note("30_資料/测试来源.md", { type: "material" }, "# 外部证据正文专属标记\n" + "証拠".repeat(400_000));
+  const source = { label: "本人已确认材料", wiki: "[[30_資料/测试来源]]" };
+  const owner = note(`${root}/投影案件.md`, { type: "job-case", company: "株式会社テスト", case_id: "typed-company",
+    status: "面接中", company_dossier: `[[${root}/投影卷宗]]`, fit_assessment: "[[80_AI分析/测试契合]]" }, "# 株式会社テスト — 系统开发\n");
+  const dossier = note(`${root}/投影卷宗.md`, { type: "company", company: "株式会社テスト", company_summary: "[[80_AI分析/测试总结]]",
+    company_profile: { version: 1, updated_on: today, facts: [], reviews: [], review_synthesis: {
+      as_of: today, ai_author: "Codex", coverage: "明确资料范围", paragraphs: ["根据[[30_資料/测试来源]]形成解读。"], sources: [source],
+    } } }, "# 株式会社テスト\n");
+  const assessment = note("80_AI分析/测试契合.md", { type: "ai-report", report_kind: "company-fit", schema_version: 1, criteria_version: 2,
+    assessed_on: today, ai_author: "Codex", case: `[[${owner.path}]]`, company_dossier: `[[${dossier.path}]]`, fit_assessment: {
+      summary: "六维有据评价。", strengths: ["经验对应"], questions: ["确认职责"], context_facts: [],
+      dimensions: Object.fromEntries(COMPANY_FIT_DIMENSIONS.map(({ key }) => [key, { score: 4, rationale: "对应已确认材料。", evidence: [source], unknowns: [] }])),
+    } }, "# 契合报告\n");
+  const summary = note("80_AI分析/测试总结.md", { type: "ai-report", report_kind: "company-summary", schema_version: 1,
+    assessed_on: today, ai_author: "Codex", company_dossier: `[[${dossier.path}]]`, coverage_period: "本次公开资料", sources: [source],
+  }, "# 公司研究\n\n## 公司总结\n\n公司总结正文引用[[30_資料/测试来源]]。\n\n## 资料与边界\n\n仅解释明确取得的资料。\n");
+  const prep = note(`${root}/投影准备.md`, { type: "interview-prep", company: "株式会社テスト", case: `[[${owner.path}]]`, date: today, round: "一次面接" }, "# 本场准备\n\n## 1. 要点\n当前准备。\n");
+  const core = [owner, dossier, assessment, summary, prep];
+  const notes = [...core, evidence];
+  const canonical = buildCompanyOverviews(notes).find((context) => context.note.path === owner.path);
+  assert.equal(canonical.assessmentStatus, "available");
+  assert.equal(canonical.summaryStatus, "available");
+  assert.equal(canonical.assessment.dimensions.length, 6);
+  assert.deepEqual(canonical.issues, []);
+  const partial = buildCompanyOverviews(core).find((context) => context.note.path === owner.path);
+  assert.equal(partial.assessmentStatus, "invalid");
+  assert.equal(partial.summaryStatus, "invalid");
+  const records = buildInterviewReadModelRecords(notes, { today });
+  const projection = record(records, INTERVIEW_RECORDS.company, owner.path);
+  assert.doesNotMatch(JSON.stringify(projection), /外部证据正文专属标记|"content"/);
+  assert.equal(hydrateInterviewCompany(projection, core).note, owner);
+  assert.deepEqual(hydrateInterviewCompany(projection, core), canonical);
+  assert.equal(hydrateInterviewCompany(projection, core.filter((note) => note.path !== assessment.path)), null);
+  const context = record(records, INTERVIEW_RECORDS.context, prep.path);
+  assert.ok(!context.paths.includes(evidence.path));
+  const model = reader(records);
+  const payload = await interviewQuery(model, "r1", new URL(`http://localhost/api/interview/context?${new URLSearchParams({ path: prep.path })}`));
+  assert.ok(Buffer.byteLength(JSON.stringify(payload)) < 100_000);
+  const { createInterviewContextResource } = await loadAppModule("app/use-interview-context.ts");
+  const resource = createInterviewContextResource(async (url) => {
+    const parsed = new URL(url, "http://localhost");
+    if (parsed.pathname === "/api/note") {
+      const path = parsed.searchParams.get("path");
+      assert.notEqual(path, evidence.path, "证据只需保留链接，正文应在打开时再读取");
+      return Response.json({ note: core.find((note) => note.path === path) });
+    }
+    return Response.json(await interviewQuery(model, "r1", parsed));
+  });
+  await resource.query("session", { sourcePath: prep.path });
+  assert.equal(resource.getState().ready, true);
+  assert.deepEqual(resource.getState().companyContexts, [canonical]);
+  assert.equal(resource.getState().notes.length, 5);
+  resource.dispose();
 });
 
 test("长整理稿按问题保存，初始目录与统计不携带逐字稿正文", async () => {
@@ -243,6 +360,39 @@ test("同步分批进行时自动推进到新版本，保留已保存的本场�
   assert.equal(resource.getState().revision, "r2");
   assert.equal(resource.getState().syncState, "ready");
   assert.equal(resource.getState().review.projection.annotations[0].mine, "刚保存的批注");
+  resource.dispose();
+});
+
+test("桥重启后旧目录对应正文暂时409时继续读取最新完整版本，不误报没有材料", async () => {
+  const { createInterviewContextResource } = await loadAppModule("app/use-interview-context.ts", { globals: {
+    setTimeout: (callback) => setImmediate(callback), clearTimeout: clearImmediate,
+  } });
+  const fixture = calendarFixture();
+  const old = reader(fixture.records, "r1");
+  const current = reader(fixture.records, "r2");
+  let attempts = 0;
+  const resource = createInterviewContextResource(async (url) => {
+    const parsed = new URL(url, "http://localhost");
+    const catalogRequest = parsed.pathname.endsWith("/catalog");
+    if (catalogRequest) attempts++;
+    const revision = catalogRequest ? attempts <= 2 ? "r1" : "r2" : parsed.searchParams.get("revision");
+    if (parsed.pathname === "/api/note") {
+      if (revision === "r1") return Response.json({ error: "资料版本已过期，请重新读取目录" }, { status: 409 });
+      return Response.json({ note: fixture.notes.find((note) => note.path === parsed.searchParams.get("path")) });
+    }
+    const result = await interviewQuery(revision === "r1" ? old : current, revision, parsed);
+    return Response.json({ ...result, ...(catalogRequest && attempts <= 2 ? { syncState: "building" } : {}) });
+  });
+  await resource.query("session", { calendar: fixture.requested, contextPath: fixture.owner.path, overviewOnly: true });
+  assert.equal(resource.getState().ready, false);
+  assert.equal(resource.getState().loading, true);
+  assert.equal(resource.getState().error, "");
+  assert.equal(resource.getState().target, null);
+  for (let index = 0; index < 50 && resource.getState().revision !== "r2"; index++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(resource.getState().ready, true);
+  assert.equal(resource.getState().revision, "r2");
+  assert.equal(resource.getState().target.path, fixture.prep.path);
+  assert.equal(resource.getState().notes.find((note) => note.path === fixture.prep.path).content, fixture.prep.content);
   resource.dispose();
 });
 

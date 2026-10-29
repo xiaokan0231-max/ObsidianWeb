@@ -74,6 +74,7 @@ import SelectionNoticePanel from "./selection-notice";
 import { interviewSourceRef, type InterviewCatalog, type InterviewSourceRef } from "@/lib/interview-read-model";
 import type { InterviewRemoteReview, InterviewSelection } from "./use-interview-context";
 import type { InterviewTrends } from "@/lib/interview-trends.mjs";
+import type { CompanyOverview } from "@/lib/company-overview";
 
 // 面接復盤：整理稿（派生層）を読む・批注（事実層）へ追記する、の2操作だけを持つ。
 // 整理稿の中身をここで書き換える経路は意図的に存在しない（唯一writer表を参照）。
@@ -340,8 +341,10 @@ function InterviewReview({
   revision = "",
   onRemoteSelect,
   onOpenSource,
+  companyContexts,
 }: {
   notes: Note[];
+  companyContexts?: CompanyOverview[];
   /** 标题行「原笔记 ↗」：外壳打开整理稿抽屉。不传就不出按钮（旧调用处行为不变）。 */
   onOpenNote?: (note: Note) => void;
   /** 标题行「准备稿 ↗」：外壳跳到这一场的本场面试页。不传就不出按钮。 */
@@ -950,7 +953,7 @@ function InterviewReview({
           <span>{doc.round} · {doc.date}{doc.result ? ` · ${doc.result}` : ""}</span>
           {(
             <span className="rv-title-links">
-              <ReviewCompanyAnalysis notes={notes} source={doc.note ?? undefined} sourcePath={doc.key} contextPath={remoteReview?.projection.contextPath} company={doc.company} filter={filter} pattern={patternParam} />
+              <ReviewCompanyAnalysis notes={notes} companyContexts={companyContexts} revision={revision} source={doc.note ?? undefined} sourcePath={doc.key} contextPath={remoteReview?.projection.contextPath} company={doc.company} filter={filter} pattern={patternParam} />
               {onOpenSession && (
                 <button
                   type="button"

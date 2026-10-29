@@ -1,4 +1,7 @@
-import { INTERVIEW_RECORDS, interviewBlockKey, type InterviewCatalog, type InterviewContext, type InterviewReviewProjection } from "../interview-read-model.ts";
+import { INTERVIEW_RECORDS, interviewBlockKey, type InterviewCatalog, type InterviewContext, type InterviewCompanyProjection, type InterviewReviewProjection } from "../interview-read-model.ts";
+import { resolveIndexedInterviewTarget } from "../interview-read-model-target.ts";
+import type { CalendarInterviewTarget } from "../calendar-interview.ts";
+import type { CalendarSnapshot } from "../calendar-snapshot.ts";
 
 type RecordReader = { readRecord<T>(revision: string, kind: string, key: string): Promise<T | null> };
 export class InterviewRevisionError extends Error { readonly status = 409; }
@@ -37,6 +40,19 @@ export async function interviewQuery(model: RecordReader, revision: string, requ
   const params = request.searchParams;
   const type = request.pathname.split("/").pop();
   const path = params.get("path") ?? "";
+  if (type === "target") {
+    const view = params.get("view");
+    const date = params.get("date") ?? "";
+    const event = params.get("event") ?? "";
+    if ((view !== "session" && view !== "review") || !/^20\d{2}-\d{2}-\d{2}$/.test(date) || !event) {
+      throw Object.assign(new Error("日历场次参数无效"), { status: 400 });
+    }
+    const requested: CalendarInterviewTarget = { view, date, sourcePath: event, company: params.get("company") ?? "",
+      label: params.get("round") ?? "面试", caseId: params.get("case") ?? "", time: params.get("time") || undefined,
+      path: params.get(view === "session" ? "prep" : "review") };
+    const entries = await readInterviewRecord<CalendarSnapshot["events"]>(model, revision, "calendar-day", date);
+    return { revision, target: resolveIndexedInterviewTarget(requested, entries ?? []) };
+  }
   if (type === "catalog") {
     const source = (await readInterviewRecord<InterviewCatalog>(model, revision, INTERVIEW_RECORDS.catalog, "root"))!;
     const section = params.get("section");
@@ -72,7 +88,9 @@ export async function interviewQuery(model: RecordReader, revision: string, requ
   if (type === "context") {
     if (!path) return null;
     const context = await readInterviewRecord<InterviewContext>(model, revision, INTERVIEW_RECORDS.context, path);
-    return context ? { revision, context } : null;
+    if (!context) return null;
+    const company = context.contextPath ? await readInterviewRecord<InterviewCompanyProjection>(model, revision, INTERVIEW_RECORDS.company, context.contextPath) : null;
+    return { revision, context, company };
   }
   if (type === "review") {
     if (!path) return null;
