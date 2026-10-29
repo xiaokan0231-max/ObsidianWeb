@@ -19,6 +19,9 @@ import type { AppView } from "./app-route";
 import { DEFAULT_PAGE_COMMAND_VIEWS, getPageCommands, getSecondaryNavigation } from "./navigation";
 import { useDialogFocus } from "./use-dialog-focus";
 import { useUiLocale } from "./ui-locale";
+import { useReadModelSearch } from "./use-read-model-library";
+import ReadModelSyncStatus from "./read-model-sync-status";
+import type { LibraryResult } from "@/lib/read-model";
 
 type SearchCopy = {
   dialog: string;
@@ -116,6 +119,9 @@ export default function SearchPalette({
   onNavigate,
   allReady = true,
   actions = [],
+  indexed = false,
+  onOpenPath,
+  revision,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
@@ -128,6 +134,9 @@ export default function SearchPalette({
    */
   allReady?: boolean;
   actions?: PaletteAction[];
+  indexed?: boolean;
+  onOpenPath?: (path: string, revision?: string) => void;
+  revision?: string | number;
 }) {
   const { locale } = useUiLocale();
   const text = SEARCH_COPY[locale];
@@ -136,6 +145,7 @@ export default function SearchPalette({
   const [activeIndex, setActiveIndex] = useState(0);
   // 最近打开只在浏览器里读：服务端与测试环境没有 localStorage。
   const [recentPaths, setRecentPaths] = useState<string[]>([]);
+  const remote = useReadModelSearch(query, recentPaths, indexed, revision);
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(dialogRef);
@@ -148,15 +158,21 @@ export default function SearchPalette({
 
   const trimmed = query.trim();
   const recentNotes = useMemo(() => {
+    if (indexed) return [];
     const byPath = new Map(notes.map((note) => [note.path, note]));
     return recentPaths.map((path) => byPath.get(path)).filter((note): note is Note => Boolean(note));
-  }, [notes, recentPaths]);
+  }, [notes, recentPaths, indexed]);
   // 空着时：有最近打开就列它；没有就列最近更新的，而不是笔记数组里碰巧排前面的 8 篇。
-  const results = useMemo(() => {
+  const localResults = useMemo(() => {
+    if (indexed) return [];
     if (trimmed) return notes.filter((note) => noteMatches(note, query)).slice(0, 8);
     if (recentNotes.length) return recentNotes;
     return [...notes].sort((left, right) => (right.stat?.mtime ?? 0) - (left.stat?.mtime ?? 0)).slice(0, 8);
-  }, [notes, query, trimmed, recentNotes]);
+  }, [notes, query, trimmed, recentNotes, indexed]);
+  const results = indexed ? remote.items : localResults;
+  const ready = indexed ? Boolean(remote.page) && !remote.loading && !remote.error : allReady;
+  const loadingText = indexed ? locale === "ja" ? "資料を検索中…" : "正在查询资料…" : text.loadingAll;
+  const showingRecent = indexed ? !trimmed && remote.items.some((item) => recentPaths.includes(item.path)) : recentNotes.length > 0;
   const glyphs = useMemo(() => {
     const map = new Map<AppView, string>([["calendar", CALENDAR_GLYPH]]);
     for (const items of Object.values(getSecondaryNavigation(locale))) items?.forEach((item) => map.set(item.id, item.glyph));
@@ -189,9 +205,10 @@ export default function SearchPalette({
     // optionId 只依赖 id，列出 id 即可。
   }, [activeIndex, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const openNote = (note: Note) => {
+  const openNote = (note: Note | LibraryResult) => {
     rememberRecentPath(note.path);
-    onOpen(note);
+    if (indexed) onOpenPath?.(note.path, remote.page?.revision);
+    else onOpen(note as Note);
   };
 
   const activateItem = (index: number) => {
@@ -253,7 +270,7 @@ export default function SearchPalette({
       </div>
       <div className="search-panel-head">
         <span>{query ? text.results(query) : text.shortcuts}</span>
-        {!allReady && <em className="search-loading" role="status">{text.loadingAll}</em>}
+        {!ready && !remote.error && <em className="search-loading" role="status">{loadingText}</em>}
         <button onClick={onClose} aria-label={text.close}>×</button>
       </div>
       {pageCount > 0 && (
@@ -304,8 +321,13 @@ export default function SearchPalette({
         </div>
       )}
       <div className="search-results" role="listbox" id={`${id}-notes`} aria-label={text.notes}>
+        {indexed && <ReadModelSyncStatus state={remote.syncState} />}
+        {indexed && remote.error && <div className="empty-search" role="alert">
+          <p>{locale === "ja" ? "資料を検索できませんでした。もう一度お試しください。" : "资料查询失败，请重试。"}</p>
+          <button type="button" onClick={() => void remote.retry()}>{locale === "ja" ? "再試行" : "重试"}</button>
+        </div>}
         {results.length > 0 && (
-          <h3 className="search-group-title">{trimmed ? text.notes : recentNotes.length ? text.recent : text.updated}</h3>
+          <h3 className="search-group-title">{trimmed ? text.notes : showingRecent ? text.recent : text.updated}</h3>
         )}
         {results.map((note, index) => (
           <button
@@ -324,14 +346,14 @@ export default function SearchPalette({
               {text.groups[getGroup(note.path)]}
             </span>
             <span className="result-copy">
-              <strong><Highlighted parts={splitByTerms(getTitle(note), terms)} /></strong>
-              <small><Highlighted parts={searchSnippet(stripMarkdown(note.content), query)} /></small>
+              <strong><Highlighted parts={indexed ? (note as LibraryResult).titleParts : splitByTerms(getTitle(note as Note), terms)} /></strong>
+              <small><Highlighted parts={indexed ? (note as LibraryResult).snippetParts ?? [{ text: (note as LibraryResult).summary, hit: false }] : searchSnippet(stripMarkdown((note as Note).content), query)} /></small>
             </span>
             <span className="result-arrow">↗</span>
           </button>
         ))}
-        {query && pageCount === 0 && results.length === 0 && (
-          <div className="empty-search">{allReady ? text.empty : text.loadingAll}</div>
+        {query && pageCount === 0 && results.length === 0 && !(indexed && remote.error) && (
+          <div className="empty-search">{ready ? text.empty : loadingText}</div>
         )}
       </div>
       <div className="search-help">

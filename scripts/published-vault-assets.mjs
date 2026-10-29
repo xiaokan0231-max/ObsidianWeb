@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { brotliCompress, constants, gzip } from "node:zlib";
 import { noteInVaultScope } from "../lib/vault-scope.ts";
 import { buildCalendarSnapshot } from "../lib/server/calendar-snapshot.ts";
+import { copyRetainedReadModelAssets, garbageCollectReadModelAssets, writeReadModelAssets } from "./read-model-published.mjs";
 
 const compressBrotli = promisify(brotliCompress);
 const compressGzip = promisify(gzip);
@@ -13,7 +14,7 @@ const SCOPES = ["all", "overview", "actions", "activity", "jobs", "interview", "
 const digest = (data) => createHash("sha256").update(data).digest("hex").slice(0, 24);
 
 /** 保留完整笔记；把聚合和压缩移到发布时，访客首次读取只需传输静态响应。 */
-export async function writePublishedVaultAssets(notes, directory, publishedAt = new Date().toISOString()) {
+export async function writePublishedVaultAssets(notes, directory, publishedAt = new Date().toISOString(), previousDirectory = directory) {
   const scopes = Object.fromEntries(SCOPES.map((scope) => [scope, []]));
   const chunks = {};
   const groups = new Map();
@@ -70,7 +71,15 @@ export async function writePublishedVaultAssets(notes, directory, publishedAt = 
   const calendar = await writeResponse(JSON.stringify({ connected: true,
     calendar: buildCalendarSnapshot(notes.filter((note) => noteInVaultScope(note, "actions"))),
   }));
-  const manifest = { schemaVersion: 2, publishedAt, scopes, chunks, responses, calendar };
-  await writeFile(join(directory, "manifest.json"), JSON.stringify(manifest), { mode: 0o600 });
+  const readModel = await writeReadModelAssets(notes, directory, publishedAt);
+  let previous = [];
+  try { const old = JSON.parse(await readFile(join(previousDirectory, "manifest.json"), "utf8")); previous = [old.readModel, ...(old.readModels ?? [])].filter((value, index, all) => value?.revision && value.revision !== readModel.revision && all.findIndex((item) => item?.revision === value.revision) === index); } catch { /* 初次发布没有旧目录。 */ }
+  const retained = previousDirectory === directory ? previous.slice(0, 2) : await copyRetainedReadModelAssets(previousDirectory, directory, previous.slice(0, 2));
+  const readModels = [readModel, ...retained];
+  const manifest = { schemaVersion: 2, publishedAt, scopes, chunks, responses, calendar, readModel, readModels };
+  const temporary = join(directory, "manifest.read-model.tmp");
+  await writeFile(temporary, JSON.stringify(manifest), { mode: 0o600 });
+  await rename(temporary, join(directory, "manifest.json"));
+  await garbageCollectReadModelAssets(directory, manifest, previous);
   return { manifest, bytes };
 }

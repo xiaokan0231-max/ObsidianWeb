@@ -52,3 +52,38 @@ export const calendarProjectionSummaries = sqliteTable("calendar_projection_summ
   historicalCount: integer("historical_count").notNull(),
   historicalTotal: integer("historical_total").notNull(),
 }, (table) => [primaryKey({ columns: [table.revision, table.asOfDate, table.month] })]);
+
+// 通用读取层按完成版本发布；正文检索块按内容哈希复用，卡片不承载完整笔记。
+export const readModelRevisions = sqliteTable("read_model_revisions", {
+  revision: text("revision").primaryKey(), state: text("state").notNull(),
+  manifestJson: text("manifest_json").notNull(), sourceUpdatedAt: integer("source_updated_at").notNull(),
+  indexedAt: integer("indexed_at").notNull(), createdAt: integer("created_at").notNull(),
+});
+export const readModelChunks = sqliteTable("read_model_chunks", {
+  id: text("id").primaryKey(), hash: text("hash").notNull(), channel: text("channel").notNull(),
+  ordinal: integer("ordinal").notNull(), prefix: integer("prefix").notNull(), text: text("text").notNull(),
+}, (table) => [index("read_chunks_hash_channel").on(table.hash, table.channel, table.ordinal)]);
+export const readModelContentRefs = sqliteTable("read_model_content_refs", {
+  revision: text("revision").notNull(), hash: text("hash").notNull(),
+}, (table) => [primaryKey({ columns: [table.revision, table.hash] }), index("read_refs_hash").on(table.hash)]);
+export const readModelCatalog = sqliteTable("read_model_catalog", {
+  revision: text("revision").notNull(), path: text("path").notNull(), ordinal: integer("ordinal").notNull(),
+  hash: text("hash").notNull(), cardJson: text("card_json").notNull(), decisionJson: text("decision_json").notNull(),
+  typeLower: text("type_lower").notNull(), statusLower: text("status_lower").notNull(), groupKey: text("group_key").notNull(),
+  scopesJson: text("scopes_json").notNull(), tagsJson: text("tags_json").notNull(), mtime: integer("mtime").notNull(),
+}, (table) => [primaryKey({ columns: [table.revision, table.path] }),
+  index("read_catalog_revision_mtime").on(table.revision, table.mtime),
+  index("read_catalog_revision_group_type").on(table.revision, table.groupKey, table.typeLower),
+  index("read_catalog_revision_status").on(table.revision, table.statusLower)]);
+export const readModelAliases = sqliteTable("read_model_aliases", {
+  revision: text("revision").notNull(), target: text("target").notNull(), path: text("path").notNull(), exact: integer("exact").notNull(),
+}, (table) => [primaryKey({ columns: [table.revision, table.target, table.path, table.exact] }), index("read_alias_lookup").on(table.revision, table.target, table.exact)]);
+export const readModelLinks = sqliteTable("read_model_links", {
+  revision: text("revision").notNull(), sourcePath: text("source_path").notNull(), target: text("target").notNull(),
+}, (table) => [primaryKey({ columns: [table.revision, table.sourcePath, table.target] }), index("read_backlink_lookup").on(table.revision, table.target)]);
+export const readModelRecords = sqliteTable("read_model_records", {
+  revision: text("revision").notNull(), kind: text("kind").notNull(), key: text("key").notNull(), hash: text("hash").notNull(),
+}, (table) => [primaryKey({ columns: [table.revision, table.kind, table.key] })]);
+export const readModelBatches = sqliteTable("read_model_batches", {
+  revision: text("revision").notNull(), ordinal: integer("ordinal").notNull(), digest: text("digest").notNull(),
+}, (table) => [primaryKey({ columns: [table.revision, table.ordinal] })]);

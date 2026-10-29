@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCodexExecutable } from "./codex-executable.mjs";
+import { buildApplicationReadModel, createLocalReadModelSource } from "./read-model-source.mjs";
 import { interviewDiagnosticInstruction } from "../.agents/skills/review-interview-answers/scripts/diagnostic-prompt.mjs";
 import { scoredEvidenceErrors } from "../.agents/skills/review-interview-answers/scripts/diagnostic-checks.mjs";
 import {
@@ -36,6 +37,7 @@ const TOKEN = process.env.CODEX_BRIDGE_TOKEN;
 const SOL_MODEL = process.env.CODEX_BRIDGE_SOL_MODEL || "gpt-5.6-sol";
 const TERRA_MODEL = process.env.CODEX_BRIDGE_TERRA_MODEL || "gpt-5.6-terra";
 const MAX_BODY = 8 * 1024 * 1024;
+const readModelSource = createLocalReadModelSource({ base: process.env.OBSIDIAN_API_URL || "http://127.0.0.1:27123", key: process.env.OBSIDIAN_API_KEY, build: buildApplicationReadModel });
 
 if (!TOKEN || TOKEN.length < 24) {
   process.stderr.write("CODEX_BRIDGE_TOKEN must contain at least 24 characters.\n");
@@ -688,6 +690,26 @@ const server = createServer(async (request, response) => {
     await checkRuntime();
     json(response, 200, statusPayload());
     return;
+  }
+  const readModelUrl = new URL(request.url, `http://${HOST}:${PORT}`);
+  if (readModelUrl.pathname.startsWith("/read-model/")) {
+    try {
+      if (request.method === "GET" && readModelUrl.pathname === "/read-model/manifest") return json(response, 200, await readModelSource.manifest(readModelUrl.searchParams.get("force") === "1", readModelUrl.searchParams.get("baseRevision") ?? undefined));
+      if (request.method === "GET" && readModelUrl.pathname === "/read-model/batch") {
+        const batch = readModelSource.batch(readModelUrl.searchParams.get("revision"), Number(readModelUrl.searchParams.get("index")));
+        return json(response, batch ? 200 : 409, batch ?? { error: "资料索引版本已过期，请重新读取" });
+      }
+      if (request.method === "GET" && readModelUrl.pathname === "/read-model/note") {
+        const note = readModelSource.note(readModelUrl.searchParams.get("revision"), readModelUrl.searchParams.get("path"));
+        return json(response, note ? 200 : 409, note ? { note } : { error: "资料版本已过期，请重新读取目录" });
+      }
+      if (request.method === "POST" && readModelUrl.pathname === "/read-model/invalidate") {
+        const body = await readBody(request);
+        readModelSource.invalidate(Array.isArray(body.paths) ? body.paths.filter((path) => typeof path === "string") : []);
+        return json(response, 200, { ok: true });
+      }
+    } catch (error) { return json(response, 503, { error: error instanceof Error ? error.message : "资料索引构建失败" }); }
+    return json(response, 404, { error: "Not found" });
   }
   if (request.method !== "POST" || request.url !== "/invoke") {
     json(response, 404, { error: "Not found" });

@@ -70,7 +70,8 @@ test("键盘契约与页面接线：上下键、Enter、Esc 都在，旧的 sele
   assert.match(source, /event\.key === "ArrowUp"/);
   assert.match(source, /event\.key === "Enter"/);
   assert.match(source, /event\.key === "Escape"/);
-  assert.match(source, /event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"\) \{ event\.preventDefault\(\); setOpen\(true\)/, "触发器方向键可打开");
+  assert.match(source, /event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"\) \{ event\.preventDefault\(\); show\(\)/, "触发器方向键可打开");
+  assert.match(source, /const show = \(\) => \{ setOpen\(true\); void load\(\)/, "打开时按需补齐选择器目录");
   assert.match(source, /useDialogFocus\(dialogRef, true\)/, "与公司对比选择器同样隔离外层焦点");
   assert.match(source, /refocusPending = false;\s*triggerRef\.current\?\.focus\(\{ preventScroll: true \}\)/, "外壳重挂载后焦点仍回到触发器");
   assert.match(session, /<ContextPicker groups=\{pickerGroups\}/);

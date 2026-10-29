@@ -14,7 +14,7 @@ const uxRefreshCss = readFileSync(new URL("../app/styles/ux-refresh.css", import
 const timelineCss = readFileSync(new URL("../app/styles/timeline.css", import.meta.url), "utf8");
 
 test("note overlays are deep-linkable, close through Back, and restore focus", () => {
-  assert.match(memoryAtlas, /params\.set\("note", note\.path\)/);
+  assert.match(memoryAtlas, /params\.set\("note", path\)/);
   assert.match(memoryAtlas, /window\.history\.pushState\([\s\S]*__echoNote/);
   assert.match(memoryAtlas, /window\.history\.state\?\.__echoNote[\s\S]*window\.history\.back\(\)/);
   assert.match(dialogFocus, /child\.setAttribute\("inert", ""\)/);

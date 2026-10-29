@@ -4,6 +4,9 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSPr
 import { type Note } from "@/lib/notes";
 import type { CalendarModel } from "@/lib/calendar-snapshot";
 import type { CalendarPulseSummary } from "@/lib/calendar-pulse-summary";
+import type { CalendarDaySummary } from "@/lib/calendar-query-model";
+import type { CalendarProjection } from "./use-calendar-projection";
+import ReadModelSyncStatus from "./read-model-sync-status";
 import { type UiLocale } from "@/lib/ui-locale";
 import { useUiLocale } from "./ui-locale";
 import CalendarApplicationPanel, { CalendarApplicationTrigger, ApplicationProgressBar, type OpenApplicationDay } from "./calendar-application-panel";
@@ -13,7 +16,7 @@ import { enumCodec, useInitialUrlSearch, useUrlState, type UrlStateCodec } from 
 import { isTypingTarget } from "@/lib/keyboard";
 import { calendarMonthDays } from "@/lib/calendar-month";
 import { buildCalendarWeek, calendarWeekDays, calendarWeekRangeLabel, calendarWeekStart, jstClock, minutesLabel, stepWeekSelection } from "@/lib/calendar-week";
-import { buildAiApplicationDays, summarizeAiApplicationDays, type AiApplicationDay } from "@/lib/calendar-applications";
+import { buildAiApplicationDays, summarizeAiApplicationDays } from "@/lib/calendar-applications";
 import { calendarConflicts } from "@/lib/calendar-conflicts";
 import { isInterviewEvent, resolveCalendarInterviewDestinations, type CalendarInterviewDestinations, type CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { buildCalendarCompanyRatings, type CalendarCompanyRating } from "@/lib/calendar-company-rating";
@@ -370,6 +373,8 @@ function CalendarView({
   onOpenCompany,
   model,
   initialSummary,
+  projection,
+  onOpenPath,
 }: {
   events: CalendarEvent[];
   notes: Note[];
@@ -381,11 +386,14 @@ function CalendarView({
   onOpenCompany?: (company: string, contextNote: Note) => void;
   model?: CalendarModel | null;
   initialSummary?: CalendarPulseSummary | null;
+  projection?: CalendarProjection;
+  onOpenPath?: (path: string, revision?: string) => void;
   /** 「今日」は殻が持つ。memo 越しなので中で求めると日付を跨いでも昨日のままになる。 */
   today: string;
 }) {
   const { locale } = useUiLocale();
   const copy = CALENDAR_COPY[locale];
+  const openSource = (note: Note) => projection && onOpenPath ? onOpenPath(note.path, projection.revision) : onOpen(note);
   const sectionRef = useRef<HTMLElement>(null);
   const initialSearch = useInitialUrlSearch();
   const [month, setMonth] = useState(() => {
@@ -401,15 +409,18 @@ function CalendarView({
   const openApplications: OpenApplicationDay = (day, trigger) => {
     applicationTriggerRef.current = trigger;
     setApplicationDate(day.date);
+    if (projection) void projection.loadApplications(day.date);
   };
   const closeApplications = () => {
     setApplicationDate("");
+    projection?.closeApplications();
     const trigger = applicationTriggerRef.current;
     if (trigger?.isConnected) trigger.focus({ preventScroll: true });
     else sectionRef.current?.querySelector<HTMLButtonElement>(`[data-ai-date="${applicationDate}"]`)?.focus({ preventScroll: true });
   };
   const [focusTone, setFocusTone] = useState<ProgressTone | "">("");
   const [historyExplanationOpen, setHistoryExplanationOpen] = useState(false);
+  const [recentOpen, setRecentOpen] = useState(false);
   // 月／周存进 URL：刷新或从别页返回时停在原来的看法上；默认月视图，链接里不出现参数。
   const [calView, setCalView] = useUrlState("calview", "month", CALENDAR_MODE_CODEC);
   // 空串＝「本周」：默认值不随 today 变，跨过午夜或周一时链接里不会凭空冒出一个 calweek，
@@ -441,9 +452,10 @@ function CalendarView({
     events.forEach((event) => map.set(event.date, [...(map.get(event.date) ?? []), event]));
     return map;
   }, [events]);
-  const applicationDays = useMemo(() => model?.applicationDays ?? buildAiApplicationDays(notes, today), [model, notes, today]);
+  const fullApplicationDays = useMemo(() => projection ? [] : model?.applicationDays ?? buildAiApplicationDays(notes, today), [model, notes, today, projection]);
+  const applicationDays = projection?.applicationDays ?? fullApplicationDays;
   const overviewMonth = calView === "week" ? weekStart.slice(0, 7) : monthKey;
-  const monthApplications = useMemo(() => summarizeAiApplicationDays(applicationDays, overviewMonth), [applicationDays, overviewMonth]);
+  const monthApplications = useMemo(() => summarizeAiApplicationDays(fullApplicationDays, overviewMonth), [fullApplicationDays, overviewMonth]);
   const interviewDestinations = useMemo(() => model?.interviewDestinations ?? new Map(events.map(event => [event.id, resolveCalendarInterviewDestinations(event, notes)])), [model, events, notes]);
   const companyRatingByEvent = useMemo(() => model?.companyRatingByEvent ?? buildCalendarCompanyRatings(events, notes, interviewTargets), [model, events, notes, interviewTargets]);
   const originByEvent = useMemo(() => model?.originByEvent ?? buildCalendarEventOrigins(events, notes), [model, events, notes]);
@@ -454,13 +466,13 @@ function CalendarView({
   // 已结束案件残留的旧预约不算撞期：拒信之后那一格不会再去。
   const conflicts = useMemo(() => calendarConflicts(events.filter((event) =>
     progressByEvent.get(event.id)?.tone !== "closed")), [events, progressByEvent]);
-  const summary = useMemo(() => buildCalendarSummary({ events, progressByEvent, applicationDays, today }),
-    [events, progressByEvent, applicationDays, today]);
+  const summary = useMemo(() => buildCalendarSummary({ events, progressByEvent, applicationDays: fullApplicationDays, today }),
+    [events, progressByEvent, fullApplicationDays, today]);
   // 说明列表与统计共用同一判定，并按场次去重；翻月不能让这个数字换口径。
   const historicalEvents = useMemo(() => [...new Map(events.filter((event) => {
     const progress = progressByEvent.get(event.id);
-    return progress && isCalendarHistoricalProgress(progress);
-  }).map((event) => [event.id, event])).values()].sort((left, right) => right.date.localeCompare(left.date) || left.id.localeCompare(right.id)), [events, progressByEvent]);
+    return progress && isCalendarHistoricalProgress(progress) && (!projection || projection.history.eventIds.has(event.id));
+  }).map((event) => [event.id, event])).values()].sort((left, right) => right.date.localeCompare(left.date) || left.id.localeCompare(right.id)), [events, progressByEvent, projection]);
   const associationConflicts = useMemo(() => [...new Map(events.filter((event) => progressByEvent.get(event.id)?.code === "association-conflict").map((event) => [event.id, event])).values()], [events, progressByEvent]);
   const horizon = shiftCalendarDay(today, 6);
   // 与态势条「下一场」「未来 7 天场次」同一口径（lib/calendar-summary.ts），侧栏和数字不会各说各的。
@@ -472,15 +484,36 @@ function CalendarView({
   const recent = events
     .filter((event) => event.phase === "past" || progressByEvent.get(event.id)?.occurred)
     .sort((left, right) => right.date.localeCompare(left.date) || right.time.localeCompare(left.time));
+  const recentDisplayed = projection ? projection.recent.loaded ? recent.filter((event) => projection.recent.eventIds.has(event.id)) : recent.slice(0, 6) : recent;
   // 首屏汇总可先于详情到达；只借用同一天、同月份的结果，翻月或详情齐全后不能沿用旧数字。
-  const pulseSummary = loading && initialSummary?.today === today && initialSummary.month === overviewMonth ? initialSummary : null;
-  const statsLoading = loading && !pulseSummary;
+  const authoritativeSummary = projection?.summary ?? initialSummary;
+  const pulseSummary = (projection || loading) && authoritativeSummary?.today === today && authoritativeSummary.month === overviewMonth ? authoritativeSummary : null;
+  const statsLoading = projection ? !pulseSummary : loading && !pulseSummary;
   const displayedApplications = pulseSummary?.applications ?? monthApplications;
   const displayedWaitingCount = pulseSummary?.waitingCount ?? summary.waitingCount;
   const displayedHistoricalCount = pulseSummary?.historicalCount ?? summary.historicalCount;
   const displayedHistoricalTotal = pulseSummary?.historicalTotal ?? recent.length;
   const selectedEvents = selectedDay ? eventsByDate.get(selectedDay) ?? [] : [];
   const selectedApplications = selectedDay && selectedDay !== today ? applicationsByDate.get(selectedDay) : undefined;
+
+  const rangeFrom = calView === "week" ? weekStart : days[0].key;
+  const rangeTo = calView === "week" ? shiftCalendarDay(weekStart, 6) : days.at(-1)!.key;
+  const onRangeChange = projection?.onRangeChange;
+  useEffect(() => { if (onRangeChange) void onRangeChange({ from: rangeFrom, to: rangeTo, month: overviewMonth }); }, [onRangeChange, rangeFrom, rangeTo, overviewMonth]);
+  const loadHistory = projection?.loadHistory;
+  const historyLoaded = projection?.history.loaded;
+  const historyLoading = projection?.history.loading;
+  const historyError = projection?.history.error;
+  const projectionRevision = projection?.revision;
+  useEffect(() => { if (historyExplanationOpen && projectionRevision && loadHistory && !historyLoaded && !historyLoading && !historyError) void loadHistory(); }, [historyExplanationOpen, projectionRevision, loadHistory, historyLoaded, historyLoading, historyError]);
+  const loadApplications = projection?.loadApplications;
+  const loadedApplicationDate = projection?.applications.date;
+  useEffect(() => { if (applicationDate && projectionRevision && loadApplications && loadedApplicationDate !== applicationDate) void loadApplications(applicationDate); }, [applicationDate, projectionRevision, loadApplications, loadedApplicationDate]);
+  const loadRecent = projection?.loadRecent;
+  const recentLoaded = projection?.recent.loaded;
+  const recentLoading = projection?.recent.loading;
+  const recentError = projection?.recent.error;
+  useEffect(() => { if (recentOpen && projectionRevision && loadRecent && !recentLoaded && !recentLoading && !recentError) void loadRecent(); }, [recentOpen, projectionRevision, loadRecent, recentLoaded, recentLoading, recentError]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -527,7 +560,7 @@ function CalendarView({
   };
   const toggleFocusTone = (tone: ProgressTone) => setFocusTone((current) => current === tone ? "" : tone);
   const scoreByEvent = useMemo(() => model?.scoreByEvent ?? new Map(events.map(event => [event.id, calendarInterviewScore(event, interviewTargets.get(event.id), notes)])), [model, events, interviewTargets, notes]);
-  const openEvent = (event: CalendarEvent) => interviewTargets.get(event.id) ? onInterview(event) : onOpen(event.note);
+  const openEvent = (event: CalendarEvent) => interviewTargets.get(event.id) ? onInterview(event) : openSource(event.note);
 
   const goToWeek = (target: string) => {
     const next = calendarWeekStart(target);
@@ -650,6 +683,9 @@ function CalendarView({
   return (
     <section className="calendar-view" ref={sectionRef} data-focus-tone={focusTone || undefined}>
       <h1 className="sr-only">{copy.calendar}</h1>
+      {projection?.error && <div className="calendar-query-status" role="alert"><p>{projection.summary ? (locale === "ja" ? "カレンダーを読み込めませんでした。前回の資料を保持しています。" : "日历读取失败，保留上次完整资料。") : (locale === "ja" ? "カレンダーを読み込めませんでした。もう一度お試しください。" : "日历读取失败，请重试。")}</p><button type="button" onClick={() => void projection.refresh()}>{locale === "ja" ? "再試行" : "重试"}</button></div>}
+      {projection?.loading && <p className="calendar-query-status" role="status">{locale === "ja" ? "カレンダーを読み込み中…" : "正在读取日历…"}</p>}
+      {projection && <ReadModelSyncStatus state={projection.syncState} />}
       <div className="calendar-pulse" role="region" aria-label={copy.stats} aria-busy={statsLoading || undefined}>
         <div className="calendar-month-applications">
           <div className="calendar-month-metric"><span>{copy.statMonthAi}<time>{overviewMonth}</time></span>
@@ -667,7 +703,7 @@ function CalendarView({
           <button type="button" className="calendar-pulse-action status-waiting" aria-pressed={focusTone === "waiting"} title={copy.focusTone(copy.progress.waiting)} disabled={loading} onClick={() => toggleFocusTone("waiting")}>
             <i className="calendar-status-dot" aria-hidden="true" /><span>{copy.statWaiting}</span>{!statsLoading && <strong>{displayedWaitingCount}</strong>}
           </button>
-          <button type="button" className="calendar-pulse-action status-neutral" aria-label={`${copy.statHistoricalCount} ${displayedHistoricalCount} ${copy.historicalScope(displayedHistoricalTotal)}`} aria-expanded={historyExplanationOpen} aria-controls="calendar-historical-explanation" title={copy.historicalOpen} disabled={loading} onClick={() => setHistoryExplanationOpen((open) => !open)}>
+          <button type="button" className="calendar-pulse-action status-neutral" aria-label={statsLoading ? copy.statHistoricalCount : `${copy.statHistoricalCount} ${displayedHistoricalCount} ${copy.historicalScope(displayedHistoricalTotal)}`} aria-expanded={historyExplanationOpen} aria-controls="calendar-historical-explanation" title={copy.historicalOpen} disabled={loading} onClick={() => { if (!historyExplanationOpen && projection && !projection.history.loaded) void projection.loadHistory(); setHistoryExplanationOpen((open) => !open); }}>
             <span>{copy.statHistorical}</span>{!statsLoading && <><strong>{displayedHistoricalCount}</strong><small>{copy.historicalScope(displayedHistoricalTotal)}</small></>}
           </button>
         </div>
@@ -675,11 +711,14 @@ function CalendarView({
       {historyExplanationOpen && <section className="calendar-historical-explanation" id="calendar-historical-explanation" aria-label={copy.statHistorical}>
         <header><div><h2>{copy.statHistorical}</h2><p>{copy.historicalScopeExplanation}</p></div><button type="button" onClick={() => setHistoryExplanationOpen(false)} aria-label={copy.historicalClose}>×</button></header>
         <p className="calendar-history-meaning">{copy.historicalExplanation}</p>
-        {historicalEvents.length ? <CalendarRecordExplanationList events={historicalEvents} progressByEvent={progressByEvent} interviewTargets={interviewTargets} interviewDestinations={interviewDestinations} copy={copy} onOpen={onOpen} onInterview={onInterview} /> : <p className="agenda-empty">{copy.historicalEmpty}</p>}
+        {historicalEvents.length ? <CalendarRecordExplanationList events={historicalEvents} progressByEvent={progressByEvent} interviewTargets={interviewTargets} interviewDestinations={interviewDestinations} copy={copy} onOpen={openSource} onInterview={onInterview} /> : !projection || projection.history.loaded && !projection.history.loading && !projection.history.error ? <p className="agenda-empty">{copy.historicalEmpty}</p> : null}
+        {projection?.history.loading && <p role="status">{locale === "ja" ? "過去の予定を読み込み中…" : "正在读取历史场次…"}</p>}
+        {projection?.history.error && <div role="alert"><p>{locale === "ja" ? "過去の予定を読み込めませんでした。" : "历史场次读取失败。"}</p><button type="button" onClick={() => void projection.loadHistory()}>{locale === "ja" ? "再試行" : "重试"}</button></div>}
+        {projection?.history.loaded && projection.history.nextOffset !== null && <button type="button" disabled={projection.history.loading} onClick={() => void projection.loadHistory()}>{locale === "ja" ? "さらに12件を表示" : "再显示 12 场"}</button>}
       </section>}
       {!loading && associationConflicts.length > 0 && <details className="calendar-association-conflicts">
         <summary>{copy.associationConflicts(associationConflicts.length)}</summary><p>{copy.associationExplanation}</p>
-        <CalendarRecordExplanationList events={associationConflicts} progressByEvent={progressByEvent} interviewTargets={interviewTargets} interviewDestinations={interviewDestinations} copy={copy} onOpen={onOpen} onInterview={onInterview} />
+        <CalendarRecordExplanationList events={associationConflicts} progressByEvent={progressByEvent} interviewTargets={interviewTargets} interviewDestinations={interviewDestinations} copy={copy} onOpen={openSource} onInterview={onInterview} />
       </details>}
       <div className="calendar-layout">
         <div className="calendar-board">
@@ -849,7 +888,7 @@ function CalendarView({
               conflicts={conflicts}
               today={today}
               detailed
-              onOpen={onOpen}
+              onOpen={openSource}
               interviewTargets={interviewTargets}
               scoreByEvent={scoreByEvent}
               originByEvent={originByEvent}
@@ -870,7 +909,7 @@ function CalendarView({
             conflicts={conflicts}
             today={today}
             limit={AGENDA_LIMIT}
-            onOpen={onOpen}
+            onOpen={openSource}
             interviewTargets={interviewTargets}
             scoreByEvent={scoreByEvent}
             originByEvent={originByEvent}
@@ -888,7 +927,7 @@ function CalendarView({
               conflicts={conflicts}
               today={today}
               limit={AGENDA_LIMIT}
-              onOpen={onOpen}
+              onOpen={openSource}
               interviewTargets={interviewTargets}
               scoreByEvent={scoreByEvent}
               originByEvent={originByEvent}
@@ -898,21 +937,21 @@ function CalendarView({
               onInterview={onInterview}
             />
           )}
-          <details className="calendar-history">
+          <details className="calendar-history" open={recentOpen} onToggle={(event) => { const open = event.currentTarget.open; setRecentOpen(open); if (open && projection && !projection.recent.loaded) void projection.loadRecent(); }}>
             <summary>
               <span>{copy.recent}</span>
-              <strong>{recent.length}</strong>
+              <strong>{projection ? pulseSummary?.historicalTotal ?? "—" : recent.length}</strong>
             </summary>
             <AgendaGroup
               title={copy.history}
               empty={copy.historyEmpty}
-              events={recent}
+              events={recentDisplayed}
               progressByEvent={progressByEvent}
               conflicts={conflicts}
               today={today}
               // 默认露出最近 6 条（与原先一致），其余用组内「另有 N 项」展开。
-              limit={6}
-              onOpen={onOpen}
+              limit={projection?.recent.loaded ? undefined : 6}
+              onOpen={openSource}
               interviewTargets={interviewTargets}
               scoreByEvent={scoreByEvent}
               originByEvent={originByEvent}
@@ -920,11 +959,15 @@ function CalendarView({
               interviewDestinations={interviewDestinations}
               onInterview={onInterview}
             />
+            {projection?.recent.loading && <p role="status">{locale === "ja" ? "最近の予定を読み込み中…" : "正在读取最近记录…"}</p>}
+            {projection?.recent.error && <div role="alert"><p>{locale === "ja" ? "最近の予定を読み込めませんでした。" : "最近记录读取失败。"}</p><button type="button" onClick={() => void projection.loadRecent()}>{locale === "ja" ? "再試行" : "重试"}</button></div>}
+            {projection?.recent.loaded && projection.recent.nextOffset !== null && <button type="button" disabled={projection.recent.loading} onClick={() => void projection.loadRecent()}>{locale === "ja" ? "さらに12件を表示" : "再显示 12 场"}</button>}
           </details>
         </aside>
       </div>
-      {applicationDate && <CalendarApplicationPanel key={applicationDate} date={applicationDate} day={applicationsByDate.get(applicationDate)} fetchedAt={fetchedAt}
-        onClose={closeApplications} onOpen={onOpen} onOpenCompany={onOpenCompany} />}
+      {applicationDate && <CalendarApplicationPanel key={applicationDate} date={applicationDate} day={projection ? projection.applications.date === applicationDate ? projection.applications.day ?? undefined : undefined : fullApplicationDays.find((day) => day.date === applicationDate)} fetchedAt={projection ? projection.applications.fetchedAt : fetchedAt}
+        summary={applicationsByDate.get(applicationDate)} loading={projection ? projection.applications.date !== applicationDate || projection.applications.loading : false} error={projection?.applications.date === applicationDate ? projection.applications.error : ""} onRetry={projection ? () => void projection.loadApplications(applicationDate) : undefined}
+        onClose={closeApplications} onOpen={openSource} onOpenCompany={onOpenCompany} />}
     </section>
   );
 }
@@ -965,7 +1008,7 @@ function WeekBoard({
   originByEvent: ReadonlyMap<string, CalendarEventOrigin>;
   companyRatingByEvent: ReadonlyMap<string, CalendarCompanyRating>;
   interviewDestinations: ReadonlyMap<string, CalendarInterviewDestinations>;
-  applicationsByDate: ReadonlyMap<string, AiApplicationDay>;
+  applicationsByDate: ReadonlyMap<string, CalendarDaySummary>;
   copy: CalendarCopy;
   dayLabel: (key: string) => string;
   onSelectDay: (key: string) => void;

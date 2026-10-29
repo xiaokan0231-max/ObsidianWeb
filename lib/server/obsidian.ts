@@ -1,6 +1,7 @@
 import { isOperationalPath } from "@/lib/vault-boundary.mjs";
 import { createVaultCache } from "./vault-cache.ts";
 import { createPublishedVaultReader } from "./published-vault.ts";
+import { invalidateReadModel } from "./codex-bridge.ts";
 import type { VaultScope } from "../vault-scope.ts";
 
 async function loadPublishedAsset(file: string) {
@@ -196,6 +197,7 @@ export async function writeNote(path: string, content: string) {
   });
   // 写穿失效：同一请求内紧随的 readAllNotes（语言路由的收尾都这么干）要能看到新内容。
   vaultCache.invalidate(path);
+  await invalidateReadModel([path]);
 }
 
 export async function appendNote(path: string, content: string) {
@@ -210,6 +212,7 @@ export async function appendNote(path: string, content: string) {
     body: content,
   });
   vaultCache.invalidate(path);
+  await invalidateReadModel([path]);
 }
 
 export async function patchHeading(
@@ -230,6 +233,7 @@ export async function patchHeading(
     body: content,
   });
   vaultCache.invalidate(path);
+  await invalidateReadModel([path]);
 }
 
 export async function uniquePath(path: string) {

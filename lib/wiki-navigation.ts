@@ -2,12 +2,15 @@ import type { Note } from "./notes.ts";
 import { explicitNoteLink, resolveNoteLinkResult } from "./wiki-target.ts";
 
 export type WikiNavigationNotice = { kind: "loading" | "missing" | "ambiguous"; target: string } | null;
+export type WikiResolveResult = { kind: "resolved"; path: string; section: string | null; revision?: string } | { kind: "missing" | "ambiguous" };
 
 type Options = {
   getNotes(): readonly Note[];
   isComplete(): boolean;
   ensureAll(): Promise<readonly Note[] | null>;
-  onOpen(link: { path: string; section: string | null }): void;
+  /** 查询目录索引即可完成消歧；返回 null 时才沿用未改造视图的旧读取路径。 */
+  resolve?(target: string, section?: string): Promise<WikiResolveResult | null>;
+  onOpen(link: { path: string; section: string | null; revision?: string }): void;
   onNotice(notice: WikiNavigationNotice): void;
 };
 
@@ -37,6 +40,24 @@ export function createWikiNavigator(options: Options) {
   async function open(target: string, section?: string) {
     const current = ++intent;
     options.onNotice(null);
+    if (options.resolve) {
+      options.onNotice({ kind: "loading", target });
+      try {
+        const result = await options.resolve(target, section);
+        if (current !== intent) return;
+        if (result) {
+          if (result.kind === "resolved") {
+            options.onNotice(null);
+            options.onOpen({ path: result.path, section: result.section, ...(result.revision ? { revision: result.revision } : {}) });
+          } else options.onNotice({ kind: result.kind, target });
+          return;
+        }
+      } catch {
+        // 索引暂时不可用不是笔记不存在，也不能退回下载全库正文。
+        if (current === intent) options.onNotice(null);
+        return;
+      }
+    }
     const explicit = explicitNoteLink(target, section);
     let notes = options.getNotes();
     if (!options.isComplete()) {

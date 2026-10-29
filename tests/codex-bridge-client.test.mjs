@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { invokeCodex } from "../lib/server/codex-bridge.ts";
+import { invalidateReadModel, invokeCodex } from "../lib/server/codex-bridge.ts";
 
 test("bridge client preserves task errors and identifies transport failures", async (t) => {
   const previousToken = process.env.CODEX_BRIDGE_TOKEN;
@@ -23,5 +23,27 @@ test("bridge client preserves task errors and identifies transport failures", as
 
   delete process.env.CODEX_BRIDGE_TOKEN;
   await assert.rejects(invokeCodex("grade_language_exam", { items: [] }), /本地 Codex Bridge 未配置/);
+  assert.equal(fetchMock.mock.callCount(), 2);
+});
+
+test("保存后的索引通知带鉴权与受影响路径，Bridge 故障不改变正本保存结果", async (t) => {
+  const previousToken = process.env.CODEX_BRIDGE_TOKEN;
+  process.env.CODEX_BRIDGE_TOKEN = "read-model-test-token";
+  t.after(() => {
+    if (previousToken === undefined) delete process.env.CODEX_BRIDGE_TOKEN;
+    else process.env.CODEX_BRIDGE_TOKEN = previousToken;
+  });
+  const fetchMock = t.mock.method(globalThis, "fetch", async (url, init) => {
+    assert.match(url, /\/read-model\/invalidate$/);
+    assert.equal(init.headers.Authorization, "Bearer read-model-test-token");
+    assert.deepEqual(JSON.parse(init.body), { paths: ["30_資料/测试.md"] });
+    assert.ok(init.signal);
+    return Response.json({ ok: true });
+  });
+  await invalidateReadModel(["30_資料/测试.md"]);
+  fetchMock.mock.mockImplementation(async () => { throw new TypeError("offline"); });
+  await assert.doesNotReject(invalidateReadModel(["30_資料/测试.md"]));
+  delete process.env.CODEX_BRIDGE_TOKEN;
+  await invalidateReadModel(["30_資料/测试.md"]);
   assert.equal(fetchMock.mock.callCount(), 2);
 });

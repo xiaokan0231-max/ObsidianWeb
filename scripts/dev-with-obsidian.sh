@@ -93,4 +93,8 @@ cleanup() {
 trap cleanup EXIT INT TERM
 # プレビューハーネスは PORT 環境変数で待ち受けポートを指定してくる。
 # vinext は PORT を読まないので明示的に渡す（未指定なら従来どおり 3000）。
-npm run dev:web -- --port "${PORT:-3000}"
+if [ "${OBSIDIAN_PREVIEW_MODE:-}" = "production" ]; then
+  node scripts/preview-local-worker.mjs
+else
+  npm run dev:web -- --port "${PORT:-3000}"
+fi

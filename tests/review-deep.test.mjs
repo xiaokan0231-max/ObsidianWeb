@@ -367,7 +367,7 @@ test("five-dimension scores stay visible before the full report is expanded", as
     readAppCss(),
   ]);
   const stageStart = client.indexOf("rv-deep-stage");
-  const collapsedReportStart = client.indexOf("doc.deepReview && !findInterviewReassessment(notes, doc.note.path) && deepOpen", stageStart);
+  const collapsedReportStart = client.indexOf("doc.deepReview && !findInterviewReassessment(notes, doc.key) && deepOpen", stageStart);
   const glanceStart = client.indexOf("rv-score-glance", stageStart);
 
   assert.ok(stageStart >= 0);

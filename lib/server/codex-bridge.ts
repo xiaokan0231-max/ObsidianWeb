@@ -72,6 +72,20 @@ export async function getCodexRuntime(): Promise<CodexRuntimeStatus> {
   }
 }
 
+/** 保存已经成功后只通知索引失效；Bridge 离线时由下一次轻量变更检测补齐。 */
+export async function invalidateReadModel(paths: string[]) {
+  if (!process.env.CODEX_BRIDGE_TOKEN || !paths.length) return;
+  try {
+    await bridgeFetch("/read-model/invalidate", {
+      method: "POST",
+      body: JSON.stringify({ paths }),
+      signal: AbortSignal.timeout(750),
+    });
+  } catch {
+    // 这是查询投影的通知失败，不能把正本已保存的结果改报成失败。
+  }
+}
+
 export async function invokeCodex<T>(
   task:
     | "rebuild_profile"

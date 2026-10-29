@@ -15,6 +15,13 @@
       "when": 1793233144660,
       "tag": "0001_flawless_lila_cheney",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793235116804,
+      "tag": "0002_funny_bulldozer",
+      "breakpoints": true
     }
   ]
 }

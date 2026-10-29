@@ -36,6 +36,8 @@ import {
 } from "@/lib/memory-atlas-data";
 import { useDialogFocus } from "./use-dialog-focus";
 import { useUiLocale } from "./ui-locale";
+import { useReadModelBacklinks } from "./use-read-model-library";
+import IndexedNoteLinksStatus from "./indexed-note-links";
 
 const DRAWER_COPY: Record<UiLocale, {
   dialog: string;
@@ -75,16 +77,22 @@ const DRAWER_FONT_OFFSET = 2;
 export default function NoteDrawer({
   note,
   section,
-  allNotes,
+  allNotes = [],
   onClose,
   onOpenWiki,
   onOpen,
   wikiIndexComplete = false,
   closing = false,
+  indexed = false,
+  revision,
+  onOpenPath,
 }: {
   note: Note;
   section: string | null;
-  allNotes: Note[];
+  allNotes?: Note[];
+  indexed?: boolean;
+  revision?: string;
+  onOpenPath?: (path: string, revision?: string) => void;
   /** 外壳正在播退场（lib/exit-transition.ts）：只换样式，卸载仍由外壳在计时结束后做。 */
   closing?: boolean;
   onClose: () => void;
@@ -104,8 +112,10 @@ export default function NoteDrawer({
   const group = getGroup(note.path);
   const trust = trustLayer(note);
   const basename = noteBasename(note.path);
-  const backlinks = useMemo(() => noteBacklinks(allNotes, note), [allNotes, note]);
-  const outlinks = useMemo(() => noteOutlinks(allNotes, note), [allNotes, note]);
+  const backlinks = useMemo(() => indexed ? [] : noteBacklinks(allNotes, note), [allNotes, note, indexed]);
+  const outlinks = useMemo(() => indexed ? [] : noteOutlinks(allNotes, note), [allNotes, note, indexed]);
+  const links = useReadModelBacklinks(note.path, indexed, revision);
+  const indexedOutlinks = links.page?.outlinks ?? [];
   const frontmatterEntries = Object.entries(note.frontmatter);
   const headings = useMemo(() => scanReadingHeadings(note.content), [note.content]);
   const headingIds = useMemo(() => headings.map((heading) => heading.id), [headings]);
@@ -179,7 +189,7 @@ export default function NoteDrawer({
   };
 
   const hasToc = headings.length > 2;
-  const hasAside = frontmatterEntries.length > 0 || backlinks.length > 0 || outlinks.length > 0;
+  const hasAside = indexed || frontmatterEntries.length > 0 || backlinks.length > 0 || outlinks.length > 0;
 
   return (
     // 退场时长经内联变量交给 CSS，和外壳的计时器读同一个常量。
@@ -227,9 +237,9 @@ export default function NoteDrawer({
                 <span>{copy.updated(formatDate(note.stat.mtime, true))}</span>
                 <span>{Math.round(note.stat.size / 1024 * 10) / 10} KB</span>
                 <span>{copy.outlinks(noteLinks(note).length)}</span>
-                <span>{copy.backlinks(backlinks.length)}</span>
+                <span>{indexed ? links.page ? copy.backlinks(links.page.total) : (locale === "ja" ? "被リンク —" : "反链 —") : copy.backlinks(backlinks.length)}</span>
               </div>
-              <MarkdownDocument content={note.content} onWikiLink={onOpenWiki} resolveWiki={wikiIndexComplete ? resolveWiki : undefined} />
+              <MarkdownDocument content={note.content} onWikiLink={onOpenWiki} resolveWiki={!indexed && wikiIndexComplete ? resolveWiki : undefined} />
             </div>
             {hasAside && (
               <div className="drawer-aside">
@@ -244,6 +254,22 @@ export default function NoteDrawer({
                     </div>
                   </details>
                 )}
+                {indexed && <>
+                  <IndexedNoteLinksStatus links={links} />
+                  {links.items.length > 0 && <section className="backlinks" aria-label={copy.backlinksTitle}>
+                    <span>{copy.backlinksTitle} · {links.page?.total ?? links.items.length}</span>
+                    {links.items.map((card) => <button key={card.path} onClick={() => onOpenPath?.(card.path, links.page?.revision)}>
+                      <span className="backlinks-head"><strong>{card.title}</strong><small>{GROUPS[card.group].label} ↗</small></span>
+                      {card.summary && <span className="backlinks-context">{card.summary}</span>}
+                    </button>)}
+                  </section>}
+                  {indexedOutlinks.length > 0 && <section className="backlinks backlinks--out" aria-label={copy.outlinksTitle}>
+                    <span>{copy.outlinksTitle} · {indexedOutlinks.length}</span>
+                    {indexedOutlinks.map((card) => <button key={card.path} onClick={() => onOpenPath?.(card.path, links.page?.revision)}>
+                      <span className="backlinks-head"><strong>{card.title}</strong><small>{GROUPS[card.group].label} ↗</small></span>
+                    </button>)}
+                  </section>}
+                </>}
                 {backlinks.length > 0 && (
                   <section className="backlinks" aria-label={copy.backlinksTitle}>
                     <span>{copy.backlinksTitle} · {backlinks.length}</span>
@@ -274,6 +300,7 @@ export default function NoteDrawer({
         </div>
       </aside>
       {readerOpen && <NoteReader note={note} section={section} backlinks={backlinks} onOpen={onOpen} onOpenWiki={onOpenWiki} allNotes={allNotes} wikiIndexComplete={wikiIndexComplete}
+        indexed={indexed} revision={revision} onOpenPath={onOpenPath} indexedLinks={indexed ? links : undefined}
         initialPosition={readerPosition?.path === note.path ? readerPosition.position : undefined}
         onClose={(position) => {
           setReaderPosition({ path: note.path, position });

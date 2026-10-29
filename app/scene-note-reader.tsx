@@ -7,10 +7,13 @@ import { NOTE_EXIT_MS } from "@/lib/exit-transition";
 import NoteReader from "./note-reader";
 
 /** 只接管全文呈现，不替换或重新装载背后的星图、时间航道。 */
-export default function SceneNoteReader({ note, section, allNotes, scene, onClose, onOpen, onOpenWiki, wikiIndexComplete = false, closing = false }: {
+export default function SceneNoteReader({ note, section, allNotes = [], scene, onClose, onOpen, onOpenWiki, wikiIndexComplete = false, closing = false, indexed = false, revision, onOpenPath }: {
   note: Note;
   section: string | null;
-  allNotes: Note[];
+  allNotes?: Note[];
+  indexed?: boolean;
+  revision?: string;
+  onOpenPath?: (path: string, revision?: string) => void;
   /** allNotes 是否为全库；见 NoteReader。 */
   wikiIndexComplete?: boolean;
   scene: "graph" | "timeline";
@@ -21,7 +24,7 @@ export default function SceneNoteReader({ note, section, allNotes, scene, onClos
   onOpenWiki: (target: string, section?: string) => void;
 }) {
   // 反链与原笔记详情页同一口径（noteBacklinks 按整批 notes 建一次索引）。
-  const backlinks = useMemo(() => noteBacklinks(allNotes, note), [allNotes, note]);
+  const backlinks = useMemo(() => indexed ? [] : noteBacklinks(allNotes, note), [allNotes, note, indexed]);
 
   // 阅读层的根节点由 ReadingMode 经 portal 挂到舞台（或 body）上，不在这棵 DOM 子树里，
   // 拿不到 ref；同一时刻只有一个场景阅读层，按类名找到它，只写退场用的 data-state 与时长变量。
@@ -39,5 +42,5 @@ export default function SceneNoteReader({ note, section, allNotes, scene, onClos
   }, [closing]);
 
   return <NoteReader note={note} section={section} backlinks={backlinks} scene={scene} allNotes={allNotes} wikiIndexComplete={wikiIndexComplete}
-    onClose={onClose} onOpen={onOpen} onOpenWiki={onOpenWiki} />;
+    indexed={indexed} revision={revision} onOpenPath={onOpenPath} onClose={onClose} onOpen={onOpen} onOpenWiki={onOpenWiki} />;
 }

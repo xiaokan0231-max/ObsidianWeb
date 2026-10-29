@@ -105,7 +105,7 @@ flowchart LR
     Export --> Published
 ```
 
-- **The Vault is authoritative.** Frontmatter, headings and links hold the facts. D1 stores a rebuildable query projection of calendar events and application summaries; full bodies remain in the existing notes.
+- **The Vault is authoritative.** Frontmatter, headings and links hold the facts. D1 stores a rebuildable query projection of catalogs, relationships, search chunks, calendar events and interview summaries; full bodies remain in the existing notes.
 - **D1 data is revision-scoped.** Hosted indexes come from the same published snapshot and use a separate database from local development. Schema migrations live in `db/schema.ts` and `drizzle/`; the original read path remains available if D1 is unavailable.
 - **Updates are checked.** Allowed-field changes, append-only records and version checks support local writes.
 - **Statistics are regenerated.** Counts and trends are calculated from upstream records into generated blocks.

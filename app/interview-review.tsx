@@ -38,6 +38,7 @@ import {
   renderEvidenceEvaluation,
   type AnswerStrategyTag,
   type InterviewAnswerReview,
+  type InterviewAnswerBlockReview,
   type ReviewDeduction,
   type ReviewDimensionKey,
 } from "@/lib/review-deep";
@@ -70,13 +71,17 @@ import { JapanSignalsPanel, SignalOutcomeTable, signalOutcomeComparison, signals
 import { resolveInterviewOutcomes, type SignalOutcomeComparison } from "@/lib/interview-outcome";
 import { selectionNoticesForSession } from "@/lib/selection-notice";
 import SelectionNoticePanel from "./selection-notice";
+import { interviewSourceRef, type InterviewCatalog, type InterviewSourceRef } from "@/lib/interview-read-model";
+import type { InterviewRemoteReview, InterviewSelection } from "./use-interview-context";
+import type { InterviewTrends } from "@/lib/interview-trends.mjs";
 
 // 面接復盤：整理稿（派生層）を読む・批注（事実層）へ追記する、の2操作だけを持つ。
 // 整理稿の中身をここで書き換える経路は意図的に存在しない（唯一writer表を参照）。
 
 type ReviewDoc = {
   key: string;
-  note: Note;
+  note: Note | null;
+  source: InterviewSourceRef;
   company: string;
   date: string;
   round: string;
@@ -223,6 +228,7 @@ function buildDocs(notes: Note[]): ReviewDoc[] {
       return {
         key: note.path,
         note,
+        source: interviewSourceRef(note),
         company,
         date,
         round,
@@ -249,6 +255,31 @@ function buildDocs(notes: Note[]): ReviewDoc[] {
     });
   // 並び順（日付の新しい順）は joinReviewNotes が決める。ここで並べ直すと、
   // 一覧とプレビューで順序が割れても誰も気づかない。
+}
+
+/** 摘要只参与目录与筛选；句子正文来自已明确标记加载完成的问题块。 */
+function projectReview(remote: InterviewRemoteReview): ReviewDoc {
+  const projection = remote.projection;
+  const blocks = projection.blocks.map((block) => remote.blocks[block.id] ?? { ...block,
+    sentences: block.sentences.map(({ goCount, errors, ...sentence }) => ({ ...sentence,
+      sei: "", go: Array.from({ length: goCount }, () => ""), notes: [], errors: errors.map((error) => ({ ...error, raw: "" })) })) });
+  const group = <T,>(items: T[], key: (item: T) => string) => {
+    const map = new Map<string, T[]>();
+    for (const item of items) { const id = key(item); map.set(id, [...(map.get(id) ?? []), item]); }
+    return map;
+  };
+  const quality = remote.quality ? { ...remote.quality, blocks: remote.quality.blocks.map((block) => remote.qualityBlocks[block.blockId] ?? block) } : null;
+  const deepReview: InterviewAnswerReview | undefined = quality ? { ...quality, advisory: remote.advisory ?? undefined }
+    : remote.advisory ? { generatedAt: "", model: "", overallScore: null, summaryZh: "", strengths: [], weaknesses: [], priorityBlockIds: [], blocks: [], advisory: remote.advisory } : undefined;
+  return { key: projection.source.path, source: projection.source, note: null,
+    company: projection.source.company, date: projection.source.date, round: projection.source.round,
+    result: projection.result, parsed: { blocks, sentences: blocks.flatMap((block) => block.sentences) },
+    stats: { ...projection.stats, patterns: new Map(projection.stats.patterns) },
+    annotationPath: projection.annotationPath, annotationExists: projection.annotationExists,
+    annotations: projection.annotations, bySentence: group(projection.annotations, (item) => item.sentenceId),
+    listeningMarks: latestListeningMarks(projection.annotations), decisionTasks: projection.decisionTasks,
+    decisionTasksBySentence: group(projection.decisionTasks, (item) => item.sentenceId),
+    deepReview, practiceBlockIds: new Set(projection.practiceBlockIds), feedbackByBlock: group(projection.feedback, (item) => item.blockId) };
 }
 
 type WriteResponse = { ok?: boolean; error?: string; note?: Note };
@@ -304,6 +335,11 @@ function InterviewReview({
   onOpenNote,
   onOpenSession,
   loading = false,
+  catalog,
+  remoteReview,
+  revision = "",
+  onRemoteSelect,
+  onOpenSource,
 }: {
   notes: Note[];
   /** 标题行「原笔记 ↗」：外壳打开整理稿抽屉。不传就不出按钮（旧调用处行为不变）。 */
@@ -322,17 +358,22 @@ function InterviewReview({
   onOpenEvidence: (ref: AdvisoryEvidenceRef) => void;
   onOpenInsights: () => void;
   onSelectionChange?: (key: string | null) => void;
+  catalog?: InterviewCatalog | null;
+  remoteReview?: InterviewRemoteReview | null;
+  revision?: string;
+  onRemoteSelect?: (selection: InterviewSelection) => void;
+  onOpenSource?: (path: string) => void;
 }) {
   const menu = useInterviewMenu();
   const t = useReviewCopy();
-  const docs = useMemo(() => buildDocs(notes), [notes]);
+  const docs = useMemo(() => remoteReview ? [projectReview(remoteReview)] : catalog ? [] : buildDocs(notes), [notes, catalog, remoteReview]);
   // 雷达的「历史平均」描边：与 vault 的 面接傾向_横断 同一套平均算法，只是去掉了本场。
   const trendEntries = useMemo(
-    () => docs.map((item) => ({ key: item.key, company: item.company, date: item.date, round: item.round, review: item.deepReview, reassessment: findInterviewReassessment(notes, item.note.path) })),
+    () => docs.map((item) => ({ key: item.key, company: item.company, date: item.date, round: item.round, review: item.deepReview, reassessment: findInterviewReassessment(notes, item.key) })),
     [docs, notes],
   );
   // 选考结果按整理稿路径解析（job-case → 面谈 TODO），详情页的信号区块与一覧的对照表共用。
-  const outcomes = useMemo(() => resolveInterviewOutcomes(notes), [notes]);
+  const outcomes = useMemo(() => remoteReview ? new Map(remoteReview.projection.outcome ? [[remoteReview.projection.source.path, remoteReview.projection.outcome]] : []) : catalog ? new Map() : resolveInterviewOutcomes(notes), [notes, remoteReview, catalog]);
   const signalOutcome = useMemo(() => signalOutcomeComparison(docs.map((item) => ({
     key: item.key, company: item.company, date: item.date, round: item.round, review: item.deepReview,
   })), outcomes), [docs, outcomes]);
@@ -437,6 +478,7 @@ function InterviewReview({
   const backToList = () => {
     setSelectedKey(null);
     onSelectionChange?.(null);
+    onRemoteSelect?.({});
     setFilter("all");
     setPatternFilter(null);
     focusDeepReview(null);
@@ -446,6 +488,30 @@ function InterviewReview({
 
   const doc = docs.find((item) => item.key === selectedKey) ?? null;
   const docKey = doc?.key;
+
+  useEffect(() => {
+    if (!remoteReview || !docKey) return;
+    if ((panel === "quality" || panel === "advisory") && !remoteReview.sections[panel]) void remoteReview.loadSection(panel);
+  }, [remoteReview, docKey, panel]);
+  useEffect(() => {
+    if (!remoteReview || !docKey || panel !== "source") return;
+    const projection = remoteReview.projection;
+    const pattern = projection.stats.patterns.some(([slug]) => slug === patternParam) ? patternParam : null;
+    const matching = (sentence: typeof projection.blocks[number]["sentences"][number]) => {
+      if (pattern) return sentence.errors.some((error) => error.pattern && patternSlug(error.pattern) === pattern);
+      if (filter === "err") return sentence.errors.some((error) => error.kind === "学習者");
+      if (filter === "go") return sentence.goCount > 0;
+      if (filter === "noted" || filter === "open") return projection.annotations.some((item) => item.sentenceId === sentence.id && (filter !== "open" || item.status === "open"));
+      if (filter === "pending") return projection.decisionTasks.some((item) => item.sentenceId === sentence.id && !item.resolvedBy);
+      if (filter === "transcript" || filter === "learner-decision" || filter === "speaker-decision") return projection.decisionTasks.some((item) => item.sentenceId === sentence.id
+        && (filter === "transcript" ? item.resolution === "transcript" : filter === "learner-decision" ? item.resolution === "learner" : item.resolution?.startsWith("speaker-")));
+      return true;
+    };
+    const ids = mode === "novel" ? projection.blocks.map((block) => block.id)
+      : filter !== "all" || pattern ? projection.blocks.filter((block) => block.sentences.some(matching)).map((block) => block.id) : [...openBlocks];
+    const missing = ids.filter((id) => !remoteReview.blocks[id]);
+    if (missing.length) void remoteReview.loadBlocks(missing);
+  }, [remoteReview, docKey, panel, mode, filter, patternParam, openBlocks]);
 
   /*
    * 分数揭晓（维度条生长、分数滚动）只在每场第一次进入「回答质量」时播一次。
@@ -465,8 +531,8 @@ function InterviewReview({
   }, [qualityReveal.active, qualityReveal.round]);
 
   const historyAverages = useMemo(
-    () => (selectedKey ? historicalDimensionAverages(trendEntries, selectedKey) : null),
-    [trendEntries, selectedKey],
+    () => remoteReview ? remoteReview.projection.historicalAverages : (selectedKey ? historicalDimensionAverages(trendEntries, selectedKey) : null),
+    [remoteReview, trendEntries, selectedKey],
   );
 
   // 只带 block 的深链（趋势页、顾问证据）落地时闪一下那一问，1.5 秒后撤掉，免得一直像被选中。
@@ -607,7 +673,7 @@ function InterviewReview({
       setDeepBusy(true);
       dismissWriteAlert(alertKey);
       try {
-        await postReviewWrite("/api/review/deep", { notePath: target.note.path }, "生成失败");
+        await postReviewWrite("/api/review/deep", { notePath: target.key }, "生成失败");
         await onVaultChanged();
         setDeepOpen(true);
       } catch (error) {
@@ -632,7 +698,7 @@ function InterviewReview({
       try {
         const payload = await postReviewWrite<WriteResponse & { deduplicated?: boolean }>(
           "/api/review/practice",
-          { notePath: target.note.path, blockId },
+          { notePath: target.key, blockId },
           "加入失败",
         );
         // 成功不另发通知：按钮随回写变成「已加入重练」并锁住，就在按下的位置。
@@ -665,7 +731,7 @@ function InterviewReview({
       try {
         const payload = await postReviewWrite<WriteResponse & { deduplicated?: boolean }>(
           "/api/review/feedback",
-          { notePath: target.note.path, blockId, kind, text: feedbackText },
+          { notePath: target.key, blockId, kind, text: feedbackText },
           "反馈写入失败",
         );
         if (payload.note && onNoteWritten) onNoteWritten(payload.note);
@@ -692,11 +758,19 @@ function InterviewReview({
   );
 
   if (!doc) {
+    if (catalog && selectedKey) return <ScopeLoading label={menu("整理稿与复盘")} />;
     // 退回一覧页也不丢失败提示：写入还没回来时按了「← 面试一览」就看不到理由的话，
     // 那又多出一个「看不见的条件」，正是这次要消掉的东西。
     return (
       <>
-        <ReviewIndex
+        {catalog ? <ProjectedReviewIndex catalog={catalog} revision={revision} onOpenInsights={onOpenInsights} onSelect={(key, block) => {
+          setSelectedKey(key);
+          onSelectionChange?.(key);
+          onRemoteSelect?.({ sourcePath: key });
+          setFilter("all"); setPatternFilter(null); setOpenBlocks(new Set()); setRevealed(new Set()); setErrOpen(new Set()); setRawOpen(new Set());
+          focusDeepReview(block ?? null); setPanel(block ? "quality" : "source"); setAssessmentOpen(Boolean(block)); resetAnnotationDraft();
+          listScrollTop.current = window.scrollY; window.scrollTo({ top: 0 });
+        }} /> : <ReviewIndex
           notes={notes}
           onOpenNote={onOpenNote}
           loading={loading}
@@ -723,7 +797,7 @@ function InterviewReview({
             // 进详情只回顶一次：带 reviewBlockId 进来时深度报告随后要自己滚到那一问，补跳会把它拽回顶部。
             window.scrollTo({ top: 0 });
           }}
-        />
+        />}
         <ReviewWriteAlerts alerts={writeAlerts} onDismiss={dismissWriteAlert} />
       </>
     );
@@ -731,6 +805,7 @@ function InterviewReview({
 
   // 连读直接使用整份整理稿，不能继承学习页的筛选或句卡展开状态。
   if (mode === "novel" && panel === "source") {
+    if (remoteReview && remoteReview.projection.blocks.some((block) => !remoteReview.blocks[block.id])) return <><button type="button" onClick={() => switchMode(previousMode.current)}>{menu("返回")}</button><ScopeLoading label={t("全文阅读")} />{remoteReview.error && <p role="alert">{remoteReview.error}<button type="button" onClick={() => void remoteReview.loadBlocks(remoteReview.projection.blocks.map((block) => block.id))}>{menu("重试")}</button></p>}</>;
     return (
       <>
         <InterviewNovelReader
@@ -745,8 +820,8 @@ function InterviewReview({
           onLanguageChange={switchNovelLang}
           onExit={() => switchMode(previousMode.current)}
           onBack={backToList}
-          headerExtra={<SelectionNoticePanel notices={selectionNoticesForSession(doc.note, notes)} locale={locale}
-            rejected={outcomes.get(doc.note.path)?.kind === "rejected"} />}
+          headerExtra={<SelectionNoticePanel notices={doc.note ? selectionNoticesForSession(doc.note, notes) : remoteReview?.projection.notices ?? []} locale={locale}
+            rejected={outcomes.get(doc.key)?.kind === "rejected"} />}
           // 阅读层 portal 到 body 并把外壳设为 inert，写入提示留在外壳里就关不掉，所以随阅读层一起挂。
           overlay={<ReviewWriteAlerts alerts={writeAlerts} onDismiss={dismissWriteAlert} />}
         />
@@ -875,22 +950,22 @@ function InterviewReview({
           <span>{doc.round} · {doc.date}{doc.result ? ` · ${doc.result}` : ""}</span>
           {(
             <span className="rv-title-links">
-              <ReviewCompanyAnalysis notes={notes} source={doc.note} company={doc.company} filter={filter} pattern={patternParam} />
+              <ReviewCompanyAnalysis notes={notes} source={doc.note ?? undefined} sourcePath={doc.key} contextPath={remoteReview?.projection.contextPath} company={doc.company} filter={filter} pattern={patternParam} />
               {onOpenSession && (
                 <button
                   type="button"
-                  onClick={() => onOpenSession({ company: doc.company, date: doc.date, round: doc.round, notePath: doc.note.path })}
+                  onClick={() => onOpenSession({ company: doc.company, date: doc.date, round: doc.round, notePath: doc.key })}
                 >{t("准备稿 ↗")}</button>
               )}
-              {onOpenNote && <button type="button" onClick={() => onOpenNote(doc.note)}>{t("原笔记 ↗")}</button>}
+              {((onOpenNote && doc.note) || onOpenSource) && <button type="button" onClick={() => doc.note && onOpenNote ? onOpenNote(doc.note) : onOpenSource?.(doc.key)}>{t("原笔记 ↗")}</button>}
             </span>
           )}
         </div>
 
       </header>
 
-      <SelectionNoticePanel key={doc.key} notices={selectionNoticesForSession(doc.note, notes)} locale={locale}
-        rejected={outcomes.get(doc.note.path)?.kind === "rejected"}
+      <SelectionNoticePanel key={doc.key} notices={doc.note ? selectionNoticesForSession(doc.note, notes) : remoteReview?.projection.notices ?? []} locale={locale}
+        rejected={outcomes.get(doc.key)?.kind === "rejected"}
         onOpenNote={onOpenNote ? path => { const note = notes.find(item => item.path === path); if (note) onOpenNote(note); } : undefined} />
 
       <nav className="rv-section-tabs" aria-label={t("面试复盘内容")}>
@@ -931,7 +1006,7 @@ function InterviewReview({
           >{t("全文阅读")}<small>{t("中文 / 日本語")}</small></button>
         </div>
       </div>
-      <InterviewReassessmentEntry notes={notes} sourcePath={doc.note.path} onOpenNote={onOpenNote} t={t}
+      <InterviewReassessmentEntry notes={notes} sourcePath={doc.key} onOpenNote={onOpenNote} t={t}
         expanded={assessmentOpen} onExpandedChange={setAssessmentOpen} onOpenEvidence={onOpenEvidence}
         onOpenUnderstanding={() => { setPanel("advisory"); setAssessmentOpen(false); window.scrollTo({ top: 0 }); }} onClose={() => {
           if (panel === "quality") {
@@ -942,8 +1017,9 @@ function InterviewReview({
 
       {doc.deepReview?.overviewZh && panel === "advisory" && <details className="rv-previous-introduction"><summary>{t("查看之前的面谈导读")}</summary><ReviewIntroduction review={doc.deepReview} /></details>}
 
-      <div className="rv-panel" hidden={panel !== "advisory"}><InterviewAdvisory key={doc.key} report={doc.deepReview?.advisory} notes={notes} notePath={doc.note.path}
-        onOpenEvidence={onOpenEvidence} onVaultChanged={onVaultChanged} onNoteWritten={onNoteWritten} onOpenInsights={onOpenInsights} /></div>
+      {remoteReview?.error && <p role="alert">{remoteReview.error}</p>}
+      <div className="rv-panel" hidden={panel !== "advisory"}>{remoteReview?.projection.hasAdvisory && !remoteReview.sections.advisory ? <ScopeLoading label={menu("顾问解读")} /> : <InterviewAdvisory key={doc.key} report={doc.deepReview?.advisory} notes={notes} notePath={doc.key}
+        onOpenEvidence={onOpenEvidence} onVaultChanged={onVaultChanged} onNoteWritten={onNoteWritten} onOpenInsights={onOpenInsights} />}</div>
 
       <div className="rv-panel" hidden={panel !== "source"}>
 
@@ -1024,9 +1100,10 @@ function InterviewReview({
       </details>
       </div>
       <div className="rv-panel" hidden={panel !== "quality"}>
-      <JapanSignalsPanel review={doc.deepReview} outcome={outcomes.get(doc.note.path) ?? null} t={signalsT}
+      {remoteReview?.projection.hasQuality && !remoteReview.sections.quality ? <ScopeLoading label={menu("回答质量")} /> : <>
+      <JapanSignalsPanel review={doc.deepReview} outcome={outcomes.get(doc.key) ?? null} t={signalsT}
         onEvidence={(_blockId, sentenceIds) => { if (sentenceIds[0]) jumpToEvidence(sentenceIds[0]); }} />
-      {!findInterviewReassessment(notes, doc.note.path) && <section className={`rv-deep-stage ${unresolvedDecisionTasks.length > 0 ? "locked" : "ready"}`}>
+      {!findInterviewReassessment(notes, doc.key) && <section className={`rv-deep-stage ${unresolvedDecisionTasks.length > 0 ? "locked" : "ready"}`}>
         <div className="rv-deep-stage-copy">
           <span>{menu("第二阶段 · 回答质量")}</span>
           <h2>
@@ -1127,7 +1204,7 @@ function InterviewReview({
         )}
       </section>}
 
-      {doc.deepReview && !findInterviewReassessment(notes, doc.note.path) && deepOpen && (
+      {doc.deepReview && !findInterviewReassessment(notes, doc.key) && deepOpen && (
         <DeepReviewPanel
           review={doc.deepReview}
           queuedBlockIds={doc.practiceBlockIds}
@@ -1141,9 +1218,11 @@ function InterviewReview({
           onQueuePractice={(blockId) => void queuePractice(doc, blockId)}
           onFeedback={(blockId, kind, feedbackText) =>
             submitReviewFeedback(doc, blockId, kind, feedbackText)}
+          remoteBlocks={remoteReview?.qualityBlocks}
+          onLoadBlock={remoteReview?.loadQualityBlock}
         />
       )}
-
+      </>}
       </div>
       <div className="rv-panel" hidden={panel !== "source"}>
 
@@ -1230,7 +1309,7 @@ function InterviewReview({
             </header>
             {isOpen && (
               <div className="rv-block-body" id={`rvb-body-${block.id}`}>
-                {sentences.map((sentence) => (
+                {remoteReview && !remoteReview.blocks[block.id] ? <ScopeLoading label={block.title} /> : sentences.map((sentence) => (
                   <SentenceCard
                     key={`${doc.key}:${sentence.id}`}
                     doc={doc}
@@ -1430,6 +1509,8 @@ export function DeepReviewPanel({
   onEvidenceClick,
   onQueuePractice,
   onFeedback,
+  remoteBlocks,
+  onLoadBlock,
 }: {
   review: InterviewAnswerReview;
   queuedBlockIds: Set<string>;
@@ -1447,6 +1528,8 @@ export function DeepReviewPanel({
     kind: ReviewFeedbackKind,
     text: string,
   ) => Promise<boolean>;
+  remoteBlocks?: Record<string, InterviewAnswerBlockReview>;
+  onLoadBlock?: (id: string) => Promise<void>;
 }) {
   const menu = useInterviewMenu();
   const [showAllBlocks, setShowAllBlocks] = useState(Boolean(focusBlockId));
@@ -1689,6 +1772,9 @@ export function DeepReviewPanel({
               id={`rv-review-${block.blockId}`}
               key={block.blockId}
               className={`rv-deep-block q-${block.quality} ${priorities.has(block.blockId) ? "priority" : ""}`}
+              onToggle={(event) => {
+                if (event.currentTarget.open && remoteBlocks && !remoteBlocks[block.blockId]) void onLoadBlock?.(block.blockId);
+              }}
             >
               <summary>
                 <span>{block.blockId}</span>
@@ -1702,6 +1788,7 @@ export function DeepReviewPanel({
                 <i aria-hidden="true">⌄</i>
               </summary>
               <div className="rv-deep-block-body">
+                {remoteBlocks && !remoteBlocks[block.blockId] ? <ScopeLoading label={block.questionTitle} /> : <>
                 <p className="rv-deep-intent"><span>{menu("面试官意图")}</span>{block.interviewerIntentZh}</p>
                 <div className="rv-coverage">
                   <div><h4>{menu("问了什么")}</h4><ul>{block.askedPoints.map((item) => <li key={item}>{item}</li>)}</ul></div>
@@ -1833,6 +1920,7 @@ export function DeepReviewPanel({
                     </div>
                   )}
                 </section>
+                </>}
               </div>
             </details>
           );
@@ -1973,7 +2061,7 @@ function ReviewCompanyTimeline({
           </header>
           <ol>
             {group.rounds.map((item) => {
-              const reassessment = findInterviewReassessment(notes, item.note.path);
+              const reassessment = findInterviewReassessment(notes, item.key);
               const display = reviewDisplayScore({ ...item, review: item.deepReview, reassessment });
               const score = display.score;
               return (
@@ -2003,6 +2091,79 @@ function ReviewCompanyTimeline({
       ))}
     </div>
   );
+}
+
+/** 首屏只画场次投影；跨场长说明在本人展开趋势时才查询。 */
+function ProjectedReviewIndex({ catalog, revision, onSelect, onOpenInsights }: {
+  catalog: InterviewCatalog; revision: string; onSelect: (key: string, blockId?: string) => void; onOpenInsights: () => void;
+}) {
+  const menu = useInterviewMenu();
+  const t = useReviewCopy();
+  const { locale } = useUiLocale();
+  const group = useSyncExternalStore(subscribeMode, readIndexGroup, () => "company" as IndexGroup);
+  const [digest, setDigest] = useState<InterviewTrends | null>(null);
+  const [trendError, setTrendError] = useState("");
+  const trendPending = useRef(false);
+  const loadTrends = async () => {
+    if (digest || trendPending.current) return;
+    trendPending.current = true;
+    setTrendError("");
+    try {
+      const response = await fetch(`/api/interview/trends?${new URLSearchParams({ revision, scope: "review" })}`, { cache: "no-store" });
+      const payload = await response.json() as { revision: string; digest: InterviewTrends; error?: string };
+      if (!response.ok || payload.revision !== revision) throw new Error(payload.error || "趋势资料读取失败");
+      setDigest(payload.digest);
+    } catch (error) { setTrendError(error instanceof Error ? error.message : "趋势资料读取失败"); }
+    finally { trendPending.current = false; }
+  };
+  const summaries = catalog.reviews.map((item) => ({ ...item, key: item.path }));
+  const groups = groupReviewsByCompany(summaries);
+  const points = summaries.filter((item) => item.score.score !== null && item.score.label === "新版有据评分")
+    .map((item) => ({ key: item.path, company: item.company, date: item.date, round: item.round, score: item.score.score! }))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
+  const historicalPoints = summaries.filter((item) => item.score.historicalScore !== null)
+    .map((item) => ({ key: item.path, company: item.company, date: item.date, round: item.round, score: item.score.historicalScore! }))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
+  return <div className="review-view rv-index-page">
+    <header className="rv-index-heading"><h1>{t("面试复盘")}</h1><p>{t("选择一场面试，阅读原文或查看评价。")}</p></header>
+    {!summaries.length ? <div className="rv-empty"><h2>{menu("还没有整理稿")}</h2></div> : <>
+      <div className="rv-index-switch" role="group" aria-label={t("复盘一览排列方式")}>
+        <button type="button" aria-pressed={group === "company"} onClick={() => saveIndexGroup("company")}>{t("按公司")}</button>
+        <button type="button" aria-pressed={group === "all"} onClick={() => saveIndexGroup("all")}>{t("全部场次")}</button>
+      </div>
+      {group === "company" ? <div className="rv-company-lines">{groups.map((item) => <section key={item.company} className="rv-company-line">
+        <header><h3>{item.company}</h3><span>{item.rounds.length} {t("轮")} · {item.latestDate}</span></header>
+        <ol>{item.rounds.map((doc) => <li key={doc.path}><button type="button" onClick={() => onSelect(doc.path)}>
+          <ScoreRing score={doc.score.score} label={t(doc.score.label)} /><span className="rv-company-round">
+            <strong>{doc.round || "—"}</strong><small>{doc.date}</small>{doc.insight && <span className="rv-company-summary">{assessmentIssueCopy(doc.insight).observation}</span>}
+            <span className="rv-company-open">{t("查看原文与评价")} →</span>
+          </span></button></li>)}{item.outcome && <li className="rv-company-outcome"><span className={`rv-result ${item.outcome.startsWith("不採用") ? "bad" : ""}`}>{item.outcome}</span></li>}</ol>
+      </section>)}</div> : <div className="rv-cards">{summaries.map((doc) => <button key={doc.path} className={`rv-card band-${reviewScoreBand(doc.score.score)}`} onClick={() => onSelect(doc.path)}>
+        <header><div><span className="rv-card-date">{doc.date}</span><h3>{doc.company}</h3></div><ScoreRing score={doc.score.score} label={t(doc.score.label)} /></header>
+        <div className="rv-card-meta"><span>{doc.round}</span>{doc.result && <span className={`rv-result ${doc.result.startsWith("不採用") ? "bad" : ""}`}>{doc.result}</span>}</div>
+        <p className="rv-card-insight">{assessmentIssueCopy(doc.insight).observation || (doc.decisionTotal > doc.decisionResolved
+          ? menu("还有 {count} 个证据裁定点，完成后才能生成深度复盘。", { count: doc.decisionTotal - doc.decisionResolved }) : menu("证据裁定已完成，可以生成回答质量复盘。"))}</p>
+        <div className="rv-card-progress"><span><i style={{ width: `${doc.decisionTotal ? Math.round(doc.decisionResolved / doc.decisionTotal * 100) : 100}%` }} /></span><small>{menu("裁定 ")}{doc.decisionResolved} / {doc.decisionTotal}</small></div>
+        <dl><div><dt>{menu("文")}</dt><dd>{doc.stats.sentenceTotal}</dd></div><div><dt>{menu("我的错误")}</dt><dd className="warn">{doc.stats.learnerErrors}</dd></div>
+          <div><dt>{menu("待裁定")}</dt><dd className="pending">{doc.decisionPendingSentences}{menu("句 · ")}{doc.decisionTotal - doc.decisionResolved}{menu("点")}</dd></div>
+          <div><dt>{menu("批注")}</dt><dd>{annotationCountLabel(doc.openAnnotations, doc.annotations)}</dd></div></dl><span className="rv-card-open">{menu("打开复盘 ")}→</span>
+      </button>)}</div>}
+      <details className="rv-index-patterns" onToggle={(event) => { if (event.currentTarget.open) void loadTrends(); }}>
+        <summary>{t("跨面试回答趋势")} · {t("查看反复出现的问题")}</summary>
+        {trendError ? <p role="alert">{trendError}<button type="button" onClick={() => void loadTrends()}>{menu("重试")}</button></p> : !digest ? <ScopeLoading label={t("跨面试回答趋势")} /> : <>
+          <div className="rv-trend-grid">{digest.tags.filter((tag) => tag.repeated).map((tag) => <details key={tag.tag}><summary>{tag.label} · {tag.interviews} / {digest.interviews.length} {menu("场")} · {tag.occurrences} {menu("问")}</summary>
+            <p>{tag.description}</p><div className="rv-trend-question-list">{tag.examples.map((example) => <button key={`${example.key}:${example.blockId}`} type="button" onClick={() => onSelect(example.key, example.blockId)}>
+              <span>{example.company} · {example.date} · {example.blockId}</span><strong>{example.title}</strong>
+            </button>)}</div></details>)}</div>
+          {digest.tags.every((tag) => !tag.repeated) && <p>{menu("目前没有跨两场重复出现的回答策略问题。")}</p>}
+          {digest.signalOutcome.rows.length > 0 && <SignalOutcomeTable comparison={digest.signalOutcome} onSelect={(key) => onSelect(key)} t={signalsCopy(locale)} />}
+        </>}
+      </details>
+    </>}
+    <section className="rv-insights-entry"><div><h2>{t("把公司的口碑、岗位与条件放在一起看")}</h2><p>{t("对照各平台评分、岗位契合与工作条件，判断值得继续了解的机会。")}</p></div><button type="button" onClick={onOpenInsights}>{t("进入公司对比 →")}</button></section>
+    {points.length >= 2 && <ReviewScoreTrend points={points} onSelect={(key) => onSelect(key)} t={t} />}
+    {historicalPoints.length >= 2 && <details><summary>{menu("旧评分历史（不同口径，不能比较能力涨跌）")}</summary><ReviewScoreTrend points={historicalPoints} onSelect={(key) => onSelect(key)} t={t} /></details>}
+  </div>;
 }
 
 function ReviewIndex({
@@ -2178,7 +2339,7 @@ function ReviewIndex({
             const completion = doc.decisionTasks.length
               ? Math.round((completedTasks / doc.decisionTasks.length) * 100)
               : 100;
-            const reassessment = findInterviewReassessment(notes, doc.note.path);
+            const reassessment = findInterviewReassessment(notes, doc.key);
             const display = reviewDisplayScore({ ...doc, review: doc.deepReview, reassessment });
             const priorityIssue = Array.isArray(reassessment?.frontmatter.priority_issues)
               ? getString(reassessment.frontmatter.priority_issues[0]) : "";

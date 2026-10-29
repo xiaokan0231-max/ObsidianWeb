@@ -2,11 +2,14 @@ import type { ObsidianNote } from "./obsidian.ts";
 import type { VaultScope } from "../vault-scope.ts";
 
 export type PublishedVaultResponse = { file: string; etag: string; gzip?: string; br?: string };
+export type PublishedReadModel = { revision: string; manifestFile: string; batches: string[]; bodyIndexFile: string };
 export type PublishedVault = {
   schemaVersion: 2; publishedAt: string;
   scopes: Record<VaultScope, string[]>; chunks: Record<string, string>;
   responses?: Partial<Record<VaultScope, PublishedVaultResponse>>;
   calendar?: PublishedVaultResponse;
+  readModel?: PublishedReadModel;
+  readModels?: PublishedReadModel[];
 };
 
 // 同一部署里的资源不可变；合并并发读取，避免每次切页重复解析全库。

@@ -149,3 +149,43 @@ test("读取失败保留当前阅读位置，后续点击能够重新加载", as
   await navigator.open("准备");
   assert.equal(opened.length, 1);
 });
+
+test("目录解析无需补拉正文全库，保留章节、重名与缺失结果", async () => {
+  const opened = [], notices = [], calls = [];
+  const navigator = createWikiNavigator({
+    getNotes: () => [], isComplete: () => false,
+    ensureAll() { throw new Error("索引解析不能下载全库正文"); },
+    resolve: async (target, section) => {
+      calls.push({ target, section });
+      return target === "同名" ? { kind: "ambiguous" } : target === "缺失" ? { kind: "missing" }
+        : { kind: "resolved", path: "资料/准备.md", section: section ?? "原章节", revision: "r1" };
+    },
+    onOpen: (link) => opened.push(link), onNotice: (notice) => notices.push(notice),
+  });
+  await navigator.open("准备", "重点");
+  assert.deepEqual(opened, [{ path: "资料/准备.md", section: "重点", revision: "r1" }]);
+  await navigator.open("同名");
+  assert.equal(notices.at(-1).kind, "ambiguous");
+  await navigator.open("缺失");
+  assert.equal(notices.at(-1).kind, "missing");
+  assert.equal(calls.length, 3);
+});
+
+test("目录请求取消后不能迟到打开；索引失败也不能误报缺失", async () => {
+  const pending = deferred();
+  const opened = [], notices = [];
+  let fail = false;
+  const navigator = createWikiNavigator({
+    getNotes: () => [], isComplete: () => false, ensureAll() { throw new Error("不应全量读取"); },
+    resolve: async () => { if (fail) throw new Error("offline"); return pending.promise; },
+    onOpen: (link) => opened.push(link), onNotice: (notice) => notices.push(notice),
+  });
+  const opening = navigator.open("准备");
+  navigator.cancel();
+  pending.resolve({ kind: "resolved", path: "资料/准备.md", section: null });
+  await opening;
+  assert.deepEqual(opened, []);
+  fail = true;
+  await navigator.open("准备");
+  assert.equal(notices.at(-1), null);
+});

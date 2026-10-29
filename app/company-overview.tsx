@@ -316,11 +316,11 @@ function ReviewThemeCell({ context, onOpenWiki }: { context: CompanyOverview; on
     <details className="co-board-expand"><summary>{themes.length}{t(" 个主题 · 查看原文与阅读边界")}</summary><Reviews compact reviews={reviews} onOpenWiki={onOpenWiki} /></details>
   </div>;
 }
-export function CompanyCompare({ contexts, notes = [], today = "1970-01-01", onClose, onDetail, onRemove, onOpenWiki, onEdit, embedded = false }: { contexts: CompanyOverview[]; notes?: Note[]; today?: string; onClose: () => void; onDetail: (context: CompanyOverview) => void; onRemove: (path: string) => void; onOpenWiki: (target: string) => void; onEdit?: () => void; embedded?: boolean }) {
+export function CompanyCompare({ contexts, notes = [], today = "1970-01-01", onClose, onDetail, onRemove, onOpenWiki, onEdit, embedded = false, projectedCandidates }: { contexts: CompanyOverview[]; notes?: Note[]; today?: string; onClose: () => void; onDetail: (context: CompanyOverview) => void; onRemove: (path: string) => void; onOpenWiki: (target: string) => void; onEdit?: () => void; embedded?: boolean; projectedCandidates?: CompanyCompareCandidate[] }) {
   const t = useCompanyCopy();
   const [view, setView] = useState<"overview" | "reviews" | "conditions">("overview");
   const [sort, setSort] = useState<"selected" | CompanyCompareSort>("selected");
-  const candidates = useMemo(() => buildCompanyCompareCandidates(contexts, notes, today), [contexts, notes, today]);
+  const candidates = useMemo(() => projectedCandidates ?? buildCompanyCompareCandidates(contexts, notes, today), [projectedCandidates, contexts, notes, today]);
   const items = sort === "selected" ? contexts.flatMap((context) => { const item = candidates.find((candidate) => candidate.context.key === context.key); return item ? [item] : []; }) : filterCompanyCompareCandidates(candidates, "", "all", [], sort);
   const columns = items.map((item) => item.context);
   const versions = new Set(columns.flatMap((context) => context.assessment ? [context.assessment.criteriaVersion] : []));

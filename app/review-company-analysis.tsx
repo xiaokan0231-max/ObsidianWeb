@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { resolveCompanyReference } from "@/lib/company-overview";
+import { buildCompanyOverviews, resolveCompanyReference } from "@/lib/company-overview";
 import { REVIEW_COMPANY_PARAM, reviewCompanyHref, reviewCompanyMatch } from "@/lib/review-company";
 import type { Note } from "@/lib/notes";
 import CompanyOverviewContent from "./company-overview";
@@ -23,19 +23,23 @@ const readPanel = () => readUrlParam(REVIEW_COMPANY_PARAM);
 const serverPanel = () => null;
 const readHref = () => `${window.location.pathname}${window.location.search}${window.location.hash}`;
 
-export default function ReviewCompanyAnalysis({ notes, source, company, filter = "all", pattern = null }: {
-  notes: Note[]; source: Note; company: string; filter?: string; pattern?: string | null;
+export default function ReviewCompanyAnalysis({ notes, source, sourcePath = source?.path ?? "", contextPath, company, filter = "all", pattern = null }: {
+  notes: Note[]; source?: Note; sourcePath?: string; contextPath?: string | null; company: string; filter?: string; pattern?: string | null;
 }) {
   const { locale } = useUiLocale();
   const ja = locale === "ja";
-  const match = useMemo(() => reviewCompanyMatch(notes, source, company), [notes, source, company]);
+  const match = useMemo(() => {
+    if (source) return reviewCompanyMatch(notes, source, company);
+    const context = contextPath ? buildCompanyOverviews(notes).find((item) => item.note.path === contextPath) ?? null : null;
+    return { context, status: context ? "ready" as const : "missing" as const };
+  }, [notes, source, company, contextPath]);
   const selectedPath = useSyncExternalStore(subscribe, readPanel, serverPanel);
-  const defaultHref = `/interview/review?review=${encodeURIComponent(source.path)}`;
+  const defaultHref = `/interview/review?review=${encodeURIComponent(sourcePath)}`;
   const href = useSyncExternalStore(subscribe, readHref, () => defaultHref);
   const context = match.context;
   const open = selectedPath !== null;
   const close = () => {
-    if (window.history.state?.__echoReviewCompanySource === source.path) window.history.back();
+    if (window.history.state?.__echoReviewCompanySource === sourcePath) window.history.back();
     else {
       window.history.replaceState(window.history.state, "", reviewCompanyHref(window.location.href, null));
       notifyUrlChange();
@@ -53,7 +57,7 @@ export default function ReviewCompanyAnalysis({ notes, source, company, filter =
     )} onClick={(event) => {
       if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
-      window.history.pushState({ ...window.history.state, __echoReviewCompanySource: source.path }, "",
+      window.history.pushState({ ...window.history.state, __echoReviewCompanySource: sourcePath }, "",
         reviewCompanyHref(window.location.href, context.note.path));
       notifyUrlChange();
     }}>{ja ? "会社分析" : "公司分析"} ↗</a>

@@ -43,7 +43,12 @@ const directory = resolve("public/_published-vault");
 const staged = directory + ".tmp";
 await rm(staged, { recursive: true, force: true });
 await mkdir(staged, { recursive: true });
-const { bytes: total } = await writePublishedVaultAssets(notes, staged);
-await rm(directory, { recursive: true, force: true });
-await rename(staged, directory);
+const { bytes: total } = await writePublishedVaultAssets(notes, staged, new Date().toISOString(), directory);
+// 暂存资源完整后才替换；第二次改名失败仍能恢复上一份完整发布目录。
+const previous = directory + ".previous";
+await rm(previous, { recursive: true, force: true });
+let moved = false;
+try { await rename(directory, previous); moved = true; } catch (error) { if (error.code !== "ENOENT") throw error; }
+try { await rename(staged, directory); } catch (error) { if (moved) await rename(previous, directory); throw error; }
+await rm(previous, { recursive: true, force: true });
 console.log(`Published Vault prepared: ${notes.length} notes, ${(total / 1024 / 1024).toFixed(1)} MiB`);

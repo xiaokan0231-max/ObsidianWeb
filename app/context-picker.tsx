@@ -12,6 +12,7 @@ import {
 import { useDialogFocus } from "./use-dialog-focus";
 import { menuLabel } from "@/lib/ui-menu-labels";
 import { useUiLocale } from "./ui-locale";
+import ScopeLoading from "./scope-loading";
 
 // 「公司／岗位或面谈」的切换入口。原来是一个原生 <select>，上百个 option 一字排开，
 // 同公司多条只差一个日文岗位名，也看不出哪条是面接中、哪条早已不採用。
@@ -41,12 +42,13 @@ function optionDomId(itemId: string) {
   return itemId.replace(/[^A-Za-z0-9_-]/g, (char) => `_${char.codePointAt(0)!.toString(16)}`);
 }
 
-export function ContextPickerPanel({ groups, selectedId, today, onSelect, onClose }: {
+export function ContextPickerPanel({ groups, selectedId, today, onSelect, onClose, loading = false, error = "", onRetry, totalCount }: {
   groups: ContextPickerGroup[];
   selectedId: string;
   today: string;
   onSelect: (id: string) => void;
   onClose: () => void;
+  loading?: boolean; error?: string; onRetry?: () => void; totalCount?: number;
 }) {
   const { locale } = useUiLocale();
   const t = (label: string) => menuLabel(label, locale);
@@ -84,13 +86,13 @@ export function ContextPickerPanel({ groups, selectedId, today, onSelect, onClos
     else if (event.key === "End") { event.preventDefault(); move(visibleItems.length); }
     else if (event.key === "Enter") { event.preventDefault(); if (resolvedActive) onSelect(resolvedActive); }
   };
-  const total = groups.reduce((sum, group) => sum + group.items.length, 0);
+  const total = totalCount ?? groups.reduce((sum, group) => sum + group.items.length, 0);
   const collapsedNote = groups.filter((group) => group.collapsible).map((group) => `${t(group.label)} ${group.items.length}`).join("、");
   const listId = `${id}-list`;
   return <div className="job-compare-backdrop co-compare-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} className="co-compare-panel co-picker-panel co-context-panel" role="dialog" aria-modal="true" aria-label={t("切换公司、案件或面谈")} tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
     <header className="co-compare-header"><div><p>{locale === "ja" ? `全${total}件` : `共 ${total} 项`}{collapsedNote ? ` · ${collapsedNote} ${locale === "ja" ? "は折りたたんで表示" : "默认折叠"}` : ""}</p><h2>{t("切换公司／岗位或面谈")}</h2></div><button type="button" onClick={onClose} aria-label={t("关闭切换")}>{t("关闭 ×")}</button></header>
     <div className="co-picker-search"><label>{t("搜索公司或岗位")}<input ref={inputRef} type="search" role="combobox" aria-expanded="true" aria-controls={listId} aria-activedescendant={resolvedActive ? `${id}-${optionDomId(resolvedActive)}` : undefined} aria-autocomplete="list" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} placeholder={t("输入公司名、岗位、状态或面谈主题")} /></label><p>{t("↑↓ 移动 · Enter 打开 · Esc 关闭 · 搜索时折叠组也会显示")}</p></div>
-    <div className="co-picker-list co-context-list" role="listbox" id={listId} aria-label={t("可切换的公司与岗位")}>{visibleGroups.map((group) => {
+    {loading ? <ScopeLoading label={t("公司／岗位或面谈")} /> : error ? <p role="alert">{error}<button type="button" onClick={onRetry}>{t("重试")}</button></p> : <div className="co-picker-list co-context-list" role="listbox" id={listId} aria-label={t("可切换的公司与岗位")}>{visibleGroups.map((group) => {
       const expanded = isExpanded(group);
       return <section key={group.id} className="co-context-group" role="group" aria-labelledby={`${id}-${group.id}`}>
         <h3 id={`${id}-${group.id}`}><span>{t(group.label)}<b>{group.items.length}</b></span><small>{t(group.hint)}</small>{group.collapsible && !searching && <button type="button" aria-expanded={expanded} onClick={() => setExpandedGroups((current) => { const next = new Set(current); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next; })}>{expanded ? t("收起") : locale === "ja" ? `${group.items.length}件を表示` : `显示 ${group.items.length} 项`}</button>}</h3>
@@ -103,22 +105,27 @@ export function ContextPickerPanel({ groups, selectedId, today, onSelect, onClos
           </div>;
         })}
       </section>;
-    })}{!visibleGroups.length && <p className="co-muted co-context-empty">{t("没有找到对应的公司、岗位或面谈。")}</p>}</div>
+    })}{!visibleGroups.length && <p className="co-muted co-context-empty">{t("没有找到对应的公司、岗位或面谈。")}</p>}</div>}
   </div></div>;
 }
 
-export default function ContextPicker({ groups, selectedId, today, onSelect, className = "" }: {
+export default function ContextPicker({ groups, selectedId, today, onSelect, className = "", loadGroups, optionsKey = "", totalCount }: {
   groups: ContextPickerGroup[];
   selectedId: string;
   today: string;
   onSelect: (id: string) => void;
   className?: string;
+  loadGroups?: () => Promise<ContextPickerGroup[]>; optionsKey?: string; totalCount?: number;
 }) {
   const { locale } = useUiLocale();
   const t = (label: string) => menuLabel(label, locale);
   const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState<{ key: string; groups: ContextPickerGroup[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const current = selectedId ? findContextPickerItem(groups, selectedId) : null;
+  const activeGroups = loaded?.key === optionsKey ? loaded.groups : groups;
+  const current = selectedId ? findContextPickerItem(activeGroups, selectedId) : null;
   const kindLabel = current ? t(KIND_LABEL[current.kind]) : "";
   useEffect(() => {
     if (open || !refocusPending) return;
@@ -126,10 +133,18 @@ export default function ContextPicker({ groups, selectedId, today, onSelect, cla
     triggerRef.current?.focus({ preventScroll: true });
   });
   const close = () => { refocusPending = true; setOpen(false); };
+  const load = async () => {
+    if (!loadGroups || loaded?.key === optionsKey || busy) return;
+    setBusy(true); setError("");
+    try { setLoaded({ key: optionsKey, groups: await loadGroups() }); }
+    catch (error) { setError(error instanceof Error ? error.message : "选择目录读取失败"); }
+    finally { setBusy(false); }
+  };
+  const show = () => { setOpen(true); void load(); };
   return <>
-    <button ref={triggerRef} type="button" className={`co-context-trigger${current ? "" : " empty"}${className ? ` ${className}` : ""}`} aria-haspopup="dialog" aria-expanded={open} aria-label={t("切换公司、案件或面谈")} title={current ? `${current.company}｜${current.title}` : undefined} onClick={() => setOpen(true)} onKeyDown={(event) => {
+    <button ref={triggerRef} type="button" className={`co-context-trigger${current ? "" : " empty"}${className ? ` ${className}` : ""}`} aria-haspopup="dialog" aria-expanded={open} aria-label={t("切换公司、案件或面谈")} title={current ? `${current.company}｜${current.title}` : undefined} onClick={show} onKeyDown={(event) => {
       // 保住原生 select 的手感：方向键也能打开。
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); show(); }
     }}>
       <span className="co-context-trigger-label">{t("公司／岗位或面谈")}{kindLabel ? ` · ${kindLabel}` : ""}</span>
       {current
@@ -137,6 +152,6 @@ export default function ContextPicker({ groups, selectedId, today, onSelect, cla
         : <span className="co-context-main"><strong>{t("请选择公司／岗位或面谈")}</strong><span>{t("按状态与日期分组，可搜索")}</span></span>}
       <span className="co-context-trigger-foot">{current && <ItemMeta item={current} today={today} />}<b aria-hidden="true">{t("切换 ▾")}</b></span>
     </button>
-    {open && <ContextPickerPanel groups={groups} selectedId={selectedId} today={today} onClose={close} onSelect={(id) => { close(); if (id !== selectedId) onSelect(id); }} />}
+    {open && <ContextPickerPanel groups={activeGroups} selectedId={selectedId} today={today} loading={busy} error={error} totalCount={totalCount} onRetry={() => void load()} onClose={close} onSelect={(id) => { close(); if (id !== selectedId) onSelect(id); }} />}
   </>;
 }

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AI_APPLICATION_BUCKETS, type AiApplicationBucket, type AiApplicationDay } from "@/lib/calendar-applications";
 import { getString, getTitle, type Note } from "@/lib/notes";
+import type { CalendarDaySummary } from "@/lib/calendar-query-model";
 import { useUiLocale } from "./ui-locale";
 import "./styles/calendar-application-panel.css";
 
@@ -26,7 +27,7 @@ const COPY = {
   },
 } as const;
 
-export type OpenApplicationDay = (day: AiApplicationDay, trigger: HTMLButtonElement) => void;
+export type OpenApplicationDay = (day: CalendarDaySummary, trigger: HTMLButtonElement) => void;
 
 type ApplicationProgressCounts = Record<AiApplicationBucket, number>;
 const progressDescription = (counts: ApplicationProgressCounts, locale: keyof typeof COPY) => {
@@ -59,7 +60,7 @@ export function ApplicationProgressBar({ bucketCounts, legend = "none", classNam
 
 /** 月格・週見出し・当日概要を同じ操作にする。プレビューには操作を置かない。 */
 export function CalendarApplicationTrigger({ day, expanded, onOpen, className, children, label, showCounts = false }: {
-  day: AiApplicationDay; expanded: boolean; onOpen: OpenApplicationDay; className: string; children: ReactNode; label: string; showCounts?: boolean;
+  day: CalendarDaySummary; expanded: boolean; onOpen: OpenApplicationDay; className: string; children: ReactNode; label: string; showCounts?: boolean;
 }) {
   const { locale } = useUiLocale();
   const copy = COPY[locale];
@@ -98,9 +99,13 @@ export function CalendarApplicationTrigger({ day, expanded, onOpen, className, c
   </>;
 }
 
-export default function CalendarApplicationPanel({ day, date, fetchedAt, onClose, onOpen, onOpenCompany }: {
+export default function CalendarApplicationPanel({ day, date, fetchedAt, onClose, onOpen, onOpenCompany, summary, loading = false, error = "", onRetry }: {
   day?: AiApplicationDay; date: string; fetchedAt?: number | null; onClose: () => void; onOpen: (note: Note) => void;
   onOpenCompany?: (company: string, contextNote: Note) => void;
+  summary?: CalendarDaySummary;
+  loading?: boolean;
+  error?: string;
+  onRetry?: () => void;
 }) {
   const { locale } = useUiLocale();
   const copy = COPY[locale];
@@ -120,6 +125,7 @@ export default function CalendarApplicationPanel({ day, date, fetchedAt, onClose
     return () => window.removeEventListener("keydown", escape, true);
   }, [onClose]);
   const number = (value: number) => new Intl.NumberFormat(locale).format(value);
+  const counts = day ?? summary;
   const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const companies = (day?.companies ?? []).filter(company => bucket === "all" || company.bucket === bucket).map(company => ({ ...company,
     applications: company.applications.filter(application => {
@@ -131,16 +137,16 @@ export default function CalendarApplicationPanel({ day, date, fetchedAt, onClose
   const timestamp = fetchedAt != null && Number.isFinite(fetchedAt) ? new Intl.DateTimeFormat(locale, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Asia/Tokyo" }).format(new Date(fetchedAt)) : null;
   const dateLabel = new Intl.DateTimeFormat(locale, { month: "long", day: "numeric", timeZone: "Asia/Tokyo" }).format(new Date(`${date}T00:00:00+09:00`));
   return <aside ref={panel} id="calendar-application-panel" className="calendar-application-panel" aria-labelledby="calendar-application-title" lang={locale}>
-    <header><div><small>{date} · JST</small><h2 id="calendar-application-title">{copy.title(dateLabel)}</h2><strong>{copy.counts(number(day?.companyCount ?? 0), number(day?.positionCount ?? 0))}</strong></div><button ref={close} type="button" className="calendar-application-close" onClick={onClose} aria-label={copy.close}>×</button></header>
+    <header><div><small>{date} · JST</small><h2 id="calendar-application-title">{copy.title(dateLabel)}</h2><strong>{counts ? copy.counts(number(counts.companyCount), number(counts.positionCount)) : "—"}</strong></div><button ref={close} type="button" className="calendar-application-close" onClick={onClose} aria-label={copy.close}>×</button></header>
     <div className="calendar-application-controls"><p>{copy.recorded}</p><small>{timestamp ? `${copy.fetched}：${timestamp} JST` : copy.noFetched}</small>
-      <label><span>{copy.search}</span><input type="search" value={query} onChange={event => { setQuery(event.target.value); resetScroll(); }} /></label>
-      <div className="calendar-application-filters" role="group" aria-label={copy.filters}>{(["all", ...AI_APPLICATION_BUCKETS] as const).map(value => <button key={value} type="button" aria-pressed={bucket === value} onClick={() => { setBucket(value); resetScroll(); }}>
-        {value === "all" ? copy.all : copy.buckets[value]} <span>{number(value === "all" ? day?.companyCount ?? 0 : day?.bucketCounts[value] ?? 0)}</span>
+      <label><span>{copy.search}</span><input type="search" value={query} disabled={!day || loading} onChange={event => { setQuery(event.target.value); resetScroll(); }} /></label>
+      <div className="calendar-application-filters" role="group" aria-label={copy.filters}>{(["all", ...AI_APPLICATION_BUCKETS] as const).map(value => <button key={value} type="button" aria-pressed={bucket === value} disabled={!day || loading} onClick={() => { setBucket(value); resetScroll(); }}>
+        {value === "all" ? copy.all : copy.buckets[value]} <span>{counts ? number(value === "all" ? counts.companyCount : counts.bucketCounts[value]) : "—"}</span>
       </button>)}</div>
       <small>{copy.groups}</small>
     </div>
     <div className="calendar-application-scroll" ref={scroll} tabIndex={0} aria-label={copy.results}>
-      {!day ? <p className="calendar-application-empty">{copy.unavailable}</p> : <>
+      {loading ? <p className="calendar-application-empty" role="status">{locale === "ja" ? "応募記録を読み込み中…" : "正在读取申请记录…"}</p> : error ? <div className="calendar-application-empty" role="alert"><p>{locale === "ja" ? "応募記録を読み込めませんでした。" : "申请记录读取失败。"}</p>{onRetry && <button type="button" onClick={onRetry}>{locale === "ja" ? "再試行" : "重试"}</button>}</div> : !day ? <p className="calendar-application-empty">{copy.unavailable}</p> : <>
         <p className="calendar-application-result" role="status">{copy.counts(number(companies.length), number(companies.reduce((sum, company) => sum + company.applications.length, 0)))}</p>
         {companies.length === 0 && <p className="calendar-application-empty">{copy.empty}{query && <button type="button" onClick={() => setQuery("")}>{copy.clear}</button>}</p>}
         {companies.map(company => <section className="calendar-application-company" key={company.key}><header><h3 lang="und">{company.company}</h3><span data-bucket={company.bucket}>{copy.buckets[company.bucket]}</span>{onOpenCompany && <button type="button" onClick={() => onOpenCompany(company.company, company.applications[0].note)}>{copy.company} ↗</button>}</header>

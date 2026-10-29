@@ -60,6 +60,10 @@ import { copySelectionWithoutRuby } from "./ruby-copy";
 import { isTypingTarget, PrepSearchBox, useSlashFocus } from "./prep-search";
 import { menuLabel } from "@/lib/ui-menu-labels";
 import { useUiLocale } from "./ui-locale";
+import type { InterviewCatalog } from "@/lib/interview-read-model";
+import type { InterviewTrends } from "@/lib/interview-trends.mjs";
+import type { InterviewSelection } from "./use-interview-context";
+import { loadInterviewPickerGroups } from "./interview-catalog-options";
 
 /** `?prep=` 直接指向对照样稿时，返回它的原稿笔记名：页面选中原稿并打开对照视图，刷新也停在样稿上。 */
 function replayTargetOf(notes: Note[], path: string) {
@@ -1120,6 +1124,9 @@ function InterviewSession({
   onContextChange,
   onSelectionChange,
   onOpenInsights,
+  catalog,
+  remoteDigest,
+  onRemoteSelect,
 }: {
   notes: Note[];
   onOpen: (note: Note) => void;
@@ -1136,6 +1143,9 @@ function InterviewSession({
   onContextChange?: (company: string, contextPath: string, prepPath: string) => void;
   onSelectionChange?: (company: string, prepPath: string) => void;
   onOpenInsights?: (contextPath?: string) => void;
+  catalog?: InterviewCatalog | null;
+  remoteDigest?: InterviewTrends | null;
+  onRemoteSelect?: (selection: InterviewSelection) => void;
   /** 「今日」は殻が持つ。memo 越しなので中で求めると、日付を跨いでも昨日のまま凍る
    *  ——当日かどうかで既定モード（确认/冲刺/深度）が変わる画面なので、ここが一番効く。 */
   today: string;
@@ -1144,10 +1154,10 @@ function InterviewSession({
   const ui = useLegacySessionMenu();
   const docs = useMemo(() => findInterviewPrepDocs(notes), [notes]);
   const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
-  const digest = useMemo(() => buildDigest(notes), [notes]);
+  const digest = useMemo(() => catalog ? remoteDigest ?? null : buildDigest(notes), [notes, catalog, remoteDigest]);
   const contexts = useMemo(() => buildCompanyOverviews(notes), [notes]);
   const docContexts = useMemo(() => new Map(docs.map((doc) => [doc.note.path, resolveCompanyOverviewFrom(contexts, notes, doc.note)])), [contexts, docs, notes]);
-  const pickerGroups = useMemo(() => buildContextPickerGroups({ contexts, series, docs, docContexts, today }), [contexts, series, docs, docContexts, today]);
+  const pickerGroups = useMemo(() => catalog?.pickerGroups ?? buildContextPickerGroups({ contexts, series, docs, docContexts, today }), [catalog, contexts, series, docs, docContexts, today]);
   const [selection, setSelection] = useState<{ prepPath: string | null; contextPath: string | null }>(() => {
     const replayTarget = replayTargetOf(notes, initialPath);
     const exact = initialPath ? docs.find((doc) => doc.note.path === initialPath
@@ -1187,6 +1197,7 @@ function InterviewSession({
     setViewReplay(false);
     if (nextContext && onContextChange) onContextChange(doc.company, nextContext.note.path, doc.note.path);
     else onSelectionChange?.(doc.company, doc.note.path);
+    onRemoteSelect?.({ sourcePath: doc.note.path, contextPath: nextContext?.note.path });
   };
   const selectContext = (nextContext: CompanyOverview) => {
     const calendarContext = forceOverviewOnly && initialContextPath ? resolveCompanyOverview(notes, initialContextPath) : null;
@@ -1195,6 +1206,7 @@ function InterviewSession({
     setLegacyPrepPath(null);
     setViewReplay(false);
     onContextChange?.(nextContext.company, nextContext.note.path, next?.note.path ?? "");
+    onRemoteSelect?.({ sourcePath: next?.note.path, contextPath: nextContext.note.path });
   };
   // 地址栏的 prep 指向正在看的稿：刷新、分享时停在原稿或对照样稿上。
   const toggleReplay = () => {
@@ -1207,10 +1219,28 @@ function InterviewSession({
   };
   const companyAction = <div className="co-header-actions">{replay && <button type="button" className="co-replay-entry" aria-pressed={showingReplay} onClick={toggleReplay}>{ui(showingReplay ? "回到原稿" : "对照样稿")}</button>}{onOpenInsights && <button type="button" className="co-compare-entry" onClick={() => onOpenInsights(context?.note.path)}>{ui("公司对比")}<span aria-hidden="true"> ↗</span></button>}</div>;
   // 选项 id 与旧 select 的 option value 同形（context:<path> / series:<key>），切换逻辑照旧。
-  const contextPicker = <ContextPicker groups={pickerGroups} today={today} selectedId={context ? `context:${context.note.path}` : selectedSeriesKey()} onSelect={(value) => {
+  const selectRemote = (value: string, exactPrep?: string) => {
+    if (!catalog) return;
+    const item = catalog.pickerGroups.flatMap((group) => group.items).find((item) => item.id === value);
+    const prepPath = exactPrep || catalog.defaults[value] || "";
+    const contextPath = value.startsWith("context:") ? value.slice(8) : "";
+    setSelection({ prepPath: prepPath || null, contextPath: contextPath || null });
+    setLegacyPrepPath(null);
+    setViewReplay(false);
+    if (contextPath) onContextChange?.(item?.company ?? "", contextPath, prepPath);
+    else if (prepPath) onSelectionChange?.(item?.company ?? "", prepPath);
+    onRemoteSelect?.({ sourcePath: prepPath || undefined, contextPath: contextPath || undefined });
+  };
+  const remoteRounds = catalog?.preps.filter((item) => item.pickerId === (context ? `context:${context.note.path}` : catalog.preps.find((item) => item.path === selected?.note.path)?.pickerId)) ?? [];
+  const contextPicker = <><ContextPicker groups={pickerGroups} today={today} selectedId={context ? `context:${context.note.path}` : selectedSeriesKey()}
+    loadGroups={catalog?.revision ? () => loadInterviewPickerGroups(catalog.revision!) : undefined} optionsKey={catalog?.revision} totalCount={catalog?.pickerTotal} onSelect={(value) => {
+    if (catalog) { selectRemote(value); return; }
     if (value.startsWith("context:")) { const next = contexts.find((item) => item.note.path === value.slice(8)); if (next) selectContext(next); }
     else { const item = series.find((item) => `series:${item.key}` === value); const next = item && selectRelevantInterviewPrepDoc(item.rounds, today); if (next) selectDoc(next); }
-  }} />;
+  }} />{remoteRounds.length > 1 && <select aria-label={menu("面试轮次")} value={selected?.note.path ?? ""} onChange={(event) => {
+    const target = remoteRounds.find((item) => item.path === event.target.value);
+    if (target) selectRemote(target.pickerId, target.path);
+  }}>{!selected && <option value="">{menu("本场尚无准备稿")}</option>}{remoteRounds.map((item) => <option key={item.path} value={item.path}>{item.date} · {item.round}</option>)}</select>}</>;
   function selectedSeriesKey() { const item = selected ? interviewPrepSeriesForDoc(series, selected) : null; return item ? `series:${item.key}` : ""; }
   const historicalCompany = !!selected && ["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today));
   const companyContent = <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} />;

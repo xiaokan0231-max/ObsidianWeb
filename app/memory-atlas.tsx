@@ -42,8 +42,10 @@ import { notifyUrlChange, SHELL_URL_KEYS, UrlSearchProvider, useInitialUrlSearch
 import { describeConnectionError } from "@/lib/connection-error";
 import { postJson } from "@/lib/client-api";
 import { createVaultReader, type VaultReadOptions } from "@/lib/vault-reader";
-import { calendarModelFromSnapshot } from "@/lib/calendar-snapshot";
-import { useCalendarSnapshot } from "./use-calendar-snapshot";
+import { useCalendarProjection } from "./use-calendar-projection";
+import { useInterviewOverlayNotes } from "./use-interview-overlay-notes";
+import { useInterviewContext, type InterviewView } from "./use-interview-context";
+import type { NoteResolution } from "@/lib/read-model";
 import type { CalendarPulseSummary } from "@/lib/calendar-pulse-summary";
 import { createWikiNavigator, type WikiNavigationNotice } from "@/lib/wiki-navigation";
 import ViewErrorBoundary from "./view-error-boundary";
@@ -471,7 +473,6 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   const secondaryMenus = getSecondaryNavigation(locale);
   const [vaultReader] = useState(() => createVaultReader());
   const vaultState = useSyncExternalStore(vaultReader.subscribe, vaultReader.getState, vaultReader.getState);
-  const notes = vaultState.notes;
   const [view, setView] = useState<View>(initialView);
   // 这一页是不是由页面转场带进来的。转场的新快照已经有淡入上移，容器自己的 view-enter 再播一遍就是双重入场；
   // 挂在随 view 重挂的 .view-container 上，转场结束后也不会因为属性被移除而重播。
@@ -503,6 +504,8 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   const [selectedPath, setSelectedPath] = useState<string | null>(() =>
     new URLSearchParams(initialSearch).get("note"),
   );
+  const [selectedRevision, setSelectedRevision] = useState<string | undefined>();
+  const [indexSeed, setIndexSeed] = useState(0);
   const [selectedSection, setSelectedSection] = useState<string | null>(() =>
     new URLSearchParams(initialSearch).get("section"),
   );
@@ -530,25 +533,37 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   // props が変わらず再レンダーされず、昨日の日付が凍りつく（総覧の見出し・日历の「今天」）。
   const [today, setToday] = useState(() => localDateKey());
   const [calendarToday, setCalendarToday] = useState(() => tokyoParts().date);
-  const fullCalendarReady = ["all", "actions", "interview"].some((scope) => vaultState.readyScopes.has(scope as "all" | "actions" | "interview"));
-  const { refresh: refreshCalendar, ...calendarRead } = useCalendarSnapshot(view === "calendar");
-  const calendarModel = useMemo(() => (!fullCalendarReady || view === "calendar") && calendarRead.snapshot
-    ? calendarModelFromSnapshot(calendarRead.snapshot, calendarToday) : null, [fullCalendarReady, view, calendarRead.snapshot, calendarToday]);
+  const indexedInterview = ["session", "prep", "review", "insights", "practice"].includes(view);
+  const interviewSeed = new URLSearchParams(interviewRouteSearch);
+  const interviewRequested = calendarInterviewFromSearch(view, interviewRouteSearch);
+  const interviewRead = useInterviewContext({ enabled: indexedInterview, view: view as InterviewView, today: calendarToday,
+    sourcePath: interviewSeed.get(view === "review" ? "review" : "prep") || undefined,
+    contextPath: interviewSeed.get("context") || interviewSeed.get("event") || undefined,
+    company: interviewSeed.get("company") || undefined,
+    paths: interviewSeed.has("compare") ? interviewSeed.getAll("compare").filter(Boolean) : undefined,
+    overviewOnly: Boolean(interviewRequested && !interviewRequested.path),
+  });
+  const { refresh: refreshInterview, patchNote: patchInterviewNote } = interviewRead;
+  const notes = indexedInterview ? interviewRead.notes : vaultState.notes;
+  const calendarRead = useCalendarProjection(calendarToday, view === "calendar", indexSeed);
+  const { refresh: refreshCalendar } = calendarRead;
+  const calendarModel = calendarRead.model;
   const compactCalendar = view === "calendar";
-  const loading = compactCalendar ? calendarRead.loading || !calendarRead.snapshot && !calendarRead.error
+  const loading = compactCalendar ? calendarRead.loading || !calendarRead.revision && !calendarRead.error
+    : indexedInterview ? !interviewRead.catalog && !interviewRead.error : view === "library" ? false
     : vaultState.loading || vaultState.readyScopes.size === 0 && vaultState.errors.size === 0;
   const activeScope = vaultScopeForView(view);
-  const error = compactCalendar ? calendarRead.error : vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
+  const error = compactCalendar ? calendarRead.error : indexedInterview ? interviewRead.error : view === "library" ? "" : vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
   const [writeError, setWriteError] = useState("");
   // 撤销失败而它的提示已被新的一次写入顶掉时，理由落到全局的写入错误横幅上（见 useUndoFlash）。
   const reportStaleUndoFailure = useCallback((message: string) => setWriteError(`撤销没有完成：${message}`), [setWriteError]);
   const undoFlash = useUndoFlash({ onStaleFailure: reportStaleUndoFailure });
   const { show: showFlash } = undoFlash;
-  const fetchedAt = compactCalendar ? calendarRead.fetchedAt : vaultState.checkedAt.get(activeScope) ?? vaultState.checkedAt.get("all") ?? null;
+  const fetchedAt = compactCalendar ? calendarRead.fetchedAt : indexedInterview ? interviewRead.fetchedAt : vaultState.checkedAt.get(activeScope) ?? vaultState.checkedAt.get("all") ?? null;
   // どの scope が手元に揃ったか。視図はこれで「まだ来ていない」と「本当に無い」を分ける（假空态の根）。
   const readyScopes = vaultState.readyScopes;
-  const interviewScopeReady = readyScopes.has("all") || readyScopes.has("interview");
-  const scopeReady = compactCalendar ? Boolean(calendarModel) : readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
+  const interviewScopeReady = indexedInterview ? Boolean(interviewRead.catalog) : readyScopes.has("all") || readyScopes.has("interview");
+  const scopeReady = compactCalendar ? Boolean(calendarRead.revision) : indexedInterview ? Boolean(interviewRead.catalog) : view === "library" ? true : readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
   const actionsReady = readyScopes.has("all") || readyScopes.has("actions");
   const activityReady = readyScopes.has("all") || readyScopes.has("activity");
   const activityError = vaultState.errors.get("activity") ?? vaultState.errors.get("all") ?? "";
@@ -630,11 +645,13 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   // 请求次序、scope 快照和写回保护由独立协调器管理，页面只订阅接受后的状态。
   const loadVault = useCallback(async (options?: VaultReadOptions): Promise<void> => {
     if (currentView.current === "calendar" && (!options?.scope || options.scope === "actions" || options.fresh)) {
-      await refreshCalendar(options?.fresh);
+      await refreshCalendar();
       return;
     }
+    if (["session", "prep", "review", "insights", "practice"].includes(currentView.current)) { await refreshInterview(); return; }
+    if (currentView.current === "library") { setIndexSeed((seed) => seed + 1); return; }
     await vaultReader.request(options);
-  }, [vaultReader, refreshCalendar]);
+  }, [vaultReader, refreshCalendar, refreshInterview]);
 
   const [wikiNotice, setWikiNotice] = useState<WikiNavigationNotice>(null);
   const [wikiNavigator] = useState(() => createWikiNavigator({
@@ -648,17 +665,23 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
       }
       return result.status === "accepted" ? vaultReader.getState().notes : null;
     },
+    resolve: async (target, section) => {
+      const response = await fetch(`/api/read-model/resolve?${new URLSearchParams({ target, ...(section ? { section } : {}) })}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("链接索引尚未就绪");
+      return response.json() as Promise<NoteResolution>;
+    },
     onNotice: setWikiNotice,
-    onOpen: ({ path, section }) => {
+    onOpen: ({ path, section, revision }) => {
       const params = new URLSearchParams(window.location.search);
       params.set("note", path);
       if (section) params.set("section", section);
       else params.delete("section");
       window.history.pushState(
-        { ...(window.history.state ?? {}), __echoNote: path }, "",
+        { ...(window.history.state ?? {}), __echoNote: path, __echoNoteRevision: revision }, "",
         `${window.location.pathname}?${params.toString()}`,
       );
       setSelectedPath(path);
+      setSelectedRevision(revision);
       setSelectedSection(section);
       setSearchOpen(false);
     },
@@ -702,6 +725,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
       setDerivedState("fresh");
       // generated 区块は複数の scope に散っている（台帳・応募日台帳は jobs、面接傾向は interview、数据字典は all だけ）。
       // 手元に載っている scope を全部取り直す——変わっていない scope は ETag で 304 になるので安い。
+      if (["calendar", "library", "session", "prep", "review", "insights", "practice"].includes(currentView.current)) await loadVault({ fresh: true });
       await Promise.all(scopesToReloadAfterStats(vaultReader.getState().readyScopes).map((scope) => loadVault({ scope })));
     } catch (rebuildError) {
       setDerivedState("stale");
@@ -721,8 +745,10 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
 
   const patchNote = useCallback((note: Note) => {
     vaultReader.patchNote(note);
+    setIndexSeed((seed) => seed + 1);
+    if (indexedInterview) void patchInterviewNote(note);
     if (DERIVED_SOURCE_TYPES.has(getType(note))) markDerivedStale();
-  }, [markDerivedStale, vaultReader]);
+  }, [markDerivedStale, vaultReader, indexedInterview, patchInterviewNote]);
 
   const openPrepCard = useCallback((cardId: string) => {
     // setState→overlay の effect を待つと、focus と overflow の変更後の座標を
@@ -879,6 +905,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
       if (interviewNavigation.current !== interviewKey) setInterviewRouteVersion((version) => version + 1);
       interviewNavigation.current = interviewKey;
       setSelectedPath(params.get("note"));
+      setSelectedRevision(typeof window.history.state?.__echoNoteRevision === "string" ? window.history.state.__echoNoteRevision : undefined);
       setSelectedSection(params.get("section"));
     };
     const onPopState = (event: PopStateEvent) => {
@@ -935,7 +962,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
 
   useEffect(() => {
     // rAF は非アクティブなタブでは発火しないため timer で初回ロードする。
-    if (initialView === "calendar") return;
+    if (["calendar", "library", "session", "prep", "review", "insights", "practice"].includes(initialView)) return;
     const timer = window.setTimeout(() => void loadVault({ scope: vaultScopeForView(initialView) }), 0);
     return () => window.clearTimeout(timer);
   }, [initialView, loadVault]);
@@ -943,7 +970,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   const { quickDue, onQuickSummary } = useQuickDueBadge(Boolean(fetchedAt), currentView);
 
   useEffect(() => {
-    if (view === "calendar") return;
+    if (["calendar", "library", "session", "prep", "review", "insights", "practice"].includes(view)) return;
     const scope = vaultScopeForView(view);
     if (vaultReader.getState().readyScopes.has("all") || vaultReader.getState().readyScopes.has(scope)) return;
     void loadVault({ scope });
@@ -1022,36 +1049,34 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
     wikiNavigator,
   ]);
 
-  const notesByBasename = useMemo(() => {
-    const index = new Map<string, Note>();
-    notes.forEach((note) => index.set(noteBasename(note.path), note));
-    return index;
-  }, [notes]);
-
-  const [noteDetail, setNoteDetail] = useState<Note | null>(null);
+  const [noteDetail, setNoteDetail] = useState<{ note: Note; revision?: string } | null>(null);
   const selectedNote = selectedPath
-    ? notes.find((note) => note.path === selectedPath) ?? (noteDetail?.path === selectedPath ? noteDetail : null)
+    ? (selectedRevision ? null : notes.find((note) => note.path === selectedPath)) ?? (noteDetail?.note.path === selectedPath && noteDetail.revision === selectedRevision ? noteDetail.note : null)
     : null;
-  const sharedAssetNote = sharedAssetOverlay
-    ? notes.find((note) => note.path === sharedAssetOverlay.note) ??
-      notesByBasename.get(sharedAssetOverlay.note) ??
-      null
-    : null;
+  const overlayRead = useInterviewOverlayNotes({ cardId: prepOverlayCard, asset: sharedAssetOverlay,
+    catalog: interviewRead.catalog, revision: interviewRead.revision, seed: notes });
+  const sharedAssetNote = overlayRead.sharedNote;
+  const prepOverlayNotes = useMemo(() => [...new Map([...notes, ...overlayRead.notes].map((note) => [note.path, note])).values()], [notes, overlayRead.notes]);
 
-  const openNote = useCallback((note: Note) => {
+  const openNotePath = useCallback((path: string, revision?: string) => {
     wikiNavigator.cancel();
     const params = new URLSearchParams(window.location.search);
-    params.set("note", note.path);
+    params.set("note", path);
     params.delete("section");
     window.history.pushState(
-      { ...(window.history.state ?? {}), __echoNote: note.path },
+      { ...(window.history.state ?? {}), __echoNote: path, __echoNoteRevision: revision },
       "",
       `${window.location.pathname}?${params.toString()}`,
     );
-    setSelectedPath(note.path);
+    setSelectedPath(path);
+    setSelectedRevision(revision);
+    setNoteDetail(null);
+    setWriteError("");
     setSelectedSection(null);
     setSearchOpen(false);
-  }, [setSearchOpen, wikiNavigator]);
+  }, [setSearchOpen, setWriteError, wikiNavigator]);
+
+  const openNote = useCallback((note: Note) => openNotePath(note.path, indexedInterview ? interviewRead.revision : undefined), [openNotePath, indexedInterview, interviewRead.revision]);
 
   // 先播退场（lib/exit-transition.ts），播完再走下面原来的关闭逻辑。
   const closeNote = useCallback(() => {
@@ -1134,8 +1159,9 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
     const requested = calendarInterviewFromSearch(view, interviewRouteSearch);
     if (!requested) return null;
     // 完整资料加载后只补齐所选材料，不能把“准备”改成自动判定的“复盘”。
+    if (indexedInterview && interviewRead.catalog) return requested;
     return resolveCalendarInterviewRequest(requested, notes, calendarEvents, calendarToday);
-  }, [view, interviewRouteSearch, notes, calendarEvents, calendarToday]);
+  }, [view, interviewRouteSearch, notes, calendarEvents, calendarToday, indexedInterview, interviewRead.catalog]);
   const interviewParams = new URLSearchParams(interviewRouteSearch);
   const reviewInitialKey = calendarInterview?.path ?? interviewParams.get("review");
   const prepInitialPath = calendarInterview ? calendarInterview.path ?? "" : interviewParams.get("prep") ?? "";
@@ -1160,22 +1186,22 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   useEffect(() => {
     if (!selectedPath || selectedNote) return;
     const controller = new AbortController();
-    void fetch(`/api/note?${new URLSearchParams({ path: selectedPath })}`, {
+    void fetch(`/api/note?${new URLSearchParams({ path: selectedPath, ...(selectedRevision ? { revision: selectedRevision } : {}) })}`, {
       cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
     }).then(async (response) => {
       const body = await response.json() as { note?: Note; error?: string };
+      if (response.status === 409 && selectedRevision) {
+        const resolved = await fetch(`/api/read-model/resolve?${new URLSearchParams({ target: selectedPath })}`, { cache: "no-store", signal: controller.signal });
+        const target = await resolved.json() as NoteResolution;
+        if (resolved.ok && target.kind === "resolved" && target.revision !== selectedRevision && !controller.signal.aborted) {
+          setSelectedRevision(target.revision); setNoteDetail(null); return;
+        }
+      }
       if (!response.ok || body.note?.path !== selectedPath) throw new Error(body.error || "笔记读取失败");
-      if (!controller.signal.aborted) setNoteDetail(body.note);
+      if (!controller.signal.aborted) setNoteDetail({ note: body.note, revision: selectedRevision });
     }).catch((error) => { if (!controller.signal.aborted) setWriteError(error instanceof Error ? error.message : "笔记读取失败"); });
     return () => controller.abort();
-  }, [selectedPath, selectedNote]);
-
-  // ⌘K 搜的是「全库」：没去过资料库时只载了当前视图的 scope，打开面板时把 all 补齐，
-  // 面板在补齐前会说明「正在载入全部资料」，不把部分结果当成全库。
-  useEffect(() => {
-    if (!searchOpen || vaultReader.getState().readyScopes.has("all") || vaultReader.getState().loadingScopes.has("all")) return;
-    void loadVault({ scope: "all" });
-  }, [searchOpen, loadVault, vaultReader]);
+  }, [selectedPath, selectedNote, selectedRevision]);
 
   // 「最近打开」记在本机：不论从哪一页、哪种方式打开笔记，都在这里统一记一笔。
   useEffect(() => {
@@ -1576,6 +1602,10 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
                 <button onClick={() => void loadVault()}>{ui.retry}</button>
               </div>
             )}
+            {indexedInterview && interviewRead.syncState !== "ready" && interviewRead.catalog && <div className="stale-data-banner" role="status">
+              <span>{locale === "ja" ? "資料インデックスを更新中です。前回の完全な資料を表示しています。" : "资料索引正在同步，当前保留上一完整版本。"}</span>
+              <button onClick={() => void loadVault()}>{ui.retry}</button>
+            </div>}
             {writeError && (
               <div className="global-write-banner" role="alert">
                 <span>{writeError}</span>
@@ -1616,9 +1646,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
                 <CalendarInterviewState
                   target={calendarInterview}
                   loading={(!interviewScopeReady && !error) || calendarInterview.view !== view}
-                  onOpenSource={notes.some((note) => note.path === calendarInterview.sourcePath)
-                    ? () => openNote(notes.find((note) => note.path === calendarInterview.sourcePath)!)
-                    : undefined}
+                  onOpenSource={interviewScopeReady ? () => openNotePath(calendarInterview.sourcePath, interviewRead.revision) : undefined}
                   onShowAll={() => navigateToView(calendarInterview.view)}
                 />
               )}
@@ -1627,6 +1655,11 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
                   loading={!scopeReady}
                   key={interviewRouteVersion}
                   notes={notes}
+                  catalog={interviewRead.catalog}
+                  remoteReview={interviewRead.review}
+                  revision={interviewRead.revision}
+                  onRemoteSelect={interviewRead.select}
+                  onOpenSource={(path) => openNotePath(path, interviewRead.revision)}
                   onVaultChanged={loadVault}
                   onNoteWritten={patchNote}
                   initialSelectedKey={reviewInitialKey}
@@ -1640,7 +1673,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
                   onOpenSession={openReviewSession}
                 />
               )}
-              {view === "insights" && <CompanyComparison notes={notes} today={calendarToday} loading={!scopeReady}
+              {view === "insights" && <CompanyComparison catalog={interviewRead.catalog} onRemoteSelect={interviewRead.select} notes={notes} today={calendarToday} loading={!scopeReady}
                 onOpenCompany={(context) => openApplicationCompany(context.company, context.note)} onOpenWiki={openWikiLink} />}
               {view === "practice" && (
                 <InterviewPractice
@@ -1653,7 +1686,10 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
               )}
               {view === "session" && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && (calendarInterview.path || calendarCompanyContext))) && (
                 <InterviewSession
-                  key={`${interviewRouteVersion}:${interviewScopeReady}`}
+                  key={interviewRouteVersion}
+                  catalog={interviewRead.catalog}
+                  remoteDigest={interviewRead.digest}
+                  onRemoteSelect={interviewRead.select}
                   notes={notes}
                   today={today}
                   onOpen={openNote}
@@ -1663,7 +1699,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
                   onOpenLibrary={openAnswerLibrary}
                   initialCompany={interviewParams.get("company") ?? ""}
                   initialPath={prepInitialPath}
-                  initialContextPath={companyContextPath}
+                  initialContextPath={interviewRead.contextPath || companyContextPath}
                   forceOverviewOnly={Boolean(calendarInterview && !calendarInterview.path && calendarCompanyContext)}
                   onSelectionChange={syncInterviewSelection}
                   onContextChange={syncCompanyContext}
@@ -1726,6 +1762,8 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
               {view === "calendar" && (
                 <CalendarView
                   initialSummary={initialSummary}
+                  projection={calendarRead}
+                  onOpenPath={openNotePath}
                   model={calendarModel}
                   events={calendarEvents}
                   notes={notes}
@@ -1763,6 +1801,9 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
               )}
               {view === "library" && (
                 <LibraryView
+                  indexed
+                  revision={indexSeed}
+                  onOpenPath={openNotePath}
                   loading={!scopeReady}
                   notes={notes}
                   filter={groupFilter}
@@ -1840,6 +1881,9 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
 
       {searchOpen && (
         <SearchPalette
+          indexed
+          revision={indexSeed}
+          onOpenPath={openNotePath}
           notes={notes}
           onOpen={openNote}
           onQuery={runSavedQuery}
@@ -1861,15 +1905,18 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
         />
       )}
 
-      {prepOverlayCard && (
+      {prepOverlayCard && !overlayRead.loading && !overlayRead.error && (
         <PrepCardOverlay
-          notes={notes}
+          notes={prepOverlayNotes}
           cardId={prepOverlayCard}
           origin={prepOverlayOrigin}
           onOpen={openNote}
           onClose={closePrepCard}
         />
       )}
+
+      {(prepOverlayCard || sharedAssetOverlay) && overlayRead.loading && <NoteReaderLoading title={locale === "ja" ? "共通資料" : "共用资料"} onClose={prepOverlayCard ? closePrepCard : closeSharedAsset} />}
+      {(prepOverlayCard || sharedAssetOverlay) && overlayRead.error && <div className="global-write-banner" role="alert"><span>{overlayRead.error}</span><button onClick={() => void overlayRead.retry()}>{ui.retry}</button><button onClick={prepOverlayCard ? closePrepCard : closeSharedAsset}>{ui.closeNotice}</button></div>}
 
       {selectedPath && !selectedNote && !writeError && <NoteReaderLoading title={noteBasename(selectedPath)} onClose={closeNote} />}
       {selectedNote && (
@@ -1880,6 +1927,9 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
                 note={selectedNote}
                 section={selectedSection}
                 allNotes={notes}
+                indexed
+                revision={selectedRevision}
+                onOpenPath={openNotePath}
                 wikiIndexComplete={readyScopes.has("all")}
                 scene={view}
                 closing={noteExiting}
@@ -1892,6 +1942,9 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
                 note={selectedNote}
                 section={selectedSection}
                 allNotes={notes}
+                indexed
+                revision={selectedRevision}
+                onOpenPath={openNotePath}
                 wikiIndexComplete={readyScopes.has("all")}
                 closing={noteExiting}
                 onClose={closeNote}

@@ -20,6 +20,11 @@ import {
 } from "./review.ts";
 import { companyIdentity, getString, getType, type Note } from "./notes.ts";
 
+// 增量同步只替换变更的 Note；整理稿未变时复用解析结果，不能为一条新批注重解析所有长稿。
+const parsedStudies = new WeakMap<Note, { content: string; parsed: ParsedSeirikou }>();
+const parsedAnnotations = new WeakMap<Note, { content: string; annotations: ReviewAnnotation[] }>();
+const joinedStudies = new WeakMap<Note, { content: string; annotationContent?: string; deepContent?: string; joined: JoinedReviewNotes }>();
+
 export type JoinedReviewNotes = {
   /** ノートのパス。同じ会社・同じ日に複数回があっても一意。 */
   key: string;
@@ -55,6 +60,51 @@ function sameInterview(candidate: Note, company: string, date: string, round?: s
   );
 }
 
+function pathKey(value: string) {
+  return value.trim().replace(/^\[\[|\]\]$/g, "").split("|")[0].split("#")[0].trim().replace(/\.md$/i, "").normalize("NFKC");
+}
+
+function referenceKey(value: string, source: Note, notes: Note[]) {
+  const target = pathKey(value);
+  if (!target) return "";
+  const exact = notes.filter((note) => pathKey(note.path) === target);
+  if (exact.length === 1) return pathKey(exact[0].path);
+  const sibling = `${source.path.slice(0, source.path.lastIndexOf("/"))}/${target}`;
+  const local = notes.filter((note) => pathKey(note.path) === pathKey(sibling));
+  if (local.length === 1) return pathKey(local[0].path);
+  const suffix = notes.filter((note) => pathKey(note.path).endsWith(`/${target}`));
+  return suffix.length === 1 ? pathKey(suffix[0].path) : target;
+}
+
+/** 同日同岗位仍沿用日／轮粒度；同公司另一个岗位必须优先尊重完整来源和明确案件。 */
+function relatedNote(candidates: Note[], source: Note, notes: Note[], round?: string) {
+  const matches = candidates.filter((candidate) => {
+    if (!sameInterview(candidate, getString(source.frontmatter.company), getString(source.frontmatter.date), round)) return false;
+    for (const field of ["case_id", "case", "meeting"]) {
+      const left = field === "case_id" ? getString(candidate.frontmatter[field]) : referenceKey(getString(candidate.frontmatter[field]), candidate, notes);
+      const right = field === "case_id" ? getString(source.frontmatter[field]) : referenceKey(getString(source.frontmatter[field]), source, notes);
+      if (left && right && left !== right) return false;
+    }
+    const reference = pathKey(getString(candidate.frontmatter.source_path) || getString(candidate.frontmatter.source_note));
+    if (!reference) return true;
+    const target = pathKey(source.path);
+    if (reference.includes("/")) return reference === target;
+    const sibling = `${pathKey(candidate.path).split("/").slice(0, -1).join("/")}/${reference}`;
+    if (notes.some((note) => pathKey(note.path) === sibling)) return target === sibling;
+    const named = notes.filter((note) => pathKey(note.path).split("/").at(-1) === reference);
+    return named.length === 1 && named[0].path === source.path;
+  });
+  const directory = source.path.slice(0, source.path.lastIndexOf("/"));
+  const siblings = matches.filter((candidate) => candidate.path.slice(0, candidate.path.lastIndexOf("/")) === directory);
+  if (siblings.length) return siblings[0];
+  const explicitlyLinked = matches.filter((candidate) => ["source_path", "source_note", "case_id", "case", "meeting"].some((field) => getString(candidate.frontmatter[field])));
+  if (explicitlyLinked.length === 1) return explicitlyLinked[0];
+  const sameDaySources = notes.filter((candidate) => getType(candidate) === "transcript-study"
+    && sameInterview(candidate, getString(source.frontmatter.company), getString(source.frontmatter.date), round));
+  const directories = new Set(sameDaySources.map((candidate) => candidate.path.slice(0, candidate.path.lastIndexOf("/"))));
+  return directories.size <= 1 ? matches[0] : undefined;
+}
+
 /**
  * 整理稿を軸に、同じ回のノートを束ねて日付の新しい順に返す。
  * 整理稿が無ければその面接は存在しない扱い（復盤だけ在っても出さない）。
@@ -69,17 +119,22 @@ export function joinReviewNotes(notes: Note[]): JoinedReviewNotes[] {
       const company = getString(note.frontmatter.company);
       const date = getString(note.frontmatter.date);
       const round = getString(note.frontmatter.round);
-      const annotationNote = annotationNotes.find((candidate) =>
-        sameInterview(candidate, company, date),
-      );
-      const deepReviewNote = deepReviewNotes.find((candidate) =>
-        sameInterview(candidate, company, date, round),
-      );
-      const parsed = parseSeirikou(note.content);
-      const annotations = annotationNote
-        ? uniqueAnnotations(parseAnnotations(annotationNote.content))
-        : [];
-      return {
+      const annotationNote = relatedNote(annotationNotes, note, notes);
+      const deepReviewNote = relatedNote(deepReviewNotes, note, notes, round);
+      const cached = joinedStudies.get(note);
+      if (cached && cached.content === note.content && cached.annotationContent === annotationNote?.content && cached.deepContent === deepReviewNote?.content
+        && cached.joined.annotationNote === annotationNote && cached.joined.deepReviewNote === deepReviewNote
+        && cached.joined.company === company && cached.joined.date === date && cached.joined.round === round) return cached.joined;
+      const sourceCache = parsedStudies.get(note);
+      let parsed = sourceCache?.content === note.content ? sourceCache.parsed : undefined;
+      if (!parsed) { parsed = parseSeirikou(note.content); parsedStudies.set(note, { content: note.content, parsed }); }
+      const annotationCache = annotationNote ? parsedAnnotations.get(annotationNote) : undefined;
+      let annotations = annotationCache && annotationCache.content === annotationNote?.content ? annotationCache.annotations : undefined;
+      if (!annotations) {
+        annotations = annotationNote ? uniqueAnnotations(parseAnnotations(annotationNote.content)) : [];
+        if (annotationNote) parsedAnnotations.set(annotationNote, { content: annotationNote.content, annotations });
+      }
+      const joined = {
         key: note.path,
         note,
         company,
@@ -91,6 +146,8 @@ export function joinReviewNotes(notes: Note[]): JoinedReviewNotes[] {
         annotations,
         decisionTasks: reviewDecisionTasks(parsed.sentences, annotations),
       };
+      joinedStudies.set(note, { content: note.content, annotationContent: annotationNote?.content, deepContent: deepReviewNote?.content, joined });
+      return joined;
     })
     .sort((left, right) => right.date.localeCompare(left.date));
 }
@@ -104,10 +161,12 @@ export function joinReviewNotes(notes: Note[]): JoinedReviewNotes[] {
 // ここを通らずファイル名の前綴で照合する実装が language-v2 に別に生えていた——
 // 今は命名規約のおかげで結果が一致しているだけで、規約が崩れた瞬間に静かに割れる。
 
-type InterviewIdentity = Pick<JoinedReviewNotes, "company" | "date" | "round">;
+type InterviewIdentity = Pick<JoinedReviewNotes, "company" | "date" | "round"> & { note?: Note; key?: string };
 
 /** 回ごとのノート（練習キュー・回答品質批注など）。company+date+round で照合。 */
 export function findRoundNote(notes: Note[], type: string, joined: InterviewIdentity) {
+  const source = joined.note ?? notes.find((note) => note.path === joined.key);
+  if (source) return relatedNote(notes.filter((note) => getType(note) === type), source, notes, joined.round);
   return notes.find(
     (candidate) =>
       getType(candidate) === type &&
@@ -117,6 +176,8 @@ export function findRoundNote(notes: Note[], type: string, joined: InterviewIden
 
 /** 日ごとのノート（面接結果の復盤など、同日の複数回で1本）。company+date で照合。 */
 export function findDayNote(notes: Note[], type: string, joined: InterviewIdentity) {
+  const source = joined.note ?? notes.find((note) => note.path === joined.key);
+  if (source) return relatedNote(notes.filter((note) => getType(note) === type), source, notes);
   return notes.find(
     (candidate) => getType(candidate) === type && sameInterview(candidate, joined.company, joined.date),
   );

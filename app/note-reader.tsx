@@ -7,9 +7,12 @@ import { headingPlainText, scanReadingHeadings } from "@/lib/reading-document";
 import { resolveNoteLink } from "@/lib/wiki-target";
 import type { SnippetPart } from "@/lib/search-snippet";
 import type { UiLocale } from "@/lib/ui-locale";
+import type { NoteCard } from "@/lib/read-model";
 import MarkdownDocument from "./markdown-document";
 import ReadingMode, { type ReadingPosition } from "./reading-mode";
 import { useUiLocale } from "./ui-locale";
+import { useReadModelBacklinks, type IndexedNoteLinks } from "./use-read-model-library";
+import IndexedNoteLinksStatus from "./indexed-note-links";
 
 const RELATED_PREVIEW = 9;
 
@@ -126,7 +129,45 @@ function ReaderRelated({ note, backlinks, outlinks, onOpen }: {
   );
 }
 
-export default function NoteReader({ note, section, onClose, onOpenWiki, backlinks = [], onOpen, initialPosition, scene, allNotes, wikiIndexComplete = false }: {
+function IndexedRelatedGroup({ title, cards, onOpenPath, revision }: {
+  title: string;
+  cards: NoteCard[];
+  onOpenPath?: (path: string, revision?: string) => void;
+  revision?: string;
+}) {
+  const { locale } = useUiLocale();
+  const copy = RELATED_COPY[locale];
+  const [expanded, setExpanded] = useState(false);
+  if (!cards.length) return null;
+  return <section className="reader-related-group">
+    <h3>{title}</h3>
+    <div className="reader-related-grid">
+      {(expanded ? cards : cards.slice(0, RELATED_PREVIEW)).map((card) => <button key={card.path} type="button" onClick={() => onOpenPath?.(card.path, revision)}
+        style={{ "--related-accent": GROUPS[card.group].cssVar } as CSSProperties}>
+        <small>{localizedGroupLabel(card.group, locale)}<span aria-hidden="true"> · </span>{localizedTypeLabel(card.type, locale)}</small>
+        <strong>{headingPlainText(card.title)}</strong>
+        {card.summary && <span className="reader-related-context">{card.summary}</span>}
+      </button>)}
+    </div>
+    {cards.length > RELATED_PREVIEW && <button type="button" className="reader-related-more" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+      {expanded ? copy.collapse : copy.showAll(cards.length)}
+    </button>}
+  </section>;
+}
+
+function IndexedReaderRelated({ links, onOpenPath }: { links: IndexedNoteLinks; onOpenPath?: (path: string, revision?: string) => void }) {
+  const { locale } = useUiLocale();
+  const copy = RELATED_COPY[locale];
+  const outlinks = links.page?.outlinks ?? [];
+  if (!links.loading && !links.error && !links.items.length && !outlinks.length) return null;
+  return <nav className="reader-related" aria-label={copy.label}>
+    <IndexedNoteLinksStatus links={links} />
+    <IndexedRelatedGroup title={copy.mentionedBy(links.page?.total ?? links.items.length)} cards={links.items} onOpenPath={onOpenPath} revision={links.page?.revision} />
+    <IndexedRelatedGroup title={copy.linksTo(outlinks.length)} cards={outlinks} onOpenPath={onOpenPath} revision={links.page?.revision} />
+  </nav>;
+}
+
+export default function NoteReader({ note, section, onClose, onOpenWiki, backlinks = [], onOpen, initialPosition, scene, allNotes, wikiIndexComplete = false, indexed = false, revision, onOpenPath, indexedLinks }: {
   note: Note;
   section?: string | null;
   onClose: (position: ReadingPosition) => void;
@@ -139,12 +180,18 @@ export default function NoteReader({ note, section, onClose, onOpenWiki, backlin
   allNotes?: Note[];
   /** allNotes 是否为全库：局部范围里查不到的双链不能标成「找不到」，只有全库时才做悬浮预览与断链标记。 */
   wikiIndexComplete?: boolean;
+  indexed?: boolean;
+  revision?: string;
+  onOpenPath?: (path: string, revision?: string) => void;
+  indexedLinks?: IndexedNoteLinks;
 }) {
   const { locale } = useUiLocale();
   const copy = NOTE_READER_COPY[locale];
   const headings = useMemo(() => scanReadingHeadings(note.content), [note.content]);
   const heading = findHeadingBySection(headings, section);
-  const outlinks = useMemo(() => (allNotes ? noteOutlinks(allNotes, note) : []), [allNotes, note]);
+  const ownLinks = useReadModelBacklinks(note.path, indexed && !indexedLinks, revision);
+  const links = indexedLinks ?? ownLinks;
+  const outlinks = useMemo(() => (!indexed && allNotes ? noteOutlinks(allNotes, note) : []), [allNotes, note, indexed]);
   const resolveWiki = useCallback(
     (target: string, heading?: string) => (allNotes ? resolveNoteLink(allNotes, target, heading)?.note ?? null : null),
     [allNotes],
@@ -156,12 +203,12 @@ export default function NoteReader({ note, section, onClose, onOpenWiki, backlin
     metadata={[localizedTrustLabel(note, locale), copy.updated(formatDate(note.stat.mtime, true))]}
     headerNote={scene ? <p className="nr-reading-note">{copy.sceneNote}<span> / </span>{copy.sceneHint}</p> : undefined}
     headings={headings} initialHeadingId={heading?.id} initialPosition={initialPosition} onClose={onClose}
-    footerActions={<ReaderRelated note={note} backlinks={backlinks} outlinks={outlinks} onOpen={onOpen} />}
+    footerActions={indexed ? <IndexedReaderRelated links={links} onOpenPath={onOpenPath} /> : <ReaderRelated note={note} backlinks={backlinks} outlinks={outlinks} onOpen={onOpen} />}
     information={<>
       <p className="reader-source-path">{note.path}</p>
       <dl>{Object.entries(note.frontmatter).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{Array.isArray(value) ? value.join(" · ") : getString(value) || copy.empty}</dd></div>)}</dl>
-      {backlinks.length > 0 && <section className="reader-backlinks"><h3>{copy.mentionedBy}</h3>{backlinks.map((backlink) => <button key={backlink.path} onClick={() => onOpen?.(backlink)}>{headingPlainText(getTitle(backlink))}<span aria-hidden="true">↗</span></button>)}</section>}
+      {indexed ? <><IndexedNoteLinksStatus links={links} />{links.items.length > 0 && <section className="reader-backlinks"><h3>{copy.mentionedBy}</h3>{links.items.map((card) => <button key={card.path} onClick={() => onOpenPath?.(card.path, links.page?.revision)}>{headingPlainText(card.title)}<span aria-hidden="true">↗</span></button>)}</section>}</> : backlinks.length > 0 && <section className="reader-backlinks"><h3>{copy.mentionedBy}</h3>{backlinks.map((backlink) => <button key={backlink.path} onClick={() => onOpen?.(backlink)}>{headingPlainText(getTitle(backlink))}<span aria-hidden="true">↗</span></button>)}</section>}
     </>}>
-    <div className="reader-prose"><MarkdownDocument content={note.content} onWikiLink={onOpenWiki} reading resolveWiki={allNotes && wikiIndexComplete ? resolveWiki : undefined} /></div>
+    <div className="reader-prose"><MarkdownDocument content={note.content} onWikiLink={onOpenWiki} reading resolveWiki={!indexed && allNotes && wikiIndexComplete ? resolveWiki : undefined} /></div>
   </ReadingMode>;
 }

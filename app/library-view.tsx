@@ -7,6 +7,9 @@ import { noteDecisionMeta } from "./note-decision";
 import { enumCodec, useUrlState } from "./use-url-state";
 import { isTypingTarget } from "@/lib/keyboard";
 import { highlightTerms, type SnippetPart } from "@/lib/search-snippet";
+import type { LibraryResult } from "@/lib/read-model";
+import { useReadModelLibrary } from "./use-read-model-library";
+import ReadModelSyncStatus from "./read-model-sync-status";
 import {
   compareRelevance,
   libraryCardSummary,
@@ -14,6 +17,7 @@ import {
   librarySnippet,
   libraryTitleParts,
   markRecencyBreaks,
+  recencyBucket,
   noteHasTags,
   noteTags,
   tagListCodec,
@@ -159,25 +163,32 @@ function Highlighted({ parts }: { parts: readonly SnippetPart[] }) {
 const STAGGERED_CARDS = 24;
 
 type LibraryCardProps = {
-  note: Note;
+  note?: Note;
+  card?: LibraryResult;
   query: string;
   layout: LibraryLayout;
   index: number;
   hits: LibraryHits | null;
   copy: LibraryCopy;
   onOpen: (note: Note) => void;
+  onOpenPath?: (path: string, revision?: string) => void;
+  revision?: string;
 };
 
 // 抽成 memo：键盘移动焦点、切换排序时，内容没变的卡片不必重渲染。
-const LibraryCard = memo(function LibraryCard({ note, query, layout, index, hits, copy, onOpen }: LibraryCardProps) {
-  const group = getGroup(note.path);
-  const trust = trustLayer(note);
-  const decision = noteDecisionMeta(note);
-  const type = getType(note);
+const LibraryCard = memo(function LibraryCard({ note, card, query, layout, index, hits, copy, onOpen, onOpenPath, revision }: LibraryCardProps) {
+  const path = card?.path ?? note!.path;
+  const group = card?.group ?? getGroup(path);
+  const trust = card?.trust ?? trustLayer(note!);
+  const decision = card?.decision ?? noteDecisionMeta(note!);
+  const type = card?.type ?? getType(note!);
   const actionCard = type === "todo" || type === "job-case" || type === "interview-prep";
   const analysisCard = trust.className === "trust-analysis";
-  const titleParts = libraryTitleParts(note, query);
-  const snippet = librarySnippet(note, query);
+  const titleParts = card?.titleParts ?? libraryTitleParts(note!, query);
+  const snippet = card ? card.snippetParts : librarySnippet(note!, query);
+  const folder = card?.folder ?? noteFolder(path);
+  const mtime = card?.mtime ?? note!.stat.mtime;
+  const open = () => card ? onOpenPath?.(path, revision) : onOpen(note!);
   const badge = actionCard ? (
     <span className={`note-semantic semantic-${decision.semantic}`}>{copy.semantics[decision.semantic]}</span>
   ) : (
@@ -187,16 +198,16 @@ const LibraryCard = memo(function LibraryCard({ note, query, layout, index, hits
     "--note-accent": GROUPS[group].cssVar,
     "--card-index": index < STAGGERED_CARDS ? index : 0,
   } as CSSProperties;
-  const time = <time dateTime={new Date(note.stat.mtime).toISOString()}>{formatDate(note.stat.mtime)}</time>;
+  const time = <time dateTime={new Date(mtime).toISOString()}>{formatDate(mtime)}</time>;
   const hitCount = hits && hits.total > 0 ? <span className="note-card-hits">{copy.hits(hits.total)}</span> : null;
 
   if (layout === "list") {
     return (
-      <button className="note-card note-card--row" data-library-card="" data-semantic={decision.semantic} onClick={() => onOpen(note)} style={style}>
+      <button className="note-card note-card--row" data-library-card="" data-semantic={decision.semantic} onClick={open} style={style}>
         <span className="note-group"><i />{copy.groups[group]}</span>
         <h2><Highlighted parts={titleParts} /></h2>
         {badge}
-        <span className="note-card-source" title={noteFolder(note.path)}>{noteFolder(note.path)}</span>
+        <span className="note-card-source" title={folder}>{folder}</span>
         {hitCount}
         {time}
       </button>
@@ -204,7 +215,7 @@ const LibraryCard = memo(function LibraryCard({ note, query, layout, index, hits
   }
 
   return (
-    <button className="note-card" data-library-card="" data-semantic={decision.semantic} onClick={() => onOpen(note)} style={style}>
+    <button className="note-card" data-library-card="" data-semantic={decision.semantic} onClick={open} style={style}>
       <div className="note-card-top">
         <span className="note-group"><i />{copy.groups[group]}</span>
         {badge}
@@ -220,11 +231,11 @@ const LibraryCard = memo(function LibraryCard({ note, query, layout, index, hits
         </div>
       ) : (
         <div className={`note-card-summary${analysisCard ? " is-analysis" : ""}${snippet ? " is-snippet" : ""}`}>
-          <p>{snippet ? <Highlighted parts={snippet} /> : libraryCardSummary(note) || copy.openContent}</p>
+          <p>{snippet ? <Highlighted parts={snippet} /> : (card?.summary ?? libraryCardSummary(note!)) || copy.openContent}</p>
         </div>
       )}
       <div className="note-card-foot">
-        <span className="note-card-source" title={noteFolder(note.path)}>{noteFolder(note.path)}</span>
+        <span className="note-card-source" title={folder}>{folder}</span>
         {hitCount}
         {time}
       </div>
@@ -240,6 +251,9 @@ function LibraryView({
   onQuery,
   onOpen,
   loading = false,
+  indexed = false,
+  onOpenPath,
+  revision,
 }: {
   notes: Note[];
   /** 全量がまだ届いていない：件数を「N 篇」と断言せず読取中と出す。 */
@@ -249,6 +263,10 @@ function LibraryView({
   onFilter: (filter: GroupKey | "all") => void;
   onQuery: (query: string) => void;
   onOpen: (note: Note) => void;
+  /** 查询目录卡片，不将卡片正文占位写进外壳的完整笔记缓存。 */
+  indexed?: boolean;
+  onOpenPath?: (path: string, revision?: string) => void;
+  revision?: string | number;
 }) {
   const { locale } = useUiLocale();
   const copy = LIBRARY_COPY[locale];
@@ -264,10 +282,11 @@ function LibraryView({
   const sort: LibrarySort = sortChoice === "auto" || (sortChoice === "relevance" && !hasTerms)
     ? (hasTerms ? "relevance" : "recent")
     : sortChoice;
+  const remote = useReadModelLibrary({ query, group: filter, scope, tags: selectedTags, sort: sortChoice }, indexed, revision);
 
   const queryMatched = useMemo(
-    () => notes.filter((note) => noteMatches(note, query)),
-    [notes, query],
+    () => indexed ? [] : notes.filter((note) => noteMatches(note, query)),
+    [notes, query, indexed],
   );
   // 标签是「同时满足」；分区、场景的计数都跟着已选标签走，不然点进去的数字和看到的对不上。
   const tagMatched = useMemo(
@@ -279,19 +298,20 @@ function LibraryView({
     [tagMatched, filter],
   );
   const scopeCounts = useMemo(
-    () => Object.fromEntries(
+    () => indexed && remote.page ? remote.page.facets.scopes : Object.fromEntries(
       LIBRARY_SCOPES.map((item) => [
         item,
         groupMatched.filter((note) => libraryScopeMatches(note, item)).length,
       ]),
     ) as Record<LibraryScope, number>,
-    [groupMatched],
+    [groupMatched, indexed, remote.page],
   );
   const scopeMatched = useMemo(
     () => tagMatched.filter((note) => libraryScopeMatches(note, scope)),
     [tagMatched, scope],
   );
   const groupCounts = useMemo(() => {
+    if (indexed && remote.page) return remote.page.facets.groups;
     const counts = Object.fromEntries(
       (Object.keys(GROUPS) as GroupKey[]).map((group) => [
         group,
@@ -299,20 +319,21 @@ function LibraryView({
       ]),
     ) as Record<GroupKey, number>;
     return { ...counts, all: scopeMatched.length };
-  }, [scopeMatched]);
+  }, [scopeMatched, indexed, remote.page]);
   const filteredNotes = useMemo(
     () => groupMatched.filter((note) => libraryScopeMatches(note, scope)),
     [groupMatched, scope],
   );
   // 标签候选取「不看已选标签」的当前范围：选了一个之后，其余候选不至于一下子全消失。
   const tagFacet = useMemo(() => {
+    if (indexed) return remote.page?.facets.tags ?? [];
     const range = queryMatched.filter((note) =>
       (filter === "all" || getGroup(note.path) === filter) && libraryScopeMatches(note, scope));
     return topLibraryTags(range, selectedTags).map(({ tag }) => ({
       tag,
       count: filteredNotes.filter((note) => noteTags(note).includes(tag)).length,
     }));
-  }, [queryMatched, filter, scope, selectedTags, filteredNotes]);
+  }, [queryMatched, filter, scope, selectedTags, filteredNotes, indexed, remote.page]);
   const hitsByNote = useMemo(
     () => (hasTerms ? new Map(filteredNotes.map((note) => [note, libraryHits(note, query)])) : null),
     [filteredNotes, query, hasTerms],
@@ -335,6 +356,19 @@ function LibraryView({
   }, [filteredNotes, sort, hitsByNote]);
   const visibleNotes = orderedNotes.slice(0, visibleLimit);
   const rows = sort === "recent" ? markRecencyBreaks(visibleNotes) : null;
+  let previousBucket: RecencyBucket | null = null;
+  const indexedRows = remote.items.map((item) => {
+    const bucket = sort === "recent" ? recencyBucket(item.mtime) : null;
+    const first = bucket !== previousBucket;
+    previousBucket = bucket;
+    return { item, bucket, first };
+  });
+  const resultCount = indexed ? remote.page?.total ?? 0 : orderedNotes.length;
+  const countsReady = !indexed || Boolean(remote.page);
+  const initialLoading = indexed ? remote.loading && !remote.page : loading;
+  const resultLoading = indexed ? remote.loading : loading;
+  const remaining = indexed ? Math.max(0, resultCount - remote.items.length) : orderedNotes.length - visibleNotes.length;
+  const hasMore = indexed ? Boolean(remote.page?.nextCursor) : remaining > 0;
   const activeScopeLabel = copy.scopes[scope];
   const hasFilters = Boolean(query) || filter !== "all" || scope !== "all" || selectedTags.length > 0;
   const activeFilterCount = Number(filter !== "all") + Number(scope !== "all") + selectedTags.length;
@@ -444,7 +478,7 @@ function LibraryView({
                     className={filter === "all" ? "active" : ""}
                     onClick={() => { onFilter("all"); resetPage(); }}
                   >
-                    <span><i className="all" />{copy.allGroups}</span><strong>{groupCounts.all}</strong>
+                    <span><i className="all" />{copy.allGroups}</span><strong>{countsReady ? groupCounts.all : "—"}</strong>
                   </button>
                   {(Object.keys(GROUPS) as GroupKey[]).map((group) => (
                     <button
@@ -453,7 +487,7 @@ function LibraryView({
                       onClick={() => { onFilter(group); resetPage(); }}
                     >
                       <span><i style={{ background: GROUPS[group].cssVar }} />{copy.groups[group]}</span>
-                      <strong>{groupCounts[group]}</strong>
+                      <strong>{countsReady ? groupCounts[group] : "—"}</strong>
                     </button>
                   ))}
                 </div>
@@ -468,7 +502,7 @@ function LibraryView({
                       className={scope === item ? "active" : ""}
                       onClick={() => { setScope(item); resetPage(); }}
                     >
-                      <span>{copy.scopes[item]}</span><strong>{scopeCounts[item]}</strong>
+                      <span>{copy.scopes[item]}</span><strong>{countsReady ? scopeCounts[item] : "—"}</strong>
                     </button>
                   ))}
                 </div>
@@ -503,11 +537,11 @@ function LibraryView({
           </details>
         </aside>
 
-        <div className="library-results">
+        <div className="library-results" aria-busy={resultLoading || undefined}>
           <div className="library-result-head">
             <div>
               <small>{query ? copy.searchResult(query) : `${filter === "all" ? copy.allGroups : copy.groups[filter]} · ${activeScopeLabel}`}</small>
-              <h2>{loading ? copy.loading : copy.resultCount(orderedNotes.length)}</h2>
+              <h2>{initialLoading ? (indexed ? locale === "ja" ? "資料を読み込み中…" : "正在读取资料…" : copy.loading) : indexed && remote.error && !remote.page ? (locale === "ja" ? "資料を読み込めませんでした。" : "资料读取失败。") : copy.resultCount(resultCount)}</h2>
             </div>
             <div className="library-result-actions">
               <div className="library-layout-switch" role="group" aria-label={copy.layout}>
@@ -530,33 +564,45 @@ function LibraryView({
             </div>
           </div>
 
+          {indexed && remote.loading && remote.page && <p className="library-sync-status" role="status">{locale === "ja" ? "資料を更新中…" : "正在更新资料…"}</p>}
+          {indexed && <ReadModelSyncStatus state={remote.syncState} />}
+          {indexed && remote.error && <div className="library-empty" role="alert">
+            <strong>{locale === "ja" ? "資料を読み込めませんでした。" : "资料读取失败。"}</strong>
+            <p>{locale === "ja" ? "しばらくしてから、もう一度お試しください。" : "请稍后重试。"}</p>
+            <button type="button" onClick={() => void remote.retry()}>{locale === "ja" ? "再試行" : "重试"}</button>
+          </div>}
+
           <div className={`note-grid${layout === "list" ? " note-grid--list" : ""}`}>
-            {(rows ?? visibleNotes.map((note) => ({ item: note, bucket: null, first: false }))).map(({ item: note, bucket, first }, index) => (
-              <LibraryRow key={note.path} heading={first && bucket ? copy.buckets[bucket] : null}>
+            {(indexed ? indexedRows : rows ?? visibleNotes.map((note) => ({ item: note, bucket: null, first: false }))).map(({ item, bucket, first }, index) => (
+              <LibraryRow key={item.path} heading={first && bucket ? copy.buckets[bucket] : null}>
                 <LibraryCard
-                  note={note}
+                  note={indexed ? undefined : item as Note}
+                  card={indexed ? item as LibraryResult : undefined}
                   query={query}
                   layout={layout}
                   index={index}
-                  hits={hitsByNote?.get(note) ?? null}
+                  hits={indexed ? (item as LibraryResult).hits : hitsByNote?.get(item as Note) ?? null}
                   copy={copy}
                   onOpen={onOpen}
+                  onOpenPath={onOpenPath}
+                  revision={remote.page?.revision}
                 />
               </LibraryRow>
             ))}
           </div>
 
-          {visibleNotes.length < orderedNotes.length && (
+          {hasMore && (
             <button
               className="library-load-more"
-              onClick={() => setVisibleLimit((current) => current + LIBRARY_PAGE_SIZE)}
+              disabled={indexed && remote.loading}
+              onClick={() => indexed ? void remote.more() : setVisibleLimit((current) => current + LIBRARY_PAGE_SIZE)}
             >
-              {copy.showMore(Math.min(LIBRARY_PAGE_SIZE, orderedNotes.length - visibleNotes.length))}
-              <span>{copy.remaining(orderedNotes.length - visibleNotes.length)}</span>
+              {copy.showMore(Math.min(LIBRARY_PAGE_SIZE, remaining))}
+              <span>{copy.remaining(remaining)}</span>
             </button>
           )}
 
-          {orderedNotes.length === 0 && (
+          {!initialLoading && !(indexed && remote.error) && resultCount === 0 && (
             <div className="library-empty">
               <strong>{copy.empty}</strong>
               <p>{copy.emptyHint}</p>
