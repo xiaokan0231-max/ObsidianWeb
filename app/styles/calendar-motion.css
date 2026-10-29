@@ -1,0 +1,110 @@
+/* 动效只跟随导航和局部反馈，不用循环闪动抢走日程正文的注意力。 */
+.calendar-view {
+  --calendar-motion-ease: cubic-bezier(.22, 1, .36, 1);
+}
+
+.calendar-view .calendar-board { overflow: clip; }
+
+/* 按周错开入场，最长不到半秒；不逐张动画，避免密集月份拖成长队。 */
+.calendar-view .calendar-grid {
+  --calendar-enter-x: 0px;
+  animation: calendar-surface-enter 360ms var(--calendar-motion-ease) both;
+}
+.calendar-view .calendar-grid[data-dir="next"] { --calendar-enter-x: 22px; }
+.calendar-view .calendar-grid[data-dir="prev"] { --calendar-enter-x: -22px; }
+.calendar-view .calendar-grid > .calendar-week:not(:first-child) {
+  animation: calendar-row-enter 360ms var(--calendar-motion-ease) both;
+  animation-delay: 20ms;
+}
+.calendar-view .calendar-grid > .calendar-week:nth-child(3) { animation-delay: 40ms; }
+.calendar-view .calendar-grid > .calendar-week:nth-child(4) { animation-delay: 60ms; }
+.calendar-view .calendar-grid > .calendar-week:nth-child(5) { animation-delay: 80ms; }
+.calendar-view .calendar-grid > .calendar-week:nth-child(6) { animation-delay: 100ms; }
+.calendar-view .calendar-grid > .calendar-week:nth-child(7) { animation-delay: 120ms; }
+
+.calendar-view .calendar-week-view {
+  --calendar-enter-x: 0px;
+  animation: calendar-surface-enter 400ms var(--calendar-motion-ease) both;
+}
+.calendar-view .calendar-week-view[data-dir="next"] { --calendar-enter-x: 22px; }
+.calendar-view .calendar-week-view[data-dir="prev"] { --calendar-enter-x: -22px; }
+/* 周视图作为一个整体移动，时间块和刻度不会各自漂移。 */
+.calendar-view .calendar-week-view[data-dir] > * { animation: none; }
+
+.calendar-view .calendar-pulse,
+.calendar-view .calendar-agenda > .agenda-group {
+  animation: calendar-panel-enter 460ms var(--calendar-motion-ease) both;
+}
+.calendar-view .calendar-agenda > .agenda-group:nth-child(2) { animation-delay: 55ms; }
+.calendar-view .calendar-agenda .calendar-day-detail {
+  animation: calendar-detail-enter 380ms var(--calendar-motion-ease) both;
+}
+.calendar-view .calendar-day-detail .agenda-item {
+  animation: calendar-row-enter 320ms 60ms var(--calendar-motion-ease) both;
+}
+.calendar-view .application-progress-track {
+  transform-origin: left center;
+  animation: calendar-progress-enter 650ms 80ms var(--calendar-motion-ease) backwards;
+}
+
+.calendar-view :is(.calendar-day, .cw-day-head, .cw-col) {
+  transition: background-color 220ms ease, box-shadow 260ms ease;
+}
+.calendar-view :is(.calendar-day-select, .cw-day-select) {
+  transition: scale 180ms var(--calendar-motion-ease), background-color 180ms ease, box-shadow 220ms ease;
+}
+.calendar-view :is(.calendar-day-select, .cw-day-select)[aria-pressed="true"] {
+  animation: calendar-selection-ring 480ms var(--calendar-motion-ease);
+}
+.calendar-view :is(.calendar-actions button, .cw-switch button, .calendar-pulse-action) {
+  transition: scale 180ms var(--calendar-motion-ease), background-color 180ms ease, box-shadow 220ms ease;
+}
+.calendar-view :is(.calendar-actions button, .cw-switch button, .calendar-pulse-action, .calendar-day-select, .cw-day-select):active {
+  scale: .95;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .calendar-view :is(.calendar-day-select, .cw-day-select):hover { scale: 1.08; }
+  .calendar-view :is(.calendar-event-item, .cw-event-shell, .agenda-item):hover { translate: 0 -3px; }
+}
+
+@keyframes calendar-surface-enter {
+  from { opacity: .35; transform: translateX(var(--calendar-enter-x)); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes calendar-row-enter {
+  from { opacity: .3; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes calendar-panel-enter {
+  from { opacity: .3; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes calendar-detail-enter {
+  from { opacity: .3; transform: translateX(14px) scale(.985); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes calendar-progress-enter { from { transform: scaleX(0); } }
+@keyframes calendar-selection-ring {
+  0% { outline: 0 solid transparent; outline-offset: 0; }
+  30% { outline: 3px solid color-mix(in oklab, var(--calendar-cyan) 48%, transparent); outline-offset: 2px; }
+  100% { outline: 0 solid transparent; outline-offset: 8px; }
+}
+
+/* 系统偏好和应用内设置同权；包括旧样式的动画，避免覆盖顺序使减弱动效失效。 */
+@media (prefers-reduced-motion: reduce) {
+  .calendar-view *, .calendar-view *::before, .calendar-view *::after {
+    animation: none !important;
+    transition: none !important;
+    translate: none !important;
+    scale: none !important;
+  }
+}
+:root[data-motion="reduce"] .calendar-view *,
+:root[data-motion="reduce"] .calendar-view *::before,
+:root[data-motion="reduce"] .calendar-view *::after {
+  animation: none !important;
+  transition: none !important;
+  translate: none !important;
+  scale: none !important;
+}

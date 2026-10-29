@@ -880,6 +880,7 @@ function CalendarView({
         <aside className="calendar-agenda">
           {selectedDay && (
             <AgendaGroup
+              key={selectedDay}
               className="calendar-day-detail"
               title={copy.dayDetail(dayLabel(selectedDay))}
               empty={selectedApplications ? "" : copy.dayEmpty}
