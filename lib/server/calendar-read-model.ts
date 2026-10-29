@@ -72,6 +72,10 @@ function rows<T>(result: D1Result<unknown>): T[] {
  */
 export function createCalendarReadModel(db: Database) {
   const inflight = new Map<string, Promise<CalendarSnapshot>>();
+  // 发布版本内容不可变；同一 Worker 热请求不必重复跨区读取、解析整份 D1 行集。
+  // 只保留最近四个版本，部署交接不会让进程内存随历史版本无限增长。
+  const snapshots = new Map<string, CalendarSnapshot>();
+  const snapshotLimit = 4;
 
   async function read(revision: string): Promise<CalendarSnapshot | null> {
     requireRevision(revision);
@@ -108,6 +112,12 @@ export function createCalendarReadModel(db: Database) {
 
   function ensure(revision: string, loadSnapshot: () => Promise<CalendarSnapshot>, publishedAt = ""): Promise<CalendarSnapshot> {
     requireRevision(revision);
+    const snapshot = snapshots.get(revision);
+    if (snapshot) {
+      snapshots.delete(revision);
+      snapshots.set(revision, snapshot);
+      return Promise.resolve(snapshot);
+    }
     const pending = inflight.get(revision);
     if (pending) return pending;
     const task = (async () => {
@@ -138,7 +148,15 @@ export function createCalendarReadModel(db: Database) {
       const stored = await read(revision);
       if (!stored) throw invalid();
       return stored;
-    })().finally(() => { if (inflight.get(revision) === task) inflight.delete(revision); });
+    })().then((snapshot) => {
+      // 读取、校验及导入全部成功后才记住；失败仍能在下一次请求重试。
+      snapshots.set(revision, snapshot);
+      if (snapshots.size > snapshotLimit) {
+        const oldest = snapshots.keys().next().value;
+        if (oldest !== undefined) snapshots.delete(oldest);
+      }
+      return snapshot;
+    }).finally(() => { if (inflight.get(revision) === task) inflight.delete(revision); });
     inflight.set(revision, task);
     return task;
   }

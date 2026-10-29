@@ -114,7 +114,7 @@ test("合法空日历有完成标记，数据库错误和不完整行集不能�
   await model.ensure("broken", async () => snapshot());
   sqlite.prepare("DELETE FROM calendar_projection_notes WHERE revision=? AND ordinal=0").run("broken");
   await assert.rejects(model.read("broken"), /不完整|无效/);
-  await assert.rejects(model.ensure("broken", async () => empty), /不完整|无效/);
+  await assert.rejects(createCalendarReadModel(db).ensure("broken", async () => empty), /不完整|无效/);
   await assert.rejects(createCalendarReadModel({ ...db, batch: async () => [{ success: false, results: [] }] }).read("unknown"), /不完整|读取失败/);
 });
 
@@ -154,4 +154,48 @@ test("格式错误的输入和加载失败不写任何投影，失败任务不�
   await assert.rejects(model.ensure("retry-load", async () => { throw new Error("加载失败"); }), /加载失败/);
   assert.equal(sqlite.prepare("SELECT count(*) AS n FROM calendar_projection_revisions").get().n, 0);
   assert.deepEqual(await model.ensure("retry-load", async () => snapshot()), snapshot());
+});
+
+test("同一不可变发布版本的热请求不再查询 D1，read 仍直接验证数据库", async (t) => {
+  const { db, calls, sqlite } = database(t);
+  const model = createCalendarReadModel(db);
+  const first = await model.ensure("hot", async () => snapshot());
+  const queried = calls.length;
+  for (let index = 0; index < 10; index++) {
+    assert.equal(await model.ensure("hot", async () => { throw new Error("热版本不应重新加载"); }), first);
+  }
+  assert.equal(calls.length, queried, "重复 ensure 没有 D1 往返");
+  assert.deepEqual(await model.read("hot"), first);
+  assert.equal(calls.length, queried + 1, "诊断 read 仍执行完整 SQL 校验");
+  sqlite.prepare("DELETE FROM calendar_projection_events WHERE revision=?").run("hot");
+  await assert.rejects(model.read("hot"), /不完整|无效/);
+});
+
+test("热版本缓存按版本隔离且最多保留四份，淘汰后从 D1 读取而不重新导入", async (t) => {
+  const { db, calls } = database(t);
+  const model = createCalendarReadModel(db);
+  const variants = Array.from({ length: 5 }, (_, index) => snapshot(index + 1));
+  for (let index = 0; index < 4; index++) await model.ensure(`version-${index}`, async () => variants[index]);
+  const afterFour = calls.length;
+  assert.deepEqual(await model.ensure("version-0", async () => { throw new Error("已导入"); }), variants[0]);
+  assert.equal(calls.length, afterFour);
+  await model.ensure("version-4", async () => variants[4]);
+  const afterFive = calls.length;
+  assert.deepEqual(await model.ensure("version-0", async () => { throw new Error("已导入"); }), variants[0]);
+  assert.equal(calls.length, afterFive, "刚访问的首版本仍在热缓存");
+  assert.deepEqual(await model.ensure("version-1", async () => { throw new Error("从 D1 恢复即可"); }), variants[1]);
+  assert.equal(calls.length, afterFive + 1, "最久未访问的版本被淘汰后发生一次 SQL batch");
+});
+
+test("数据库读取失败不进入热缓存，修复后同一版本可重试并复用成功结果", async (t) => {
+  const storage = database(t);
+  await createCalendarReadModel(storage.db).ensure("recover", async () => snapshot());
+  const model = createCalendarReadModel(storage.db);
+  storage.failOn("SELECT path");
+  await assert.rejects(model.ensure("recover", async () => { throw new Error("不应加载"); }), /数据库故障/);
+  storage.failOn(null);
+  const restored = await model.ensure("recover", async () => { throw new Error("应读取既有版本"); });
+  const afterRecovery = storage.calls.length;
+  assert.equal(await model.ensure("recover", async () => { throw new Error("不应重新加载"); }), restored);
+  assert.equal(storage.calls.length, afterRecovery);
 });
