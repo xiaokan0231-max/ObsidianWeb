@@ -6,7 +6,7 @@
 
 <p align="center"><strong>把散落的求职笔记，变成看得清、能比较、可练习的下一步。</strong></p>
 <p align="center">Obsidian Markdown 驱动的本地工作台：日历、面试准备、公司对比、复盘与日语训练。</p>
-<p align="center"><code>Local-first</code> · <code>Markdown as data</code> · <code>无需数据库</code> · <code>Cloudflare Workers</code></p>
+<p align="center"><code>Local-first</code> · <code>Markdown as data</code> · <code>D1 查询投影</code> · <code>Cloudflare Workers</code></p>
 <p align="center"><a href="README.md">日本語</a> · <strong>简体中文</strong> · <a href="README.en.md">English</a></p>
 
 ![日历首页：从真实安排进入准备与复盘](docs/images/readme/calendar.jpg)
@@ -87,7 +87,8 @@ flowchart LR
     V -->|导出与构建| P --> C
 ```
 
-- **Markdown 是正本。** 无需额外数据库；结构化 frontmatter、正文和双链共同组成数据模型。
+- **Markdown 是正本。** 结构化 frontmatter、正文和双链保存事实；D1 存储可重建的日历与申请摘要查询投影，完整正文仍从原笔记按需读取。
+- **D1 按版本隔离。** 线上索引只从同版本已发布快照建立，与本地数据库分开。表结构和迁移由 `db/schema.ts`、`drizzle/` 管理，数据库不可用时保留原读取路径。
 - **缓存与汇总可以重建。** 派生统计由脚本生成，避免手写数字与上游记录脱节。
 - **证据跟着判断走。** 外部评价、公司资料和岗位判断保留来源及阅读范围。
 - **本地与线上职责明确。** 本地连接 Obsidian 进行编辑和 AI 生成；线上可以发布独立只读快照，电脑离线后仍可阅读。

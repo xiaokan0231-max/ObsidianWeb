@@ -9,13 +9,13 @@ export function useCalendarSnapshot(enabled: boolean) {
   const [state, setState] = useState<State>({ snapshot: null, loading: false, error: "", fetchedAt: null });
   const cached = useRef<{ snapshot: CalendarSnapshot; etag: string | null } | null>(null);
   const pending = useRef<Promise<void> | null>(null);
-  const refresh = useCallback((): Promise<void> => {
+  const refresh = useCallback((fresh = false): Promise<void> => {
     if (pending.current) return pending.current;
     setState((previous) => ({ ...previous, loading: true, error: "" }));
     const request = (async () => {
       try {
-        const etag = cached.current?.etag;
-        const response = await fetch("/api/calendar", {
+        const etag = fresh ? null : cached.current?.etag;
+        const response = await fetch(fresh ? "/api/calendar?refresh=1" : "/api/calendar", {
           headers: etag ? { "If-None-Match": etag } : {}, signal: AbortSignal.timeout(20_000),
         });
         if (response.status === 304 && cached.current) {

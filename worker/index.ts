@@ -3,12 +3,13 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { publishedRequestResponse } from "../lib/server/published-access";
 import { createPublishedVaultResponseHandler } from "../lib/server/published-vault-response";
+import { createCalendarReadModel } from "../lib/server/calendar-read-model";
 import { dispatchFeedbackRequest, type FeedbackDispatchEnv } from "../lib/server/feedback-dispatch";
 
 interface Env extends FeedbackDispatchEnv {
   OBSIDIAN_DATA_SOURCE?: string;
   ASSETS: Fetcher;
-  DB: D1Database;
+  DB?: D1Database;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -43,7 +44,7 @@ const worker = {
     if (published && ["/api/vault", "/api/calendar"].includes(url.pathname)) {
       let respond = publishedResponses.get(env.ASSETS);
       if (!respond) {
-        respond = createPublishedVaultResponseHandler((asset) => env.ASSETS.fetch(asset));
+        respond = createPublishedVaultResponseHandler((asset) => env.ASSETS.fetch(asset), env.DB ? createCalendarReadModel(env.DB) : undefined);
         publishedResponses.set(env.ASSETS, respond);
       }
       const response = await respond(request, published);

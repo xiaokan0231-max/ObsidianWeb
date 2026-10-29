@@ -69,6 +69,37 @@ test("日历专用静态响应复用压缩与验证器，旧快照才回退动�
   assert.equal(await fixture().handle(new Request("https://example.com/api/calendar"), true), null);
 });
 
+test("云端日历实际读取 D1，并保留 gzip、版本验证器和已发布资源的回退", async () => {
+  const calendar = { schemaVersion: 1, events: [], applicationNotes: [], selectionCount: 0 };
+  let imports = 0, queries = 0, stored = null, fail = false;
+  const handle = createPublishedVaultResponseHandler(async (incoming) => {
+    if (new URL(incoming.url).pathname.endsWith("manifest.json")) return Response.json({ ...manifest, calendar: entry });
+    imports++;
+    return Response.json({ connected: true, calendar });
+  }, { ensure: async (revision, load, publishedAt) => {
+    queries++;
+    assert.equal(revision, etag);
+    assert.equal(publishedAt, manifest.publishedAt);
+    if (fail) throw new Error("D1 unavailable");
+    return stored ??= await load();
+  } });
+  for (let index = 0; index < 2; index++) {
+    const response = await handle(new Request("https://example.com/api/calendar", { headers: { "Accept-Encoding": "gzip" } }), true);
+    assert.equal(response.headers.get("X-Obsidian-Read-Model"), "d1");
+    assert.equal(response.headers.get("Content-Encoding"), "gzip");
+    assert.deepEqual(gunzipSync(Buffer.from(await response.arrayBuffer())), Buffer.from(JSON.stringify({ connected: true, calendar })));
+  }
+  assert.equal(imports, 1, "已有数据库版本不能再次下载和解析资源");
+  const validated = await handle(new Request("https://example.com/api/calendar", { headers: { "If-None-Match": etag } }), true);
+  assert.equal(validated.status, 304);
+  assert.equal(queries, 2);
+  fail = true;
+  const fallback = await handle(new Request("https://example.com/api/calendar"), true);
+  assert.equal(fallback.status, 200);
+  assert.equal(fallback.headers.get("X-Obsidian-Read-Model"), "asset-fallback");
+  assert.deepEqual(await fallback.json(), { connected: true, calendar });
+});
+
 test("a matching validator returns 304 without reading any payload asset", async () => {
   const f = fixture();
   for (const validator of [etag, etag.slice(2), `"older", ${etag}`, "*"]) {

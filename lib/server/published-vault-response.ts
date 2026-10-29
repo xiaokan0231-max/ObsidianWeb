@@ -1,5 +1,10 @@
 import { normalizeVaultScope } from "../vault-scope.ts";
 import type { PublishedVault, PublishedVaultResponse } from "./published-vault.ts";
+import type { CalendarSnapshot } from "../calendar-snapshot.ts";
+
+type CalendarReadModel = {
+  ensure(revision: string, load: () => Promise<CalendarSnapshot>, publishedAt?: string): Promise<CalendarSnapshot>;
+};
 
 type AssetFetch = (request: Request) => Promise<Response>;
 type Encoding = "br" | "gzip" | "identity";
@@ -46,7 +51,7 @@ function assetRequest(request: Request, file: string, method = "GET") {
   });
 }
 
-export function createPublishedVaultResponseHandler(fetchAsset: AssetFetch) {
+export function createPublishedVaultResponseHandler(fetchAsset: AssetFetch, calendarReadModel?: CalendarReadModel) {
   let pending: Promise<PublishedVault> | undefined;
   function snapshot(request: Request) {
     pending ??= (async () => {
@@ -81,6 +86,29 @@ export function createPublishedVaultResponseHandler(fetchAsset: AssetFetch) {
       });
       if (url.searchParams.get("refresh") !== "1" && etagMatches(request.headers.get("If-None-Match"), entry.etag)) {
         return new Response(null, { status: 304, headers });
+      }
+      // 数据库只保存已发布资料的可重建投影；初始化来源固定在本部署的资源中，访客不能提交索引内容。
+      if (url.pathname === "/api/calendar" && calendarReadModel) {
+        const databaseEncoding = selectEncoding(request, { ...entry, br: undefined, gzip: `${entry.file}.gz` });
+        if (databaseEncoding !== null) {
+          try {
+            const calendar = await calendarReadModel.ensure(entry.etag, async () => {
+              const response = await fetchAsset(assetRequest(request, entry.file));
+              if (!response.ok) throw new Error("日历索引来源不可用");
+              const payload = await response.json() as { connected?: boolean; calendar?: CalendarSnapshot };
+              if (!payload.connected || payload.calendar?.schemaVersion !== 1) throw new Error("日历索引来源格式无效");
+              return payload.calendar;
+            }, manifest.publishedAt);
+            headers.set("X-Obsidian-Read-Model", "d1");
+            if (databaseEncoding === "gzip") headers.set("Content-Encoding", "gzip");
+            const body = new Response(JSON.stringify({ connected: true, calendar })).body!;
+            return new Response(request.method === "HEAD" ? null : databaseEncoding === "gzip"
+              ? body.pipeThrough(new CompressionStream("gzip")) : body, { status: 200, headers, encodeBody: "manual" });
+          } catch {
+            // 迁移未完成或数据库暂时不可用时，仍可读取同版本静态资料，不返回假的空日历。
+            headers.set("X-Obsidian-Read-Model", "asset-fallback");
+          }
+        }
       }
       const encoding = selectEncoding(request, entry);
       if (encoding === null) return new Response(null, { status: 406, headers });

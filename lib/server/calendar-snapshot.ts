@@ -4,6 +4,7 @@ import { resolveCalendarInterview, resolveCalendarInterviewDestinations } from "
 import { calendarInterviewScore } from "../calendar-interview-score.ts";
 import { calendarProgress } from "../calendar-progress.ts";
 import type { CalendarSnapshot } from "../calendar-snapshot.ts";
+import { buildCompanyOverviews } from "../company-overview.ts";
 import { jobPosition } from "../jobs.ts";
 import { buildCalendarEvents, type CalendarEvent } from "../memory-atlas-data.ts";
 import { selectionCaseCount } from "../nav-badges.ts";
@@ -36,8 +37,10 @@ export function buildCalendarSnapshot(notes: Note[]): CalendarSnapshot {
   }));
   const upcomingTargets = targets(upcoming);
   const pastTargets = targets(past);
-  const upcomingRatings = buildCalendarCompanyRatings(upcoming, notes, upcomingTargets);
-  const pastRatings = buildCalendarCompanyRatings(past, notes, pastTargets);
+  // 两种日期阶段共用同一份公司事实，避免完整解析画像、来源及评价两遍。
+  const companyContexts = buildCompanyOverviews(notes);
+  const upcomingRatings = buildCalendarCompanyRatings(upcoming, notes, upcomingTargets, companyContexts);
+  const pastRatings = buildCalendarCompanyRatings(past, notes, pastTargets, companyContexts);
   const origins = buildCalendarEventOrigins(events, notes);
   const phaseData = (event: CalendarEvent, phase: "upcoming" | "past") => {
     const target = (phase === "past" ? pastTargets : upcomingTargets).get(event.id);

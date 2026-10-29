@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildCalendarCompanyRatings } from "../lib/calendar-company-rating.ts";
+import { buildCompanyOverviews } from "../lib/company-overview.ts";
 
 const note = (path, frontmatter, content = "") => ({ path, frontmatter, content, tags: [], stat: { ctime: 0, mtime: 0, size: 0 } });
 const review = (extra = {}) => ({
@@ -33,6 +34,22 @@ const fixture = (key = "a", extra = {}) => {
   return { dossier, owner, prep, event, notes };
 };
 const read = (data, event = data.event, targets) => buildCalendarCompanyRatings([event], data.notes, targets).get(event.id);
+
+test("过去与未来场次共享画像后仍与分别解析的口碑一致，冲突关联仍不借分", () => {
+  const first = fixture("a");
+  const second = fixture("b", { score: 3.2 });
+  const notes = [...first.notes, ...second.notes];
+  const contexts = buildCompanyOverviews(notes);
+  for (const phase of ["past", "upcoming"]) {
+    const events = [first.event, second.event].map((event) => ({ ...event, phase }));
+    const shared = buildCalendarCompanyRatings(events, notes, undefined, contexts);
+    assert.deepEqual(shared, buildCalendarCompanyRatings(events, notes));
+    assert.equal(shared.get(first.event.id).score, 4.18);
+    assert.equal(shared.get(second.event.id).score, 3.2);
+    const conflicting = new Map([[first.event.id, { sourcePath: second.prep.path, path: second.prep.path, caseId: "test-b" }]]);
+    assert.equal(buildCalendarCompanyRatings(events, notes, conflicting, contexts).has(first.event.id), false);
+  }
+});
 const target = (event, extra = {}) => ({ view: "session", path: null, sourcePath: event.note.path, caseId: event.caseId,
   company: event.company, date: event.date, label: event.label, ...extra });
 

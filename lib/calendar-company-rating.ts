@@ -59,8 +59,8 @@ export function buildCalendarCompanyRatings(
   events: CalendarEvent[],
   notes: Note[],
   interviewTargets?: ReadonlyMap<string, CalendarInterviewTarget>,
+  contexts: CompanyOverview[] = buildCompanyOverviews(notes),
 ): Map<string, CalendarCompanyRating> {
-  const contexts = buildCompanyOverviews(notes);
   const ratings = new Map<string, CalendarCompanyRating>();
   for (const event of events) {
     const target = interviewTargets?.get(event.id);

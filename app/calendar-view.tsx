@@ -8,7 +8,6 @@ import { useUiLocale } from "./ui-locale";
 import CalendarApplicationPanel, { CalendarApplicationTrigger, ApplicationProgressBar, type OpenApplicationDay } from "./calendar-application-panel";
 import { buildCalendarEventOrigins, type CalendarEventOrigin } from "@/lib/calendar-event-origin";
 import { CalendarOriginBadge, CalendarOriginLegend } from "./calendar-origin-badge";
-import { CountUp } from "./count-up";
 import { enumCodec, useInitialUrlSearch, useUrlState, type UrlStateCodec } from "./use-url-state";
 import { isTypingTarget } from "@/lib/keyboard";
 import { calendarMonthDays } from "@/lib/calendar-month";
@@ -644,7 +643,7 @@ function CalendarView({
       <div className="calendar-pulse" role="region" aria-label={copy.stats} aria-busy={loading || undefined}>
         <div className="calendar-month-applications">
           <div className="calendar-month-metric"><span>{copy.statMonthAi}<time>{overviewMonth}</time></span>
-            {loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : <div><CountUp as="strong" value={monthApplications.companyCount} /><span>{copy.applicationCompanyUnit}</span>
+            {loading ? <i className="skeleton calendar-stat-skeleton" aria-hidden="true" /> : <div><strong>{monthApplications.companyCount}</strong><span>{copy.applicationCompanyUnit}</span>
               {monthApplications.positionCount !== monthApplications.companyCount && <small> · {copy.applicationPositionCount(monthApplications.positionCount)}</small>}
             </div>}
           </div>
@@ -656,10 +655,10 @@ function CalendarView({
         </div>
         <div className="calendar-pulse-actions">
           <button type="button" className="calendar-pulse-action status-waiting" aria-pressed={focusTone === "waiting"} title={copy.focusTone(copy.progress.waiting)} disabled={loading} onClick={() => toggleFocusTone("waiting")}>
-            <i className="calendar-status-dot" aria-hidden="true" /><span>{copy.statWaiting}</span>{!loading && <CountUp as="strong" value={summary.waitingCount} />}
+            <i className="calendar-status-dot" aria-hidden="true" /><span>{copy.statWaiting}</span>{!loading && <strong>{summary.waitingCount}</strong>}
           </button>
           <button type="button" className="calendar-pulse-action status-neutral" aria-label={`${copy.statHistoricalCount} ${summary.historicalCount} ${copy.historicalScope(recent.length)}`} aria-expanded={historyExplanationOpen} aria-controls="calendar-historical-explanation" title={copy.historicalOpen} disabled={loading} onClick={() => setHistoryExplanationOpen((open) => !open)}>
-            <span>{copy.statHistorical}</span>{!loading && <><CountUp as="strong" value={summary.historicalCount} /><small>{copy.historicalScope(recent.length)}</small></>}
+            <span>{copy.statHistorical}</span>{!loading && <><strong>{summary.historicalCount}</strong><small>{copy.historicalScope(recent.length)}</small></>}
           </button>
         </div>
       </div>

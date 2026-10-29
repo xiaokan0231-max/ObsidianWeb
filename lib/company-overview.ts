@@ -157,13 +157,41 @@ function wikiTarget(value: unknown) {
   return text(value).match(/^\[\[([^\]]+)\]\]$/)?.[1]?.split("|")[0]?.split("#")[0]?.trim() ?? "";
 }
 
+type CompanyReferenceIndex = {
+  size: number;
+  exact: Map<string, Note | null>;
+  suffix: Map<string, Note | null>;
+};
+const companyReferenceIndexes = new WeakMap<Note[], CompanyReferenceIndex>();
+
+function companyReferenceIndex(notes: Note[]): CompanyReferenceIndex {
+  const cached = companyReferenceIndexes.get(notes);
+  if (cached?.size === notes.length) return cached;
+  const exact = new Map<string, Note | null>();
+  const suffix = new Map<string, Note | null>();
+  const add = (index: Map<string, Note | null>, key: string, note: Note) => {
+    // null 同样是有效索引项：重复路径或短名歧义不能被后来的文件覆盖成唯一匹配。
+    index.set(key, index.has(key) ? null : note);
+  };
+  for (const note of notes) {
+    const path = pathKey(note.path);
+    add(exact, path, note);
+    for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1)) {
+      add(suffix, path.slice(slash + 1), note);
+    }
+  }
+  const index = { size: notes.length, exact, suffix };
+  companyReferenceIndexes.set(notes, index);
+  return index;
+}
+
 /** 显式路径优先；短名有多个匹配时绝不按公司显示名或文件顺序猜测。 */
 export function resolveCompanyReference(notes: Note[], reference: string): Note | null {
   const target = pathKey(wikiTarget(reference) || reference);
   if (!target) return null;
-  const exact = notes.filter((note) => pathKey(note.path) === target);
-  const matches = exact.length ? exact : notes.filter((note) => pathKey(note.path).endsWith(`/${target}`));
-  return matches.length === 1 ? matches[0] : null;
+  // 笔记快照替换时索引自然失效；每个引用不必再次规范化并扫描全部路径。
+  const index = companyReferenceIndex(notes);
+  return (index.exact.has(target) ? index.exact.get(target) : index.suffix.get(target)) ?? null;
 }
 
 function explicitReference(notes: Note[], value: unknown, field: string, issues: string[]) {

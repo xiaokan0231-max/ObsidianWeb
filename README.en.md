@@ -7,7 +7,7 @@
 <p align="center"><strong>See the schedule. Compare opportunities. Prepare the conversation. Learn from it.</strong></p>
 
 <p align="center">
-  <kbd>Local first</kbd>　<kbd>Markdown</kbd>　<kbd>No database</kbd>　<kbd>中文 / 日本語</kbd>
+  <kbd>Local first</kbd>　<kbd>Markdown</kbd>　<kbd>D1 read model</kbd>　<kbd>中文 / 日本語</kbd>
 </p>
 
 <p align="center">
@@ -105,7 +105,8 @@ flowchart LR
     Export --> Published
 ```
 
-- **The Vault is authoritative.** Frontmatter, headings and links form the application model; there is no application database.
+- **The Vault is authoritative.** Frontmatter, headings and links hold the facts. D1 stores a rebuildable query projection of calendar events and application summaries; full bodies remain in the existing notes.
+- **D1 data is revision-scoped.** Hosted indexes come from the same published snapshot and use a separate database from local development. Schema migrations live in `db/schema.ts` and `drizzle/`; the original read path remains available if D1 is unavailable.
 - **Updates are checked.** Allowed-field changes, append-only records and version checks support local writes.
 - **Statistics are regenerated.** Counts and trends are calculated from upstream records into generated blocks.
 - **Publication uses a snapshot.** The hosted copy remains readable while the local computer is offline; editing and AI generation run locally.

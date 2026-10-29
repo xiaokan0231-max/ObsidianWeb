@@ -629,7 +629,7 @@ function MemoryAtlasContent({ initialView = "calendar" }: { initialView?: AppVie
   // 请求次序、scope 快照和写回保护由独立协调器管理，页面只订阅接受后的状态。
   const loadVault = useCallback(async (options?: VaultReadOptions): Promise<void> => {
     if (currentView.current === "calendar" && (!options?.scope || options.scope === "actions" || options.fresh)) {
-      await refreshCalendar();
+      await refreshCalendar(options?.fresh);
       return;
     }
     await vaultReader.request(options);

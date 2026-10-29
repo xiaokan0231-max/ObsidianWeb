@@ -7,7 +7,7 @@
 <p align="center"><strong>予定を見て、企業を比べ、面接を準備し、会話から学ぶ。</strong></p>
 
 <p align="center">
-  <kbd>Local first</kbd>　<kbd>Markdown</kbd>　<kbd>No database</kbd>　<kbd>中文 / 日本語</kbd>
+  <kbd>Local first</kbd>　<kbd>Markdown</kbd>　<kbd>D1 read model</kbd>　<kbd>中文 / 日本語</kbd>
 </p>
 
 <p align="center">
@@ -104,7 +104,8 @@ flowchart LR
     Export --> Published
 ```
 
-- **Vault が正本。** ノートの frontmatter・見出し・リンクから画面を構成し、アプリ用データベースは持ちません。
+- **Vault が正本。** ノートの frontmatter・見出し・リンクが事実の保存先です。D1 は日程と応募概要の再生成可能な検索用投影を持ち、本文は従来のノートから読みます。
+- **D1 は版ごとに分離。** 公開版は同じ公開スナップショットから索引を作り、ローカル版とは別のデータベースを使います。移行は `db/schema.ts` と `drizzle/` で管理し、D1 が使えない場合も元の読み取り経路を保持します。
 - **更新は検証してから。** 許可したフィールドの更新、追記型の記録、版の確認を組み合わせます。
 - **集計は再生成。** 件数や推移などの生成区画を、上流の記録から計算します。
 - **公開時はスナップショット。** 本機がオフラインでも読める副本を配信し、書き込みと AI 生成はローカルで行います。

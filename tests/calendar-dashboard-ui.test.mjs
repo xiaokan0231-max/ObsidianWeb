@@ -6,9 +6,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
 // 日历概况只负责投递与记录入口；未来安排在右侧完整显示一次。
-const zh = await loadAppModule("app/calendar-view.tsx", { globals: { window: { location: { search: "?month=2026-08" } } } });
+// 接口读完就显示终值，不能再启动一轮从零滚动，造成仍在加载的错觉。
+const noCounterAnimation = { "./count-up": { CountUp() { throw new Error("日历概况不能等待数字滚动"); } } };
+const zh = await loadAppModule("app/calendar-view.tsx", { stubs: noCounterAnimation, globals: { window: { location: { search: "?month=2026-08" } } } });
 const ja = await loadAppModule("app/calendar-view.tsx", {
-  stubs: { "./ui-locale": { useUiLocale: () => ({ locale: "ja", setLocale() {} }) } },
+  stubs: { ...noCounterAnimation, "./ui-locale": { useUiLocale: () => ({ locale: "ja", setLocale() {} }) } },
   globals: { window: { location: { search: "?month=2026-08" } } },
 });
 
@@ -32,8 +34,8 @@ test("投递概况加载时说明正在读取，不先显示零或空态", () =>
   assert.doesNotMatch(strip, /当前月份暂无已确认的 AI 代投/);
 });
 
-test("下一场只在未来议程显示一次，等待案件仍按案件去重", () => {
-  const waiting = note("20_求職/テスト/案件.md", { type: "job-case", case_id: "case", status: "面接中", waiting_for: "company" });
+test("概况直接显示准确计数，下一场只显示一次，等待案件按案件去重", () => {
+  const waiting = note("20_求職/テスト/案件.md", { type: "job-case", case_id: "case", company: "株式会社テスト", status: "面接中", waiting_for: "company", applied_on: "2026-08-01", application_actor: "ai", application_agent: "Codex" });
   const events = [
     event("past-1", { date: "2026-08-03", phase: "past", caseId: "case", note: waiting }),
     event("past-2", { date: "2026-08-05", phase: "past", caseId: "case", note: waiting }),
@@ -44,6 +46,8 @@ test("下一场只在未来议程显示一次，等待案件仍按案件去重",
     interviewTargets: new Map([["next", { view: "session", path: "prep.md", company: "株式会社ダミー", date: "2026-08-11", label: "最终面试", sourcePath: "next.md", caseId: "" }]]),
   });
   assert.match(html, /<span>等回复案件<\/span><strong>1<\/strong>/, "同一案件两场等待只算一次");
+  assert.match(html, /<strong>1<\/strong><span>家公司<\/span>/, "当月公司数直接显示最终值");
+  assert.match(html, /<span>历史状态说明<\/span><strong>0<\/strong>/, "已经关联当前状态的旧预约不计入历史说明");
   const aside = html.slice(html.indexOf('<aside class="calendar-agenda">'), html.indexOf("</aside>"));
   assert.match(aside, /<h2>未来 7 天<\/h2><span>1<\/span>/);
   assert.match(aside, /<[^>]+class="agenda-item [^>]+data-next=""/);

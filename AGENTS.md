@@ -14,8 +14,9 @@ Next(vinext/Cloudflare Workers) 前端，**读 Obsidian vault 作为唯一数据
 
 - Vault 路径由 `OBSIDIAN_VAULT_PATH` 指定（本机实际路径见 `AGENTS.local.md`）。
   vault 是独立的 git 仓库，不属于本仓库。
-- **没有数据库。** `db/schema.ts` 是空的，是有意为之。别加表、别引入 MySQL。
-  页面数据来自 `app/api/vault/route.ts` → `readAllNotes()` → Obsidian Local REST API。
+- **Vault 是唯一事实正本。** 页面数据来自 `readAllNotes()` → Obsidian Local REST API；
+  D1 只存可重建的日历查询投影（`db/schema.ts`），不承接事实写入、不引入第二套选考状态。
+  本地与线上数据库独立，线上只从同版本已发布快照建立索引；正文仍按需读取原有分片。
 - `npm run dev` 会先从 Obsidian 插件配置里读 API key，不要直接跑 `dev:web`。
 
 ### 老师交流信箱
