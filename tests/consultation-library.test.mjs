@@ -390,3 +390,31 @@ test("咨询库日语轮次沿用明确阶段，未知名称回退且不改写�
     assert.equal(source.frontmatter.round, label, "显示投影不能改写原始轮次");
   }
 });
+
+test("每周补充代理面谈原稿和确约无稿场次，不把它们算成已完成企业面试", () => {
+  const prep = (id, company, date, round, status = "scheduled") => note(`${root}/${id}.md`, { type: "interview-prep", company, date, round, session_status: status });
+  const notes = [
+    raw("employer", { date: "2026-10-30" }),
+    raw("agent-week", { company: "株式会社紹介テスト", date: "2026-10-29", round: "エージェント面談" }),
+    prep("agent-prep", "株式会社紹介テスト", "2026-10-29", "エージェント面談"),
+    job("scheduled-role", "面接中", { company: "株式会社予定テスト", next_event_at: "2026-10-28 17:00", next_event_label: "一次面接" }),
+    note(`${root}/confirmed-prep.md`, { type: "interview-prep", company: "株式会社予定テスト", date: "2026-10-28", time: "17:00", round: "一次面接", session_status: "scheduled", case: "[[scheduled-role]]" }),
+    prep("draft", "株式会社下書テスト", "2026-10-27", "一次面接", "draft"),
+    prep("cancelled", "株式会社取消テスト", "2026-10-26", "一次面接", "cancelled"),
+    prep("support", "株式会社説明テスト", "2026-10-25", "説明会"),
+  ];
+  const catalog = buildConsultationCatalog(notes);
+  assert.equal(catalog.sessions.length, 1);
+  assert.equal(catalog.companies.length, 1);
+  assert.equal(catalog.additionalSessions.length, 1);
+  const agent = catalog.additionalSessions[0];
+  assert.equal(agent.stage, "agent");
+  assert.equal(agent.outcomeKind, "not-applicable");
+  assert.match(findConsultationTranscript(notes, agent.id).raw, /質問です/);
+  assert.equal(catalog.scheduledInterviews.length, 1);
+  assert.equal(catalog.scheduledInterviews[0].company, "株式会社予定テスト");
+  assert.equal(catalog.scheduledInterviews[0].interview.date, "2026-10-28");
+  assert.equal(catalog.scheduledInterviews[0].interview.evidenceKind, "scheduled");
+  assert.equal(catalog.scheduledInterviews[0].interview.sessionId, undefined);
+  assert.doesNotMatch(JSON.stringify(catalog), /20_求職/);
+});

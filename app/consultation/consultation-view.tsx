@@ -238,7 +238,7 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
   const query = route.query.trim().toLocaleLowerCase();
   const companies = useMemo(() => [...initial.companies].sort((a, b) => b.latestDate.localeCompare(a.latestDate) || a.company.localeCompare(b.company, "ja")), [initial.companies]);
   const sessions = useMemo(() => initial.sessions.filter(hasRecord).sort((a, b) => b.date.localeCompare(a.date) || a.company.localeCompare(b.company, "ja")), [initial.sessions]);
-  const readingGroups = useMemo(() => selectConsultationReadingGroups(initial.sessions, initial.companies), [initial.sessions, initial.companies]);
+  const readingGroups = useMemo(() => selectConsultationReadingGroups([...initial.sessions, ...(initial.additionalSessions ?? [])], initial.companies, undefined, initial.scheduledInterviews), [initial.sessions, initial.companies, initial.additionalSessions, initial.scheduledInterviews]);
   const [readingGroupId, setReadingGroupId] = useState("recent");
   const readingGroup = readingGroups.find(group => group.id === readingGroupId) ?? readingGroups[0];
   const readingStarts = readingGroup?.sessions ?? [];
@@ -313,6 +313,7 @@ export function ConsultationPagination({ page, pageCount, onChange }: { page: nu
 }
 
 export function ReadingHistoryCard({ history, onBrowse }: { history: ConsultationReadingHistory; onBrowse: () => void }) {
+  if (history.interview.evidenceKind === "scheduled") return <article className="consultation-reading-start-card consultation-reading-history"><div className="consultation-reading-start-main"><h3>{history.company}</h3><div className="consultation-reading-start-meta"><time dateTime={history.interview.date}>{dateLabel(history.interview.date)}</time><span>{stageLabel(history.interview)}</span><span className="reading-start-memory">日程確定</span></div></div><p className="consultation-reading-start-introduction">確定した日程です。実施記録・原稿はまだ登録されていません。</p><div className="consultation-reading-start-footer"><span>実施記録未登録</span></div></article>;
   return <article className="consultation-reading-start-card consultation-reading-history"><div className="consultation-reading-start-main"><h3>{history.company}</h3><div className="consultation-reading-start-meta"><time dateTime={history.interview.date || undefined}>{dateLabel(history.interview.date)}</time><span>{stageLabel(history.interview)}</span><span className="reading-start-memory">原稿未登録</span></div></div><p className="consultation-reading-start-introduction">{stageLabel(history.interview)}の履歴です。逐字の原稿は登録されていません。</p><div className="consultation-reading-start-footer"><span>日付・結果を確認できます</span><button className="consultation-reading-start-open" onClick={onBrowse}>面接履歴を見る<span aria-hidden="true">→</span></button></div></article>;
 }
 

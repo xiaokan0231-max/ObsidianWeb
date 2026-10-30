@@ -166,3 +166,18 @@ test("本周逐字稿与无稿场次合并按日期排序，同公司多场各�
   assert.equal((start.match(/面接履歴を見る/g) ?? []).length, 2);
   assert.doesNotMatch(start, /最終面接/);
 });
+
+test("最近一周同时展示企业原稿、代理面谈和仅确约场次，确约不冒充完成历史", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-30T03:00:00Z") });
+  const { ConsultationLibrary } = await loadAppModule("app/consultation/consultation-view.tsx");
+  const initial = catalog([session("company", "2026-10-30"), session("second", "2026-10-29")]);
+  initial.additionalSessions = [session("agent", "2026-10-29", {}, { stage: "agent", round: "エージェント面談", outcomeKind: "not-applicable" })];
+  initial.scheduledInterviews = [{ companyId: "scheduled", company: "株式会社予定テスト", interview: { id: "scheduled", date: "2026-10-28", round: "一次面接", stage: "round-1", evidenceKind: "scheduled" } }];
+  const start = startSection(renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial })));
+  assert.equal((start.match(/<article /g) ?? []).length, 4);
+  assert.match(start, /4<small>件/);
+  assert.match(start, /エージェント面談/);
+  assert.match(start, /株式会社予定テスト/);
+  assert.match(start, /実施記録未登録/);
+  assert.doesNotMatch(start, /面接履歴を見る/);
+});

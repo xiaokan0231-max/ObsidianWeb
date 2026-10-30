@@ -36,10 +36,15 @@ export type ConsultationCompany = {
 export type ConsultationInterview = {
   id: string; date: string; round: string; stage: string; outcome: string;
   outcomeKind: ConsultationSessionSummary["outcomeKind"]; sessionId?: string;
-  evidenceKind: "transcript" | "review" | "completed-prep" | "job-case" | "history";
+  evidenceKind: "transcript" | "review" | "completed-prep" | "job-case" | "history" | "scheduled";
   position?: string;
 };
-export type ConsultationCatalog = { companies: ConsultationCompany[]; sessions: ConsultationSessionSummary[]; updatedAt: string };
+export type ConsultationMeetingHistory = { companyId: string; company: string; interview: ConsultationInterview };
+export type ConsultationCatalog = {
+  companies: ConsultationCompany[]; sessions: ConsultationSessionSummary[]; updatedAt: string;
+  additionalSessions?: ConsultationSessionSummary[];
+  scheduledInterviews?: ConsultationMeetingHistory[];
+};
 export type ConsultationTranscript = ConsultationSessionSummary & {
   blocks: { id: string; title: string; turns: { id: string; speaker: "interviewer" | "self" | "unknown"; text: string; uncertain: boolean }[] }[];
   raw: string; notice: string;
@@ -47,7 +52,7 @@ export type ConsultationTranscript = ConsultationSessionSummary & {
 };
 
 type SourceSession = { note: Note; raw?: Note; readable?: JoinedReviewNotes };
-type CompletedEvidence = { note: Note; original: Note; date: string; round: string; result: string; position: string; kind: Exclude<ConsultationInterview["evidenceKind"], "transcript"> };
+type CompletedEvidence = { note: Note; original: Note; date: string; round: string; result: string; position: string; kind: Exclude<ConsultationInterview["evidenceKind"], "transcript" | "scheduled"> };
 
 // 页面只拿稳定 ID；查询参数始终在已投影的场次集合里匹配，不解码成任意文件路径。
 function stableId(kind: string, value: string) {
@@ -220,6 +225,12 @@ function isEnterpriseSession(source: SourceSession, notes: Note[]) {
   return !labels.some(label => /説明会|说明会|セミナー|\bseminar\b|ユーザーサクセス|選考ではない|非選考|企業選考の対象外|媒体の担当面談|平台服务|非企业面试|^(?:platform-support|career-support|career-consultation)$/i.test(label));
 }
 
+function isAgentSession(source: SourceSession, notes: Note[]) {
+  const owner = interviewSessionOwner(source.note, notes);
+  return [source.note, source.raw, owner].some(note => note &&
+    ["round", "meeting_kind", "session_kind"].some(field => interviewRound(getString(note.frontmatter[field])) === "agent"));
+}
+
 function confirmedPrep(note: Note) {
   return getType(note) === "interview-prep" && Boolean(day(note.frontmatter.date)) &&
     ["scheduled", "completed"].includes(getString(note.frontmatter.session_status ?? note.frontmatter.schedule_status));
@@ -310,8 +321,9 @@ function resultFor(source: SourceSession, result: InterviewOutcome | undefined, 
 
 function model(notes: Note[]) {
   const available = notes.filter(note => includeRuntimeNote(note));
-  const sources = sourceSessions(available).filter(source => (hasRawContent(source) || hasReadableContent(source)) && isEnterpriseSession(source, available));
-  const sourcePaths = new Set(sources.flatMap(source => [source.note.path, ...(source.raw ? [source.raw.path] : [])]));
+  const sources = sourceSessions(available).filter(source => (hasRawContent(source) || hasReadableContent(source)) && (isEnterpriseSession(source, available) || isAgentSession(source, available)));
+  // 代理面谈可供老师阅读，但不能证明企业选考通过或进入下一轮。
+  const sourcePaths = new Set(sources.filter(source => isEnterpriseSession(source, available)).flatMap(source => [source.note.path, ...(source.raw ? [source.raw.path] : [])]));
   const evidence = completedEvidence(available);
   // 只有原稿的场次也复用同一归属与次轮判定，不从正文或准备稿补造场次。
   const outcomeNotes = [...available.filter(note => !["transcript", "transcript-study"].includes(getType(note)) || sourcePaths.has(note.path)).map(note => {
@@ -329,8 +341,8 @@ function model(notes: Note[]) {
     return {
       id: sessionId(source), companyId: companyIdOf(companySource), company: safeText(nameOf(companySource)) || "会社名は未確認",
       date: day(source.note.frontmatter.date), round: safeText(interviewRoundLabelJa(getString(source.note.frontmatter.round)) || getString(source.note.frontmatter.round)),
-      ...resultFor(source, outcomes.get(source.note.path), outcomeNotes), hasRaw: hasRawContent(source),
-      hasReadable: hasReadableContent(source), stage: interviewRound(getString(source.note.frontmatter.round)),
+      ...(isAgentSession(source, available) ? { outcome: "エージェント面談（企業選考とは別）", outcomeKind: "not-applicable" as const } : resultFor(source, outcomes.get(source.note.path), outcomeNotes)), hasRaw: hasRawContent(source),
+      hasReadable: hasReadableContent(source), stage: isAgentSession(source, available) ? "agent" : interviewRound(getString(source.note.frontmatter.round)),
       recordKind: isMemory(source) ? "memory" as const : "transcript" as const,
       ...(owner && getType(owner) === JOB_CASE_TYPE && safeText(jobPosition(owner)) ? { position: safeText(jobPosition(owner)) } : {}),
       readingGuide: readingGuide(source, blocksBySession.get(sessionId(source))!),
@@ -357,7 +369,9 @@ function model(notes: Note[]) {
 }
 
 export function buildConsultationCatalog(notes: Note[]): ConsultationCatalog {
-  const { available, sources, sessions, evidence, outcomes, outcomeNotes } = model(notes);
+  const { available, sources, sessions: allSessions, evidence, outcomes, outcomeNotes } = model(notes);
+  const additionalSessions = allSessions.filter(session => session.stage === "agent");
+  const sessions = allSessions.filter(session => session.stage !== "agent");
   const completed: { companyId: string; company: string; ownerPath: string; time: string; interview: ConsultationInterview }[] = [];
   for (const session of sessions) {
     const source = sources.find(item => sessionId(item) === session.id)!;
@@ -453,8 +467,31 @@ export function buildConsultationCatalog(notes: Note[]): ConsultationCatalog {
   }
   const mtimes = available.map(note => note.stat?.mtime ?? 0).filter(value => Number.isFinite(value) && value > 0 && value <= 8640000000000000);
   const maximumMtime = Math.max(0, ...mtimes);
+  const scheduledInterviews: ConsultationMeetingHistory[] = [];
+  const confirmed = [...available.filter(note => confirmedPrep(note) && getString(note.frontmatter.session_status ?? note.frontmatter.schedule_status) === "scheduled"), ...structuredInvitations(available)];
+  const known: { companyId: string; ownerPath: string; time: string; interview: Pick<ConsultationInterview, "date" | "stage"> }[] = [...completed, ...additionalSessions.map(session => {
+    const source = sources.find(item => sessionId(item) === session.id)!;
+    return { companyId: session.companyId, ownerPath: interviewSessionOwner(source.note, available)?.path ?? "", time: interviewNoteTime(source.note, session.date), interview: { date: session.date, stage: session.stage ?? "" } };
+  })];
+  for (const note of confirmed) {
+    if (!isEnterpriseSession({ note }, available) && !isAgentSession({ note }, available)) continue;
+    const owner = interviewSessionOwner(note, available);
+    const companySource = owner && getType(owner) === JOB_CASE_TYPE ? owner : note;
+    const companyId = companyIdOf(companySource);
+    const date = day(note.frontmatter.date);
+    const round = getString(note.frontmatter.round);
+    const stage = interviewRound(round);
+    const time = interviewNoteTime(note, date);
+    const ownerPath = owner?.path ?? "";
+    if (known.some(item => item.companyId === companyId && item.interview.date === date && item.ownerPath === ownerPath &&
+      !(time && item.time && time !== item.time) && !(stage && item.interview.stage && stage !== item.interview.stage))) continue;
+    const interview: ConsultationInterview = { id: stableId("scheduled", note.path), date, round: safeText(interviewRoundLabelJa(round) || round), stage,
+      outcome: "日程確定・実施記録未登録", outcomeKind: "unknown", evidenceKind: "scheduled" };
+    scheduledInterviews.push({ companyId, company: safeText(nameOf(companySource)) || "会社名は未確認", interview });
+    known.push({ companyId, ownerPath, time, interview });
+  }
   return { companies: [...companies.values()].sort((a, b) => b.latestDate.localeCompare(a.latestDate) || a.company.localeCompare(b.company, "ja")), sessions,
-    updatedAt: maximumMtime ? new Date(maximumMtime).toISOString() : "" };
+    additionalSessions, scheduledInterviews, updatedAt: maximumMtime ? new Date(maximumMtime).toISOString() : "" };
 }
 
 export function findConsultationTranscript(notes: Note[], id: string): ConsultationTranscript | null {
@@ -467,7 +504,7 @@ export function findConsultationTranscript(notes: Note[], id: string): Consultat
     : summary.hasReadable ? "読みやすく整理した記録です。フィラー等が省略されている場合があります。原音は未確認です。"
     : "原始転写のみの記録です。話者の分離や聞き取りには未確認の箇所があります。原音は未確認です。";
   // 老师页只投影脱敏正文和稳定 ID，不把邮箱入口、内部文件路径带给浏览器。
-  const selectionNotices = selectionNoticesForSession(source.note, notes).map(item => ({
+  const selectionNotices = (summary.stage === "agent" ? [] : selectionNoticesForSession(source.note, notes)).map(item => ({
     id: stableId("notice", item.id), date: item.date, time: item.time,
     stage: safeText(item.stage), outcome: item.outcome, channel: safeText(item.channel),
     reasonStatus: item.reasonStatus, capture: item.capture, original: safeText(item.original),

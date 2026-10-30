@@ -1,4 +1,4 @@
-import type { ConsultationCompany, ConsultationInterview, ConsultationSessionSummary } from "./consultation-library.ts";
+import type { ConsultationCompany, ConsultationInterview, ConsultationSessionSummary, ConsultationMeetingHistory } from "./consultation-library.ts";
 import { shiftCalendarDay } from "./calendar-summary.ts";
 import { tokyoParts } from "./dojo/utils.ts";
 
@@ -13,7 +13,7 @@ export type ConsultationReadingGroup = {
 };
 
 // 最近按 JST 的七个自然日收齐场次；终面仍按企业汇集，避免旧资料冒充本周面试。
-export function selectConsultationReadingGroups(sessions: ConsultationSessionSummary[], companies: ConsultationCompany[] = [], today = tokyoParts().date): ConsultationReadingGroup[] {
+export function selectConsultationReadingGroups(sessions: ConsultationSessionSummary[], companies: ConsultationCompany[] = [], today = tokyoParts().date, scheduled: ConsultationMeetingHistory[] = []): ConsultationReadingGroup[] {
   const start = shiftCalendarDay(today, -6);
   const inWeek = (date: string) => /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= start && date <= today;
   const seen = new Set<string>();
@@ -35,6 +35,9 @@ export function selectConsultationReadingGroups(sessions: ConsultationSessionSum
       recentHistories.push({ companyId: company.id, company: company.company, interview });
     }
   }
+  for (const history of scheduled) {
+    if (inWeek(history.interview.date)) recentHistories.push(history);
+  }
   recentHistories.sort((a, b) => b.interview.date.localeCompare(a.interview.date) || a.interview.id.localeCompare(b.interview.id));
   const finalCompanies = new Set<string>();
   const finals = readable.filter(session => {
@@ -51,7 +54,7 @@ export function selectConsultationReadingGroups(sessions: ConsultationSessionSum
   }
   histories.sort((a, b) => b.interview.date.localeCompare(a.interview.date) || a.companyId.localeCompare(b.companyId));
   const groups: ConsultationReadingGroup[] = [
-    { id: "recent", title: "最近1週間の面接・面談", description: `${start.replaceAll("-", ".")}–${today.replaceAll("-", ".")}（日本時間・今日を含む7日間）の記録です。原稿のない回も、確認できている履歴を表示します。`, sessions: recent, histories: recentHistories },
+    { id: "recent", title: "最近1週間の面接・面談", description: `${start.replaceAll("-", ".")}–${today.replaceAll("-", ".")}（日本時間・今日を含む7日間）の面接・面談です。エージェント面談や原稿のない確定日程も含み、実施記録の有無を区別しています。`, sessions: recent, histories: recentHistories },
     { id: "final", title: "最終面接", description: "最終面接のある企業です。原稿のない企業は、面接履歴を確認できます。", sessions: finals, histories },
   ];
   return groups.filter(group => group.id === "recent" || group.sessions.length + group.histories.length > 0);
