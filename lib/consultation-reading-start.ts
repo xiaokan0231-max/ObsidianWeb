@@ -1,4 +1,6 @@
 import type { ConsultationCompany, ConsultationInterview, ConsultationSessionSummary } from "./consultation-library.ts";
+import { shiftCalendarDay } from "./calendar-summary.ts";
+import { tokyoParts } from "./dojo/utils.ts";
 
 export type ConsultationReadingHistory = { companyId: string; company: string; interview: ConsultationInterview };
 
@@ -10,8 +12,10 @@ export type ConsultationReadingGroup = {
   histories: ConsultationReadingHistory[];
 };
 
-// 最近只给两个起点；终面按企业汇集实际记录，缺少原稿的企业仍保留历史入口。
-export function selectConsultationReadingGroups(sessions: ConsultationSessionSummary[], companies: ConsultationCompany[] = []): ConsultationReadingGroup[] {
+// 最近按 JST 的七个自然日收齐场次；终面仍按企业汇集，避免旧资料冒充本周面试。
+export function selectConsultationReadingGroups(sessions: ConsultationSessionSummary[], companies: ConsultationCompany[] = [], today = tokyoParts().date): ConsultationReadingGroup[] {
+  const start = shiftCalendarDay(today, -6);
+  const inWeek = (date: string) => /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= start && date <= today;
   const seen = new Set<string>();
   const readable = sessions.filter(session => session.hasRaw || session.hasReadable).slice().sort((left, right) =>
     Number(Boolean(right.date)) - Number(Boolean(left.date)) || right.date.localeCompare(left.date) || left.id.localeCompare(right.id),
@@ -19,7 +23,19 @@ export function selectConsultationReadingGroups(sessions: ConsultationSessionSum
     if (seen.has(session.id)) return false;
     seen.add(session.id); return true;
   });
-  const recent = readable.slice(0, 2);
+  const recent = readable.filter(session => inWeek(session.date));
+  const readableIds = new Set(readable.map(session => session.id));
+  const recentHistoryIds = new Set<string>();
+  const recentHistories: ConsultationReadingHistory[] = [];
+  for (const company of companies) {
+    for (const interview of company.interviews ?? []) {
+      const key = `${company.id}:${interview.id}`;
+      if (!inWeek(interview.date) || (interview.sessionId && readableIds.has(interview.sessionId)) || recentHistoryIds.has(key)) continue;
+      recentHistoryIds.add(key);
+      recentHistories.push({ companyId: company.id, company: company.company, interview });
+    }
+  }
+  recentHistories.sort((a, b) => b.interview.date.localeCompare(a.interview.date) || a.interview.id.localeCompare(b.interview.id));
   const finalCompanies = new Set<string>();
   const finals = readable.filter(session => {
     if (session.stage !== "final" || finalCompanies.has(session.companyId)) return false;
@@ -35,8 +51,8 @@ export function selectConsultationReadingGroups(sessions: ConsultationSessionSum
   }
   histories.sort((a, b) => b.interview.date.localeCompare(a.interview.date) || a.companyId.localeCompare(b.companyId));
   const groups: ConsultationReadingGroup[] = [
-    { id: "recent", title: "最近の面接", description: "最近のやり取りから、今の話し方をご覧いただけます。", sessions: recent, histories: [] },
+    { id: "recent", title: "最近1週間の面接・面談", description: `${start.replaceAll("-", ".")}–${today.replaceAll("-", ".")}（日本時間・今日を含む7日間）の記録です。原稿のない回も、確認できている履歴を表示します。`, sessions: recent, histories: recentHistories },
     { id: "final", title: "最終面接", description: "最終面接のある企業です。原稿のない企業は、面接履歴を確認できます。", sessions: finals, histories },
   ];
-  return groups.filter(group => group.sessions.length + group.histories.length > 0);
+  return groups.filter(group => group.id === "recent" || group.sessions.length + group.histories.length > 0);
 }

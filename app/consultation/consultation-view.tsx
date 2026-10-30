@@ -242,6 +242,11 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
   const [readingGroupId, setReadingGroupId] = useState("recent");
   const readingGroup = readingGroups.find(group => group.id === readingGroupId) ?? readingGroups[0];
   const readingStarts = readingGroup?.sessions ?? [];
+  const readingEntries = [
+    ...readingStarts.map(session => ({ date: session.date, id: session.id, session, history: null })),
+    ...(readingGroup?.histories ?? []).map(history => ({ date: history.interview.date, id: `${history.companyId}:${history.interview.id}`, session: null, history })),
+  ];
+  if (readingGroup?.id === "recent") readingEntries.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
   const manuscriptCompanyCount = new Set(sessions.map(session => session.companyId)).size;
   const selectedCompany = initial.companies.find(company => company.id === route.companyId);
   const visibleCompanies = filterConsultationCompanies(companies, sessions, query, route.outcome, route.progress);
@@ -273,9 +278,11 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
           <div id="consultation-reading-selection" className={`consultation-reading-selection is-${readingGroup?.id ?? "recent"}`} aria-live="polite" aria-atomic="false">
             {readingGroup && <p className="consultation-reading-group-description">{readingGroup.description}</p>}
             <div className={`consultation-reading-start-grid${readingStarts.length + (readingGroup?.histories.length ?? 0) === 1 ? " is-single" : ""}${readingGroup?.id === "final" ? " is-final" : ""}`}>
-              {readingStarts.map(session => <ReadingStartCard key={session.id} session={session} recent={readingGroup?.id === "recent" && Boolean(session.date)} label={readingGroup?.id === "recent" ? undefined : readingGroup?.title} onOpen={() => openSession(session)} onExcerpt={blockId => openExcerpt(session, blockId)} />)}
-              {readingGroup?.histories.map(history => <ReadingHistoryCard key={history.companyId} history={history} onBrowse={() => browseHistory(history.company)} />)}
+              {readingEntries.map(entry => entry.session
+                ? <ReadingStartCard key={entry.id} session={entry.session} recent={readingGroup?.id === "recent" && Boolean(entry.date)} label={readingGroup?.id === "recent" ? undefined : readingGroup?.title} onOpen={() => openSession(entry.session)} onExcerpt={blockId => openExcerpt(entry.session, blockId)} />
+                : <ReadingHistoryCard key={entry.id} history={entry.history} onBrowse={() => browseHistory(entry.history.company)} />)}
             </div>
+            {readingGroup?.id === "recent" && readingStarts.length + readingGroup.histories.length === 0 && <p className="consultation-reading-start-empty">最近1週間の面接・面談の記録はまだありません。過去の記録は「すべての資料を見る」から確認できます。</p>}
           </div>
           {!readingGroup && <p className="consultation-reading-start-empty">原稿が登録されると、ここから読み始められます。企業一覧から、確認できている面接の履歴をご覧いただけます。</p>}
         </section>
@@ -306,7 +313,7 @@ export function ConsultationPagination({ page, pageCount, onChange }: { page: nu
 }
 
 export function ReadingHistoryCard({ history, onBrowse }: { history: ConsultationReadingHistory; onBrowse: () => void }) {
-  return <article className="consultation-reading-start-card consultation-reading-history"><div className="consultation-reading-start-main"><h3>{history.company}</h3><div className="consultation-reading-start-meta"><time dateTime={history.interview.date || undefined}>{dateLabel(history.interview.date)}</time><span>最終面接</span><span className="reading-start-memory">原稿未登録</span></div></div><p className="consultation-reading-start-introduction">最終面接の履歴です。逐字の原稿は登録されていません。</p><div className="consultation-reading-start-footer"><span>日付・結果を確認できます</span><button className="consultation-reading-start-open" onClick={onBrowse}>面接履歴を見る<span aria-hidden="true">→</span></button></div></article>;
+  return <article className="consultation-reading-start-card consultation-reading-history"><div className="consultation-reading-start-main"><h3>{history.company}</h3><div className="consultation-reading-start-meta"><time dateTime={history.interview.date || undefined}>{dateLabel(history.interview.date)}</time><span>{stageLabel(history.interview)}</span><span className="reading-start-memory">原稿未登録</span></div></div><p className="consultation-reading-start-introduction">{stageLabel(history.interview)}の履歴です。逐字の原稿は登録されていません。</p><div className="consultation-reading-start-footer"><span>日付・結果を確認できます</span><button className="consultation-reading-start-open" onClick={onBrowse}>面接履歴を見る<span aria-hidden="true">→</span></button></div></article>;
 }
 
 function ReadingGroupIcon({ group }: { group: string }) {

@@ -15,7 +15,7 @@ type TourPlacement = { left: number; top: number; side: "top" | "bottom" | "left
 export const TEACHER_TOUR_STORAGE_KEY = "teacher-tour:seen:v3";
 export const TEACHER_TOUR_STEPS: Record<TeacherTourMode, TourStep[]> = {
   library: [
-    { target: '[data-tour="reading-choice"]', title: ["読み始める入口を選ぶ", "先选一种阅读入口"], text: ["「最近の面接」か「最終面接」を選びます。原稿のある面接は、その下から読めます。「原稿未登録」の面接では、確認できている履歴をご覧いただけます。", "选择最近的面试或终面。有原稿的场次可以直接打开；标注“原稿未登记”的场次则展示已确认的面试历史。"] },
+    { target: '[data-tour="reading-choice"]', title: ["読み始める入口を選ぶ", "先选一种阅读入口"], text: ["「最近1週間の面接・面談」か「最終面接」を選びます。最近1週間は、日本時間で今日を含む7日間です。原稿のある面接は、その下から読めます。「原稿未登録」の面接では、確認できている履歴をご覧いただけます。", "选择最近一周的面试、面谈或终面。最近一周按日本时间计算，包含今天在内共七天。有原稿的场次可以直接打开；标注“原稿未登记”的场次则展示已确认的面试历史。"] },
     { target: '[data-tour="reading-preview"]', title: ["このやりとりから読む", "从这段交流开始"], text: ["原文の質問を一部表示しています。気になる項目を押すと、原稿のその部分へ移動できます。", "这里展示原文中的问题摘录，点击即可进入对应的那一段。"], fallback: {
       target: '[data-tour="start-reading"]', title: ["原稿を開いて、コメント", "打开原文并留言"], text: ["このボタンから原稿を開けます。会話の横にある「この部分にコメント」から、ご意見やご質問を送れます。", "从这个按钮打开原文，再点对话旁的“评论这段”即可留下建议或问题。"],
     } },

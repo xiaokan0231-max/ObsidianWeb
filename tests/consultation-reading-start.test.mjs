@@ -111,7 +111,7 @@ test("记忆重构和原始稿不冒充已确认逐字问题预览，人工介�
 
 const session = (id, date, featured = false, extra = {}) => ({ id, companyId: `company-${id}`, company: "株式会社テスト", date, round: "一次面接", outcome: "進行中", outcomeKind: "waiting", hasReadable: true, hasRaw: false, readingGuide: { featured, excerpts: [], blockCount: 1 }, ...extra });
 
-test("最近两场按日期展示，终面按企业去重且不按结果或隐式重点选择", () => {
+test("最近一周保留所有场次，终面仍按企业去重且不按结果选择", () => {
   const sessions = [
     session("latest", "2026-10-07", false, { outcome: "不採用", outcomeKind: "rejected" }),
     session("offer", "2026-10-06", false, { outcome: "内定", outcomeKind: "offer" }),
@@ -121,13 +121,13 @@ test("最近两场按日期展示，终面按企业去重且不按结果或隐�
     session("final-c", "2026-10-02", false, { stage: "final" }),
     session("old-final-a", "2026-10-01", false, { stage: "final", companyId: "company-final-a" }),
   ];
-  const groups = selectConsultationReadingGroups(sessions);
-  assert.deepEqual(groups.map(group => [group.id, group.sessions.map(item => item.id)]), [["recent", ["latest", "offer"]], ["final", ["final-a", "final-b", "final-c"]]]);
+  const groups = selectConsultationReadingGroups(sessions, [], "2026-10-07");
+  assert.deepEqual(groups.map(group => [group.id, group.sessions.map(item => item.id)]), [["recent", ["latest", "offer", "final-a", "final-b", "flagged", "final-c", "old-final-a"]], ["final", ["final-a", "final-b", "final-c"]]]);
   assert.equal(groups[1].sessions[1].recordKind, "memory");
   assert.ok(groups.every(group => group.histories.length === 0));
   assert.equal(sessions.length, 7);
   assert.deepEqual(selectConsultationReadingGroups(sessions.slice(0, 2)).map(group => group.id), ["recent"]);
-  assert.deepEqual(selectConsultationReadingGroups(sessions), groups);
+  assert.deepEqual(selectConsultationReadingGroups(sessions, [], "2026-10-07"), groups);
 });
 
 test("缺少原稿的全部已确认终面保留历史，不伪造场次或截断为两家", () => {
@@ -152,16 +152,45 @@ test("缺少原稿的全部已确认终面保留历史，不伪造场次或截�
   assert.equal(group.histories[1].sessionId, undefined);
   assert.deepEqual(companies, original);
   const historyOnly = selectConsultationReadingGroups([], companies.filter(item => item.id === "company-third"));
-  assert.deepEqual(historyOnly.map(item => item.id), ["final"]);
-  assert.equal(historyOnly[0].sessions.length, 0);
-  assert.equal(historyOnly[0].histories.length, 1);
+  assert.deepEqual(historyOnly.map(item => item.id), ["recent", "final"]);
+  assert.equal(historyOnly[1].sessions.length, 0);
+  assert.equal(historyOnly[1].histories.length, 1);
 });
 
-test("没有日期的记录不超过已知日期，重复和无稿重点不占起点", () => {
-  const latest = session("known", "2026-10-01", true);
-  assert.deepEqual(selectConsultationReadingGroups([session("undated", "", true), latest, { ...latest }, session("no-record", "2026-11-01", true, { hasReadable: false })])[0].sessions.map(item => item.id), ["known", "undated"]);
-  assert.deepEqual(selectConsultationReadingGroups([session("undated-b", ""), session("undated-a", "")])[0].sessions.map(item => item.id), ["undated-a", "undated-b"]);
-  assert.deepEqual(selectConsultationReadingGroups([]), []);
+test("七天边界不纳入旧稿、未来日期、未知日期或重复记录，跨月也适用", () => {
+  const latest = session("known", "2026-10-01");
+  const groups = selectConsultationReadingGroups([
+    session("undated", ""), latest, { ...latest },
+    session("start", "2026-09-25"), session("old", "2026-09-24"), session("future", "2026-10-02"),
+    session("no-record", "2026-10-01", false, { hasReadable: false }),
+  ], [], "2026-10-01");
+  assert.deepEqual(groups[0].sessions.map(item => item.id), ["known", "start"]);
+  assert.match(groups[0].description, /2026.09.25–2026.10.01/);
+  const empty = selectConsultationReadingGroups([], [], "2026-10-01");
+  assert.equal(empty[0].id, "recent");
+  assert.deepEqual(empty[0].sessions, []);
+});
+
+test("默认日期以日本午夜切换，与执行环境时区无关", t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-01T15:00:00Z") });
+  const group = selectConsultationReadingGroups([session("today", "2026-10-02"), session("old", "2026-09-25")])[0];
+  assert.deepEqual(group.sessions.map(item => item.id), ["today"]);
+  assert.match(group.description, /2026.09.26–2026.10.02/);
+});
+
+test("一周内无稿历史保留多轮，已有逐字稿不重复计数", () => {
+  const recorded = session("recorded", "2026-10-07");
+  const interview = (id, date, extra = {}) => ({ id, date, stage: "round-1", round: "一次面接", outcome: "進行中", outcomeKind: "waiting", evidenceKind: "history", ...extra });
+  const missing = interview("missing", "2026-10-06");
+  const companies = [{ id: recorded.companyId, company: "株式会社テスト", interviews: [
+    interview("linked", "2026-10-07", { sessionId: recorded.id }), missing, { ...missing },
+    interview("second", "2026-10-02"), interview("old", "2026-09-30"), interview("future", "2026-10-08"),
+  ] }];
+  const original = structuredClone(companies);
+  const group = selectConsultationReadingGroups([recorded], companies, "2026-10-07")[0];
+  assert.deepEqual(group.sessions.map(item => item.id), ["recorded"]);
+  assert.deepEqual(group.histories.map(item => item.interview.id), ["missing", "second"]);
+  assert.deepEqual(companies, original);
 });
 
 test("原问句预览跳过声音检查整段，同段追问不占据两个入口", () => {
