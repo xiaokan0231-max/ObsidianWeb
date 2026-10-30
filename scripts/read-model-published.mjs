@@ -3,6 +3,7 @@ import { copyFile, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { buildApplicationReadModel } from "./read-model-source.mjs";
+import { includePublishedNote } from "../lib/vault-boundary.mjs";
 
 const BATCH_BYTES = 480_000;
 const compare = (left, right) => left < right ? -1 : left > right ? 1 : 0;
@@ -41,6 +42,7 @@ function stablePublishedArtifact(artifact) {
 
 /** 只处理明确发布的同一批资料；全文资源和索引始终指向同一版本。 */
 export async function writeReadModelAssets(notes, directory, publishedAt) {
+  notes = notes.filter(includePublishedNote);
   const write = async (value, compressed = false) => {
     const text = JSON.stringify(value);
     const file = `${createHash("sha256").update(text).digest("hex").slice(0, 24)}.json${compressed ? ".gz" : ""}`;

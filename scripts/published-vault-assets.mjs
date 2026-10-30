@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { brotliCompress, constants, gzip } from "node:zlib";
 import { noteInVaultScope } from "../lib/vault-scope.ts";
+import { includePublishedNote } from "../lib/vault-boundary.mjs";
 import { buildCalendarSnapshot } from "../lib/server/calendar-snapshot.ts";
 import { copyRetainedReadModelAssets, garbageCollectReadModelAssets, writeReadModelAssets } from "./read-model-published.mjs";
 
@@ -15,6 +16,8 @@ const digest = (data) => createHash("sha256").update(data).digest("hex").slice(0
 
 /** 保留完整笔记；把聚合和压缩移到发布时，访客首次读取只需传输静态响应。 */
 export async function writePublishedVaultAssets(notes, directory, publishedAt = new Date().toISOString(), previousDirectory = directory) {
+  const excludedPaths = new Set(notes.filter(note => !includePublishedNote(note)).map(note => note.path));
+  notes = notes.filter(includePublishedNote);
   const scopes = Object.fromEntries(SCOPES.map((scope) => [scope, []]));
   const chunks = {};
   const groups = new Map();
@@ -74,7 +77,18 @@ export async function writePublishedVaultAssets(notes, directory, publishedAt = 
   const readModel = await writeReadModelAssets(notes, directory, publishedAt);
   let previous = [];
   try { const old = JSON.parse(await readFile(join(previousDirectory, "manifest.json"), "utf8")); previous = [old.readModel, ...(old.readModels ?? [])].filter((value, index, all) => value?.revision && all.findIndex((item) => item?.revision === value.revision) === index); } catch { /* 初次发布没有旧目录。 */ }
-  const eligible = previous.filter((value) => value.revision !== readModel.revision).slice(0, 2);
+  const eligible = [];
+  for (const index of previous.filter(value => value.revision !== readModel.revision)) {
+    // 撤回发布时连旧版正文和搜索块一起退出保留集，不能从历史版本绕回私有资料。
+    if (excludedPaths.size) {
+      try {
+        const bodies = JSON.parse(await readFile(join(previousDirectory, index.bodyIndexFile), "utf8"));
+        if ([...excludedPaths].some(path => Object.hasOwn(bodies, path))) continue;
+      } catch { continue; }
+    }
+    eligible.push(index);
+    if (eligible.length === 2) break;
+  }
   const retained = previousDirectory === directory ? eligible : await copyRetainedReadModelAssets(previousDirectory, directory, eligible);
   const readModels = [readModel, ...retained];
   const manifest = { schemaVersion: 2, publishedAt, scopes, chunks, responses, calendar, readModel, readModels };

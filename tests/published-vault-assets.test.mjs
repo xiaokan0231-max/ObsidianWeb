@@ -69,3 +69,23 @@ test("超过单资源上限的全库继续分片读取，不输出超限响应�
   assert.deepEqual(await reader.readAll(), largeNotes);
   for (const file of await readdir(directory)) assert.ok((await stat(join(directory, file))).size < 24 * 1024 * 1024);
 });
+
+test("不发布笔记只留本地，正文、压缩响应和新旧查询索引均不携带内容", async t => {
+  const previousDirectory = await mkdtemp(join(tmpdir(), "published-private-old-"));
+  const directory = await mkdtemp(join(tmpdir(), "published-private-new-"));
+  t.after(() => Promise.all([previousDirectory, directory].map(path => rm(path, { recursive: true, force: true }))));
+  const original = makeNote("個別面談.md", "transcript", "PRIVATE-INTERVIEW-CONTENT");
+  const old = await writePublishedVaultAssets([...notes, original], previousDirectory, publishedAt);
+  const privateNote = { ...original, frontmatter: { ...original.frontmatter, publish: false } };
+  const result = await writePublishedVaultAssets([...notes, privateNote], directory, publishedAt, previousDirectory);
+  assert.equal(result.manifest.chunks[privateNote.path], undefined);
+  assert.ok(result.manifest.readModels.every(model => model.revision !== old.manifest.readModel.revision));
+  const bodyIndex = JSON.parse(await readFile(join(directory, result.manifest.readModel.bodyIndexFile), "utf8"));
+  assert.equal(bodyIndex[privateNote.path], undefined);
+  for (const file of await readdir(directory)) {
+    if (!file.endsWith(".json")) continue;
+    const content = await readFile(join(directory, file), "utf8");
+    assert.doesNotMatch(content, /PRIVATE-INTERVIEW-CONTENT|個別面談/);
+  }
+  assert.equal(privateNote.content, "PRIVATE-INTERVIEW-CONTENT");
+});
