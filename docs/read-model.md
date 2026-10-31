@@ -9,6 +9,7 @@ Obsidian 是资料正本。Cloudflare D1 保存可重建的目录、关系、搜
 - 面试目录、场次依赖、复盘问题块和章节：`/api/interview/{catalog,context,review,trends}`。
 - 资料库、搜索、短链消歧和反链：`/api/read-model/{library,search,resolve,backlinks}`。
 - 完整正文：`/api/note?path=…&revision=…`。目录返回版本；后续依赖、正文和分页必须沿用它。过期游标返回 409，从第一页重查，不能混合两版。
+- 专题速览：用 `type:language-reading-list` 查询资料目录，选中后沿用目录版本读取一篇正文；不加载 `all`、`interview` 或训练正文集合。清单是独立的阅读资料，不回灌为面试原话或训练来源。结构由 `lib/language-reading-list.ts` 校验，资料中的 `publish: false` 继续限制发布范围。
 - 搜索保留空格 AND、字段值 `|` OR、正文与 frontmatter 检索。FTS5 trigram 仅用于候选，参数化子串验证保留短中日文及跨块命中。
 
 ## 本地同步

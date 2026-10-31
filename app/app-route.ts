@@ -8,6 +8,7 @@ export type AppView =
   | "practice"
   | "language"
   | "topics"
+  | "reading"
   | "jobs"
   | "analytics"
   | "graph"
@@ -31,6 +32,7 @@ const VIEW_PATHS: Record<AppView, string> = {
   practice: "/interview/practice",
   language: "/training",
   topics: "/training/topics",
+  reading: "/training/reading",
   library: "/library",
   timeline: "/timeline",
   graph: "/graph",

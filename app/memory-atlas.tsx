@@ -106,6 +106,7 @@ const VIEW_MODULES = {
   session: createPreloadable(() => import("./interview-session")),
   language: createPreloadable(() => import("./japanese-training")),
   topics: createPreloadable(() => import("./language-expression-courses")),
+  reading: createPreloadable(() => import("./reading-view")),
   analytics: createPreloadable(() => import("./jobs-analytics")),
   jobs: createPreloadable(() => import("./jobs-view")),
   graph: createPreloadable(() => import("./graph-view")),
@@ -120,6 +121,7 @@ const InterviewPrep = lazy(VIEW_MODULES.prep.load);
 const InterviewSession = lazy(VIEW_MODULES.session.load);
 const JapaneseTraining = lazy(VIEW_MODULES.language.load);
 const LanguageExpressionCourses = lazy(VIEW_MODULES.topics.load);
+const ReadingView = lazy(VIEW_MODULES.reading.load);
 const JobsAnalytics = lazy(VIEW_MODULES.analytics.load);
 const JobsView = lazy(VIEW_MODULES.jobs.load);
 const GraphView = lazy(VIEW_MODULES.graph.load);
@@ -550,10 +552,10 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   const calendarModel = calendarRead.model;
   const compactCalendar = view === "calendar";
   const loading = compactCalendar ? calendarRead.loading || !calendarRead.revision && !calendarRead.error
-    : indexedInterview ? !interviewRead.fetchedAt && !interviewRead.error : view === "library" ? false
+    : indexedInterview ? !interviewRead.fetchedAt && !interviewRead.error : view === "library" || view === "reading" ? false
     : vaultState.loading || vaultState.readyScopes.size === 0 && vaultState.errors.size === 0;
   const activeScope = vaultScopeForView(view);
-  const error = compactCalendar ? calendarRead.error : indexedInterview ? interviewRead.error : view === "library" ? "" : vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
+  const error = compactCalendar ? calendarRead.error : indexedInterview ? interviewRead.error : view === "library" || view === "reading" ? "" : vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
   const [writeError, setWriteError] = useState("");
   // 撤销失败而它的提示已被新的一次写入顶掉时，理由落到全局的写入错误横幅上（见 useUndoFlash）。
   const reportStaleUndoFailure = useCallback((message: string) => setWriteError(`撤销没有完成：${message}`), [setWriteError]);
@@ -564,7 +566,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   const readyScopes = vaultState.readyScopes;
   // 目录可能先到，完整场次首次到齐后再挂载；刷新空正文的复盘目录也不能卸载已打开的页面。
   const interviewScopeReady = indexedInterview ? Boolean(interviewRead.fetchedAt) : readyScopes.has("all") || readyScopes.has("interview");
-  const scopeReady = compactCalendar ? Boolean(calendarRead.revision) : indexedInterview ? Boolean(interviewRead.fetchedAt) : view === "library" ? true : readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
+  const scopeReady = compactCalendar ? Boolean(calendarRead.revision) : indexedInterview ? Boolean(interviewRead.fetchedAt) : view === "library" || view === "reading" ? true : readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
   const actionsReady = readyScopes.has("all") || readyScopes.has("actions");
   const activityReady = readyScopes.has("all") || readyScopes.has("activity");
   const activityError = vaultState.errors.get("activity") ?? vaultState.errors.get("all") ?? "";
@@ -650,7 +652,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
       return;
     }
     if (["session", "prep", "review", "insights", "practice"].includes(currentView.current)) { await refreshInterview(); return; }
-    if (currentView.current === "library") { setIndexSeed((seed) => seed + 1); return; }
+    if (currentView.current === "library" || currentView.current === "reading") { setIndexSeed((seed) => seed + 1); return; }
     await vaultReader.request(options);
   }, [vaultReader, refreshCalendar, refreshInterview]);
 
@@ -963,7 +965,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
 
   useEffect(() => {
     // rAF は非アクティブなタブでは発火しないため timer で初回ロードする。
-    if (["calendar", "library", "session", "prep", "review", "insights", "practice"].includes(initialView)) return;
+    if (["calendar", "library", "reading", "session", "prep", "review", "insights", "practice"].includes(initialView)) return;
     const timer = window.setTimeout(() => void loadVault({ scope: vaultScopeForView(initialView) }), 0);
     return () => window.clearTimeout(timer);
   }, [initialView, loadVault]);
@@ -971,7 +973,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
   const { quickDue, onQuickSummary } = useQuickDueBadge(Boolean(fetchedAt), currentView);
 
   useEffect(() => {
-    if (["calendar", "library", "session", "prep", "review", "insights", "practice"].includes(view)) return;
+    if (["calendar", "library", "reading", "session", "prep", "review", "insights", "practice"].includes(view)) return;
     const scope = vaultScopeForView(view);
     if (vaultReader.getState().readyScopes.has("all") || vaultReader.getState().readyScopes.has(scope)) return;
     void loadVault({ scope });
@@ -1730,6 +1732,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary }: { init
                   onNoteWritten={patchNote}
                 />
               )}
+              {view === "reading" && <ReadingView revision={indexSeed} onOpenSource={openNotePath} />}
               {view === "jobs" && (
                 <JobsView
                   loading={!scopeReady && !error}

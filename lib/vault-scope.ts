@@ -76,6 +76,6 @@ export function vaultScopeForView(view: string): VaultScope {
   if (view === "calendar" || view === "actions") return "actions";
   if (view === "jobs" || view === "analytics") return "jobs";
   if (view === "session" || view === "prep" || view === "review" || view === "practice" || view === "insights") return "interview";
-  if (view === "language" || view === "topics") return "training";
+  if (view === "language" || view === "topics" || view === "reading") return "training";
   return "all";
 }

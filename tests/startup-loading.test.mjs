@@ -8,7 +8,7 @@ import { createVaultReader } from "../lib/vault-reader.ts";
 import { vaultScopeForView } from "../lib/vault-scope.ts";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
-test("直达日历预加载专用摘要，其它页面预加载对应笔记范围", async () => {
+test("直达页面预加载各自的摘要、专题目录或笔记范围", async () => {
   const { default: Section } = await loadAppModule("app/[section]/[[...rest]]/page.tsx", {
     stubs: {
       "next/navigation": { notFound() { throw new Error("not found"); }, redirect() { throw new Error("redirect"); } },
@@ -26,6 +26,12 @@ test("直达日历预加载专用摘要，其它页面预加载对应笔记范�
     assert.equal(preload.props.crossOrigin, "anonymous", "匹配普通 fetch 的 cors 模式与同源凭证");
     if (view === "calendar") {
       assert.equal(preload.props.href, "/api/calendar");
+      assert.doesNotMatch(renderToStaticMarkup(tree), /\/api\/vault/);
+      continue;
+    }
+    if (view === "reading") {
+      const { libraryReadModelUrl } = await loadAppModule("app/use-read-model-library.ts");
+      assert.equal(preload.props.href, libraryReadModelUrl({ query: "type:language-reading-list", scope: "language", sort: "recent" }));
       assert.doesNotMatch(renderToStaticMarkup(tree), /\/api\/vault/);
       continue;
     }

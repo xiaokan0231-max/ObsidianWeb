@@ -40,7 +40,9 @@ export default async function AppSectionPage({
   const initialSummary = initialView === "calendar" ? await calendarPulseSummary(summaryMonth, today).catch(() => null) : null;
   // 与外壳首个读取使用同一 scope；先取数据，避免等到客户端模块下载和挂载后才发起请求。
   return <>
-    <link rel="preload" as="fetch" href={initialView === "calendar" ? "/api/calendar" : `/api/vault?scope=${vaultScopeForView(initialView)}`} crossOrigin="anonymous" />
+    <link rel="preload" as="fetch" href={initialView === "calendar" ? "/api/calendar" : initialView === "reading"
+      ? "/api/read-model/library?q=type%3Alanguage-reading-list&group=all&scope=language&sort=recent&limit=24"
+      : `/api/vault?scope=${vaultScopeForView(initialView)}`} crossOrigin="anonymous" />
     <MemoryAtlas initialView={initialView} initialSearch={initialSearch.toString()} initialSummary={initialSummary} />
   </>;
 }

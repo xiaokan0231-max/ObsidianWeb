@@ -61,7 +61,7 @@ export const NAVIGATION: PrimaryNavigationItem[] = [
     mobileLabel: "训练",
     glyph: "training",
     target: "language",
-    views: ["language", "topics"],
+    views: ["language", "topics", "reading"],
   },
   {
     id: "career",
@@ -109,6 +109,7 @@ export const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigat
   training: [
     { id: "language", label: "日语训练", glyph: "話", caption: "NIHONGO" },
     { id: "topics", label: "专项训练", glyph: "専", caption: "FOCUS" },
+    { id: "reading", label: "专题速览", glyph: "読", caption: "READING" },
   ],
   resources: [
     { id: "library", label: "全部资料", glyph: "庫", caption: "ARCHIVE" },
@@ -138,6 +139,7 @@ const JAPANESE_SECONDARY_LABELS: Record<Exclude<AppView, "calendar">, string> = 
   practice: "回答練習",
   language: "日本語練習",
   topics: "テーマ別練習",
+  reading: "テーマ別資料",
   library: "すべての資料",
   timeline: "タイムライン",
   graph: "関連図",
@@ -211,6 +213,7 @@ const PAGE_COMMAND_HINTS: Record<AppView, { description: string; keywords: strin
   practice: { description: "开始今天的素振り", keywords: "回答 重练 练习 practice 面试 面接 練習 素振り" },
   language: { description: "日语表达与会话训练", keywords: "日语 训练 会话 日本語 nihongo japanese language 敬語" },
   topics: { description: "按专项练习日语表达", keywords: "专项 训练 表达 课程 topics focus course 表現 練習" },
+  reading: { description: "按专题阅读表达清单与学习资料", keywords: "专题 速览 阅读 表达 清单 资料 reading reference themes テーマ 資料 一覧 読む" },
   library: { description: "浏览全部笔记与资料", keywords: "资料 全部 笔记 资料库 library archive notes ノート 資料" },
   timeline: { description: "按时间回看事件与记录", keywords: "时间线 历史 时序 timeline history 年表 履歴" },
   graph: { description: "笔记之间的关系图", keywords: "关系 关系图 图谱 双链 graph network links 関係 グラフ" },
@@ -230,6 +233,7 @@ const JAPANESE_COMMAND_DESCRIPTIONS: Record<AppView, string> = {
   practice: "今日の回答練習を始める",
   language: "日本語の表現・会話練習",
   topics: "テーマ別に日本語表現を練習する",
+  reading: "テーマ別の表現一覧と学習資料を読む",
   library: "すべてのノート・資料を見る",
   timeline: "出来事・記録を時系列で振り返る",
   graph: "ノート同士のつながりを見る",
