@@ -3,13 +3,14 @@ import { createVaultCache } from "./vault-cache.ts";
 import { createPublishedVaultReader } from "./published-vault.ts";
 import { invalidateReadModel } from "./codex-bridge.ts";
 import type { VaultScope } from "../vault-scope.ts";
+import { fetchSealedPublishedAsset } from "./sealed-assets.ts";
 
 async function loadPublishedAsset(file: string) {
   // 发布副本由部署资源提供；不回连本机，也不把个人笔记打进 JavaScript 源码。
   const { env } = await import("cloudflare:workers");
   const assets = (env as { ASSETS?: Fetcher }).ASSETS;
   if (!assets) throw new Error("云端发布资源未配置");
-  const response = await assets.fetch(new Request(`http://localhost/_published-vault/${file}`));
+  const response = await fetchSealedPublishedAsset(assets, new Request(`http://localhost/_published-vault/${file}`), (env as { SITE_ASSET_SECRET?: string }).SITE_ASSET_SECRET);
   if (!response.ok) throw new Error("云端内容尚未发布，请重新发布代码和笔记");
   return response.json();
 }

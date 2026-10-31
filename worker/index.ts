@@ -6,11 +6,13 @@ import { createPublishedVaultResponseHandler } from "../lib/server/published-vau
 import { createCalendarReadModel } from "../lib/server/calendar-read-model";
 import { dispatchFeedbackRequest, type FeedbackDispatchEnv } from "../lib/server/feedback-dispatch";
 import { createSiteAccessGate, privateSiteResponse, type SiteAccessEnv } from "../lib/server/site-access";
+import { fetchSealedPublishedAsset } from "../lib/server/sealed-assets";
 
 interface Env extends FeedbackDispatchEnv, SiteAccessEnv {
   OBSIDIAN_DATA_SOURCE?: string;
   ASSETS: Fetcher;
   DB?: D1Database;
+  SITE_ASSET_SECRET?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -49,17 +51,19 @@ const worker = {
     }
     const guarded = publishedRequestResponse(request, published);
     if (guarded) return published ? privateSiteResponse(guarded) : guarded;
+    const fetchAsset = (asset: Request) => new URL(asset.url).pathname.startsWith("/_published-vault/")
+      ? fetchSealedPublishedAsset(env.ASSETS, asset, env.SITE_ASSET_SECRET) : env.ASSETS.fetch(asset);
 
     // 线上先验证密码再取静态资源；ASSETS 绑定直接读取文件，不会重新进入业务 Worker。
     if (published && ["GET", "HEAD"].includes(request.method)) {
-      const asset = await env.ASSETS.fetch(request);
+      const asset = await fetchAsset(request);
       if (asset.status !== 404) return privateSiteResponse(asset);
     }
 
     if (published && ["/api/vault", "/api/calendar"].includes(url.pathname)) {
       let respond = publishedResponses.get(env.ASSETS);
       if (!respond) {
-        respond = createPublishedVaultResponseHandler((asset) => env.ASSETS.fetch(asset), env.DB ? createCalendarReadModel(env.DB) : undefined);
+        respond = createPublishedVaultResponseHandler(fetchAsset, env.DB ? createCalendarReadModel(env.DB) : undefined);
         publishedResponses.set(env.ASSETS, respond);
       }
       const response = await respond(request, published);
@@ -71,7 +75,7 @@ const worker = {
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       const response = await handleImageOptimization(request, {
-        fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
+        fetchAsset: (path) => fetchAsset(new Request(new URL(path, request.url))),
         transformImage: async (body, { width, format, quality }) => {
           const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
           return result.response();

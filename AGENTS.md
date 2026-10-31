@@ -18,6 +18,7 @@ Next(vinext/Cloudflare Workers) 前端，**读 Obsidian vault 作为唯一数据
   D1 保存可重建的目录、关系、搜索分块、日历及面试查询投影（`db/schema.ts`），不承接事实写入、不引入第二套选考状态。
   本地用 D1 模拟库，线上用 Sites D1，共用表结构、业务计算和查询代码，不另设 MySQL。线上只从已发布快照建立索引；正文按需读取，查询和分页绑定同一资料版本。
 - 日历、面试作战、资料库／全局搜索不加载整套 all/interview 正文；目录引用不能冒充完整 Note。同步、发布和保留规则见 `docs/read-model.md`。
+- Sites会直接提供静态文件，不能只靠Worker密码门禁保护资料。发布包的 `_published-vault` 只允许整份加密封装；明文副本和备份不得进入发布目录。封存、密钥与线上验收流程见 `docs/read-model.md`。
 - 日历首屏统计从 D1 月度汇总读取并随 HTML 返回；详情另外加载。不要为显示一个计数读取整套日历明细。
   汇总按资料版本与 JST 日期隔离，沿用统一的公司去重和选考状态口径。
 - `npm run dev` 会先从 Obsidian 插件配置里读 API key，不要直接跑 `dev:web`。

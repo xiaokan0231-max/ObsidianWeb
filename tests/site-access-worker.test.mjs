@@ -3,6 +3,7 @@ import test from "node:test";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 import { publishedRequestResponse } from "../lib/server/published-access.ts";
 import { privateSiteResponse } from "../lib/server/site-access.ts";
+import { sealAsset } from "../lib/server/sealed-assets.ts";
 
 async function harness({ deny = false, assetStatus = 404, projected = false, login = false } = {}) {
   const events = [];
@@ -36,7 +37,14 @@ async function harness({ deny = false, assetStatus = 404, projected = false, log
   });
   const env = {
     OBSIDIAN_DATA_SOURCE: "published",
-    ASSETS: { async fetch(request) { events.push(["asset", new URL(request.url).pathname]); return new Response(assetStatus === 404 ? "not found" : "asset", { status: assetStatus, headers: { "Cache-Control": "public, max-age=31536000" } }); } },
+    SITE_ASSET_SECRET: "cd".repeat(32),
+    ASSETS: { async fetch(request) {
+      const path = new URL(request.url).pathname;
+      events.push(["asset", path]);
+      const bytes = new TextEncoder().encode(assetStatus === 404 ? "not found" : "asset");
+      const body = assetStatus !== 404 && path.startsWith("/_published-vault/") ? await sealAsset(bytes, "cd".repeat(32)) : bytes;
+      return new Response(body, { status: assetStatus, headers: { "Cache-Control": "public, max-age=31536000" } });
+    } },
     IMAGES: {},
   };
   return {

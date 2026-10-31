@@ -1,6 +1,7 @@
 import { createReadModel, readModelHash } from "@/lib/server/read-model";
 import type { ReadModelBatch, ReadModelManifest } from "@/lib/read-model";
 import type { Note } from "@/lib/notes";
+import { fetchSealedPublishedAsset } from "@/lib/server/sealed-assets";
 
 type PublishedIndex = { revision?: string; manifestFile: string; batches: string[]; bodyIndexFile: string };
 type Source = { manifest: ReadModelManifest; publishedAt: string; batch(index: number): Promise<ReadModelBatch>; note(path: string): Promise<Note | null> };
@@ -46,7 +47,7 @@ async function source(requestedRevision?: string, baseRevision?: string): Promis
   const pending = (async (): Promise<Source> => {
   async function asset<T>(file: string): Promise<T> {
     if (file !== "manifest.json" && !assetName.test(file)) throw new ReadModelError("发布索引路径无效");
-    const response = await assets!.fetch(new Request(`http://localhost/_published-vault/${file}`, file.endsWith(".gz") ? { headers: { "Accept-Encoding": "identity" } } : undefined));
+    const response = await fetchSealedPublishedAsset(assets!, new Request(`http://localhost/_published-vault/${file}`), (env as { SITE_ASSET_SECRET?: string }).SITE_ASSET_SECRET);
     if (!response.ok) throw new ReadModelError("发布资料尚未准备完成");
     // 索引批次与单篇正文直接以 gzip 存盘，避免部署归档保存多份膨胀的 JSON。
     if (file.endsWith(".gz")) {

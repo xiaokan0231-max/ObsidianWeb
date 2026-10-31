@@ -3,6 +3,7 @@ import test from "node:test";
 import { gzipSync } from "node:zlib";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 import { ReadModelError as StoreError, readModelHash } from "../lib/server/read-model.ts";
+import { sealAsset } from "../lib/server/sealed-assets.ts";
 
 async function publishedRuntime(t, { previous = true } = {}) {
   const saved = process.env.OBSIDIAN_DATA_SOURCE;
@@ -26,10 +27,13 @@ async function publishedRuntime(t, { previous = true } = {}) {
   };
   const loaded = await loadAppModule("app/read-model-server.ts", { stubs: {
     "@/lib/server/read-model": { createReadModel: () => store },
-    "cloudflare:workers": { env: { DB: {}, ASSETS: { async fetch(request) {
+    "cloudflare:workers": { env: { DB: {}, SITE_ASSET_SECRET: "ab".repeat(32), ASSETS: { async fetch(request) {
       const file = new URL(request.url).pathname.replace("/_published-vault/", ""); requests.push(file);
       if (file.endsWith(".gz")) assert.equal(request.headers.get("Accept-Encoding"), "identity");
-      return fail ? new Response("unavailable", { status: 503 }) : files.has(file) ? Buffer.isBuffer(files.get(file)) ? new Response(files.get(file)) : Response.json(files.get(file)) : new Response("missing", { status: 404 });
+      if (fail) return new Response("unavailable", { status: 503 });
+      if (!files.has(file)) return new Response("missing", { status: 404 });
+      const bytes = Buffer.isBuffer(files.get(file)) ? files.get(file) : new TextEncoder().encode(JSON.stringify(files.get(file)));
+      return new Response(await sealAsset(bytes, "ab".repeat(32)));
     } } } },
   } });
   return { ...loaded, requests, states, external, fail(value) { fail = value; } };

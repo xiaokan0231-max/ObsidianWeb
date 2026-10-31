@@ -4,6 +4,7 @@ import { buildCalendarPulseSummary } from "@/lib/calendar-pulse-summary";
 import { localDateKey } from "@/lib/memory-atlas-data";
 import type { CalendarSnapshot } from "@/lib/calendar-snapshot";
 import type { Note } from "@/lib/notes";
+import { fetchSealedPublishedAsset } from "@/lib/server/sealed-assets";
 
 let current: { notes: Note[]; day: string; snapshot: CalendarSnapshot; revision: string } | undefined;
 const models = new WeakMap<D1Database, ReturnType<typeof createCalendarReadModel>>();
@@ -47,13 +48,14 @@ export async function calendarPulseSummary(month: string, today: string) {
     const { env } = await import("cloudflare:workers");
     const assets = env.ASSETS;
     if (!assets) throw new Error("发布资源不可用");
-    const manifestResponse = await assets.fetch(new Request("http://localhost/_published-vault/manifest.json"));
+    const fetchAsset = (request: Request) => fetchSealedPublishedAsset(assets, request, (env as { SITE_ASSET_SECRET?: string }).SITE_ASSET_SECRET);
+    const manifestResponse = await fetchAsset(new Request("http://localhost/_published-vault/manifest.json"));
     if (!manifestResponse.ok) throw new Error("发布索引不可用");
     const manifest = await manifestResponse.json() as { publishedAt: string; calendar?: { file: string; etag: string } };
     const entry = manifest.calendar;
     if (!entry || !/^[a-f0-9]{24}\.json$/.test(entry.file)) throw new Error("日历索引无效");
     const load = async () => {
-      const response = await assets.fetch(new Request(`http://localhost/_published-vault/${entry.file}`));
+      const response = await fetchAsset(new Request(`http://localhost/_published-vault/${entry.file}`));
       if (!response.ok) throw new Error("日历资料不可用");
       const body = await response.json() as { connected?: boolean; calendar?: CalendarSnapshot };
       if (!body.connected || body.calendar?.schemaVersion !== 1) throw new Error("日历资料格式无效");

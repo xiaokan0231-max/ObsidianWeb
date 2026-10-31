@@ -34,4 +34,10 @@ node scripts/warm-read-model.mjs https://YOUR_SITE
 
 公网仍使用已发布快照，业务写入和 AI 生成仍仅在本地执行。老师交流信箱继续使用独立鉴权的 R2，不进入 SQL、公开快照、搜索索引或 AI 输入。
 
-公网入口由 Worker 的访问密码门禁保护，覆盖页面、API、留言入口和 `_published-vault` 静态文件。生产构建必须保留 `assets.run_worker_first: true`，开发环境仍由 Vite 优先处理资源。密码和会话签名密钥分别配置为 Sites 运行时秘密 `SITE_ACCESS_PASSWORD`、`SITE_ACCESS_SESSION_SECRET`；缺失时关闭访问，不回退为匿名可读。解锁后使用浏览会话 Cookie，服务端最多保留 12 小时；改密码或密钥使旧会话失效。发布后须验证未带 Cookie 的原始资料链接被拒绝，再验证输入密码后页面与资料可读。所有授权资料响应禁止共享及浏览器持久缓存。
+公网页面、API和留言入口由 Worker 访问密码保护。密码和会话签名密钥分别配置为 Sites 运行时秘密 `SITE_ACCESS_PASSWORD`、`SITE_ACCESS_SESSION_SECRET`；缺失时关闭访问。解锁后使用浏览会话 Cookie，服务端最多保留12小时；改密码或密钥使旧会话失效。授权资料响应禁止共享及浏览器持久缓存。
+
+Sites可能在 Worker 之前直接返回静态文件，不能只依赖 `assets.run_worker_first` 来保护资料。部署的 `_published-vault` 必须全部封装为 `OWSEALED1` 格式：先gzip，再以随机IV和AES-256-GCM加密；密钥是独立的随机256位 Sites运行时秘密 `SITE_ASSET_SECRET`，不由访问密码派生。当前和历史清单、正文、搜索批次都加密，只有服务器读取时解密。构建插件会删除Vite提前复制的明文，且只包装整份已加密的快照；本机普通构建缺少封存副本时不包装资料，不能退回明文发布。
+
+发布流程：先从正本准备明文快照及索引，再将明文放在发布目录外，以 `node scripts/seal-published-vault.mjs` 从隐藏stdin接收 `{secret,source,destination}`，目标是发布构建副本的 `public/_published-vault`，不可放置任何明文备份目录。密钥只留内存并以相同值配置Sites秘密；每次发布可生成新密钥，将当前及保留版本一并重新封存。最后构建、包装、部署。不要加密本机唯一的明文副本，后续 `publish:index` 仍使用本机可重建快照。
+
+上线后必须检查实际文件而不是只看构建配置：匿名页面/API不可读，平台直接提供的当前和历史静态资源只包含加密封装，不能读出原始JSON；正确密码登录后，目录与按需正文解密正常。本站点的共享密码访问不依赖ChatGPT账号登录。
