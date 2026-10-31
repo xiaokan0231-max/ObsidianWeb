@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { brotliCompress, constants, gzip } from "node:zlib";
 import { noteInVaultScope } from "../lib/vault-scope.ts";
 import { includePublishedNote } from "../lib/vault-boundary.mjs";
+import { withPublishedReadingSources } from "../lib/language-reading-list.ts";
 import { buildCalendarSnapshot } from "../lib/server/calendar-snapshot.ts";
 import { copyRetainedReadModelAssets, garbageCollectReadModelAssets, writeReadModelAssets } from "./read-model-published.mjs";
 
@@ -18,6 +19,8 @@ const digest = (data) => createHash("sha256").update(data).digest("hex").slice(0
 export async function writePublishedVaultAssets(notes, directory, publishedAt = new Date().toISOString(), previousDirectory = directory) {
   const excludedPaths = new Set(notes.filter(note => !includePublishedNote(note)).map(note => note.path));
   notes = notes.filter(includePublishedNote);
+  const publishedPaths = new Set(notes.map(note => note.path));
+  notes = notes.map(note => withPublishedReadingSources(note, publishedPaths));
   const scopes = Object.fromEntries(SCOPES.map((scope) => [scope, []]));
   const chunks = {};
   const groups = new Map();

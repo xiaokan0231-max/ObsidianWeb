@@ -144,7 +144,7 @@ test("语法专题按自定目录展示并能只读原句可用的改写，旧�
     version: 1, description: "保留判断与适用边界。", period: { start: "2026-01-01", end: "2026-01-31" }, sections: ["句子结构", "可选句式"],
     items: [
       { ...item, category: "句子结构", finding: "correction" },
-      { ...item, id: "alternative-02", number: 2, category: "可选句式", finding: "alternative", suggested: "設計と開発の両方を担当しました。", rule: "AもBも → AとBの両方", boundary: "原句也成立。" },
+      { ...item, id: "alternative-02", number: 2, category: "可选句式", finding: "alternative", suggested: "設計と開発の両方を担当しました。", rule: "AもBも → AとBの両方", boundary: "原句也成立。", sources: [{ ...item.sources[0], available: false }] },
     ],
   };
   const richNote = { ...note, content: `${LANGUAGE_READING_LIST_MARKER}\n\`\`\`json\n${JSON.stringify(data)}\n\`\`\`\n` };
@@ -158,6 +158,8 @@ test("语法专题按自定目录展示并能只读原句可用的改写，旧�
     assert.match(html, /可选句式/);
     assert.match(html, /設計と開発の両方を担当しました。/);
     assert.match(html, /原句也成立。/);
+    assert.match(html, /原稿未公开/);
+    assert.equal(elements(h.render().tree).some(element => element.type === "button" && textOf(element.props.children).includes(item.sources[0].label)), false);
     assert.doesNotMatch(html, /reading-expression-01|语体与句尾/);
   } finally { cleanup(); }
   const old = await harness(catalog(), selected);

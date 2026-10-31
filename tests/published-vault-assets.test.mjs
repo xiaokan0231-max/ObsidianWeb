@@ -7,6 +7,7 @@ import test from "node:test";
 import { writePublishedVaultAssets } from "../scripts/published-vault-assets.mjs";
 import { noteInVaultScope } from "../lib/vault-scope.ts";
 import { createPublishedVaultReader } from "../lib/server/published-vault.ts";
+import { LANGUAGE_READING_LIST_MARKER, parseLanguageReadingList } from "../lib/language-reading-list.ts";
 
 const publishedAt = "2026-01-01T00:00:00Z";
 const makeNote = (path, type, content) => ({
@@ -88,4 +89,31 @@ test("不发布笔记只留本地，正文、压缩响应和新旧查询索引�
     assert.doesNotMatch(content, /PRIVATE-INTERVIEW-CONTENT|個別面談/);
   }
   assert.equal(privateNote.content, "PRIVATE-INTERVIEW-CONTENT");
+});
+
+test("公开学习短摘不公开私有原稿，正文与聚合响应一致标记不可打开的出处", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "published-reading-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const source = { ...makeNote("20_求職/株式会社テスト/原稿.md", "transcript", "PRIVATE-FULL-TRANSCRIPT"), frontmatter: { type: "transcript", publish: false } };
+  const data = { version: 1, description: "授权学习短摘", period: { start: "2026-01-01", end: "2026-01-31" }, items: [{
+    id: "g01", number: 1, category: "语法", priority: "先改", pattern: "经历", original: "話したことがあります。",
+    suggested: "話した経験があります。", reminder: "保留经历。", sources: [{ path: source.path, locator: "s01", label: "株式会社テスト 面談" }],
+  }] };
+  const reading = makeNote("30_日本語学習/专题速览/表达.md", "language-reading-list", `${LANGUAGE_READING_LIST_MARKER}\n\`\`\`json\n${JSON.stringify(data)}\n\`\`\`\n`);
+  const before = structuredClone(reading);
+  const { manifest } = await writePublishedVaultAssets([...notes, reading, source], directory, publishedAt);
+  const reader = createPublishedVaultReader(async () => manifest, async file => JSON.parse(await readFile(join(directory, file), "utf8")));
+  const published = await reader.readNote(reading.path);
+  assert.equal(parseLanguageReadingList(published).items[0].sources[0].available, false);
+  assert.deepEqual(parseLanguageReadingList(published).items[0].original, data.items[0].original);
+  assert.deepEqual(reading, before);
+  assert.equal(parseLanguageReadingList(reading).items[0].sources[0].available, undefined);
+  assert.equal(manifest.chunks[source.path], undefined);
+  const all = JSON.parse(await readFile(join(directory, manifest.responses.all.file), "utf8"));
+  assert.deepEqual(all.notes.find(note => note.path === reading.path), published);
+  const index = JSON.parse(await readFile(join(directory, manifest.readModel.bodyIndexFile), "utf8"));
+  assert.equal(index[source.path], undefined);
+  const indexed = JSON.parse(gunzipSync(await readFile(join(directory, index[reading.path]))).toString());
+  assert.deepEqual(indexed, published);
+  for (const file of await readdir(directory)) if (file.endsWith(".json")) assert.doesNotMatch(await readFile(join(directory, file), "utf8"), /PRIVATE-FULL-TRANSCRIPT/);
 });

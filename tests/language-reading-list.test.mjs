@@ -76,7 +76,7 @@ test("来源只接受可打开的Vault相对Markdown路径与非空定位标签"
     { path: "20_求職/./source.md" }, { path: "20_求職\\source.md" }, { path: "https://example.test/source.md" },
     { path: "20_求職/source.html" }, { path: "20_求職/source.md\u0000" }, { path: ".obsidian/source.md" },
     { path: "99_系统/模板/source.md" }, { path: "90_归档/source.md" }, { path: "20_求職//source.md" },
-    { path: " source.md" }, { locator: " " }, { label: "" },
+    { path: " source.md" }, { locator: " " }, { label: "" }, { available: "false" },
   ]) {
     const data = payload();
     Object.assign(data.items[0].sources[0], fields);

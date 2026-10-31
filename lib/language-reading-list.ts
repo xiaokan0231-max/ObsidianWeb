@@ -10,7 +10,7 @@ export const LANGUAGE_READING_LIST_FINDINGS = ["correction", "alternative", "unc
 export type LanguageReadingListCategory = string;
 export type LanguageReadingListPriority = typeof LANGUAGE_READING_LIST_PRIORITIES[number];
 export type LanguageReadingListFinding = typeof LANGUAGE_READING_LIST_FINDINGS[number];
-export type LanguageReadingListSource = { path: string; locator: string; label: string };
+export type LanguageReadingListSource = { path: string; locator: string; label: string; available?: boolean };
 export type LanguageReadingListItem = {
   id: string;
   number: number;
@@ -64,7 +64,8 @@ function sourcePath(value: unknown): value is string {
 }
 
 function source(value: unknown): value is LanguageReadingListSource {
-  return record(value) && sourcePath(value.path) && nonempty(value.locator) && nonempty(value.label);
+  return record(value) && sourcePath(value.path) && nonempty(value.locator) && nonempty(value.label)
+    && (value.available === undefined || typeof value.available === "boolean");
 }
 
 function item(value: unknown, sections: readonly string[]): value is LanguageReadingListItem {
@@ -110,4 +111,19 @@ export function parseLanguageReadingList(note: Note): LanguageReadingList | null
   if (date && !dateKey(date)) return null;
   return { path: note.path, title, date, description: data.description,
     period: { start: data.period.start, end: data.period.end }, ...(sections ? { sections } : {}), items: data.items };
+}
+
+/** 只改发布副本的来源可用性；原稿未公开时仍可阅读授权清单，但不提供失效的打开按钮。 */
+export function withPublishedReadingSources(note: Note, publishedPaths: ReadonlySet<string>): Note {
+  const document = parseLanguageReadingList(note);
+  if (!document) return note;
+  const items = document.items.map(entry => ({ ...entry, sources: entry.sources.map(source => ({
+    ...source, available: publishedPaths.has(source.path),
+  })) }));
+  const marker = note.content.indexOf(LANGUAGE_READING_LIST_MARKER) + LANGUAGE_READING_LIST_MARKER.length;
+  const suffix = note.content.slice(marker).replace(/^(\s*```json[\t ]*\r?\n)([\s\S]*?)(\r?\n[\t ]*```)/u, (_match, prefix, json, closing) => {
+    const data = JSON.parse(json);
+    return prefix + JSON.stringify({ ...data, items }, null, 2) + closing;
+  });
+  return { ...note, content: note.content.slice(0, marker) + suffix };
 }

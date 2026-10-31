@@ -68,6 +68,8 @@
 .reading-sources { margin: 8px 0 0 25px; color: var(--muted); font-size: 11px; line-height: 1.7; }
 .reading-sources summary { cursor: pointer; width: fit-content; }
 .reading-sources summary:hover { color: var(--green); }
+.reading-source-private { display: block; color: var(--text-secondary); }
+.reading-source-private small { display: block; color: var(--muted); }
 .reading-sources ul { padding: 0; margin: 9px 0 0; list-style: none; }
 .reading-sources li + li { margin-top: 8px; }
 .reading-sources button { padding: 0; border: 0; background: none; text-align: left; color: var(--green); font: inherit; cursor: pointer; line-height: 1.8; }

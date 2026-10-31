@@ -19,7 +19,7 @@ const COPY = {
   "zh-CN": {
     module: "专题速览", library: "阅读资料", contents: "本文目录", all: "从头阅读", original: "原话",
     suggested: "建议说法", reminder: "一句提醒", search: "查找原话、建议说法或提醒", searchShort: "查找这份清单", firstOnly: "只看优先项",
-    source: "出处", openNote: "打开资料原笔记", loading: "正在读取专题资料…", empty: "还没有阅读专题",
+    source: "出处", sourcePrivate: "原稿未公开", openNote: "打开资料原笔记", loading: "正在读取专题资料…", empty: "还没有阅读专题",
     emptyDetail: "整理好的专题资料会出现在这里。", failed: "这份专题暂时无法打开", retry: "重试",
     notFound: "没有找到这份专题", showFirst: "打开最新专题", noMatch: "没有匹配的表达", clear: "清除筛选",
     more: "更多专题", rows: "条", sources: "份来源", shown: "当前显示", first: "先改", optional: "顺手改",
@@ -31,7 +31,7 @@ const COPY = {
   ja: {
     module: "テーマ別資料", library: "読む資料", contents: "目次", all: "最初から読む", original: "元の表現",
     suggested: "言い換え例", reminder: "ポイント", search: "元の表現・言い換え・ポイントを検索", searchShort: "この資料を検索", firstOnly: "優先項目のみ",
-    source: "出典", openNote: "元の資料を開く", loading: "資料を読み込んでいます…", empty: "読む資料はまだありません",
+    source: "出典", sourcePrivate: "原文は非公開", openNote: "元の資料を開く", loading: "資料を読み込んでいます…", empty: "読む資料はまだありません",
     emptyDetail: "整理されたテーマ別資料がここに表示されます。", failed: "この資料を開けませんでした", retry: "再試行",
     notFound: "この資料が見つかりません", showFirst: "最新の資料を開く", noMatch: "一致する表現がありません", clear: "絞り込みを解除",
     more: "ほかの資料", rows: "件", sources: "資料", shown: "表示中", first: "優先", optional: "参考",
@@ -149,7 +149,7 @@ export default function ReadingView({ revision: refreshVersion, onOpenSource }: 
             return items.length ? <tbody key={category}>
               <tr className="reading-group" id={`reading-category-${index}`}><th colSpan={3} scope="rowgroup"><span>{String(index + 1).padStart(2, "0")}</span><h2>{categoryLabel(category)}</h2><small>{items.length} {t.rows}</small></th></tr>
               {items.map(item => <tr key={item.id} id={`reading-${item.id}`} className="reading-entry">
-                <td><div className="reading-original"><span>{String(item.number).padStart(2, "0")}</span><p lang="ja">{item.original}</p></div><details className="reading-sources"><summary>{t.source}{item.sources.length > 1 ? ` · ${item.sources.length}` : ""}</summary><ul>{item.sources.map(source => <li key={`${source.path}:${source.locator}`}><button type="button" onClick={() => onOpenSource(source.path, revision)}>{source.label}<small>{source.locator} ↗</small></button></li>)}</ul></details></td>
+                <td><div className="reading-original"><span>{String(item.number).padStart(2, "0")}</span><p lang="ja">{item.original}</p></div><details className="reading-sources"><summary>{t.source}{item.sources.length > 1 ? ` · ${item.sources.length}` : ""}</summary><ul>{item.sources.map(source => <li key={`${source.path}:${source.locator}`}>{source.available === false ? <span className="reading-source-private">{source.label}<small>{source.locator} · {t.sourcePrivate}</small></span> : <button type="button" onClick={() => onOpenSource(source.path, revision)}>{source.label}<small>{source.locator} ↗</small></button>}</li>)}</ul></details></td>
                 <td className="reading-suggested" lang="ja">{item.finding && <p className="reading-pattern" lang="zh-CN">{item.pattern}</p>}{item.suggested}</td>
                 <td>{item.finding ? <span className={`reading-finding-label ${item.finding}`}>{t.findings[item.finding]}</span> : <span className={`reading-priority-label${item.priority === "先改" ? " first" : ""}`}>{item.priority === "先改" ? t.first : t.optional}</span>}<p className="reading-reminder" lang="zh-CN">{item.reminder}</p>{item.rule && <p className="reading-rule"><span>{t.rule}</span>{item.rule}</p>}{item.boundary && <details className="reading-boundary"><summary>{t.boundary}</summary><p lang="zh-CN">{item.boundary}</p></details>}</td>
               </tr>)}
