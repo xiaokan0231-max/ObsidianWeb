@@ -57,10 +57,10 @@ test("相同快照生成相同验证器，正文改写即使mtime未变也改变
   assert.notEqual(first.manifest.responses.actions.file, next.manifest.responses.actions.file);
 });
 
-test("超过单资源上限的全库继续分片读取，不输出超限响应或丢失笔记", async (t) => {
+test("超过聚合预算但未达单资源上限的全库继续分片读取，不丢失笔记", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "published-large-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const content = "字".repeat(4_300_000);
+  const content = "字".repeat(2_900_000);
   const largeNotes = [makeNote("大資料一.md", "note", content), makeNote("大資料二.md", "note", content)];
   const { manifest } = await writePublishedVaultAssets(largeNotes, directory, publishedAt);
   assert.equal(manifest.responses.all, undefined);

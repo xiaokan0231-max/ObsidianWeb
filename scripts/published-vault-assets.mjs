@@ -12,6 +12,7 @@ import { copyRetainedReadModelAssets, garbageCollectReadModelAssets, writeReadMo
 const compressBrotli = promisify(brotliCompress);
 const compressGzip = promisify(gzip);
 const ASSET_LIMIT = 24 * 1024 * 1024;
+const AGGREGATE_LIMIT = 16 * 1024 * 1024;
 const SCOPES = ["all", "overview", "actions", "activity", "jobs", "interview", "training"];
 const digest = (data) => createHash("sha256").update(data).digest("hex").slice(0, 24);
 
@@ -70,8 +71,8 @@ export async function writePublishedVaultAssets(notes, directory, publishedAt = 
       connected: true, fetchedAt: Date.parse(publishedAt), notes: scopedNotes,
       paths: scopedNotes.map((note) => note.path), scope,
     });
-    // 全库可能超过静态资源上限；仍保留原有分片读取，不能为了提速截断内容。
-    if (Buffer.byteLength(data) > ASSET_LIMIT) continue;
+    // 大型聚合响应只是加速副本；留出历史索引的部署容量，超限时沿用完整分片读取。
+    if (Buffer.byteLength(data) > AGGREGATE_LIMIT) continue;
     responses[scope] = await writeResponse(data);
   }
   const calendar = await writeResponse(JSON.stringify({ connected: true,
