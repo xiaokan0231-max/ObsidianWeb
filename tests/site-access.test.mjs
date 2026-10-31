@@ -115,7 +115,8 @@ test("登录只能同源表单POST，拒绝跨站、缺失来源、其它类型�
 });
 
 test("登录后的返回地址不能跳出本站，也不接受反斜线或控制字符", async () => {
-  for (const next of ["https://other.example.test/", "//other.example.test/", "/\\other.example.test/", "\n//other.example.test/", "/calendar\r\nX-Test: bad"]) {
+  for (const next of ["https://other.example.test/", "//other.example.test/", "/\\other.example.test/", "\n//other.example.test/", "/calendar\r\nX-Test: bad",
+    "/..//other.example.test", "/.//other.example.test", "/%2e%2e//other.example.test"]) {
     const f = fixture();
     const { response } = await f.login(next);
     assert.equal(response.status, 303);

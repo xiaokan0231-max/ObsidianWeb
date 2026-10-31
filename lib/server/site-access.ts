@@ -21,7 +21,7 @@ function returnPath(value: string | null, origin: string) {
   if (!value?.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u001f\u007f]/u.test(value)) return "/calendar";
   try {
     const target = new URL(value, origin);
-    if (target.origin !== origin || target.pathname.startsWith("/_site-access")) return "/calendar";
+    if (target.origin !== origin || target.pathname.startsWith("//") || target.pathname.startsWith("/_site-access")) return "/calendar";
     return target.pathname + target.search;
   } catch { return "/calendar"; }
 }
