@@ -33,3 +33,5 @@ node scripts/warm-read-model.mjs https://YOUR_SITE
 索引导入完成后再验收页面。保留最近三个完整派生版本及被它们引用的正文资源；清理仅处理派生资源，不删除 Obsidian 原笔记。JST 跨日汇总从同版日历投影重新计算。
 
 公网仍使用已发布快照，业务写入和 AI 生成仍仅在本地执行。老师交流信箱继续使用独立鉴权的 R2，不进入 SQL、公开快照、搜索索引或 AI 输入。
+
+公网入口由 Worker 的访问密码门禁保护，覆盖页面、API、留言入口和 `_published-vault` 静态文件。生产构建必须保留 `assets.run_worker_first: true`，开发环境仍由 Vite 优先处理资源。密码和会话签名密钥分别配置为 Sites 运行时秘密 `SITE_ACCESS_PASSWORD`、`SITE_ACCESS_SESSION_SECRET`；缺失时关闭访问，不回退为匿名可读。解锁后使用浏览会话 Cookie，服务端最多保留 12 小时；改密码或密钥使旧会话失效。发布后须验证未带 Cookie 的原始资料链接被拒绝，再验证输入密码后页面与资料可读。所有授权资料响应禁止共享及浏览器持久缓存。

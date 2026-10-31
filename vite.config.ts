@@ -71,7 +71,10 @@ export default defineConfig(async ({ command }) => {
       sites(),
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        config: { ...localBindingConfig, vars: { ...localBindingConfig.vars, ...feedbackVars } },
+        config: { ...localBindingConfig,
+          // 生产的原始资料也必须先过密码门禁；开发继续由 Vite 直接提供模块资源。
+          assets: { ...localBindingConfig.assets, ...(command === "build" ? { run_worker_first: true } : {}) },
+          vars: { ...localBindingConfig.vars, ...feedbackVars } },
       }),
     ],
   };

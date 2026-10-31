@@ -48,5 +48,6 @@ export function PublishedReadOnlyNotice() {
   if (/^\/(consultation|feedback)(\/|$)/.test(pathname ?? "")) return null;
   return <aside style={{ position: "fixed", bottom: 12, right: 16, zIndex: 1000, padding: "6px 12px", borderRadius: 8, background: "var(--color-bg, #fff)", color: "var(--color-text, #222)", border: "1px solid var(--color-border, #ddd)", fontSize: 14 }}>
     {locale === "ja" ? "資料は閲覧専用 · コメントできます" : "资料仅供浏览 · 可留言交流"}
+    <form method="post" action="/_site-access/logout" style={{ display: "inline", marginLeft: 12 }}><button type="submit" style={{ border: 0, padding: 0, color: "inherit", background: "transparent", font: "inherit", textDecoration: "underline", cursor: "pointer" }}>{locale === "ja" ? "アクセスを終了" : "退出访问"}</button></form>
   </aside>;
 }
