@@ -146,5 +146,7 @@ export function privateSiteResponse(response: Response): Response {
   const responseHeaders = new Headers(response.headers);
   responseHeaders.set("Cache-Control", "private, no-store");
   responseHeaders.set("X-Robots-Tag", "noindex, nofollow, noarchive");
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers: responseHeaders });
+  // 聚合资料可能已是 gzip/br 字节；包裹缓存头时保留手动编码，避免平台再压缩一次。
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers: responseHeaders,
+    ...(responseHeaders.has("Content-Encoding") ? { encodeBody: "manual" as const } : {}) });
 }
