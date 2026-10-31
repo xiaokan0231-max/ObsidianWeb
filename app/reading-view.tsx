@@ -8,6 +8,7 @@ import {
   parseLanguageReadingList,
   type LanguageReadingList,
   type LanguageReadingListItem,
+  type LanguageReadingListFinding,
 } from "@/lib/language-reading-list";
 import { ReadModelFetchError, readReadModelJSON } from "./read-model-resource";
 import { useReadModelLibrary } from "./use-read-model-library";
@@ -23,6 +24,8 @@ const COPY = {
     notFound: "没有找到这份专题", showFirst: "打开最新专题", noMatch: "没有匹配的表达", clear: "清除筛选",
     more: "更多专题", rows: "条", sources: "份来源", shown: "当前显示", first: "先改", optional: "顺手改",
     syncing: "资料正在更新，当前保留上一完整版本。", syncFailed: "资料更新暂未完成，当前保留上一完整版本。",
+    finding: "表达类型", allFindings: "全部类型", rule: "句式", boundary: "使用边界",
+    findings: { correction: "句型需修", alternative: "原句可用", uncertain: "转写待核" },
     categories: { "语体": "语体与句尾", "含义": "含义与分寸", "搭配": "用词与搭配", "语法": "语法提醒" },
   },
   ja: {
@@ -33,14 +36,17 @@ const COPY = {
     notFound: "この資料が見つかりません", showFirst: "最新の資料を開く", noMatch: "一致する表現がありません", clear: "絞り込みを解除",
     more: "ほかの資料", rows: "件", sources: "資料", shown: "表示中", first: "優先", optional: "参考",
     syncing: "資料を更新中です。前回の完全な資料を表示しています。", syncFailed: "更新は未完了です。前回の完全な資料を表示しています。",
+    finding: "表現の分類", allFindings: "すべての分類", rule: "構文", boundary: "使う際の注意",
+    findings: { correction: "構文の修正", alternative: "原文も使える", uncertain: "文字起こし要確認" },
     categories: { "语体": "文体と文末", "含义": "意味と伝え方", "搭配": "言葉の組み合わせ", "语法": "文法の確認" },
   },
 };
 
 /** 检索只针对已打开的专题，不把目录卡片当正文，也不扫描面试原稿。 */
-export function readingListMatches(item: LanguageReadingListItem, query: string, firstOnly: boolean) {
+export function readingListMatches(item: LanguageReadingListItem, query: string, firstOnly: boolean, finding: LanguageReadingListFinding | "all" = "all") {
   if (firstOnly && item.priority !== "先改") return false;
-  const haystack = [item.pattern, item.original, item.suggested, item.reminder, ...item.sources.map(source => `${source.label} ${source.locator}`)]
+  if (finding !== "all" && item.finding !== finding) return false;
+  const haystack = [item.pattern, item.original, item.suggested, item.reminder, item.rule, item.boundary, ...item.sources.map(source => `${source.label} ${source.locator}`)]
     .join(" ").normalize("NFKC").toLocaleLowerCase("ja-JP");
   return query.normalize("NFKC").toLocaleLowerCase("ja-JP").trim().split(/\s+/u).filter(Boolean).every(term => haystack.includes(term));
 }
@@ -55,6 +61,7 @@ export default function ReadingView({ revision: refreshVersion, onOpenSource }: 
   const [path, setPath] = useUrlState("readingList", "", textCodec);
   const [search, setSearch] = useUrlState("readingSearch", "", textCodec);
   const [priority, setPriority] = useUrlState("readingPriority", "all", enumCodec(["all", "first"] as const));
+  const [finding, setFinding] = useUrlState("readingFinding", "all", enumCodec(["all", "correction", "alternative", "uncertain"] as const));
   const [retry, setRetry] = useState(0);
   const [state, setState] = useState<DocumentState>({ key: "", document: null, error: false });
   // 明确的阅读路径不依赖目录当前分页；后续页资料刷新后也能直接回到同一篇。
@@ -83,9 +90,12 @@ export default function ReadingView({ revision: refreshVersion, onOpenSource }: 
 
   const document = state.key === key ? state.document : null;
   const failed = state.key === key && state.error;
-  const visible = useMemo(() => document?.items.filter(item => readingListMatches(item, search, priority === "first")) ?? [], [document, search, priority]);
+  const hasFindings = document?.items.some(item => item.finding) ?? false;
+  const sections = document?.sections ?? LANGUAGE_READING_LIST_CATEGORIES;
+  const categoryLabel = (category: string) => Object.hasOwn(t.categories, category) ? t.categories[category as keyof typeof t.categories] : category;
+  const visible = useMemo(() => document?.items.filter(item => readingListMatches(item, search, priority === "first", hasFindings ? finding : "all")) ?? [], [document, search, priority, hasFindings, finding]);
   const sourceCount = useMemo(() => new Set(document?.items.flatMap(item => item.sources.map(source => source.path))).size, [document]);
-  const clear = () => { setSearch(""); setPriority("all"); };
+  const clear = () => { setSearch(""); setPriority("all"); setFinding("all"); };
   const select = (next: string) => { setPath(next); clear(); };
 
   if (!catalog.page && catalog.loading) return <div className="reading-status" role="status">{t.loading}</div>;
@@ -116,31 +126,32 @@ export default function ReadingView({ revision: refreshVersion, onOpenSource }: 
         <div className="reading-controls">
           <nav className="reading-outline" aria-label={t.contents}>
             <a href="#reading-start">{t.all}</a>
-            {LANGUAGE_READING_LIST_CATEGORIES.map((category, index) => {
+            {sections.map((category, index) => {
               const count = visible.filter(item => item.category === category).length;
-              return count ? <a href={`#reading-category-${index}`} key={category}>{t.categories[category]}<span>{count}</span></a>
-                : <span className="reading-outline-empty" aria-disabled="true" key={category}>{t.categories[category]}<small>0</small></span>;
+              return count ? <a href={`#reading-category-${index}`} key={category}>{categoryLabel(category)}<span>{count}</span></a>
+                : <span className="reading-outline-empty" aria-disabled="true" key={category}>{categoryLabel(category)}<small>0</small></span>;
             })}
           </nav>
           <div className="reading-toolbar">
             <label className="reading-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg><input type="search" value={search} onChange={event => setSearch(event.target.value)} aria-label={t.search} placeholder={t.searchShort} /></label>
             <label className="reading-priority"><input type="checkbox" checked={priority === "first"} onChange={event => setPriority(event.target.checked ? "first" : "all")} />{t.firstOnly}</label>
+            {hasFindings && <label className="reading-finding-filter"><select aria-label={t.finding} value={finding} onChange={event => setFinding(event.target.value as LanguageReadingListFinding | "all")}><option value="all">{t.allFindings}</option>{(["correction", "alternative", "uncertain"] as const).map(value => <option key={value} value={value}>{t.findings[value]}</option>)}</select></label>}
             <span className="reading-result-count" role="status">{visible.length} / {document.items.length}</span>
-            {(search || priority !== "all") && <button className="reading-clear" type="button" onClick={clear}>{t.clear}</button>}
+            {(search || priority !== "all" || (hasFindings && finding !== "all")) && <button className="reading-clear" type="button" onClick={clear}>{t.clear}</button>}
           </div>
         </div>
         {!visible.length ? <div className="reading-status"><p>{t.noMatch}</p><button type="button" onClick={clear}>{t.clear}</button></div> : <table className="reading-table">
           <caption>{document.title}</caption>
           <colgroup><col className="reading-original-column" /><col className="reading-suggested-column" /><col /></colgroup>
           <thead><tr><th scope="col">{t.original}</th><th scope="col">{t.suggested}</th><th scope="col">{t.reminder}</th></tr></thead>
-          {LANGUAGE_READING_LIST_CATEGORIES.map((category, index) => {
+          {sections.map((category, index) => {
             const items = visible.filter(item => item.category === category);
             return items.length ? <tbody key={category}>
-              <tr className="reading-group" id={`reading-category-${index}`}><th colSpan={3} scope="rowgroup"><span>{String(index + 1).padStart(2, "0")}</span><h2>{t.categories[category]}</h2><small>{items.length} {t.rows}</small></th></tr>
+              <tr className="reading-group" id={`reading-category-${index}`}><th colSpan={3} scope="rowgroup"><span>{String(index + 1).padStart(2, "0")}</span><h2>{categoryLabel(category)}</h2><small>{items.length} {t.rows}</small></th></tr>
               {items.map(item => <tr key={item.id} id={`reading-${item.id}`} className="reading-entry">
                 <td><div className="reading-original"><span>{String(item.number).padStart(2, "0")}</span><p lang="ja">{item.original}</p></div><details className="reading-sources"><summary>{t.source}{item.sources.length > 1 ? ` · ${item.sources.length}` : ""}</summary><ul>{item.sources.map(source => <li key={`${source.path}:${source.locator}`}><button type="button" onClick={() => onOpenSource(source.path, revision)}>{source.label}<small>{source.locator} ↗</small></button></li>)}</ul></details></td>
-                <td className="reading-suggested" lang="ja">{item.suggested}</td>
-                <td><span className={`reading-priority-label${item.priority === "先改" ? " first" : ""}`}>{item.priority === "先改" ? t.first : t.optional}</span><p className="reading-reminder" lang="zh-CN">{item.reminder}</p></td>
+                <td className="reading-suggested" lang="ja">{item.finding && <p className="reading-pattern" lang="zh-CN">{item.pattern}</p>}{item.suggested}</td>
+                <td>{item.finding ? <span className={`reading-finding-label ${item.finding}`}>{t.findings[item.finding]}</span> : <span className={`reading-priority-label${item.priority === "先改" ? " first" : ""}`}>{item.priority === "先改" ? t.first : t.optional}</span>}<p className="reading-reminder" lang="zh-CN">{item.reminder}</p>{item.rule && <p className="reading-rule"><span>{t.rule}</span>{item.rule}</p>}{item.boundary && <details className="reading-boundary"><summary>{t.boundary}</summary><p lang="zh-CN">{item.boundary}</p></details>}</td>
               </tr>)}
             </tbody> : null;
           })}

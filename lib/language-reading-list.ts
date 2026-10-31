@@ -5,9 +5,11 @@ export const LANGUAGE_READING_LIST_TYPE = "language-reading-list";
 export const LANGUAGE_READING_LIST_MARKER = "<!-- language-reading-list:data -->";
 export const LANGUAGE_READING_LIST_CATEGORIES = ["语体", "含义", "搭配", "语法"] as const;
 export const LANGUAGE_READING_LIST_PRIORITIES = ["先改", "顺手改"] as const;
+export const LANGUAGE_READING_LIST_FINDINGS = ["correction", "alternative", "uncertain"] as const;
 
-export type LanguageReadingListCategory = typeof LANGUAGE_READING_LIST_CATEGORIES[number];
+export type LanguageReadingListCategory = string;
 export type LanguageReadingListPriority = typeof LANGUAGE_READING_LIST_PRIORITIES[number];
+export type LanguageReadingListFinding = typeof LANGUAGE_READING_LIST_FINDINGS[number];
 export type LanguageReadingListSource = { path: string; locator: string; label: string };
 export type LanguageReadingListItem = {
   id: string;
@@ -18,6 +20,9 @@ export type LanguageReadingListItem = {
   original: string;
   suggested: string;
   reminder: string;
+  finding?: LanguageReadingListFinding;
+  rule?: string;
+  boundary?: string;
   sources: LanguageReadingListSource[];
 };
 export type LanguageReadingListPeriod = { start: string; end: string };
@@ -25,6 +30,7 @@ export type LanguageReadingListData = {
   version: 1;
   description: string;
   period: LanguageReadingListPeriod;
+  sections?: string[];
   items: LanguageReadingListItem[];
 };
 export type LanguageReadingList = {
@@ -33,6 +39,7 @@ export type LanguageReadingList = {
   date: string;
   description: string;
   period: LanguageReadingListPeriod;
+  sections?: string[];
   items: LanguageReadingListItem[];
 };
 
@@ -60,12 +67,14 @@ function source(value: unknown): value is LanguageReadingListSource {
   return record(value) && sourcePath(value.path) && nonempty(value.locator) && nonempty(value.label);
 }
 
-function item(value: unknown): value is LanguageReadingListItem {
+function item(value: unknown, sections: readonly string[]): value is LanguageReadingListItem {
   return record(value) && nonempty(value.id) && value.id === value.id.trim()
     && Number.isSafeInteger(value.number) && Number(value.number) > 0
-    && LANGUAGE_READING_LIST_CATEGORIES.some((category) => category === value.category)
+    && sections.some((category) => category === value.category)
     && LANGUAGE_READING_LIST_PRIORITIES.some((priority) => priority === value.priority)
     && nonempty(value.pattern) && nonempty(value.original) && nonempty(value.suggested) && nonempty(value.reminder)
+    && (value.finding === undefined || LANGUAGE_READING_LIST_FINDINGS.some(finding => finding === value.finding))
+    && (value.rule === undefined || nonempty(value.rule)) && (value.boundary === undefined || nonempty(value.boundary))
     && Array.isArray(value.sources) && value.sources.length > 0 && value.sources.every(source);
 }
 
@@ -81,7 +90,13 @@ export function parseLanguageReadingList(note: Note): LanguageReadingList | null
   try { data = JSON.parse(block); } catch { return null; }
   if (!record(data) || data.version !== 1 || typeof data.description !== "string" || !record(data.period)
     || !dateKey(data.period.start) || !dateKey(data.period.end) || data.period.start > data.period.end
-    || !Array.isArray(data.items) || data.items.length === 0 || !data.items.every(item)) return null;
+    || !Array.isArray(data.items) || data.items.length === 0) return null;
+  // 专题可自定目录；未声明目录的旧清单仍沿用原来的四类校验。
+  if (data.sections !== undefined && (!Array.isArray(data.sections) || data.sections.length === 0 || data.sections.length > 12
+    || !data.sections.every(section => nonempty(section) && section === section.trim())
+    || new Set(data.sections).size !== data.sections.length)) return null;
+  const sections = data.sections as string[] | undefined;
+  if (!data.items.every(entry => item(entry, sections ?? LANGUAGE_READING_LIST_CATEGORIES))) return null;
   const ids = new Set<string>(), numbers = new Set<number>();
   for (const entry of data.items) {
     if (ids.has(entry.id) || numbers.has(entry.number)) return null;
@@ -94,5 +109,5 @@ export function parseLanguageReadingList(note: Note): LanguageReadingList | null
     : nonempty(metadata.date) ? metadata.date.trim() : "";
   if (date && !dateKey(date)) return null;
   return { path: note.path, title, date, description: data.description,
-    period: { start: data.period.start, end: data.period.end }, items: data.items };
+    period: { start: data.period.start, end: data.period.end }, ...(sections ? { sections } : {}), items: data.items };
 }

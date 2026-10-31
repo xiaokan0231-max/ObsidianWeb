@@ -31,7 +31,7 @@ function catalog(items = firstPage, syncState = "ready") {
   };
 }
 
-async function harness(remote, search = "") {
+async function harness(remote, search = "", documentNote = note) {
   const values = [], requests = [], opened = [];
   let cursor = 0;
   let effects = [];
@@ -56,7 +56,7 @@ async function harness(remote, search = "") {
       "./use-read-model-library": { useReadModelLibrary: () => remote },
       "./read-model-resource": {
         ReadModelFetchError: class ReadModelFetchError extends Error {},
-        readReadModelJSON: async (url, signal) => { requests.push({ url, signal }); return { note }; },
+        readReadModelJSON: async (url, signal) => { requests.push({ url, signal }); return { note: documentNote }; },
       },
     },
   });
@@ -137,4 +137,34 @@ test("索引构建中的空目录显示读取状态，只有完整空目录才�
   assert.deepEqual(building.requests, []);
   const ready = await harness(catalog([]));
   assert.match(ready.render().html, /还没有阅读专题/);
+});
+
+test("语法专题按自定目录展示并能只读原句可用的改写，旧清单不受分类参数影响", async () => {
+  const data = {
+    version: 1, description: "保留判断与适用边界。", period: { start: "2026-01-01", end: "2026-01-31" }, sections: ["句子结构", "可选句式"],
+    items: [
+      { ...item, category: "句子结构", finding: "correction" },
+      { ...item, id: "alternative-02", number: 2, category: "可选句式", finding: "alternative", suggested: "設計と開発の両方を担当しました。", rule: "AもBも → AとBの両方", boundary: "原句也成立。" },
+    ],
+  };
+  const richNote = { ...note, content: `${LANGUAGE_READING_LIST_MARKER}\n\`\`\`json\n${JSON.stringify(data)}\n\`\`\`\n` };
+  const selected = new URLSearchParams({ readingList: documentPath, readingFinding: "alternative" }).toString();
+  const h = await harness(catalog(), selected, richNote);
+  h.render();
+  const cleanup = await h.runEffects();
+  try {
+    const html = h.render().html;
+    assert.match(html, /原句可用/);
+    assert.match(html, /可选句式/);
+    assert.match(html, /設計と開発の両方を担当しました。/);
+    assert.match(html, /原句也成立。/);
+    assert.doesNotMatch(html, /reading-expression-01|语体与句尾/);
+  } finally { cleanup(); }
+  const old = await harness(catalog(), selected);
+  old.render();
+  const oldCleanup = await old.runEffects();
+  try { assert.match(old.render().html, /SQLの実行結果を確認します。/); } finally { oldCleanup(); }
+  const { readingListMatches } = await loadAppModule("app/reading-view.tsx");
+  assert.equal(readingListMatches(data.items[1], "両方 原句", false, "alternative"), true);
+  assert.equal(readingListMatches(data.items[1], "", false, "correction"), false);
 });

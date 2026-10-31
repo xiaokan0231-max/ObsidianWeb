@@ -97,3 +97,23 @@ test("覆盖日期有效且有序，标题按元数据、运行时标题、正�
   assert.equal(parseLanguageReadingList(noTitle).title, "备用标题");
   assert.equal(parseLanguageReadingList({ ...source, frontmatter: { ...source.frontmatter, date: "2026-02-30" } }), null);
 });
+
+test("语法专题声明自己的目录，保留纠正、可选句式和转写疑点的区别", () => {
+  const data = payload();
+  data.sections = ["句子结构", "可选句式"];
+  Object.assign(data.items[0], { category: "可选句式", finding: "alternative", rule: "AもBも → AとBの両方", boundary: "原句也成立，不增加工作范围。" });
+  const result = parseLanguageReadingList(note(data));
+  assert.deepEqual(result.sections, data.sections);
+  assert.equal(result.items[0].finding, "alternative");
+  assert.equal(result.items[0].rule, data.items[0].rule);
+  assert.equal(result.items[0].boundary, data.items[0].boundary);
+  assert.equal("sections" in parseLanguageReadingList(note()), false);
+  for (const fields of [{ finding: "error" }, { finding: null }, { rule: " " }, { boundary: 7 }, { category: "语法" }]) {
+    const invalid = structuredClone(data);
+    Object.assign(invalid.items[0], fields);
+    assert.equal(parseLanguageReadingList(note(invalid)), null);
+  }
+  for (const sections of [[], ["句子结构", "句子结构"], [" 可选句式"], [null], Array.from({ length: 13 }, (_, i) => `目录${i}`)]) {
+    assert.equal(parseLanguageReadingList(note({ ...data, sections })), null);
+  }
+});
