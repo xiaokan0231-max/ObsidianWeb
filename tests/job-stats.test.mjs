@@ -16,11 +16,13 @@ import {
 
 const SAMPLE = {
   total: 181,
-  reached: 11,
+  reachedInterview: 11,
+  reachedMeeting: 3,
+  unsubmitted: 2,
   byChannel: new Map([
-    ["Recruit Agent", { total: 163, reached: 8 }],
-    ["企業直投/ATS", { total: 8, reached: 2 }],
-    ["Green", { total: 10, reached: 1 }],
+    ["Recruit Agent", { total: 163, reached: 8, meeting: 0, unsubmitted: 0 }],
+    ["企業直投/ATS", { total: 8, reached: 2, meeting: 1, unsubmitted: 0 }],
+    ["Green", { total: 10, reached: 1, meeting: 2, unsubmitted: 2 }],
   ]),
   byMonth: new Map([
     ["2025-10", 26],
@@ -50,6 +52,10 @@ test("buildStatsPayload sorts each breakdown so the chart order is stable", () =
 
   assert.equal(rejections.total, 181);
   assert.equal(rejections.reachedInterview, 11);
+  // 面談を経て書類で終わった分と、企業に届かず終わった分は面接到達と混ぜない
+  assert.equal(rejections.reachedMeeting, 3);
+  assert.equal(rejections.unsubmitted, 2);
+  assert.deepEqual(rejections.byChannel[1], { channel: "Green", total: 10, reached: 1, meeting: 2, unsubmitted: 2 });
   // 経路は件数の多い順（棒グラフの並び順がそのまま決まる）
   assert.deepEqual(rejections.byChannel.map((c) => c.channel), ["Recruit Agent", "Green", "企業直投/ATS"]);
   // 月は時系列順。件数順に並べると折れ線が意味を失う
@@ -68,6 +74,34 @@ test("the rendered block carries no timestamp", () => {
   const second = renderStatsBlock(buildStatsPayload(SAMPLE));
   assert.equal(first, second);
   assert.ok(!/\d{4}-\d{2}-\d{2}T|generatedAt|fetchedAt/.test(first));
+});
+
+test("a channel row without the 面談／未提出 columns is carried as zeros, not undefined", () => {
+  // 列が増える前の呼び出し形。undefined のまま画面に渡すと「書類終了 = total − reached − meeting」が NaN になる。
+  const { rejections } = buildStatsPayload({
+    total: 5,
+    reachedInterview: 1,
+    byChannel: new Map([["Green", { total: 5, reached: 1 }]]),
+    byMonth: new Map(),
+    byReason: new Map(),
+  });
+  assert.equal(rejections.reachedMeeting, 0);
+  assert.equal(rejections.unsubmitted, 0);
+  assert.deepEqual(rejections.byChannel, [{ channel: "Green", total: 5, reached: 1, meeting: 0, unsubmitted: 0 }]);
+});
+
+test("a ledger written before the 面談／未提出 split still parses with zeros", () => {
+  const note = [
+    `<!-- generated:${STATS_BLOCK_ID} -->`,
+    "```json",
+    JSON.stringify({ rejections: { total: 5, reachedInterview: 1, byChannel: [{ channel: "Green", total: 5, reached: 1 }], byMonth: [], byReason: [] } }),
+    "```",
+    "<!-- /generated -->",
+  ].join("\n");
+  const stats = parseStatsPayload(note);
+  assert.equal(stats.rejections.reachedMeeting, 0);
+  assert.equal(stats.rejections.unsubmitted, 0);
+  assert.deepEqual(stats.rejections.byChannel, [{ channel: "Green", total: 5, reached: 1, meeting: 0, unsubmitted: 0 }]);
 });
 
 test("a note without the block yields empty counts instead of throwing", () => {

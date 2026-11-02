@@ -6,10 +6,11 @@
 //   1) job_search_rejections.csv（ある時点で凍結した過去分。件数は CSV が持つ）
 //   2) 20_求職 配下の type: job-case frontmatter（凍結後の応募はここが唯一の記録先）
 //   3) vault-lib.mjs の列挙定数（status / channel の正）
-// CSV に既にある会社は 2) 側を無視する（二重計上を避ける）。
+// CSV と同じ出来事を記録したノートは CSV 行に畳む（二重計上を避ける）。
+// 会社が同じでも経路が違えば別の応募として数える——詳細は records の組み立てを見ること。
 
-import { readFile, stat, writeFile } from "node:fs/promises";
-import { relative } from "node:path";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { load as loadYaml, JSON_SCHEMA } from "js-yaml";
 import {
   APPLIED_LEDGER,
@@ -87,10 +88,77 @@ if (csvRows.length === 0) {
   process.exit(3);
 }
 
+/** 株式会社の位置・空白・全半角の表記ゆれだけを吸収し、同じ会社の二重計上を防ぐ。 */
+const companyKey = (value) =>
+  String(value ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/株式会社|有限会社|合同会社|\(株\)|[\s　・･_]/g, "");
+
+// ── 到達段階 ──────────────────────────────────────────────────────────────
+// 不採用になるまでに企業とどこまで接点があったか。値が大きいほど深い。
+// 以前は「面接か、それ以外か」の二値で、カジュアル面談・人事面談を経てから書類で落ちた案件も、
+// エージェントが企業に出さずに終わった案件も、全部「書類終了」に押し込んでいた。
+// 2026-11-02 本人が「ビズリーチ 0/21 は実態と違う」と指摘して判明——数字の欠落ではなく口径の問題。
+const STAGE = { unsubmitted: 0, document: 1, meeting: 2, interview: 3 };
+const STAGE_LABEL = {
+  [STAGE.unsubmitted]: "未提出（企業に届かず終了）",
+  [STAGE.document]: "書類不採用",
+  [STAGE.meeting]: "面談後の書類不採用",
+  [STAGE.interview]: "面接後不採用",
+};
+// status の補足文から段階を読む。書き手は人と AI の両方で、面談を経たのに「書類選考」としか書かない
+// 例が実在するため、ここで拾えない分は会社フォルダの逐字稿で補う（下の sessionsByFolder）。
+//   未提出：エージェント推薦不可・面談前終了・掲載／募集終了＝企業に書類が届いていない
+//   面談  ：「面談後」「面談実施」「面談を経て」。「面談前」「面談見送り」は面談していないので含めない
+//   面接  ：一次〜最終面接（「一次選考」は書類なので除く）
+const UNSUBMITTED_STATUS = /推薦不可|未提出|面談前|掲載終了|募集終了/;
+const MEETING_STATUS = /面談(?:後|実施|を経て|済)/;
+const INTERVIEW_STATUS = /面接(?!前)|最終|[一二三]次(?!選考)/;
+const stageFromStatus = (status) => {
+  if (INTERVIEW_STATUS.test(status)) return STAGE.interview;
+  if (MEETING_STATUS.test(status)) return STAGE.meeting;
+  if (UNSUBMITTED_STATUS.test(status)) return STAGE.unsubmitted;
+  return STAGE.document;
+};
+
+// 会社フォルダ（20_求職/<会社>/）に置かれた逐字稿・整理稿は「その回が実際にあった」物証。
+// ファイル名は `YYYY-MM-DD_<回>_逐字稿.md`／`_整理稿.md`（数据字典の規約）なので、回名で面談／面接を分ける。
+// エージェント面談・媒体のユーザーサクセス面談は応募先企業との接点ではないので数えない。
+const companyFolders = [];
+const sessionsByFolder = new Map();
+for (const entry of await readdir(JOB_CASE_ROOT, { withFileTypes: true })) {
+  if (!entry.isDirectory() || entry.name.startsWith("_") || entry.name.startsWith(".")) continue;
+  companyFolders.push(entry.name);
+  const sessions = [];
+  for (const file of await readdir(join(JOB_CASE_ROOT, entry.name))) {
+    const parsed = file.match(/^(\d{4}-\d{2}-\d{2})_(.+?)_(?:逐字稿|整理稿)/);
+    if (!parsed || /エージェント|ユーザーサクセス/.test(parsed[2])) continue;
+    const stage = /面接/.test(parsed[2]) ? STAGE.interview : /面談/.test(parsed[2]) ? STAGE.meeting : null;
+    if (stage !== null) sessions.push({ date: parsed[1], stage });
+  }
+  if (sessions.length) sessionsByFolder.set(entry.name, sessions);
+}
+// 案件ノートがどの会社フォルダに属するか。会社フォルダ直下ならそのフォルダ。
+// `_AI推薦/` 配下は会社フォルダを持たない代わりに、ファイル名が `<会社フォルダ名>_<求人>` で始まる規約
+// （`INSIGHT_LAB_…` のようにフォルダ名自体が _ を含むので最長一致）。英字ファイル名とカナのフォルダ名の
+// ような割れは会社名キーで拾う。
+const companyFolderOf = (note) => {
+  const segments = relative(JOB_CASE_ROOT, note.path).split("/");
+  if (segments.length < 2) return null;
+  if (!segments[0].startsWith("_")) return segments[0];
+  const base = note.name.replace(/\.md$/i, "");
+  const byPrefix = companyFolders
+    .filter((folder) => base === folder || base.startsWith(`${folder}_`))
+    .sort((a, b) => b.length - a.length)[0];
+  return byPrefix ?? companyFolders.find((folder) => companyKey(folder) === companyKey(note.frontmatter.company)) ?? null;
+};
+
 const records = csvRows.map((row) => ({
   company: row.company,
   channel: normalizeChannel(row.channel),
-  reachedInterview: !isDocStage(row.stage),
+  // 凍結 CSV の stage 列は「書類で終了か、面接後か」の二値で、面談の有無は持っていない。
+  stage: isDocStage(row.stage) ? STAGE.document : STAGE.interview,
   month: (row.last_rejection_date ?? "").slice(0, 7),
   // 応募↔不採用の突き合わせは日単位で行うので、月だけでなく通知日そのものを持たせる。
   // ここを月初で代用すると「応募より前に不採用」になり、同月の応募が結び付かなくなる。
@@ -99,51 +167,94 @@ const records = csvRows.map((row) => ({
   source: "csv",
 }));
 
-/** 株式会社の位置・空白・全半角の表記ゆれだけを吸収し、同じ会社の二重計上を防ぐ。 */
-const companyKey = (value) =>
-  String(value ?? "")
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/株式会社|有限会社|合同会社|\(株\)|[\s　・･_]/g, "");
-
-const seen = new Set(records.map((r) => companyKey(r.company)));
-
 const jobCases = await readJobCases();
 for (const note of jobCases) {
   const fm = note.frontmatter;
   if (baseStatus(fm.status) !== "不採用") continue;
   const company = String(fm.company ?? "").trim();
-  const key = companyKey(company);
-  if (!company || seen.has(key)) continue;
-  seen.add(key);
+  if (!company) continue;
+  const channel = normalizeChannel(String(fm.channel ?? ""));
+  const notifiedOn = String(fm.status_updated ?? "");
+  // 通知日より後の回は別の応募のもの（同じ会社へ後から応募し直した等）なので、この案件の証拠にしない。
+  const sessions = (sessionsByFolder.get(companyFolderOf(note)) ?? []).filter(
+    (session) => !notifiedOn || session.date <= notifiedOn,
+  );
+  const stage = Math.max(stageFromStatus(String(fm.status)), ...sessions.map((session) => session.stage));
+  // CSV と同じ出来事の二重記録（同じ会社・同じ経路で、通知日が CSV の通知日以前）は CSV 行に畳む。
+  // 以前は「CSV にある会社のノートは全部無視」だったため、CSV で RA 書類落ちの会社に後日 Green で
+  // 応募して一次面接まで行った記録が丸ごと消えていた。
+  const twin = records.find(
+    (r) =>
+      r.source === "csv" &&
+      r.channel === channel &&
+      companyKey(r.company) === companyKey(company) &&
+      notifiedOn &&
+      notifiedOn <= r.notifiedOn,
+  );
+  if (twin) {
+    twin.stage = Math.max(twin.stage, stage);
+    continue;
+  }
   records.push({
     company,
-    channel: normalizeChannel(String(fm.channel ?? "")),
-    // 面接まで行ったかは status の補足文から拾う。書類段階で終わったものが既定。
-    reachedInterview: /面接|最終|一次|二次/.test(String(fm.status)),
-    month: String(fm.status_updated ?? "").slice(0, 7),
+    channel,
+    stage,
+    month: notifiedOn.slice(0, 7),
     reason: String(fm.reason_category ?? "") || "未披露/模板拒绝",
     source: "note",
-    notifiedOn: String(fm.status_updated ?? ""),
+    notifiedOn,
     position: String(fm.position ?? ""),
   });
 }
 
-const total = records.length;
-const reached = records.filter((r) => r.reachedInterview).length;
+// ── 集計単位：会社×経路 ───────────────────────────────────────────────────
+// 同じ会社に同じ経路で複数求人へ応募した分は 1 件に畳み、最も深い段階を採る。1 回の人事面談と 1 通の
+// 通知で 4 求人が同時に終わった例があり、求人ごとに数えると母数が二桁の経路でその 1 社が率を支配する。
+// 逆に同じ会社でも経路が違えば別の応募（RA で書類落ち → 半年後に Green で一次面接）なので会社では畳まない。
+// 進行中の案件（応募済・面接中）はそもそも入っていない。ここが答えるのは
+// 「不採用になった案件は、断られる前にどこまで行ったか」であって、応募→面接の率ではない。
+const groups = new Map();
+for (const record of records) {
+  const key = `${companyKey(record.company)}\t${record.channel}`;
+  const group = groups.get(key);
+  if (!group) groups.set(key, { ...record });
+  else if (record.stage > group.stage) Object.assign(group, record, { company: group.company });
+}
+// 企業に書類が届かないまま終わったもの（推薦不可・面談前終了 等）は母数に入れず、別枠で数える。
+const submitted = [...groups.values()].filter((group) => group.stage !== STAGE.unsubmitted);
+
+// 会社単位の集計（サマリ・照合リスト）。経路が違っても同じ会社は 1 社、段階は最も深いもの。
+const companies = new Map();
+for (const group of groups.values()) {
+  const key = companyKey(group.company);
+  const entry = companies.get(key);
+  if (!entry) companies.set(key, { company: group.company, stage: group.stage });
+  else entry.stage = Math.max(entry.stage, group.stage);
+}
+const submittedCompanies = [...companies.values()].filter((entry) => entry.stage !== STAGE.unsubmitted);
+const countStage = (list, stage) => list.filter((entry) => entry.stage === stage).length;
+const total = submittedCompanies.length;
+const reachedInterview = countStage(submittedCompanies, STAGE.interview);
+const reachedMeeting = countStage(submittedCompanies, STAGE.meeting);
+const documentOnly = countStage(submittedCompanies, STAGE.document);
+const unsubmittedCompanies = companies.size - total;
 
 const byChannel = new Map();
-for (const record of records) {
-  const entry = byChannel.get(record.channel) ?? { total: 0, reached: 0 };
-  entry.total += 1;
-  if (record.reachedInterview) entry.reached += 1;
-  byChannel.set(record.channel, entry);
+for (const group of groups.values()) {
+  const entry = byChannel.get(group.channel) ?? { total: 0, reached: 0, meeting: 0, unsubmitted: 0 };
+  if (group.stage === STAGE.unsubmitted) entry.unsubmitted += 1;
+  else {
+    entry.total += 1;
+    if (group.stage === STAGE.interview) entry.reached += 1;
+    if (group.stage === STAGE.meeting) entry.meeting += 1;
+  }
+  byChannel.set(group.channel, entry);
 }
 
 const byMonth = new Map();
-for (const record of records) {
-  if (!record.month) continue;
-  byMonth.set(record.month, (byMonth.get(record.month) ?? 0) + 1);
+for (const group of submitted) {
+  if (!group.month) continue;
+  byMonth.set(group.month, (byMonth.get(group.month) ?? 0) + 1);
 }
 
 const pct = (part, whole) => (whole ? `${((part / whole) * 100).toFixed(1)}%` : "—");
@@ -153,35 +264,46 @@ const cell = (value) => String(value || "—").replaceAll("|", "｜");
 const summary = [
   "| 項目 | 値 |",
   "|---|---|",
-  `| **不採用企業数** | **${total}社** |`,
-  `| 書類選考で終了 | ${total - reached}社（${pct(total - reached, total)}） |`,
-  `| 面接まで到達 | ${reached}社（${pct(reached, total)}） |`,
+  `| **不採用企業数** | **${total}社**（企業へ書類が届いた会社。経路が違っても同じ会社は 1 社） |`,
+  `| 書類選考で終了（面談なし） | ${documentOnly}社（${pct(documentOnly, total)}） |`,
+  `| 面談（カジュアル・人事等）を経て書類で終了 | ${reachedMeeting}社（${pct(reachedMeeting, total)}） |`,
+  `| 面接まで到達 | ${reachedInterview}社（${pct(reachedInterview, total)}） |`,
+  `| （母数外）企業へ未提出のまま終了 | ${unsubmittedCompanies}社（推薦不可・面談前終了・掲載終了など。照合リストには載せる） |`,
 ].join("\n");
 
 const channelTable = [
-  "| 経路 | 不採用 | 書類終了 | 面接到達 | 到達率 |",
-  "|---|---|---|---|---|",
+  "| 経路 | 提出済 | 書類終了 | 面談到達 | 面接到達 | 面接到達率 | 面談以上率 | 未提出（母数外） |",
+  "|---|---|---|---|---|---|---|---|",
   ...[...byChannel.entries()]
-    .sort((a, b) => b[1].total - a[1].total)
+    .sort((a, b) => b[1].total - a[1].total || b[1].unsubmitted - a[1].unsubmitted)
     .map(
       ([name, s]) =>
-        `| ${name} | ${s.total} | ${s.total - s.reached} | ${s.reached} | ${pct(s.reached, s.total)} |`,
+        `| ${name} | ${s.total} | ${s.total - s.reached - s.meeting} | ${s.meeting} | ${s.reached} | ${pct(s.reached, s.total)} | ${pct(s.reached + s.meeting, s.total)} | ${s.unsubmitted} |`,
     ),
+  "",
+  "口径：1 件＝会社×経路。同じ会社の複数求人は最も深い段階で 1 件に畳み、経路が違えば別件。進行中の案件は含まない——この表は「不採用になった案件が、断られる前にどこまで行ったか」であり、応募→面接の率ではない。",
+  "- **未提出**：エージェント推薦不可・面談前終了・掲載／募集終了など、企業に書類が届いていないもの。母数（提出済）に入れない。",
+  "- **面談到達**：カジュアル面談・人事面談などを経てから書類選考で終了。status の補足文（「面談後」等）と、会社フォルダの逐字稿／整理稿（通知日以前の回）の両方から判定。",
+  "- **面接到達**：一次〜最終面接を受けてから不採用。面談以上率＝（面談到達＋面接到達）÷提出済。",
 ].join("\n");
 
-const monthList = [...byMonth.entries()]
-  .sort((a, b) => a[0].localeCompare(b[0]))
-  .map(([month, count]) => `- ${month}: ${count}社`)
-  .join("\n");
+const monthList = [
+  "1 件＝会社×経路（企業へ提出済みの不採用のみ。未提出は含めない）",
+  ...[...byMonth.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([month, count]) => `- ${month}: ${count}件`),
+].join("\n");
 
 const byReason = new Map();
-for (const record of records) {
-  byReason.set(record.reason, (byReason.get(record.reason) ?? 0) + 1);
+for (const group of submitted) {
+  byReason.set(group.reason, (byReason.get(group.reason) ?? 0) + 1);
 }
-const reasonList = [...byReason.entries()]
-  .sort((a, b) => b[1] - a[1])
-  .map(([reason, count]) => `- ${reason}: ${count}社`)
-  .join("\n");
+const reasonList = [
+  "1 件＝会社×経路（企業へ提出済みの不採用のみ）",
+  ...[...byReason.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, count]) => `- ${reason}: ${count}件`),
+].join("\n");
 
 // 応募日台帳（Gmail の受理メールから起こした事実）を月別に畳む。
 // 走査していない期間は「0件」ではなく「不明」——buildTimeline が null で表現する。
@@ -275,7 +397,9 @@ const appliedPairs = appliedRows.map((row) => {
 const statsJson = renderStatsBlock(
   buildStatsPayload({
     total,
-    reached,
+    reachedInterview,
+    reachedMeeting,
+    unsubmitted: unsubmittedCompanies,
     byChannel,
     byMonth,
     byReason,
@@ -284,7 +408,8 @@ const statsJson = renderStatsBlock(
 );
 
 // CSV に無い不採用（job-case 由来）だけの明細。凍結後の新規分だけでなく、
-// 移行時に判明した CSV 欠落もここへ入る。かつては手書き表で、
+// 移行時に判明した CSV 欠落もここへ入る。1 行＝1 ノート（同じ会社の別求人も別行。
+// 会社×経路に畳むのは上の集計の話で、明細まで畳むと求人名が消える）。かつては手書き表で、
 // status と二重管理になっていた（改一处不等于改完 の第2落点）。いまはここで生成する。
 const additions = records
   .filter((r) => r.source === "note")
@@ -298,17 +423,19 @@ const additionsTable = additions.length
       "|---|---|---|---|---|",
       ...additions.map(
         (r) =>
-          `| ${cell(r.notifiedOn)} | ${cell(r.company)} | ${cell(r.position)} | ${cell(r.channel)} | ${cell(`${r.reachedInterview ? "面接後不採用" : "書類不採用"}・${r.reason}`)} |`,
+          `| ${cell(r.notifiedOn)} | ${cell(r.company)} | ${cell(r.position)} | ${cell(r.channel)} | ${cell(`${STAGE_LABEL[r.stage]}・${r.reason}`)} |`,
       ),
     ].join("\n")
   : "（CSV 凍結後の不採用ノートはまだ無い）";
 
 // 推薦・応募前の照合リスト。CSV とノートの和集合。
+const csvCompanies = new Set(csvRows.map((row) => companyKey(row.company))).size;
 const companyList = [
-  `全${total}社（CSV ${csvRows.length} + ノート ${additions.length}）：`,
+  `全${companies.size}社（CSV ${csvCompanies}社＋ノートのみ ${companies.size - csvCompanies}社。`
+    + `うち企業へ未提出のまま終了した ${unsubmittedCompanies}社は集計の母数に入れないが、照合用にここには載せる）：`,
   "",
-  ...records
-    .map((r) => r.company)
+  ...[...companies.values()]
+    .map((entry) => entry.company)
     .sort((a, b) => a.localeCompare(b, "ja"))
     .map((name) => `- ${name}`),
 ].join("\n");
@@ -488,7 +615,7 @@ const targets = [
 ];
 
 console.log(
-  `集計: ${total}社（CSV ${csvRows.length} + ノート ${total - csvRows.length}）／面接到達 ${reached}社`,
+  `集計: 不採用 ${total}社（面接到達 ${reachedInterview}・面談到達 ${reachedMeeting}）＋未提出のみ ${unsubmittedCompanies}社／CSV ${csvRows.length} 行・ノート ${additions.length} 件`,
 );
 
 const drifted = [];

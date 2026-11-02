@@ -949,7 +949,7 @@ function JobsAnalytics({
             title={menu("経路別の面接到達率")}
             caption={
               range === "all"
-                ? menu("どの経路が書類を通っているか。バーの長さ＝到達率、右の n＝その経路の不採用社数。")
+                ? menu("どの経路が書類を通っているか。バーの長さ＝面接到達率、右の n＝その経路の提出済件数（企業に届かなかった案件は母数外）。面談を経て書類で終わった件は表の「面談到達」に分ける。")
                 : menu("⚠️ 経路別は月内訳を持たないため、ここだけ常に全期間の数字。他のチャートとは母数が違う。")
             }
           >
@@ -963,7 +963,7 @@ function JobsAnalytics({
                       label={row.channel}
                       ratio={row.rate}
                       valueLabel={pct1(row.rate)}
-                      title={`${row.channel}：${row.reached} / ${row.total} 社が面接到達`}
+                      title={`${row.channel}：${row.reached} / ${row.total} 件が面接到達（面談到達 ${row.meeting}）`}
                       flag={
                         row.total < SMALL_SAMPLE_THRESHOLD
                           ? `n=${row.total}・少数`
@@ -988,13 +988,20 @@ function JobsAnalytics({
                   );
                 })()}
                 <TableView
-                  head={[menu("経路"), menu("不採用"), menu("書類終了"), menu("面接到達"), menu("到達率")]}
+                  head={[
+                    menu("経路"), menu("提出済"), menu("書類終了"), menu("面談到達"), menu("面接到達"),
+                    menu("面接到達率"), menu("面談以上率"), menu("未提出（母数外）"),
+                  ]}
                   rows={channels.map((row) => [
                     row.channel,
                     row.total,
-                    row.total - row.reached,
+                    // 面談を経た件は「書類終了」から外す。台帳の generated 表と同じ引き算。
+                    row.total - row.reached - row.meeting,
+                    row.meeting,
                     row.reached,
                     pct1(row.rate),
+                    pct1(reachRate(row.reached + row.meeting, row.total)),
+                    row.unsubmitted,
                   ])}
                 />
               </>
