@@ -77,7 +77,7 @@ function normalizedQuery(input: LibraryQuery) {
 }
 
 /** 统一的 D1 查询层；请求只读取目录或命中候选的索引文本，不把全库 Note[] 送到浏览器。 */
-export function createReadModel(db: Database) {
+export function createReadModel(db: Database, { retention = true }: { retention?: boolean } = {}) {
   const inflight = new Map<string, Promise<ReadModelStatus>>();
   const results = new Map<string, { json: string; bytes: number }>();
   let resultBytes = 0;
@@ -117,6 +117,17 @@ export function createReadModel(db: Database) {
     const value = await status(revision);
     if (!value || value.state !== "ready") throw new ReadModelError("资料索引尚未完成，请稍后重试", value ? 503 : 409, value ? "index-building" : "revision-expired");
     return value;
+  }
+  async function firstMissingBatch(revision: string) {
+    revisionKey(revision);
+    const result = await query<{ ordinal: number }>(`SELECT CASE WHEN NOT EXISTS (
+      SELECT 1 FROM read_model_batches WHERE revision=?1 AND ordinal=0
+    ) THEN 0 ELSE (
+      SELECT MIN(b.ordinal+1) FROM read_model_batches b WHERE b.revision=?1 AND NOT EXISTS (
+        SELECT 1 FROM read_model_batches next WHERE next.revision=?1 AND next.ordinal=b.ordinal+1
+      )
+    ) END ordinal`, [revision]);
+    return result[0].ordinal;
   }
   async function latest() {
     const result = await query<{ revision: string }>("SELECT revision FROM read_model_revisions WHERE state = 'ready' ORDER BY created_at DESC LIMIT 1");
@@ -186,6 +197,8 @@ export function createReadModel(db: Database) {
       || Object.entries(manifest.counts).some(([key, value]) => counts[key as keyof typeof counts] !== value)
       || chunks.length !== Object.keys(manifest.hashes).length || chunks.some((chunk) => manifest.hashes[chunk.hash] !== chunk.count)) throw new ReadModelError("资料索引尚未完整导入", 409, "index-incomplete");
     await db.batch([db.prepare("UPDATE read_model_revisions SET state='ready' WHERE revision=?").bind(revision)]);
+    // 发布索引由维护入口按实际发布清单回收，普通请求只完成导入。
+    if (!retention) return (await status(revision))!;
     // 只清理可重建投影；保留最近三份完成版本及一天内仍可续传的导入。
     const retired = await query<{ revision: string }>(`SELECT revision FROM (
       SELECT revision FROM read_model_revisions WHERE state='ready' AND revision<>?1 ORDER BY created_at DESC,revision DESC LIMIT -1 OFFSET 2
@@ -376,5 +389,5 @@ export function createReadModel(db: Database) {
   }
   async function readRecord<T>(revision: string, kind: string, key: string): Promise<T | null> { return (await readRecords<T>(revision, kind, [key]))[0]?.value ?? null; }
   async function listRecords<T>(revision: string, kind: string) { return readRecords<T>(revision, kind); }
-  return { begin, importBatch, finish, importArtifact, status, latest, ensure, library, search, resolve, backlinks, getCard, readRecord, readRecords, listRecords };
+  return { begin, importBatch, finish, importArtifact, status, firstMissingBatch, latest, ensure, library, search, resolve, backlinks, getCard, readRecord, readRecords, listRecords };
 }

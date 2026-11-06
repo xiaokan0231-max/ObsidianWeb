@@ -49,7 +49,7 @@ async function harness({ deny = false, assetStatus = 404, projected = false, log
   };
   return {
     events,
-    fetch: (path, method = "GET", overrides = {}) => mod.default.fetch(new Request(`https://example.test${path}`, { method }), { ...env, ...overrides }, { waitUntil() {}, passThroughOnException() {} }),
+    fetch: (path, method = "GET", overrides = {}, headers = {}) => mod.default.fetch(new Request(`https://example.test${path}`, { method, headers }), { ...env, ...overrides }, { waitUntil() {}, passThroughOnException() {} }),
   };
 }
 
@@ -73,6 +73,26 @@ test("生产入口先检查密码，页面、资料接口、原始静态、图�
   }
   assert.equal(h.events.length, requests.length);
   assert.ok(h.events.every(([kind]) => kind === "gate"), JSON.stringify(h.events));
+});
+
+test("本人服务端凭据只绕过精确留言路由的站点密码，仍进入留言独立鉴权", async () => {
+  const owner = "test-owner-secret-at-least-thirty-two-characters";
+  const env = { FEEDBACK_OWNER_SECRET: owner };
+  for (const [path, method] of [["/api/feedback/session", "GET"], ["/api/feedback/threads", "POST"], ["/api/feedback/threads/thread-test/read", "POST"], ["/api/feedback/unread", "GET"]]) {
+    const h = await harness({ deny: true });
+    assert.equal((await h.fetch(path, method, env, { Authorization: `Bearer ${owner}` })).status, 401);
+    assert.deepEqual(h.events, [["feedback", path]]);
+  }
+  for (const [path, method] of [["/api/note", "GET"], ["/api/read-model/maintenance/prune", "POST"], ["/api/feedback/threads/", "GET"], ["/api/feedback/threads", "DELETE"], ["/api/feedback/unknown", "GET"]]) {
+    const h = await harness({ deny: true });
+    assert.equal((await h.fetch(path, method, env, { Authorization: `Bearer ${owner}` })).status, 401);
+    assert.deepEqual(h.events, [["gate", path]]);
+  }
+  for (const headers of [{ Authorization: "Bearer wrong" }, { Cookie: "feedback_session=teacher" }, {}]) {
+    const h = await harness({ deny: true });
+    assert.equal((await h.fetch("/api/feedback/threads", "GET", env, headers)).status, 401);
+    assert.deepEqual(h.events, [["gate", "/api/feedback/threads"]]);
+  }
 });
 
 test("密码处理返回的重定向和会话cookie不被线上只读守卫拦截", async () => {

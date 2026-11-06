@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createSiteAccessGate } from "../lib/server/site-access.ts";
+import { MemoryFeedbackBucket } from "./helpers/feedback-bucket.mjs";
 
 const origin = "https://vault.example.test";
 const password = "test-access-phrase-willow";
@@ -9,7 +10,7 @@ const initialTime = Date.parse("2026-01-01T00:00:00Z");
 
 function fixture() {
   let time = initialTime;
-  const env = { SITE_ACCESS_PASSWORD: password, SITE_ACCESS_SESSION_SECRET: secret };
+  const env = { SITE_ACCESS_PASSWORD: password, SITE_ACCESS_SESSION_SECRET: secret, FEEDBACK_BUCKET: new MemoryFeedbackBucket() };
   const gate = createSiteAccessGate({ now: () => time });
   function request(path = "/training/reading", options = {}) {
     const headers = new Headers(options.headers);
@@ -42,6 +43,27 @@ test("未解锁时页面显示密码页，资料接口与静态快照均不能�
     assert.match(response.headers.get("Cache-Control"), /no-store/);
     assert.equal((await response.json()).code, "SITE_ACCESS_REQUIRED");
   }
+});
+
+test("登录额度跨实例共享，并发和成功登录都不能重置每分钟十次的额度", async () => {
+  const f = fixture();
+  const request = () => f.request("/_site-access/login", { method: "POST", headers: { Origin: origin, "CF-Connecting-IP": "192.0.2.8" }, body: new URLSearchParams({ password }).toString() });
+  const results = await Promise.all(Array.from({ length: 16 }, () => createSiteAccessGate({ now: () => initialTime + 1000 })(request(), f.env)));
+  assert.equal(results.filter(response => response.status === 303).length, 10);
+  assert.equal(results.filter(response => response.status === 429).length, 6);
+  assert.ok(results.filter(response => response.status === 429).every(response => response.headers.get("Retry-After") === "59"));
+  assert.ok([...f.env.FEEDBACK_BUCKET.records.keys()].every(key => !key.includes("192.0.2.8")));
+  assert.equal((await createSiteAccessGate({ now: () => initialTime + 60000 })(request(), f.env)).status, 303);
+});
+
+test("缺少或损坏共享存储时关闭新登录，但已签发会话仍可浏览", async () => {
+  const f = fixture();
+  const { cookie } = await f.login();
+  const request = () => f.request("/_site-access/login", { method: "POST", headers: { Origin: origin }, body: new URLSearchParams({ password }).toString() });
+  assert.equal((await f.gate(request(), { ...f.env, FEEDBACK_BUCKET: undefined })).status, 503);
+  f.env.FEEDBACK_BUCKET.fail = () => { throw new Error("storage unavailable"); };
+  assert.equal((await f.gate(request(), f.env)).status, 503);
+  assert.equal(await f.gate(f.request("/calendar", { cookie }), f.env), null);
 });
 
 test("运行时密码或签名密钥缺失时关闭访问，不降级为公开站点", async () => {

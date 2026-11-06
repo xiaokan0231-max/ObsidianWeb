@@ -7,6 +7,7 @@ import { createCalendarReadModel } from "../lib/server/calendar-read-model";
 import { dispatchFeedbackRequest, type FeedbackDispatchEnv } from "../lib/server/feedback-dispatch";
 import { createSiteAccessGate, privateSiteResponse, type SiteAccessEnv } from "../lib/server/site-access";
 import { fetchSealedPublishedAsset } from "../lib/server/sealed-assets";
+import { isFeedbackOwnerRequest } from "../lib/server/feedback-owner-auth";
 
 interface Env extends FeedbackDispatchEnv, SiteAccessEnv {
   OBSIDIAN_DATA_SOURCE?: string;
@@ -40,7 +41,7 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const published = env.OBSIDIAN_DATA_SOURCE === "published";
-    if (published) {
+    if (published && !await isFeedbackOwnerRequest(request, env)) {
       const denied = await siteAccess(request, env);
       if (denied) return denied;
     }

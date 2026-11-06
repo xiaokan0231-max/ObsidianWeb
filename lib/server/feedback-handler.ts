@@ -1,4 +1,5 @@
 import type { FeedbackIdentity } from "../feedback.ts";
+import { isFeedbackOwnerRequest } from "./feedback-owner-auth.ts";
 import { changeThread, createThread, FeedbackError, getThread, listThreads, loginAttempt, markRead, participantName, reply, rotateCode, settings, validId, type FeedbackSettings } from "./feedback-store.ts";
 
 export type FeedbackEnv = {
@@ -45,8 +46,7 @@ function cookie(request: Request, value: string, maxAge = MAX_AGE) {
   return `${COOKIE}=${value}; Path=/api/feedback; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${new URL(request.url).protocol === "https:" ? "; Secure" : ""}`;
 }
 async function identity(request: Request, env: FeedbackEnv, config: FeedbackSettings): Promise<FeedbackIdentity | null> {
-  const bearer = request.headers.get("Authorization");
-  if (bearer?.startsWith("Bearer ") && await equal(bearer.slice(7), env.FEEDBACK_OWNER_SECRET!)) return { id: "owner", name: "本人", role: "owner" };
+  if (await isFeedbackOwnerRequest(request, env)) return { id: "owner", name: "本人", role: "owner" };
   const value = request.headers.get("Cookie")?.split(";").map(part => part.trim()).find(part => part.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
   if (!value || value.length > 4096) return null;
   try {

@@ -1,6 +1,9 @@
+import { reserveSiteLogin } from "./site-access-limit.ts";
+
 export type SiteAccessEnv = {
   SITE_ACCESS_PASSWORD?: string;
   SITE_ACCESS_SESSION_SECRET?: string;
+  FEEDBACK_BUCKET?: R2Bucket;
 };
 
 const COOKIE = "__Host-obsidian_access";
@@ -106,7 +109,6 @@ async function formBody(request: Request) {
 
 /** Worker 最外层门禁；不能只保护页面路由，否则静态资料和接口仍可被直链读取。 */
 export function createSiteAccessGate({ now = Date.now }: { now?: () => number } = {}) {
-  const failures = new Map<string, { count: number; until: number }>();
   return async function siteAccessResponse(request: Request, env: SiteAccessEnv): Promise<Response | null> {
     const password = env.SITE_ACCESS_PASSWORD, secret = env.SITE_ACCESS_SESSION_SECRET;
     if (!password || !secret) return json(request, 503, "SITE_ACCESS_UNAVAILABLE", "访问密码暂未配置完成。");
@@ -120,19 +122,17 @@ export function createSiteAccessGate({ now = Date.now }: { now?: () => number } 
       if (!form) return json(request, 413, "BODY_TOO_LARGE", "提交内容过长。");
       const next = returnPath(form.get("next"), url.origin);
       const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-      const recent = failures.get(ip);
-      if (recent && recent.until > seconds && recent.count >= 10) {
+      let retryAfter: number;
+      try { retryAfter = await reserveSiteLogin(env.FEEDBACK_BUCKET, secret, ip, seconds); }
+      catch { return json(request, 503, "SITE_ACCESS_UNAVAILABLE", "暂时无法验证访问密码，请稍后再试。"); }
+      if (retryAfter) {
         const response = loginPage(request, next, "尝试次数较多，请稍后再试。", 429);
-        response.headers.set("Retry-After", String(recent.until - seconds));
+        response.headers.set("Retry-After", String(retryAfter));
         return response;
       }
       if (!await equalPassword(form.get("password") ?? "", password)) {
-        if (failures.size > 1000) for (const [address, entry] of failures) if (entry.until <= seconds) failures.delete(address);
-        if (failures.size > 2000) failures.clear();
-        failures.set(ip, recent && recent.until > seconds ? { ...recent, count: recent.count + 1 } : { count: 1, until: seconds + 60 });
         return loginPage(request, next, "密码不正确，请重新输入。");
       }
-      failures.delete(ip);
       return redirect(next, cookie(await signedSession(seconds + SESSION_SECONDS, password, secret)));
     }
     if (url.pathname === "/_site-access") return loginPage(request, returnPath(url.searchParams.get("next"), url.origin));

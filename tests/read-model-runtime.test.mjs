@@ -5,7 +5,7 @@ import { loadAppModule } from "./helpers/render-tsx.mjs";
 import { ReadModelError as StoreError, readModelHash } from "../lib/server/read-model.ts";
 import { sealAsset } from "../lib/server/sealed-assets.ts";
 
-async function publishedRuntime(t, { previous = true } = {}) {
+async function publishedRuntime(t, { previous = true, withdrawn = false } = {}) {
   const saved = process.env.OBSIDIAN_DATA_SOURCE;
   process.env.OBSIDIAN_DATA_SOURCE = "published";
   t.after(() => { if (saved === undefined) delete process.env.OBSIDIAN_DATA_SOURCE; else process.env.OBSIDIAN_DATA_SOURCE = saved; });
@@ -17,16 +17,17 @@ async function publishedRuntime(t, { previous = true } = {}) {
   const note = (content) => ({ path: "30_資料/测试.md", content, frontmatter: { type: "material" }, tags: [], stat: { ctime: 1, mtime: 1, size: content.length } });
   const old = { revision: "old", manifestFile: write({ schemaVersion: 1, revision: "old", batchCount: 1 }), batches: [write({})], bodyIndexFile: write({ "30_資料/测试.md": write(note("# 旧版完整正文")) }) };
   const current = { revision: "new", manifestFile: write({ schemaVersion: 1, revision: "new", batchCount: 5 }), batches: Array.from({ length: 5 }, (_, batch) => write({ batch }, true)), bodyIndexFile: write({ "30_資料/测试.md": write(note("# 新版完整正文"), true) }) };
-  files.set("manifest.json", { publishedAt: "2026-10-29T00:00:00Z", readModel: current, readModels: [current, old] });
+  files.set("manifest.json", { publishedAt: "2026-10-29T00:00:00Z", readModel: current, readModels: withdrawn ? [current] : [current, old] });
   const store = {
     async latest() { return latestRevision ? states.get(latestRevision) : null; },
     async status(revision) { return states.get(revision) ?? null; },
+    async firstMissingBatch(revision) { return states.get(revision)?.completedBatches ?? 0; },
     async begin(manifest) { if (!states.has(manifest.revision)) states.set(manifest.revision, { revision: manifest.revision, state: "building", sourceUpdatedAt: 3, indexedAt: 4, completedBatches: 0, batchCount: manifest.batchCount }); },
     async importBatch(revision, batch, index) { const state = states.get(revision); assert.deepEqual(batch, { batch: index }); assert.equal(index, state.completedBatches); state.completedBatches++; },
     async finish(revision) { states.get(revision).state = "ready"; latestRevision = revision; },
   };
   const loaded = await loadAppModule("app/read-model-server.ts", { stubs: {
-    "@/lib/server/read-model": { createReadModel: () => store },
+    "@/lib/server/read-model": { readModelHash, createReadModel: () => store },
     "cloudflare:workers": { env: { DB: {}, SITE_ASSET_SECRET: "ab".repeat(32), ASSETS: { async fetch(request) {
       const file = new URL(request.url).pathname.replace("/_published-vault/", ""); requests.push(file);
       if (file.endsWith(".gz")) assert.equal(request.headers.get("Accept-Encoding"), "identity");
@@ -36,7 +37,7 @@ async function publishedRuntime(t, { previous = true } = {}) {
       return new Response(await sealAsset(bytes, "ab".repeat(32)));
     } } } },
   } });
-  return { ...loaded, requests, states, external, fail(value) { fail = value; } };
+  return { ...loaded, requests, states, files, external, fail(value) { fail = value; } };
 }
 
 test("索引每次只导入两批，当前未完整时保留上一完整资料并显示同步状态", async (t) => {
@@ -78,15 +79,71 @@ test("首次索引未完成返回503与重试提示，存储层版本错误保�
   assert.equal(runtime.external.mock.callCount(), 0);
 });
 
-test("来源或索引失败继续保留完整版本，带固定版本的请求不悄悄混入新资料", async (t) => {
+test("发布清单不可读时关闭访问，不能以 D1 中的旧完整版本绕过撤回名单", async (t) => {
   const runtime = await publishedRuntime(t);
   runtime.fail(true);
-  assert.deepEqual((({ revision, syncState }) => ({ revision, syncState }))(await runtime.readModelRuntime()), { revision: "old", syncState: "failed" });
-  assert.equal((await runtime.readModelRuntime("old")).revision, "old");
-  await assert.rejects(runtime.readModelRuntime("missing"), /发布资料尚未准备完成/);
+  await assert.rejects(runtime.readModelRuntime(), /发布资料尚未准备完成/);
+  await assert.rejects(runtime.readModelRuntime("old"), /发布资料尚未准备完成/);
+  await assert.rejects(runtime.readModelReady(), /发布资料尚未准备完成/);
   runtime.fail(false);
   assert.equal((await runtime.readModelRuntime("old")).revision, "old");
   assert.ok(!runtime.states.has("new"), "旧版本固定请求不触发新版本导入");
+});
+
+test("撤回旧版本后正文、显式查询、默认回退与HTML汇总遵守同一白名单", async (t) => {
+  const runtime = await publishedRuntime(t, { withdrawn: true });
+  await assert.rejects(runtime.readModelRuntime("old"), { status: 409 });
+  await assert.rejects(runtime.readModelNote("30_資料/测试.md", "old"), { status: 409 });
+  assert.equal(await runtime.readModelReady(), null);
+  await assert.rejects(runtime.readModelRuntime(), { status: 503, building: true });
+  assert.equal(runtime.states.get("old").state, "ready", "物理旧行仍在，也不可被选中");
+});
+
+test("当前批次失败时仅回退到清单仍允许的ready版本", async (t) => {
+  const runtime = await publishedRuntime(t);
+  assert.equal((await runtime.readModelReady()).revision, "old");
+  runtime.fail(true);
+  const result = await runtime.readModelRuntime();
+  assert.equal(result.revision, "old");
+  assert.equal(result.syncState, "failed");
+});
+
+test("本地固定ready版本与HTML汇总不访问离线bridge", async (t) => {
+  const saved = process.env.OBSIDIAN_DATA_SOURCE;
+  process.env.OBSIDIAN_DATA_SOURCE = "live";
+  t.after(() => { if (saved === undefined) delete process.env.OBSIDIAN_DATA_SOURCE; else process.env.OBSIDIAN_DATA_SOURCE = saved; });
+  const request = t.mock.method(globalThis, "fetch", async () => { throw new Error("bridge不能被访问"); });
+  const state = { revision: "ready", state: "ready", sourceUpdatedAt: 1, indexedAt: 2 };
+  const runtime = await loadAppModule("app/read-model-server.ts", { stubs: {
+    "@/lib/server/read-model": { readModelHash, createReadModel: () => ({ async status(id) { return id === "ready" ? state : null; }, async latest() { return state; } }) },
+    "cloudflare:workers": { env: { DB: {} } },
+  } });
+  assert.equal((await runtime.readModelRuntime("ready")).revision, "ready");
+  assert.equal((await runtime.readModelReady()).revision, "ready");
+  await assert.rejects(runtime.readModelRuntime("missing"), { status: 409 });
+  assert.equal(request.mock.callCount(), 0);
+});
+
+test("预热仅使用一次选中的清单，来源变化不能造成状态和版本错配", async (t) => {
+  const saved = process.env.OBSIDIAN_DATA_SOURCE, token = process.env.CODEX_BRIDGE_TOKEN;
+  process.env.OBSIDIAN_DATA_SOURCE = "live"; process.env.CODEX_BRIDGE_TOKEN = "test-token";
+  t.after(() => { if (saved === undefined) delete process.env.OBSIDIAN_DATA_SOURCE; else process.env.OBSIDIAN_DATA_SOURCE = saved; if (token === undefined) delete process.env.CODEX_BRIDGE_TOKEN; else process.env.CODEX_BRIDGE_TOKEN = token; });
+  let manifests = 0;
+  const states = new Map();
+  t.mock.method(globalThis, "fetch", async url => {
+    assert.equal(new URL(url).pathname, "/read-model/manifest");
+    return Response.json({ revision: ++manifests === 1 ? "A" : "B", batchCount: 0 });
+  });
+  const runtime = await loadAppModule("app/read-model-server.ts", { stubs: {
+    "@/lib/server/read-model": { readModelHash, createReadModel: () => ({
+      async latest() { return null; }, async status(id) { return states.get(id); },
+      async begin(manifest) { states.set(manifest.revision, { ...manifest, state: "building" }); },
+      async firstMissingBatch() { return 0; }, async finish(id) { states.get(id).state = "ready"; },
+    }) }, "cloudflare:workers": { env: { DB: {} } },
+  } });
+  const result = await runtime.readModelRuntime();
+  assert.equal(result.revision, "A"); assert.equal(result.syncState, "ready");
+  assert.equal(manifests, 1); assert.equal(states.get("A").state, "ready");
 });
 
 async function restartedLocalRuntime(t, options = {}) {
