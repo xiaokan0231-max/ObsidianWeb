@@ -452,9 +452,10 @@
 
 /*
  * 临场卡（presentation="stage"）：面试开始前最后几分钟用。纸更宽，台词放大到正文的 1.35 倍、行距放松，
- * ←/→ 在台词之间跳，当前那句左侧亮一条细线。只剩台词与它紧邻的小标题，别的都在准备页里。
+ * ←/→ 在台词之间跳，当前那句左侧亮一条细线。事实卡的表格也是临场要读的正文。
  */
 .reading-mode.stage-reader .nr-paper { width: min(100%, 1000px); }
+.reading-mode.stage-reader .reader-prep-v2 .prep-doc-tablewrap table { font-size: 1em; }
 .reading-mode.stage-reader .reader-prose .prep-doc-say {
   font-size: calc(var(--nr-font-size, 18px) * 1.35);
   line-height: 2.3;

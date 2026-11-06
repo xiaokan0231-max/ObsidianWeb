@@ -30,6 +30,8 @@ export type InterviewSourceRef = {
 };
 export type InterviewPrepSummary = InterviewSourceRef & {
   contextPath: string | null; pickerId: string; sessionStatus: string; sessionOrder: number | null;
+  /** 系列内的接触顺序，供仅拿到摘要的轮次选择器使用。旧资料版本可能没有。 */
+  sessionSequence?: number;
 };
 export type InterviewReviewSummary = InterviewSourceRef & {
   result?: string; score: ReturnType<typeof reviewDisplayScore>; insight: string;
@@ -174,12 +176,14 @@ export function buildInterviewReadModelRecords(notes: Note[], options: { today?:
   const docContexts = new Map(docs.map((doc) => [doc.note.path, resolveCompanyOverviewFrom(contexts, notes, doc.note)]));
   const pickerGroups = buildContextPickerGroups({ contexts, docs, series, docContexts, today });
   const defaults: Record<string, string> = {};
+  const seriesByRound = new Map(series.flatMap(({ key, rounds }) =>
+    rounds.map((doc, index) => [doc.note.path, { key, index }] as const)));
   const preps: InterviewPrepSummary[] = docs.map((doc) => {
     const context = docContexts.get(doc.note.path);
-    const ownerSeries = series.find((item) => item.rounds.some((round) => round.note.path === doc.note.path));
+    const ownerSeries = seriesByRound.get(doc.note.path);
     return { ...sourceRef(doc.note), contextPath: context?.note.path ?? null,
       pickerId: context ? `context:${context.note.path}` : `series:${ownerSeries?.key ?? doc.note.path}`,
-      sessionStatus: doc.sessionStatus, sessionOrder: doc.sessionOrder };
+      sessionStatus: doc.sessionStatus, sessionOrder: doc.sessionOrder, sessionSequence: ownerSeries?.index };
   });
   for (const group of pickerGroups) for (const item of group.items) {
     const eligible = docs.filter((doc) => preps.find((summary) => summary.path === doc.note.path)?.pickerId === item.id);

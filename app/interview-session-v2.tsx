@@ -27,7 +27,8 @@ const V2_COPY_JA: Record<string, string> = {
   "信息截至 {date}": "{date} までの情報",
   "对照样稿：按 {date} 以前能拿到的信息重写，不是当时的准备稿；文末「对照」一节写当时实际发生了什么。": "対照稿：{date} までに得られた情報で書き直したもので、当時の準備稿ではありません。末尾の「対照」に当時の実際を記しています。",
   "临场卡": "当日カード",
-  "只看要说的话 ↗": "話す言葉だけ ↗",
+  "按现场顺序 ↗": "当日の流れ ↗",
+  "会场未定": "会場未定",
   "今天": "今日",
   "明天": "明日",
   "{n} 天后": "{n}日後",
@@ -313,7 +314,11 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
         {companyAction}
       </div>
       {doc.replayOf && <p className="v2-replay-note">{t("对照样稿：按 {date} 以前能拿到的信息重写，不是当时的准备稿；文末「对照」一节写当时实际发生了什么。", { date: doc.replayAsOf || doc.date })}</p>}
-      <div className="v2-logistics"><time>{overview.dateTime}</time><span>{doc.format}</span>{overview.place !== doc.format && overview.place !== "进入会议" && <span>{overview.place}</span>}<span>{doc.interviewers || menu("面试官未定")}</span>
+      <div className="v2-logistics"><time>{overview.dateTime || menu("日程待定")}</time>
+        {doc.format && <span>{doc.format}</span>}
+        {overview.place && overview.place !== doc.format && overview.place !== "进入会议" && <span>{overview.place}</span>}
+        {!overview.place && <span>{t("会场未定")}</span>}
+        <span>{doc.interviewers || menu("面试官未定")}</span>
         {overview.meetingUrl && <a className="v2-meeting" href={overview.meetingUrl} target="_blank" rel="noopener noreferrer">{t("进入会议")} <span aria-hidden="true">↗</span></a>}
       </div>
     </header>
@@ -343,7 +348,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
       </main>
       <aside className="v2-rail" ref={railRef} aria-label={t("章节目录与研究来源")}>
         <div className="v2-quick"><button type="button" onClick={openMotivation}>{menu("志望動機 ")}<span>{t("20 秒版 ↗")}</span></button><button type="button" onClick={() => switchSection("questions")}>{menu("逆質問 ")}<span>{t("3 个主问题 →")}</span></button>
-          {hasStageLines && <button type="button" className="v2-stage-entry" onClick={() => { savePosition(); setReading("stage"); }}>{t("临场卡")} <span>{t("只看要说的话 ↗")}</span></button>}</div>
+          {hasStageLines && <button type="button" className="v2-stage-entry" onClick={() => { savePosition(); setReading("stage"); }}>{t("临场卡")} <span>{t("按现场顺序 ↗")}</span></button>}</div>
         {headings.length > 1 && <nav className="v2-toc" aria-label={t("本章目录")}><h3>{t("本章目录")}</h3><ol>{headings.map((heading) => <li key={heading.index}><a href={`#${prefix}-h-${heading.index}`} onClick={(event) => {
           event.preventDefault();
           document.getElementById(`${prefix}-h-${heading.index}`)?.scrollIntoView({ block: "start", behavior: "instant" });

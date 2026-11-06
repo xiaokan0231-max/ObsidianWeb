@@ -102,6 +102,16 @@ test("本场依赖只包含明确案件、当前准备稿、对照稿和实际�
   assert.equal(Object.hasOwn(catalog.preps[0], "content"), false);
 });
 
+test("轮次目录保留接触顺序，旧轮与未定的新轮不按日期字符串排序", () => {
+  const owner = note(`${root}/同岗位.md`, { type: "job-case", company: "株式会社テスト", case_id: "ordered-rounds", status: "面接中" });
+  const old = note(`${root}/首次接触.md`, { type: "interview-prep", company: "株式会社テスト", case: `[[${owner.path}]]`, round: "カジュアル面談", date: "2026-10-28" });
+  const pending = note(`${root}/新一轮.md`, { type: "interview-prep", prep_version: 2, company: "株式会社テスト", case: `[[${owner.path}]]`, round: "一次面接", date: "未定", session_order: 2, session_status: "preparing" });
+  const records = buildInterviewReadModelRecords([owner, pending, old], { today });
+  const { preps } = record(records, INTERVIEW_RECORDS.catalog, "root");
+  assert.equal(preps.find((item) => item.path === old.path).sessionSequence, 0);
+  assert.equal(preps.find((item) => item.path === pending.path).sessionSequence, 1);
+});
+
 test("公司总结和六维评价使用完整资料验证后的投影，证据正文不为存在校验而整批下载", async () => {
   const evidence = note("30_資料/测试来源.md", { type: "material" }, "# 外部证据正文专属标记\n" + "証拠".repeat(400_000));
   const source = { label: "本人已确认材料", wiki: "[[30_資料/测试来源]]" };

@@ -1233,7 +1233,10 @@ function InterviewSession({
     else if (prepPath) onSelectionChange?.(item?.company ?? "", prepPath);
     onRemoteSelect?.({ sourcePath: prepPath || undefined, contextPath: contextPath || undefined });
   };
-  const remoteRounds = catalog?.preps.filter((item) => item.pickerId === (context ? `context:${context.note.path}` : catalog.preps.find((item) => item.path === selected?.note.path)?.pickerId)) ?? [];
+  const remotePickerId = context ? `context:${context.note.path}` : catalog?.preps.find((item) => item.path === selected?.note.path)?.pickerId;
+  // 目录按日期提供摘要；轮次按接触顺序显示，避免「未定」按字符串排到第一轮前面。
+  const remoteRounds = catalog?.preps.filter((item) => item.pickerId === remotePickerId)
+    .sort((left, right) => (left.sessionSequence ?? left.sessionOrder ?? 0) - (right.sessionSequence ?? right.sessionOrder ?? 0)) ?? [];
   const contextPicker = <><ContextPicker groups={pickerGroups} today={today} selectedId={context ? `context:${context.note.path}` : selectedSeriesKey()}
     loadGroups={catalog?.revision ? () => loadInterviewPickerGroups(catalog.revision!) : undefined} optionsKey={catalog?.revision} totalCount={catalog?.pickerTotal} onSelect={(value) => {
     if (catalog) { selectRemote(value); return; }
@@ -1242,7 +1245,7 @@ function InterviewSession({
   }} />{remoteRounds.length > 1 && <select aria-label={menu("面试轮次")} value={selected?.note.path ?? ""} onChange={(event) => {
     const target = remoteRounds.find((item) => item.path === event.target.value);
     if (target) selectRemote(target.pickerId, target.path);
-  }}>{!selected && <option value="">{menu("本场尚无准备稿")}</option>}{remoteRounds.map((item) => <option key={item.path} value={item.path}>{item.date} · {item.round}</option>)}</select>}</>;
+  }}>{!selected && <option value="">{menu("本场尚无准备稿")}</option>}{remoteRounds.map((item) => <option key={item.path} value={item.path}>{item.date || menu("未定")} · {item.round}</option>)}</select>}</>;
   function selectedSeriesKey() { const item = selected ? interviewPrepSeriesForDoc(series, selected) : null; return item ? `series:${item.key}` : ""; }
   const historicalCompany = !!selected && ["past", "completed", "cancelled"].includes(interviewPrepTemporalStatus(selected, today));
   const companyContent = <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} />;
