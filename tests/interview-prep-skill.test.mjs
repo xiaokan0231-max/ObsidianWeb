@@ -68,21 +68,28 @@ test("默认模板改为五个语义章节的 v2，旧版通过独立文档保�
   assert.match(skill, /不做移动适配或验收/);
 });
 
-test("v2 模板在临场备用开头固定冒頭・懸念・締め三块，填好后通过校验", async () => {
-  const { PREP_V2_STAGE_BLOCKS, prepStageBlockIssues } = await import("../lib/interview-prep-validation.mjs");
+test("v2 模板在临场备用开头固定規律・冒頭・事実カード・懸念・締め五块，填好后通过校验", async () => {
+  const { PREP_V2_STAGE_BLOCKS, PREP_V2_FACT_ROWS, prepStageBlockIssues } = await import("../lib/interview-prep-validation.mjs");
   const template = await readFile(`${SKILL}/assets/面談準備_v2_テンプレート.md`, "utf8");
   const backup = template.slice(template.indexOf("## 临场备用"));
   const h3 = [...backup.matchAll(/^### (.+)$/gm)].map((match) => match[1]);
-  assert.deepEqual(h3.slice(0, 3), PREP_V2_STAGE_BLOCKS.map((spec) => spec.title), "固定块在最前，顺序与标题原样");
+  assert.deepEqual(h3.slice(0, PREP_V2_STAGE_BLOCKS.length), PREP_V2_STAGE_BLOCKS.map((spec) => spec.title), "固定块在最前，顺序与标题原样");
   assert.match(backup, /\[\[自己紹介_音読台本#30秒版\]\]/);
-  assert.equal([...backup.matchAll(/^#### [1-3]\. /gm)].length, 3, "懸念默认三点");
+  // 規律取自趋势表；事実カード八行必有，逐社子表只抄転職理由台本的台本栏。
+  assert.match(backup, /\[\[面接傾向_横断#/);
+  for (const row of PREP_V2_FACT_ROWS) assert.match(backup, new RegExp(`^\\| ${row.key} \\|`, "m"), row.key);
+  assert.match(backup, /^#### 逐社退職理由/m);
+  assert.match(backup, /\[\[転職理由台本#逐社一句/);
+  assert.match(backup, /【内部・言わない】欄は写さない/);
+  // 懸念前两点固定：定着与日本語，第三点本场特有。
+  assert.deepEqual([...backup.matchAll(/^#### [1-3]\. (.+)$/gm)].map((match) => match[1].slice(0, 3)), ["定着（", "日本語", "{{本"]);
   assert.match(backup, /^#### 当日お礼メッセージ$/m);
   assert.match(backup, /ぜひ選考（せんこう）に進（すす）ませていただきたい/);
   assert.match(backup, /第一志望群/);
-  // 模板自带新契约标记；占位符换成任意正文后，三块满足校验器（照模板写的新稿就能过）。
-  assert.match(template, /^prep_contract: 2026-10$/m);
+  // 模板自带新契约标记；占位符换成任意正文后，五块满足校验器（照模板写的新稿就能过）。
+  assert.match(template, /^prep_contract: 2026-11$/m);
   const filled = template.replace(/\{\{[^}]*\}\}/g, "テストです。");
-  assert.deepEqual(prepStageBlockIssues(filled, { contract: "2026-10" }), []);
+  assert.deepEqual(prepStageBlockIssues(filled, { contract: "2026-11" }), []);
 });
 
 test("v2 模板的逆質問：面接官研究在前，五题各带用到的信息、预想回答与接话", async () => {
@@ -123,7 +130,14 @@ test("SKILL 与方法论：被问到才说边界，逆質問用双方信息把�
   }
   assert.match(methodology, /被问到才说边界，并配现状＋计划/);
   assert.doesNotMatch(methodology, /边界 → 真实证据 → 能承担的范围/);
-  assert.match(skill, /冒頭30秒、本場の懸念 TOP3 と先回り一言、締めの一言/);
+  assert.match(skill, /本場の規律、冒頭30秒、HR事実カード、本場の懸念 TOP3 と先回り一言、締めの一言/);
+  // 事実カード与規律在 skill 和方法论里都有说明，内部栏不进稿的红线也在两处。
+  for (const text of [skill, methodology]) {
+    assert.match(text, /HR事実カード/);
+    assert.match(text, /逐社退職理由/);
+    assert.match(text, /【内部】栏永远不进稿/);
+  }
+  assert.match(methodology, /結論→証拠二文→止める/);
   assert.match(skill, /面试当天和前一天默认打开临场卡/);
   assert.match(skill, /### 面接官研究/);
   assert.match(skill, /type: interview-prep-replay/);

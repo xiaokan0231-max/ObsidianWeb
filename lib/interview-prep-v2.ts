@@ -86,8 +86,9 @@ function linksToSection(nodes: PrepInline[]): boolean {
 }
 
 /**
- * 临场卡按面试流程排：冒頭 → 懸念 → 志望動機 → 逆質問 → 締め，其余临场备用（被问到才用的短答）垫底。
- * 三个固定块住在临场备用里（不新增 H2），这里按标题取出；没有这三块的旧稿，顺序和内容都与以前相同。
+ * 临场卡按面试流程排：規律 → 冒頭 → 事実カード → 懸念 → 志望動機 → 逆質問 → 締め，其余临场备用（被问到才用的短答）垫底。
+ * 固定块住在临场备用里（不新增 H2），这里按标题取出；没有这些块的旧稿，顺序和内容都与以前相同。
+ * 規律是几行纪律、事実カード是表，都不是台词：这两块按自己的块型上卡，其余块仍只留台词。
  */
 export function prepV2StageSections(doc: InterviewPrepDoc): PrepStageSection[] {
   const backup = getPrepV2Section(doc.sections, "backup");
@@ -107,15 +108,21 @@ export function prepV2StageSections(doc: InterviewPrepDoc): PrepStageSection[] {
     const found = getPrepV2Section(doc.sections, id);
     return found ? [{ id: found.id, title: found.title, blocks: stageCardBlocks(found.blocks) }] : [];
   };
+  const discipline = fixed.get("discipline");
   const opening = fixed.get("opening");
+  const facts = fixed.get("facts");
   const concerns = fixed.get("concerns");
   const closing = fixed.get("closing");
   // 当日お礼不是台词，但面试一结束就要发，所以整段跟在締め后面。
   const thanks = closing ? takeSubsection(closing, PREP_V2_THANKS_TITLE, 4) : null;
   return [
+    // 規律：列表项就是要带进场的几行；▷ 的出处留在稿里，不上卡。
+    ...chapter("discipline", discipline ? stageCardBlocks(discipline, (block) => block.kind === "list" || block.kind === "say") : null),
     // 自我介绍不复制进准备稿，冒頭保留指向朗读节的链接行，卡上一点就能打开正本。
     ...chapter("opening", opening ? stageCardBlocks(opening, (block) => block.kind === "say"
       || ((block.kind === "paragraph" || block.kind === "note") && linksToSection(block.inline))) : null),
+    // 事実カード：表里每行就是被问到时的第一句；逐社子表、确认日期与正本链接的 ▷ 也要在卡上，被问「一つずつ」时就看这里。
+    ...chapter("facts", facts ? stageCardBlocks(facts, (block) => block.kind === "table" || block.kind === "say" || block.kind === "note") : null),
     ...chapter("concerns", concerns ? stageCardBlocks(concerns) : null),
     ...section("motivation"),
     ...section("questions"),

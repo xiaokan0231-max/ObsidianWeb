@@ -132,6 +132,59 @@ test("没有三个固定块的旧稿，临场卡顺序与内容不变", () => {
   }
 });
 
+const STAGE_BODY_11 = STAGE_BODY
+  .replace("### 冒頭30秒", `### 本場の規律
+
+- 結論→証拠二文→止める。
+- 聞かれていない負号・謝罪・自己評価を出さない。
+
+▷ 出典：[[面接傾向_横断#反復している戦略タグ（2 場以上で出たものだけ）]]。
+
+### 冒頭30秒`)
+  .replace("### 本場の懸念 TOP3 と先回り一言", `### HR事実カード
+
+▷ 正本確認：在留・年収・他社は 2026-11-01 本人確認。
+
+| 聞かれること | 最初の一文（【あなた】） | 正本 |
+|---|---|---|
+| 直近の役職 | 直近は株式会社テストでリードエンジニアを担当しました。 | [[面接標準回答集#p49 直近の役職・担当責任：先回答过去事实]] |
+
+#### 逐社退職理由（聞かれた社だけ一句で）
+
+| 社名 | 期間 | 【あなた】一句 |
+|---|---|---|
+| 株式会社テスト | 2020-04〜2023-03 | 事業の縮小に伴い、次の構築機会を求めて転職しました。 |
+
+▷ 正本：[[転職理由台本#逐社一句(深掘り対策)]]。
+
+### 本場の懸念 TOP3 と先回り一言`);
+
+test("2026-11 的規律与事実カード上卡：規律→冒頭→事実カード→懸念…，規律留列表、事実カード留表与子表", async () => {
+  const sections = prepV2StageSections(parseInterviewPrepDoc(prepNote(STAGE_BODY_11), []));
+  assert.deepEqual(sections.map((section) => section.title), ["本場の規律", "冒頭30秒", "HR事実カード", "本場の懸念 TOP3 と先回り一言", "志望動機", "逆質問", "締めの一言", "临场备用"]);
+  const [discipline, , facts] = sections;
+  // 規律只留列表项，出处的 ▷ 不上卡。
+  assert.deepEqual(discipline.blocks.map((block) => block.kind), ["list"]);
+  assert.doesNotMatch(JSON.stringify(discipline.blocks), /出典/);
+  // 事実カード：确认日期、主表、逐社子表标题与表、正本链接都在卡上；每行第一句就是要说的话。
+  assert.deepEqual(facts.blocks.map((block) => block.kind), ["note", "table", "heading", "table", "note"]);
+  assert.match(JSON.stringify(facts.blocks), /直近は株式会社テストでリードエンジニアを担当しました/);
+  assert.match(JSON.stringify(facts.blocks), /"target":"転職理由台本"/);
+  // 临场卡的阅读层照常把表画出来：被问「一つずつ」时看的就是这张表。
+  const { default: Reader } = await loadAppModule("app/prep-material-reader.tsx", {
+    stubs: {
+      "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN", setLocale() {} }) },
+      "@/lib/reading-document": { headingPlainText: (value) => value },
+      "./reading-mode": { default: ({ children }) => createElement("div", null, children) },
+    },
+  });
+  const html = renderToStaticMarkup(createElement(Reader, {
+    documentKey: "test:stage-11", title: "临场卡", sections: [facts], presentation: "stage", prepVersion: 2,
+    onClose() {}, onOpenWiki() {}, onOpenCard() {},
+  }));
+  assert.match(html, /<table>[\s\S]*直近は株式会社テストでリードエンジニアを担当しました[\s\S]*<table>[\s\S]*事業の縮小に伴い/);
+});
+
 test("面试当天和前一天默认打开临场卡，底下停在纵览；URL 的 prepTab 与无台词稿不弹", async () => {
   const doc = parseInterviewPrepDoc(prepNote(STAGE_BODY), []);
   const render = async ({ today, search = "", target = doc }) => {
