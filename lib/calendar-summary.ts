@@ -37,9 +37,22 @@ type SummaryProgress = Pick<CalendarProgress, "tone"> & Partial<Pick<CalendarPro
  * 同一天的场次可能已面完（已有整理稿或准备稿已完成），phase 仍是 upcoming——它已计入等回复与最近记录，
  * 不能同时再当下一场；历史通过和拒信之后残留的旧预约也不是要去的面试。
  */
-export function isCalendarLiveEvent(event: CalendarEvent, progress: SummaryProgress | undefined, today: string) {
+export function isCalendarLiveEvent(event: Pick<CalendarEvent, "phase" | "date">, progress: SummaryProgress | undefined, today: string) {
   return event.phase === "upcoming" && event.date >= today && !progress?.occurred && progress?.tone !== "closed"
     && !(progress?.code && isCalendarHistoricalProgress({ code: progress.code }));
+}
+
+export function calendarProgressCounts(events: readonly Pick<CalendarEvent, "id" | "caseId">[], progressByEvent: ReadonlyMap<string, SummaryProgress>) {
+  const waiting = new Set<string>();
+  const unknown = new Set<string>();
+  const historical = new Set<string>();
+  for (const event of events) {
+    const progress = progressByEvent.get(event.id);
+    if (progress?.tone === "waiting") waiting.add(progress.ownerKey || (event.caseId ? `case:${event.caseId}` : `event:${event.id}`));
+    if (progress?.code === "association-conflict") unknown.add(event.id);
+    if (progress?.code && isCalendarHistoricalProgress({ code: progress.code })) historical.add(event.id);
+  }
+  return { waitingCount: waiting.size, unknownCount: unknown.size, historicalCount: historical.size };
 }
 
 /**
@@ -60,15 +73,7 @@ export function buildCalendarSummary({ events, progressByEvent, applicationDays,
     .filter((event) => isCalendarLiveEvent(event, progressByEvent.get(event.id), today))
     .sort((left, right) => left.date.localeCompare(right.date) || left.time.localeCompare(right.time) || left.id.localeCompare(right.id));
   const first = live[0];
-  const waiting = new Set<string>();
-  const unknown = new Set<string>();
-  const historical = new Set<string>();
-  for (const event of events) {
-    const progress = progressByEvent.get(event.id);
-    if (progress?.tone === "waiting") waiting.add(progress.ownerKey || (event.caseId ? `case:${event.caseId}` : `event:${event.id}`));
-    if (progress?.code === "association-conflict") unknown.add(event.id);
-    if (progress?.code && isCalendarHistoricalProgress({ code: progress.code })) historical.add(event.id);
-  }
+  const counts = calendarProgressCounts(events, progressByEvent);
   const month = today.slice(0, 7);
   const companies = new Set(applicationDays
     .filter((day) => day.date.startsWith(month) && day.date <= today)
@@ -76,9 +81,7 @@ export function buildCalendarSummary({ events, progressByEvent, applicationDays,
   return {
     weekCount: live.filter((event) => event.date <= horizon).length,
     next: first ? { event: first, days: calendarDayOffset(today, first.date) ?? 0 } : null,
-    waitingCount: waiting.size,
-    unknownCount: unknown.size,
-    historicalCount: historical.size,
+    ...counts,
     monthAiCompanies: companies.size,
   };
 }

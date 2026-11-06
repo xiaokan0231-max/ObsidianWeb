@@ -343,6 +343,153 @@ test("客户端按版本取完整正文；迟到的上一场请求不能覆盖�
   resource.dispose();
 });
 
+test("切回仍在途的同版复盘块时共享数据请求，由新选择应用结果", async () => {
+  const { createInterviewContextResource } = await loadAppModule("app/use-interview-context.ts");
+  const first = study("切回甲");
+  const second = study("切回乙", "二次面接");
+  const model = reader(buildInterviewReadModelRecords([first, second], { today }));
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  let blockCalls = 0;
+  const resource = createInterviewContextResource(async (url) => {
+    const parsed = new URL(url, "http://localhost");
+    if (parsed.searchParams.has("block")) { blockCalls++; await pending; }
+    return Response.json(await interviewQuery(model, "r1", parsed));
+  });
+  await resource.query("review", { sourcePath: first.path });
+  const old = resource.getState().review.loadBlocks(["q01"]);
+  await resource.query("review", { sourcePath: second.path });
+  await resource.query("review", { sourcePath: first.path });
+  const current = resource.getState().review.loadBlocks(["q01"]);
+  release();
+  await Promise.all([old, current]);
+  assert.equal(blockCalls, 1);
+  assert.equal(resource.getState().review.blocks.q01.sentences[0].sei, "開発を担当しました。");
+  resource.dispose();
+});
+
+test("复盘块和评价失败后停止自动请求，手动重试仅重读失败资源", async () => {
+  const { createInterviewContextResource } = await loadAppModule("app/use-interview-context.ts");
+  const first = study("部分失败", "一次面接", "## q01 経験\n- **s001｜私**\n    - 正:: 開発を担当しました。\n\n## q02 条件\n- **s002｜面**\n    - 正:: ご希望を教えてください。\n");
+  const model = reader(buildInterviewReadModelRecords([first], { today }));
+  const calls = new Map();
+  let recover = false;
+  const resource = createInterviewContextResource(async (url) => {
+    const parsed = new URL(url, "http://localhost");
+    const block = parsed.searchParams.get("block");
+    const section = parsed.searchParams.get("section");
+    if (block || section) {
+      const key = block ? `block:${block}` : `section:${section}`;
+      calls.set(key, (calls.get(key) ?? 0) + 1);
+      if (!recover && (block === "q01" || section)) return Response.json({ error: "模拟资料暂时不可用" }, { status: 404 });
+      if (section === "quality") return Response.json({ revision: "r1", section: { review: {}, blocks: [{ blockId: "q01", missedCount: 0 }] } });
+      if (section) return Response.json({ revision: "r1", section: { blockId: section } });
+    }
+    const data = await interviewQuery(model, "r1", parsed);
+    if (data.review) { data.review.hasQuality = true; data.review.hasAdvisory = true; }
+    return Response.json(data);
+  });
+  await resource.query("review", { sourcePath: first.path });
+  const review = () => resource.getState().review;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await review().loadBlocks(["q01"]);
+    await review().loadSection("quality");
+    await review().loadSection("advisory");
+    await review().loadQualityBlock("q01");
+  }
+  assert.deepEqual(Object.fromEntries(calls), { "block:q01": 1, "block:q02": 1, "section:quality": 1, "section:advisory": 1, "section:q01": 1 });
+  assert.ok(review().blocks.q02);
+  assert.equal(review().errors.blocks.q01, "模拟资料暂时不可用");
+  assert.equal(review().errors.sections.quality, "模拟资料暂时不可用");
+  assert.equal(review().errors.qualityBlocks.q01, "模拟资料暂时不可用");
+  recover = true;
+  await review().loadBlocks(["q01"], true);
+  await review().loadSection("quality", true);
+  await review().loadSection("advisory", true);
+  await review().loadQualityBlock("q01", true);
+  assert.deepEqual(Object.fromEntries(calls), { "block:q01": 2, "block:q02": 1, "section:quality": 2, "section:advisory": 2, "section:q01": 2 });
+  assert.deepEqual(review().errors, { blocks: {}, sections: {}, qualityBlocks: {} });
+  assert.ok(review().blocks.q01 && review().qualityBlocks.q01);
+  resource.dispose();
+});
+
+test("复盘问题过期后重试切换版本，同时保留已经打开的问题", async () => {
+  const { createInterviewContextResource } = await loadAppModule("app/use-interview-context.ts");
+  const body = (prefix) => [1, 2, 3].map(index =>
+    `## q0${index} テスト\n- **s00${index}｜私**\n    - 正:: ${prefix}${index}。`).join("\n\n");
+  const initial = study("期限切れ", "一次面接", body("旧版"));
+  const updated = { ...initial, content: body("新版") };
+  const readers = { r1: reader(buildInterviewReadModelRecords([initial], { today }), "r1"),
+    r2: reader(buildInterviewReadModelRecords([updated], { today }), "r2") };
+  let revision = "r1", release;
+  const holdNewCatalog = new Promise((resolve) => { release = resolve; });
+  const requested = [];
+  const resource = createInterviewContextResource(async (url) => {
+    const parsed = new URL(url, "http://localhost");
+    const version = parsed.searchParams.get("revision");
+    const block = parsed.searchParams.get("block");
+    if (block) requested.push([version, block]);
+    if (version && version !== revision) return Response.json({ error: "资料版本已过期" }, { status: 409 });
+    if (revision === "r2" && parsed.pathname.endsWith("/catalog")) await holdNewCatalog;
+    return Response.json(await interviewQuery(readers[revision], revision, parsed));
+  });
+  const review = () => resource.getState().review;
+  await resource.query("review", { sourcePath: initial.path });
+  await review().loadBlocks(["q01", "q02"]);
+  assert.equal(review().blocks.q01.sentences[0].sei, "旧版1。");
+  revision = "r2";
+  await review().loadBlocks(["q03"]);
+  assert.equal(review().errors.blocks.q03, "资料版本已过期");
+  const retry = review().loadBlocks(["q03"], true);
+  assert.equal(review().blocks.q01.sentences[0].sei, "旧版1。");
+  release();
+  await retry;
+  assert.equal(resource.getState().revision, "r2");
+  assert.equal(review().blocks.q01.sentences[0].sei, "新版1。");
+  assert.equal(review().blocks.q03.sentences[0].sei, "新版3。");
+  assert.deepEqual(requested.filter(([, block]) => block === "q03"), [["r1", "q03"], ["r2", "q03"]]);
+  resource.dispose();
+});
+
+test("新资料版本移除评价章节或其中的问题时，不重新读取已经删除的题目", async () => {
+  const { createInterviewContextResource } = await loadAppModule("app/use-interview-context.ts");
+  const source = study("评价更新");
+  const records = buildInterviewReadModelRecords([source], { today });
+  const sectionCalls = [];
+  let revision = "r1";
+  const resource = createInterviewContextResource(async (url) => {
+    const parsed = new URL(url, "http://localhost");
+    const section = parsed.searchParams.get("section");
+    if (section) {
+      sectionCalls.push([revision, section]);
+      const blockId = revision === "r1" ? "q01" : "q02";
+      if (revision === "r3" || section !== "quality" && section !== blockId) {
+        return Response.json({ error: "评价章节已删除" }, { status: 404 });
+      }
+      return Response.json({ revision, section: section === "quality" ? { review: {}, blocks: [{ blockId, missedCount: 0 }] } : { blockId } });
+    }
+    const payload = await interviewQuery(reader(records, revision), revision, parsed);
+    if (payload.review) payload.review = { ...payload.review, hasQuality: revision !== "r3" };
+    return Response.json(payload);
+  });
+  await resource.query("review", { sourcePath: source.path });
+  await resource.getState().review.loadSection("quality");
+  await resource.getState().review.loadQualityBlock("q01");
+  assert.ok(resource.getState().review.qualityBlocks.q01);
+  revision = "r2";
+  await resource.refresh();
+  assert.equal(resource.getState().revision, "r2");
+  assert.deepEqual(resource.getState().review.qualityBlocks, {});
+  await resource.getState().review.loadQualityBlock("q02");
+  revision = "r3";
+  await resource.refresh();
+  assert.equal(resource.getState().revision, "r3");
+  assert.equal(resource.getState().review.quality, null);
+  assert.deepEqual(resource.getState().review.qualityBlocks, {});
+  assert.deepEqual(sectionCalls, [["r1", "quality"], ["r1", "q01"], ["r2", "quality"], ["r2", "q02"]]);
+  resource.dispose();
+});
+
 test("同步分批进行时自动推进到新版本，保留已保存的本场批注", async () => {
   const { createInterviewContextResource } = await loadAppModule("app/use-interview-context.ts", { globals: {
     setTimeout: (callback) => setImmediate(callback), clearTimeout: clearImmediate,

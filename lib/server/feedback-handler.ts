@@ -1,6 +1,6 @@
 import type { FeedbackIdentity } from "../feedback.ts";
 import { isFeedbackOwnerRequest } from "./feedback-owner-auth.ts";
-import { changeThread, createThread, FeedbackError, getThread, listThreads, loginAttempt, markRead, participantName, reply, rotateCode, settings, validId, type FeedbackSettings } from "./feedback-store.ts";
+import { changeThread, createThread, FeedbackError, getThread, listThreads, listSummaries, unreadSummary, loginAttempt, markRead, participantName, reply, rotateCode, settings, validId, type FeedbackSettings } from "./feedback-store.ts";
 
 export type FeedbackEnv = {
   FEEDBACK_BUCKET?: R2Bucket;
@@ -126,6 +126,17 @@ async function response(request: Request, env: FeedbackEnv): Promise<Response> {
     return json({ error: "この操作は利用できません。" }, 405);
   }
   if (!participant) throw new FeedbackError(401, "お名前とアクセスコードを入力してください。");
+  if (path === "/api/feedback/summaries" && method === "GET") return json(await listSummaries(bucket, participant, new URL(request.url).searchParams));
+  if (path === "/api/feedback/unread" && method === "GET") {
+    const unread = await unreadSummary(bucket, participant);
+    const etag = `"${await hash(`${participant.id}:${participant.role}:${unread.revision}:${unread.readRevision}`)}"`;
+    if (request.headers.get("If-None-Match") === etag) {
+      const headers = json(null).headers;
+      headers.set("ETag", etag);
+      return new Response(null, { status: 304, headers });
+    }
+    return json(unread, 200, { ETag: etag });
+  }
   if (path === "/api/feedback/settings") {
     if (participant.role !== "owner") throw new FeedbackError(403, "この操作は本人のみ利用できます。");
     if (method === "GET") return json({ accessCode: config.accessCode });
@@ -154,8 +165,8 @@ async function response(request: Request, env: FeedbackEnv): Promise<Response> {
 export async function handleFeedbackRequest(request: Request, env: FeedbackEnv): Promise<Response> {
   try { return await response(request, env); }
   catch (error) {
-    if (error instanceof FeedbackError) return json({ error: error.message }, error.status);
+    if (error instanceof FeedbackError) return json({ error: error.message }, error.status, error.status === 503 ? { "Retry-After": "3" } : undefined);
     // 不把正文、密钥或存储内部错误写入日志或返回给访客。
-    return json({ error: "コメントを読み込めませんでした。少し待ってから、もう一度お試しください。" }, 503);
+    return json({ error: "コメントを読み込めませんでした。少し待ってから、もう一度お試しください。" }, 503, { "Retry-After": "3" });
   }
 }

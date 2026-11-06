@@ -125,3 +125,15 @@ test("密文manifest不能掩盖夹带的明文资产，构建拒绝整份且不
   await assert.rejects(copySealedPublishedVault(published, output), /未加密/u);
   await assert.rejects(stat(output), error => error.code === "ENOENT");
 });
+
+test("轮换密钥同时支持新旧安全发布资源，错误密钥和明文都不放行", async () => {
+  const { sealAsset, unsealAssetResponse, publishedAssetSecrets } = await import("../lib/server/sealed-assets.ts");
+  const old = "12".repeat(32), next = "34".repeat(32);
+  const keys = publishedAssetSecrets({ SITE_ASSET_SECRET: old, SITE_ASSET_SECRET_NEXT: next });
+  for (const secret of [old, next]) {
+    const bytes = await sealAsset(new TextEncoder().encode("synthetic published snapshot"), secret);
+    assert.equal(await (await unsealAssetResponse(new Response(bytes), keys)).text(), "synthetic published snapshot");
+  }
+  await assert.rejects(unsealAssetResponse(new Response(await sealAsset(new TextEncoder().encode("private"), "56".repeat(32))), keys), /解密验证失败/);
+  await assert.rejects(unsealAssetResponse(new Response("plaintext"), keys), /未加密/);
+});

@@ -35,15 +35,18 @@ export async function dispatchFeedbackRequest(request: Request, env: FeedbackDis
       Accept: "application/json",
     });
     if (request.headers.has("content-type")) headers.set("content-type", request.headers.get("content-type")!);
+    if (request.headers.has("if-none-match")) headers.set("if-none-match", request.headers.get("if-none-match")!);
     const response = await fetch(target, {
       method: request.method, headers,
       body: ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer(),
       redirect: "error", signal: AbortSignal.timeout(20000),
     });
     // 远端 Cookie 不复制到 localhost；管理权限始终留在服务端代理中。
+    const responseHeaders = new Headers({ ...privateHeaders, "Content-Type": "application/json; charset=utf-8" });
+    for (const name of ["ETag", "Retry-After"]) if (response.headers.has(name)) responseHeaders.set(name, response.headers.get(name)!);
     return new Response(response.body, {
       status: response.status,
-      headers: { ...privateHeaders, "Content-Type": "application/json; charset=utf-8" },
+      headers: responseHeaders,
     });
   } catch {
     return Response.json({ error: "コメントに接続できませんでした。時間をおいて、もう一度お試しください。" }, { status: 502, headers: privateHeaders });

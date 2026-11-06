@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { isTypingTarget } from "../lib/keyboard.ts";
+import { isComposingKey, isTypingTarget } from "../lib/keyboard.ts";
+
+test("输入法组字与 229 确认键不进入应用快捷键", () => {
+  assert.equal(isComposingKey({ isComposing: true, keyCode: 13 }), true);
+  assert.equal(isComposingKey({ isComposing: false, keyCode: 229 }), true);
+  assert.equal(isComposingKey({ isComposing: false, keyCode: 13 }), false);
+});
 
 test("输入场景判定：input/textarea/select 与 contentEditable 都算，其它元素和空目标不算", () => {
   assert.equal(isTypingTarget({ tagName: "INPUT" }), true);

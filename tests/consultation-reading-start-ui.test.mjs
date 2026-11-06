@@ -12,15 +12,15 @@ function catalog(sessions) {
 }
 function startSection(html) { return html.match(/<section class="consultation-reading-start"[^]*?<\/section>/)?.[0] ?? ""; }
 
-test("首页展示最近一周所有场次，保留终面入口和完整目录", async t => {
+test("首页展示最近两周所有场次，保留终面入口和完整目录", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-23T03:00:00Z") });
   const { ConsultationLibrary } = await loadAppModule("app/consultation/consultation-view.tsx");
-  const items = [session("recent", "2026-10-23"), session("second", "2026-10-22", { introduction: "開発経験について話した面談です。" }), session("final", "2026-10-16", {}, { stage: "final", round: "最終面接" }), session("other", "2026-10-19", { example: true })];
+  const items = [session("recent", "2026-10-23"), session("second", "2026-10-22", { introduction: "開発経験について話した面談です。" }), session("final", "2026-10-09", {}, { stage: "final", round: "最終面接" }), session("other", "2026-10-19", { example: true })];
   const html = renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial: catalog(items) }));
   const start = startSection(html);
   assert.equal((start.match(/<article /g) ?? []).length, 3);
-  assert.match(start, /最近1週間の面接・面談/);
-  assert.match(start, /2026.10.17–2026.10.23/);
+  assert.match(start, /最近2週間の面接・面談/);
+  assert.match(start, /2026.10.10–2026.10.23/);
   assert.match(start, /最終面接/);
   assert.doesNotMatch(start, /ほかの面接/);
   assert.match(start, /<h1 id="reading-start-title">面接相談の資料<\/h1>/);
@@ -142,9 +142,9 @@ test("本周无记录仍显示零件和空状态，不回退到陈旧记录", as
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-01T03:00:00Z") });
   const { ConsultationLibrary, ReadingHistoryCard } = await loadAppModule("app/consultation/consultation-view.tsx");
   const start = startSection(renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial: catalog([session("old-final", "2026-10-01", {}, { stage: "final" })]) })));
-  assert.match(start, /最近1週間の面接・面談/);
+  assert.match(start, /最近2週間の面接・面談/);
   assert.match(start, /0<small>件/);
-  assert.match(start, /最近1週間の面接・面談の記録はまだありません/);
+  assert.match(start, /最近2週間の面接・面談の記録はまだありません/);
   assert.doesNotMatch(start, /<article /);
   const html = renderToStaticMarkup(React.createElement(ReadingHistoryCard, { history: { companyId: "history", company: "株式会社テスト", interview: { id: "meeting", date: "2026-10-30", round: "カジュアル面談", stage: "casual" } }, onBrowse() {} }));
   assert.match(html, /カジュアル面談/);
@@ -167,7 +167,7 @@ test("本周逐字稿与无稿场次合并按日期排序，同公司多场各�
   assert.doesNotMatch(start, /最終面接/);
 });
 
-test("最近一周同时展示企业原稿、代理面谈和仅确约场次，确约不冒充完成历史", async t => {
+test("最近两周同时展示企业原稿、代理面谈和仅确约场次，确约不冒充完成历史", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-30T03:00:00Z") });
   const { ConsultationLibrary } = await loadAppModule("app/consultation/consultation-view.tsx");
   const initial = catalog([session("company", "2026-10-30"), session("second", "2026-10-29")]);
@@ -180,4 +180,26 @@ test("最近一周同时展示企业原稿、代理面谈和仅确约场次，�
   assert.match(start, /株式会社予定テスト/);
   assert.match(start, /実施記録未登録/);
   assert.doesNotMatch(start, /面接履歴を見る/);
+});
+
+test("明确指定的两场咨询优先于日期更新的面谈", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-30T03:00:00Z") });
+  const { ConsultationLibrary } = await loadAppModule("app/consultation/consultation-view.tsx");
+  const items = [session("latest", "2026-10-29"), session("thursday", "2026-10-22", { priority: 1 }), session("friday", "2026-10-23", { priority: 2 })];
+  const start = startSection(renderToStaticMarkup(React.createElement(ConsultationLibrary, { initial: catalog(items) })));
+  assert.match(start, /株式会社テストthursday[^]*株式会社テストfriday[^]*株式会社テストlatest/);
+  assert.equal((start.match(/今回の相談/g) ?? []).length, 2);
+});
+
+test("复盘摘要入口与阅读页明确资料性质，不显示不存在的逐字稿切换", async () => {
+  const { ReadingHistoryCard, ConsultationTranscriptReader } = await loadAppModule("app/consultation/consultation-view.tsx");
+  const history = { companyId: "company-summary", company: "株式会社テスト", interview: { id: "interview-test", date: "2026-07-13", round: "一次面接", stage: "round-1", summaryId: "summary-test" } };
+  const card = renderToStaticMarkup(React.createElement(ReadingHistoryCard, { history, onBrowse() {}, onSummary() {} }));
+  assert.match(card, /面接まとめを読む/);
+  assert.match(card, /逐字稿なし/);
+  const detail = { ...session("summary-test", "2026-07-13"), recordKind: "summary", hasRaw: true, hasReadable: false, raw: "面接のまとめです。", blocks: [], notice: "本人の記憶と企業評価を含みます。" };
+  const html = renderToStaticMarkup(React.createElement(ConsultationTranscriptReader, { initial: detail, view: "raw" }));
+  assert.match(html, /面接後のまとめ・復盤資料/);
+  assert.match(html, /面接のまとめです/);
+  assert.doesNotMatch(html, /録音からの文字起こし|原始転写|原稿の表示形式/);
 });

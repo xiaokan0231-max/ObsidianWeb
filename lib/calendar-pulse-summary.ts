@@ -1,6 +1,8 @@
-import { summarizeAiApplicationDays, type AiApplicationBucket } from "./calendar-applications.ts";
-import { calendarModelFromSnapshot, type CalendarModel, type CalendarSnapshot } from "./calendar-snapshot.ts";
-import { buildCalendarSummary } from "./calendar-summary.ts";
+import { buildAiApplicationDays, summarizeAiApplicationDays, type AiApplicationBucket } from "./calendar-applications.ts";
+import type { CalendarSnapshot } from "./calendar-snapshot.ts";
+import { calendarProgressCounts, isCalendarLiveEvent } from "./calendar-summary.ts";
+import { isCalendarHistoricalProgress, type CalendarProgress } from "./calendar-progress.ts";
+import type { CalendarEvent } from "./memory-atlas-data.ts";
 
 export type CalendarPulseSummary = {
   today: string;
@@ -15,25 +17,50 @@ export type CalendarPulseSummary = {
   historicalTotal: number;
 };
 
-function globalCounts(model: CalendarModel, today: string) {
-  const summary = buildCalendarSummary({ ...model, today });
-  return {
-    waitingCount: summary.waitingCount,
-    historicalCount: summary.historicalCount,
-    historicalTotal: model.events.filter((event) => event.phase === "past" || model.progressByEvent.get(event.id)?.occurred).length,
-  };
+type PulseProgress = Pick<CalendarProgress, "tone" | "code" | "ownerKey" | "occurred">;
+export type CalendarPulseSource = Pick<CalendarSnapshot, "applicationNotes"> & {
+  events: (Pick<CalendarEvent, "id" | "date" | "time" | "caseId"> & Record<"upcoming" | "past", PulseProgress>)[];
+};
+
+export function calendarPulseSource(snapshot: CalendarSnapshot): CalendarPulseSource {
+  const progress = ({ tone, code, ownerKey, occurred }: CalendarProgress): PulseProgress => ({ tone, code, ownerKey, occurred });
+  return { applicationNotes: snapshot.applicationNotes, events: snapshot.events.map(({ event, upcoming, past }) => ({
+    id: event.id, date: event.date, time: event.time, caseId: event.caseId,
+    upcoming: progress(upcoming.progress), past: progress(past.progress),
+  })) };
+}
+
+function pulseDay(source: CalendarPulseSource, today: string) {
+  const progressByEvent = new Map<string, PulseProgress>();
+  const events = source.events.map(({ id, date, time, upcoming, past }) => {
+    const phase = date < today ? "past" : "upcoming";
+    const progress = phase === "past" ? past : upcoming;
+    progressByEvent.set(id, progress);
+    return { id, date, time, live: isCalendarLiveEvent({ date, phase }, progress, today),
+      occurred: phase === "past" || progress.occurred, historical: isCalendarHistoricalProgress(progress) };
+  });
+  const applicationDays = buildAiApplicationDays(source.applicationNotes, today);
+  const { waitingCount, historicalCount } = calendarProgressCounts(source.events, progressByEvent);
+  const historicalTotal = events.filter((event) => event.occurred).length;
+  const summary = (month: string): CalendarPulseSummary => ({
+    today, month, applications: summarizeAiApplicationDays(applicationDays, month),
+    waitingCount, historicalCount, historicalTotal,
+  });
+  return { events, applicationDays, summary };
+}
+
+export function rollCalendarPulse(source: CalendarPulseSource, today: string) {
+  const { events, applicationDays, summary } = pulseDay(source, today);
+  const months = ["", ...new Set(applicationDays.map((day) => day.date.slice(0, 7)))].sort();
+  return { events, applicationDays, summaries: months.map(summary) };
 }
 
 /** 首屏数字与完整日历沿用同一去重及状态口径，不能用逐日公司数相加代替月度去重。 */
 export function buildCalendarPulseSummary(snapshot: CalendarSnapshot, today: string, month: string): CalendarPulseSummary {
-  const model = calendarModelFromSnapshot(snapshot, today);
-  return { today, month, applications: summarizeAiApplicationDays(model.applicationDays, month), ...globalCounts(model, today) };
+  return pulseDay(calendarPulseSource(snapshot), today).summary(month);
 }
 
 /** 空月份行保存全局计数，让没有申请活动的月份也能只读一条小汇总返回零。 */
 export function buildCalendarPulseSummaries(snapshot: CalendarSnapshot, today: string): CalendarPulseSummary[] {
-  const model = calendarModelFromSnapshot(snapshot, today);
-  const counts = globalCounts(model, today);
-  const months = ["", ...new Set(model.applicationDays.map((day) => day.date.slice(0, 7)))].sort();
-  return months.map((month) => ({ today, month, applications: summarizeAiApplicationDays(model.applicationDays, month), ...counts }));
+  return rollCalendarPulse(calendarPulseSource(snapshot), today).summaries;
 }

@@ -1682,9 +1682,6 @@
   .graph-preview-copy { width: 52%; }
   .graph-layout { grid-template-columns: minmax(0, 1fr); }
   .graph-legend { display: none; }
-  .space-graph-stage, .space-graph-loading-shell, .space-graph-empty { min-height: 590px; }
-  .space-graph-dossier { width: min(330px, calc(100% - 32px)); }
-  .space-graph-dossier[data-mode="focus"] { width: calc(100% - 32px); }
   .timeline-items { grid-template-columns: 1fr; }
   .library-workspace { grid-template-columns: minmax(0, 1fr); }
   .library-facets {
@@ -1804,56 +1801,6 @@
   .graph-control-cluster { justify-content: flex-start; }
   .graph-renderer-toggle { align-self: stretch; }
   .graph-renderer-toggle button { flex: 1; padding-inline: 6px; }
-  .space-graph-stage, .space-graph-loading-shell, .space-graph-empty { min-height: 540px; }
-  .space-graph-brand strong { display: none; }
-  .space-graph-controls { top: 14px; right: 14px; }
-  .graph-hand-console { bottom: 38px; left: 10px; width: 190px; }
-  .graph-hand-preview { height: 108px; }
-  .graph-hand-cursor > b { display: none; }
-  .space-graph-brand { top: 20px; left: 14px; }
-  .space-graph-search { top: 56px; left: 14px; width: calc(100% - 28px); }
-  .space-graph-search-results > div { max-height: 230px; }
-  .space-graph-node-card { top: 104px; left: 14px; width: min(240px, calc(100% - 28px)); }
-  .space-graph-dossier {
-    top: auto;
-    right: 10px;
-    bottom: 42px;
-    left: 10px;
-    width: auto;
-    max-height: min(72vh, 500px);
-    padding: 14px;
-  }
-  .space-graph-dossier-orbit { position: absolute; top: 46px; right: 14px; width: 58px; height: 58px; margin: 0; opacity: .74; }
-  .space-graph-dossier-title { max-width: calc(100% - 74px); margin-top: 13px; }
-  .space-graph-dossier-title h2 { font-size: 21px; }
-  .space-graph-dossier-neighbors { display: none; }
-  .space-graph-dossier[data-mode="focus"] {
-    top: 50%;
-    right: 10px;
-    bottom: auto;
-    left: 10px;
-    width: auto;
-    height: min(82vh, 650px);
-    max-height: none;
-    transform: translateY(-50%);
-    animation: graph-signal-in 220ms ease-out both;
-  }
-  .space-graph-dossier[data-mode="focus"] .space-graph-dossier-orbit {
-    width: 64px;
-    height: 64px;
-    float: none;
-    margin: 0;
-  }
-  .space-graph-dossier[data-mode="focus"] .space-graph-dossier-title {
-    min-height: 0;
-    padding-top: 0;
-  }
-  .space-graph-shortcuts { right: 10px; bottom: 42px; left: 10px; width: auto; }
-  .space-graph-portal-rings { width: min(54vw, 220px); }
-  .space-graph-caption { right: 14px; bottom: 12px; left: 14px; }
-  .space-graph-caption > span { display: none; }
-  .space-graph-caption { justify-content: flex-end; }
-  .space-graph-index { bottom: 34px; left: 14px; }
   .time-corridor-layout { min-height: 540px; }
   /* 窄屏上密度条压缩成纯柱状：月份文字让位给触控热区。 */
   .time-corridor-scrubber { max-width: calc(100% - 24px); bottom: 30px; }

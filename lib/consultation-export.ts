@@ -165,9 +165,9 @@ export function exportConsultationCompanies(catalog: ConsultationCatalog): Uint8
 export function exportConsultationTranscript(transcript: ConsultationTranscript, view: "readable" | "raw"): Uint8Array {
   const raw = view === "raw";
   const memory = transcript.recordKind === "memory";
-  const sourceType = memory ? (raw ? "記憶から再構成した記録の原文" : "記憶から再構成した記録") : (raw ? "原始文字起こし" : "読みやすい逐句稿");
+  const sourceType = transcript.recordKind === "summary" ? "面接まとめ（逐字稿なし）" : memory ? (raw ? "記憶から再構成した記録の原文" : "記憶から再構成した記録") : (raw ? "原始文字起こし" : "読みやすい逐句稿");
   const title = `${transcript.company} 面接記録`;
-  const introduction = memory ? "本人の記憶から再構成した資料です。録音に基づく逐語記録ではありません。"
+  const introduction = transcript.recordKind === "summary" ? "面接後に作成したまとめ・復盤資料です。逐語の発言記録とは区別してください。" : memory ? "本人の記憶から再構成した資料です。録音に基づく逐語記録ではありません。"
     : raw ? "文字起こしの原文です。聞き取りや話者の判定に誤りが含まれる場合があります。改行と発言の順序を保持しています。"
     : "記録にある発言を話者ごとに掲載しています。聞き取りや話者が未確認の箇所は、そのまま明示しています。整理方法と聞き取りの状況は、以下の注記をご確認ください。";
   const parts = [paragraph(title, "Title"), metadata("面接日", shown(transcript.date, "日付未確認")), metadata("面接段階", shown(transcript.round, "面接・面談")), metadata("選考結果", shown(transcript.outcome)), metadata("資料の種類", sourceType), paragraph(introduction)];

@@ -94,6 +94,47 @@ test("完整路径优先及重名短链消歧，关系查询不加载全库正�
   assert.ok(storage.calls.slice(before).flat().every(({ sql }) => !/FROM read_model_chunks/.test(sql)));
 });
 
+test("常见词搜索只取一页卡片，资料库翻页复用精确相关度与统计", async (t) => {
+  const storage = database(t);
+  const notes = Array.from({ length: 76 }, (_, index) =>
+    note(`30_資料/测试${index}.md`, "テスト データ基盤 ".repeat(index + 1), {}, index % 2 ? ["资料"] : [], 10));
+  const { model } = await imported(storage, notes);
+  storage.calls.length = 0;
+  const blank = await model.search("test");
+  assert.equal(blank.total, 76);
+  assert.deepEqual(paths(blank.items), notes.slice(0, 8).map(({ path }) => path));
+  const common = await model.search("test", "データ");
+  assert.equal(common.total, 76);
+  assert.deepEqual(paths(common.items), paths(blank.items));
+  for (const statement of storage.calls.flat().filter(({ sql }) => /SELECT c\.\*/.test(sql))) {
+    assert.match(statement.sql, /LIMIT/);
+    assert.equal(storage.sqlite.prepare(statement.sql).all(...statement.values).length, 8);
+  }
+  const first = await model.library("test", { query: "データ" });
+  assert.deepEqual(paths(first.items), notes.toReversed().slice(0, 24).map(({ path }) => path));
+  storage.calls.length = 0;
+  const second = await model.library("test", { query: "データ", cursor: first.nextCursor });
+  assert.deepEqual(paths(second.items), notes.toReversed().slice(24, 48).map(({ path }) => path));
+  assert.deepEqual(second.facets, first.facets);
+  assert.ok(storage.calls.flat().every(({ sql }) => !/WITH flags|SELECT c\.path,c\.hash,c\.ordinal/.test(sql)));
+});
+
+test("同日经过五分钟后重查结果与相关度计划", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-29T01:00:00Z") });
+  const storage = database(t);
+  const { model } = await imported(storage, [note("30_資料/测试.md", "データ基盤")]);
+  await model.library("test", { query: "データ" });
+  t.mock.timers.tick(5 * 60_000 - 1);
+  storage.calls.length = 0;
+  await model.library("test", { query: "データ" });
+  assert.equal(storage.calls.length, 1);
+  t.mock.timers.tick(1);
+  storage.calls.length = 0;
+  await model.library("test", { query: "データ" });
+  assert.ok(storage.calls.flat().some(({ sql }) => /WITH flags/.test(sql)));
+  assert.ok(storage.calls.flat().some(({ sql }) => /JOIN read_model_chunks/.test(sql)));
+});
+
 test("大于 D1 单行限制的正文及投影分块导入，42 个精确键用一次 JOIN 读取", async (t) => {
   const storage = database(t);
   const text = "边界😀\"\\".repeat(230_000);

@@ -27,11 +27,30 @@ async function moduleFor(notes, today = TODAY, transform = () => {}) {
     },
   } };
   const loaded = await loadAppModule("app/read-model-calendar.ts", { stubs: {
-    "./read-model-server": { ReadModelError, async readModelRuntime(revision) { if (revision && revision !== runtime.revision) throw new ReadModelError("版本已过期", 409); return runtime; } },
+    "./read-model-server": { ReadModelError, async readModelReady() { return runtime; }, async readModelRuntime(revision) { if (revision && revision !== runtime.revision) throw new ReadModelError("版本已过期", 409); return runtime; } },
+    "cloudflare:workers": { env: {} },
     "@/lib/dojo/utils": { tokyoParts: () => ({ date }) },
   } });
   return { ...loaded, calls, records, setDate(value) { date = value; } };
 }
+
+test("首屏只取同一就绪版的月度汇总，详情继续沿用日本日期和资料版本", async () => {
+  const loaded = await moduleFor([application("first")]);
+  const initial = await loaded.calendarInitialPulse("2026-10", TODAY);
+  assert.equal(initial.revision, "pinned-test");
+  assert.equal(initial.today, TODAY);
+  assert.equal(initial.summary.today, TODAY);
+  assert.deepEqual(loaded.calls, [{ kind: "calendar-pulse", keys: ["2026-10", "default"] }]);
+  const params = new URLSearchParams({ revision: initial.revision, today: initial.today, month: "2026-10" });
+  const range = await loaded.calendarRange(params);
+  assert.deepEqual(range.summary, initial.summary);
+  assert.equal(range.revision, initial.revision);
+  assert.equal((await loaded.calendarHistory(params)).today, initial.today);
+  loaded.setDate("2026-10-30");
+  await assert.rejects(loaded.calendarRange(params), { status: 409 });
+  await assert.rejects(loaded.calendarHistory(params), { status: 409 });
+  await assert.rejects(loaded.calendarApplication(new URLSearchParams({ ...Object.fromEntries(params), date: TODAY })), { status: 409 });
+});
 
 test("范围只批量读取相关日期，月度公司跨日去重沿用预聚合，未知月不伪造全局零值", async () => {
   const notes = [application("first", { next_event_at: "2026-10-03 10:00", next_event_label: "一次面接" }), application("second", { applied_on: "2026-10-02" }), application("other", { company: "株式会社ダミー", applied_on: "2026-10-04" }), application("future", { next_event_at: "2026-11-20 11:00", next_event_label: "一次面接" })];
@@ -84,6 +103,18 @@ test("JST跨日按固定资料版本重算申请与过期行动桶，之后复�
   const range = await loaded.calendarRange(new URLSearchParams({ month: "2026-10", from: "2026-10-01", to: "2026-10-31" }));
   assert.equal(range.today, "2026-10-30");
   assert.deepEqual(range.summary, buildCalendarPulseSummary(buildCalendarSnapshot(notes), "2026-10-30", "2026-10"));
+  assert.equal(loaded.calls.filter((call) => call.kind === "calendar-pulse-source").length, 1);
+  assert.equal(loaded.calls.filter((call) => call.kind === "calendar-source").length, 0);
+});
+
+test("保留的旧索引跨日时共用一次同版快照重算", async () => {
+  const loaded = await moduleFor([application("first")], TODAY, (records) => records.delete(JSON.stringify(["calendar-pulse-source", "root"])));
+  loaded.setDate("2026-10-30");
+  const [initial, range] = await Promise.all([
+    loaded.calendarInitialPulse("2026-10", "2026-10-30"),
+    loaded.calendarRange(new URLSearchParams({ revision: "pinned-test", today: "2026-10-30", month: "2026-10" })),
+  ]);
+  assert.deepEqual(initial.summary, range.summary);
   assert.equal(loaded.calls.filter((call) => call.kind === "calendar-source").length, 1);
 });
 

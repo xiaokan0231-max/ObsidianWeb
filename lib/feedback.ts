@@ -15,6 +15,15 @@ export type FeedbackThread = {
   messages: FeedbackMessage[]; unread: boolean;
 };
 export type FeedbackSession = { identity: FeedbackIdentity | null; configured: boolean };
+export type FeedbackSummary = Omit<FeedbackThread, "messages"> & {
+  preview: string; messageCount: number; authors: FeedbackIdentity[]; lastAuthor: FeedbackIdentity;
+  quoteLength: number; quoteRevision: string;
+};
+export type FeedbackSummaryPage = {
+  items: FeedbackSummary[]; nextCursor: string | null; revision: number; total: number;
+  facets: { companies: string[]; pages: [string, string][]; authors: [string, string][] };
+};
+export type FeedbackUnread = { revision: number; readRevision: number; unreadThreads: number };
 
 // 同一句原文发布后可能变动；只在版本相同的情况下定位，避免把旧建议挂到另一句话。
 export function feedbackRevision(value: string): string {

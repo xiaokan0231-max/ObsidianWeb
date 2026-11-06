@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { feedbackContextKey, type FeedbackContext, type FeedbackSession, type FeedbackThread } from "@/lib/feedback";
+import { feedbackContextKey, type FeedbackContext, type FeedbackSession, type FeedbackSummaryPage, type FeedbackThread, type FeedbackUnread } from "@/lib/feedback";
 import { useUiLocale } from "./ui-locale";
 import { TeacherTour, type TeacherTourMode } from "./feedback-tour";
 import "./feedback.css";
@@ -11,23 +11,36 @@ import "./feedback.css";
 export type FeedbackLocale = "ja" | "zh-CN";
 export const feedbackText = (locale: FeedbackLocale, ja: string, zh: string) => locale === "ja" ? ja : zh;
 type DrawerTarget = { context: FeedbackContext; threadId?: string; locale?: FeedbackLocale };
+type ThreadDetail = { thread?: FeedbackThread; loading: boolean; error?: number; revision: number | undefined };
 type FeedbackValue = {
-  session: FeedbackSession | null; threads: FeedbackThread[]; loading: boolean; error: string;
-  refresh: () => Promise<void>; open: (context?: FeedbackContext, threadId?: string, locale?: FeedbackLocale) => void;
-  close: () => void; replaceThread: (thread: FeedbackThread) => void;
-  markRead: (thread: FeedbackThread) => Promise<void>;
+  session: FeedbackSession | null; unread: FeedbackUnread | null; loading: boolean; error: string;
+  refresh: () => Promise<void>; refreshSession: () => Promise<void>;
+  open: (context?: FeedbackContext, threadId?: string, locale?: FeedbackLocale) => void;
+  close: () => void; replaceThread: (thread: FeedbackThread, identity: string) => boolean; markRead: (thread: FeedbackThread) => Promise<void>;
+  details: ReadonlyMap<string, ThreadDetail>;
+  loadThread: (id: string, force?: boolean) => Promise<void>;
 };
-const emptyFeedback: FeedbackValue = { session: null, threads: [], loading: false, error: "", refresh: async () => {}, open: () => {}, close: () => {}, replaceThread: () => {}, markRead: async () => {} };
+const emptyFeedback: FeedbackValue = {
+  session: null, unread: null, loading: false, error: "", details: new Map(),
+  refresh: async () => {}, refreshSession: async () => {}, open: () => {}, close: () => {},
+  replaceThread: () => false, markRead: async () => {}, loadThread: async () => {},
+};
 const Feedback = createContext<FeedbackValue>(emptyFeedback);
 export const useFeedback = () => useContext(Feedback);
 
 export class FeedbackRequestError extends Error {
   constructor(public status: number) { super(`Feedback request failed (${status})`); }
 }
-export async function feedbackRequest<T>(path: string, body?: unknown, method = body === undefined ? "GET" : "POST"): Promise<T> {
-  const response = await fetch(`/api/feedback${path}`, {
-    method, cache: "no-store", credentials: "same-origin", signal: AbortSignal.timeout(20000),
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+function feedbackFetch(path: string, options: RequestInit = {}) {
+  const timeout = AbortSignal.timeout(20000);
+  return fetch(`/api/feedback${path}`, {
+    cache: "no-store", credentials: "same-origin", ...options,
+    signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
+  });
+}
+export async function feedbackRequest<T>(path: string, body?: unknown, method = body === undefined ? "GET" : "POST", signal?: AbortSignal): Promise<T> {
+  const response = await feedbackFetch(path, {
+    method, signal, headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) throw new FeedbackRequestError(response.status);
@@ -45,83 +58,254 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { locale } = useUiLocale();
   const [session, setSession] = useState<FeedbackSession | null>(null);
-  const [threads, setThreads] = useState<FeedbackThread[]>([]);
+  const [unread, setUnread] = useState<FeedbackUnread | null>(null);
+  const [details, setDetails] = useState<ReadonlyMap<string, ThreadDetail>>(() => new Map());
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [target, setTarget] = useState<DrawerTarget | null>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const requestGeneration = useRef(0);
   const displayedIdentity = useRef<string | null>(null);
+  const unreadState = useRef<{ etag: string | null; value: FeedbackUnread | null; checkedAt: number }>({ etag: null, value: null, checkedAt: 0 });
+  const unreadPending = useRef<Promise<void> | null>(null);
+  const sessionPending = useRef<Promise<void> | null>(null);
+  const detailState = useRef<ReadonlyMap<string, ThreadDetail>>(new Map());
+  const detailRequests = useRef(new Map<string, AbortController>());
   const readPending = useRef(new Set<string>());
-  const refresh = useCallback(async () => {
-    const generation = ++requestGeneration.current;
-    try {
-      const next = await feedbackRequest<FeedbackSession>("/session");
-      if (generation !== requestGeneration.current) return;
-      if (displayedIdentity.current !== (next.identity?.id ?? null)) {
-        // 身份变化时不能沿用上一位参与者的私密列表；同一身份暂时断线则保留已读资料。
-        displayedIdentity.current = next.identity?.id ?? null; setThreads([]); readPending.current.clear();
-      }
-      setSession(next);
-      if (next.identity) {
-        const data = await feedbackRequest<{ threads: FeedbackThread[] }>("/threads");
-        if (generation === requestGeneration.current) setThreads(data.threads);
-      } else setThreads([]);
-      if (generation === requestGeneration.current) setError("");
-    } catch (reason) {
-      if (generation !== requestGeneration.current) return;
-      if (reason instanceof FeedbackRequestError && reason.status === 401) {
-        displayedIdentity.current = null; readPending.current.clear(); setSession({ identity: null, configured: true }); setThreads([]);
-      } else if (reason instanceof FeedbackRequestError && reason.status === 503) {
-        displayedIdentity.current = null; readPending.current.clear(); setSession({ identity: null, configured: false }); setThreads([]);
-      } else setError("unavailable");
-    } finally { if (generation === requestGeneration.current) setLoading(false); }
+
+  const setIdentity = useCallback((next: FeedbackSession) => {
+    const identity = next.identity?.id ?? null;
+    if (displayedIdentity.current !== identity) {
+      // 清空旧身份的详情与验证器，迟到的请求只能写回其原身份。
+      displayedIdentity.current = identity;
+      unreadState.current = { etag: null, value: null, checkedAt: 0 };
+      unreadPending.current = null;
+      setUnread(null);
+      for (const controller of detailRequests.current.values()) controller.abort();
+      detailRequests.current.clear();
+      detailState.current = new Map();
+      setDetails(detailState.current);
+      readPending.current.clear();
+    }
+    setSession(next);
   }, []);
-  const cancelRequests = useCallback(() => { ++requestGeneration.current; }, []);
+
+  const pollUnread = useCallback((force = false): Promise<void> => {
+    const identity = displayedIdentity.current;
+    if (!identity) return Promise.resolve();
+    if (unreadPending.current) return unreadPending.current;
+    const { etag, checkedAt } = unreadState.current;
+    if (!force && Date.now() - checkedAt < 1000) return Promise.resolve();
+    unreadState.current.checkedAt = Date.now();
+    const task = (async () => {
+      try {
+        const response = await feedbackFetch("/unread", { headers: etag ? { "If-None-Match": etag } : undefined });
+        if (displayedIdentity.current !== identity) return;
+        if (response.status === 401) { setIdentity({ identity: null, configured: true }); return; }
+        if (response.status === 304) { setError(""); return; }
+        if (!response.ok) throw new FeedbackRequestError(response.status);
+        const value = await response.json() as FeedbackUnread;
+        if (displayedIdentity.current !== identity) return;
+        const previous = unreadState.current.value;
+        unreadState.current = { etag: response.headers.get("ETag"), value, checkedAt: Date.now() };
+        if (!previous || previous.revision !== value.revision || previous.readRevision !== value.readRevision || previous.unreadThreads !== value.unreadThreads) setUnread(value);
+        setError("");
+      } catch {
+        if (displayedIdentity.current === identity) setError("unavailable");
+      }
+    })().finally(() => { if (unreadPending.current === task) unreadPending.current = null; });
+    unreadPending.current = task;
+    return task;
+  }, [setIdentity]);
+
+  const refreshSession = useCallback((): Promise<void> => {
+    if (sessionPending.current) return sessionPending.current;
+    const task = (async () => {
+      try {
+        setIdentity(await feedbackRequest<FeedbackSession>("/session"));
+        setError("");
+        await pollUnread(true);
+      } catch (reason) {
+        if (reason instanceof FeedbackRequestError && reason.status === 401) setIdentity({ identity: null, configured: true });
+        else if (reason instanceof FeedbackRequestError && reason.status === 503 && !displayedIdentity.current) setIdentity({ identity: null, configured: false });
+        else setError("unavailable");
+      } finally { setLoading(false); }
+    })().finally(() => { if (sessionPending.current === task) sessionPending.current = null; });
+    sessionPending.current = task;
+    return task;
+  }, [pollUnread, setIdentity]);
+
   useEffect(() => {
-    queueMicrotask(() => { void refresh(); });
-    const focus = () => { if (document.visibilityState === "visible") void refresh(); };
+    queueMicrotask(() => { void refreshSession(); });
+    const focus = () => { if (document.visibilityState === "visible") void pollUnread(); };
     const interval = window.setInterval(focus, 30000);
     window.addEventListener("focus", focus); document.addEventListener("visibilitychange", focus);
-    return () => { cancelRequests(); window.clearInterval(interval); window.removeEventListener("focus", focus); document.removeEventListener("visibilitychange", focus); };
-  }, [refresh, cancelRequests]);
-  const replaceThread = useCallback((thread: FeedbackThread) => {
-    setThreads(previous => [...previous.filter(item => item.id !== thread.id), thread].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+    return () => { window.clearInterval(interval); window.removeEventListener("focus", focus); document.removeEventListener("visibilitychange", focus); };
+  }, [refreshSession, pollUnread]);
+
+  const storeDetail = useCallback((id: string, entry: ThreadDetail) => {
+    const next = new Map(detailState.current);
+    next.delete(id); next.set(id, entry);
+    while (next.size > 8) next.delete(next.keys().next().value!);
+    detailState.current = next;
+    setDetails(next);
   }, []);
+
+  const replaceThread = useCallback((thread: FeedbackThread, identity: string) => {
+    if (!displayedIdentity.current || displayedIdentity.current !== identity) return false;
+    detailRequests.current.get(thread.id)?.abort();
+    detailRequests.current.delete(thread.id);
+    storeDetail(thread.id, { thread, loading: false, revision: unreadState.current.value?.revision });
+    return true;
+  }, [storeDetail]);
+
+  const loadThread = useCallback(async (id: string, force = false) => {
+    const identity = displayedIdentity.current, revision = unreadState.current.value?.revision;
+    if (!identity) return;
+    const previous = detailState.current.get(id), previousRequest = detailRequests.current.get(id);
+    if (!force && previous?.revision === revision && (previousRequest || previous?.thread)) return;
+    previousRequest?.abort();
+    const controller = new AbortController();
+    detailRequests.current.set(id, controller);
+    storeDetail(id, { thread: previous?.thread, loading: true, revision });
+    try {
+      const data = await feedbackRequest<{ thread: FeedbackThread }>(`/threads/${encodeURIComponent(id)}`, undefined, "GET", controller.signal);
+      if (displayedIdentity.current === identity && detailRequests.current.get(id) === controller) storeDetail(id, { thread: data.thread, loading: false, revision });
+    } catch (reason) {
+      if (displayedIdentity.current === identity && detailRequests.current.get(id) === controller) {
+        const error = reason instanceof FeedbackRequestError ? reason.status : 0;
+        storeDetail(id, { thread: error === 404 || error === 403 ? undefined : previous?.thread, loading: false, error, revision });
+      }
+    } finally {
+      if (detailRequests.current.get(id) === controller) detailRequests.current.delete(id);
+    }
+  }, [storeDetail]);
+
+  const refresh = useCallback(() => {
+    const pending = unreadPending.current;
+    return pending ? pending.then(() => pollUnread(true)) : pollUnread(true);
+  }, [pollUnread]);
   const markRead = useCallback(async (thread: FeedbackThread) => {
-    const key = `${displayedIdentity.current}:${thread.id}:${thread.messages.map(message => message.id).join(",")}`;
-    if (!thread.unread || readPending.current.has(key) || !thread.messages.length) return;
+    const identity = displayedIdentity.current;
+    const ids = thread.messages.map(message => message.id), key = `${identity}:${thread.id}:${ids.join(",")}`;
+    if (!identity || !thread.unread || readPending.current.has(key) || !ids.length) return;
     readPending.current.add(key);
     try {
-      const ids = thread.messages.map(message => message.id);
       for (let index = 0; index < ids.length; index += 2000) {
-        await feedbackRequest(`/threads/${encodeURIComponent(thread.id)}/read`, { messageId: ids[Math.min(index + 1999, ids.length - 1)], messageIds: ids.slice(index, index + 2000) });
+        const batch = ids.slice(index, index + 2000);
+        await feedbackRequest(`/threads/${encodeURIComponent(thread.id)}/read`, { messageId: batch.at(-1), messageIds: batch });
       }
-      // 只比较实际显示的消息，不能把标记过程中刚收到的回复一起判成已读。
-      setThreads(previous => previous.map(item => item.id === thread.id && item.messages.every(message => ids.includes(message.id)) ? { ...item, unread: false } : item));
-    } catch { readPending.current.delete(key); }
-  }, []);
+      if (displayedIdentity.current !== identity) return;
+      const current = detailState.current.get(thread.id);
+      const shown = new Set(ids);
+      // 只标记实际显示的消息，保留同时收到的新回复。
+      if (current?.thread?.messages.every(message => shown.has(message.id))) storeDetail(thread.id, { ...current, thread: { ...current.thread, unread: false } });
+      await refresh();
+    } catch {
+      // 未写入成功时下次打开仍可标记。
+    } finally { readPending.current.delete(key); }
+  }, [refresh, storeDetail]);
   const close = useCallback(() => { setTarget(null); requestAnimationFrame(() => opener.current?.isConnected && opener.current.focus({ preventScroll: true })); }, []);
   const open = useCallback((context?: FeedbackContext, threadId?: string, locale?: FeedbackLocale) => { opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setTarget({ context: context ?? currentPage(), threadId, locale }); }, []);
-  const value = useMemo(() => ({ session, threads, loading, error, refresh, open, close, replaceThread, markRead }), [session, threads, loading, error, refresh, open, close, replaceThread, markRead]);
+  const value = useMemo(() => ({ session, unread, details, loading, error, refresh, refreshSession, open, close, replaceThread, markRead, loadThread }),
+    [session, unread, details, loading, error, refresh, refreshSession, open, close, replaceThread, markRead, loadThread]);
   return <Feedback.Provider value={value}>{children}
     {!pathname?.startsWith("/consultation") && !pathname?.startsWith("/feedback") && <div className="feedback-floating"><FeedbackEntry locale={locale} /></div>}
     {target && <div className="feedback-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}><FeedbackPanel key={`${feedbackContextKey(target.context)}:${target.threadId ?? ""}`} context={target.context} threadId={target.threadId} onClose={close} locale={target.locale ?? (pathname?.startsWith("/consultation") ? "ja" : locale)} /></div>}
   </Feedback.Provider>;
 }
 
+export function useFeedbackThread(id: string) {
+  const { session, unread, details, loadThread } = useFeedback();
+  const identity = session?.identity?.id, revision = unread?.revision;
+  useEffect(() => {
+    if (!identity || !id || revision === undefined) return;
+    let active = true;
+    queueMicrotask(() => { if (active) void loadThread(id); });
+    return () => { active = false; };
+  }, [id, identity, revision, loadThread]);
+  return { ...(identity && id ? details.get(id) : undefined), retry: () => void loadThread(id, true) };
+}
+
+type SummaryState = { key: string; page?: FeedbackSummaryPage; loading: boolean; error: boolean };
+export function useFeedbackSummaries(params: Record<string, string> | null, complete = false) {
+  const { session, unread } = useFeedback();
+  const search = params ? new URLSearchParams(params).toString() : "";
+  const identity = params ? session?.identity?.id : undefined;
+  const key = identity && unread ? `${identity}:${search}` : "";
+  const [state, setState] = useState<SummaryState>({ key: "", loading: false, error: false });
+  const active = useRef<AbortController | null>(null);
+  const run = useCallback(async (previous?: FeedbackSummaryPage) => {
+    if (!key) return;
+    active.current?.abort();
+    const controller = new AbortController();
+    active.current = controller;
+    setState(value => ({ key, page: value.key === key ? value.page : undefined, loading: true, error: false }));
+    const read = (cursor?: string | null) => {
+      const query = new URLSearchParams(search);
+      if (cursor) query.set("cursor", cursor);
+      return feedbackRequest<FeedbackSummaryPage>(`/summaries?${query}`, undefined, "GET", controller.signal);
+    };
+    const collect = async (before?: FeedbackSummaryPage) => {
+      let page = await read(before?.nextCursor);
+      if (before && page.revision !== before.revision) throw new FeedbackRequestError(409);
+      const items = [...(before?.items ?? []), ...page.items];
+      if (complete) while (page.nextCursor) {
+        const next = await read(page.nextCursor);
+        if (next.revision !== page.revision) throw new FeedbackRequestError(409);
+        items.push(...next.items);
+        page = next;
+      }
+      return { ...page, items };
+    };
+    try {
+      let page: FeedbackSummaryPage;
+      try {
+        page = await collect(previous);
+      } catch (reason) {
+        if (!(reason instanceof FeedbackRequestError && reason.status === 409)) throw reason;
+        page = await collect();
+      }
+      if (!controller.signal.aborted) setState({ key, page, loading: false, error: false });
+    } catch {
+      if (!controller.signal.aborted) setState(value => ({ key, page: value.key === key ? value.page : undefined, loading: false, error: true }));
+    } finally {
+      if (active.current === controller) active.current = null;
+    }
+  }, [complete, key, search]);
+  const revision = unread?.revision, readRevision = unread?.readRevision;
+  useEffect(() => {
+    let activeEffect = true;
+    queueMicrotask(() => { if (activeEffect) void run(); });
+    return () => { activeEffect = false; active.current?.abort(); };
+  }, [revision, readRevision, run]);
+  const current = state.key === key && key ? state : undefined;
+  return {
+    page: current?.page, error: Boolean(current?.error), loading: Boolean(identity && (!current || current.loading)),
+    retry: () => void run(),
+    more: () => { if (!active.current && current?.page?.nextCursor) void run(current.page); },
+  };
+}
+
+export function FeedbackDetailStatus({ detail, locale }: { detail: ReturnType<typeof useFeedbackThread>; locale: FeedbackLocale }) {
+  if (detail.error === undefined) return <p role="status">{feedbackText(locale, "コメントを読み込んでいます…", "正在读取留言…")}</p>;
+  return <p className="feedback-notice" role="status">{detail.error === 404 ? feedbackText(locale, "このコメントは見つかりませんでした。", "未找到这条留言。") : feedbackText(locale, "コメントを読み込めませんでした。", "暂时无法读取留言。")} <button onClick={detail.retry}>{feedbackText(locale, "もう一度確認", "重试")}</button></p>;
+}
+
 export function FeedbackEntry({ locale: explicitLocale, context }: { locale?: FeedbackLocale; context?: FeedbackContext }) {
   const { locale: uiLocale } = useUiLocale();
   const locale = explicitLocale ?? uiLocale;
-  const { threads, open } = useFeedback();
-  const count = threads.filter(thread => thread.unread && !thread.hidden).length;
-  return <button type="button" className="feedback-entry" onClick={() => count ? window.location.assign("/feedback?filter=unread") : open(context, undefined, locale)}>
+  const { unread, open } = useFeedback();
+  const count = unread?.unreadThreads ?? 0;
+  const content = <>
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 4V6a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /><path d="M7 9h10M7 13h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg><span>{count ? feedbackText(locale, `新しい返信 ${count}件`, `${count} 条新回复`) : feedbackText(locale, "コメント・返信", "老师交流与回复")}</span>
-  </button>;
+  </>;
+  return count
+    ? <Link className="feedback-entry" href="/feedback?filter=unread" prefetch={false}>{content}</Link>
+    : <button type="button" className="feedback-entry" onClick={() => open(context, undefined, locale)}>{content}</button>;
 }
 
 export function FeedbackLogin({ locale = "ja" }: { locale?: FeedbackLocale }) {
-  const { session, refresh, loading } = useFeedback();
+  const { session, refreshSession, loading } = useFeedback();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [ownerKey, setOwnerKey] = useState("");
@@ -134,7 +318,7 @@ export function FeedbackLogin({ locale = "ja" }: { locale?: FeedbackLocale }) {
     try {
       await feedbackRequest<FeedbackSession>("/session", ownerMode ? { ownerKey } : { name: name.trim(), code });
       if (!ownerMode) { try { localStorage.setItem("feedback:display-name", name.trim()); } catch {} }
-      setCode(""); setOwnerKey(""); await refresh();
+      setCode(""); setOwnerKey(""); await refreshSession();
     } catch (reason) {
       if (reason instanceof FeedbackRequestError && reason.status === 429) setError(feedbackText(locale, "入力の回数が多くなっています。しばらくしてからお試しください。", "尝试次数较多，请稍后重试。"));
       else if (reason instanceof FeedbackRequestError && [401, 403].includes(reason.status)) setError(ownerMode ? feedbackText(locale, "管理キーをご確認ください。もう一度お試しいただけます。", "请核对本人管理密钥后重试。") : feedbackText(locale, "お名前とアクセスコードをご確認ください。もう一度お試しいただけます。", "请核对姓名和访问码后重试。"));
@@ -143,7 +327,7 @@ export function FeedbackLogin({ locale = "ja" }: { locale?: FeedbackLocale }) {
     } finally { setBusy(false); }
   }
   if (loading && session === null) return <p className="feedback-notice" role="status">{feedbackText(locale, "コメントの準備をしています…", "正在准备交流区…")}</p>;
-  if (session && !session.configured) return <div className="feedback-notice"><h3>{feedbackText(locale, "コメントの受付を準備しています", "交流区正在准备中")}</h3><p>{feedbackText(locale, "資料はそのままお読みいただけます。しばらくしてから、もう一度お試しください。", "资料仍可正常阅读，请稍后重试留言。")}</p><button onClick={() => void refresh()}>{feedbackText(locale, "もう一度確認", "重新检查")}</button></div>;
+  if (session && !session.configured) return <div className="feedback-notice"><h3>{feedbackText(locale, "コメントの受付を準備しています", "交流区正在准备中")}</h3><p>{feedbackText(locale, "資料はそのままお読みいただけます。しばらくしてから、もう一度お試しください。", "资料仍可正常阅读，请稍后重试留言。")}</p><button onClick={() => void refreshSession()}>{feedbackText(locale, "もう一度確認", "重新检查")}</button></div>;
   return <form className="feedback-login" onSubmit={submit}>
     <p className="feedback-eyebrow">{feedbackText(locale, "先生方と本人の交流", "老师与本人的共享交流区")}</p>
     <h3>{feedbackText(locale, "コメント・返信を見る", "进入交流区")}</h3>
@@ -182,7 +366,9 @@ export function FeedbackComposer({ context, thread, locale = "ja", onSaved }: { 
     try { localStorage.setItem(draftKey, JSON.stringify(submission.current)); } catch {}
   }
   async function submit(event: FormEvent) {
-    event.preventDefault(); if (!text.trim() || busy) return;
+    event.preventDefault();
+    const identity = session?.identity?.id;
+    if (!identity || !text.trim() || busy) return;
     setBusy(true); setError(""); setSuccess(false);
     const attempt = submission.current?.text === text ? submission.current : { id: crypto.randomUUID(), text };
     submission.current = attempt;
@@ -190,9 +376,10 @@ export function FeedbackComposer({ context, thread, locale = "ja", onSaved }: { 
     try {
       const result = await feedbackRequest<{ thread: FeedbackThread }>(thread ? `/threads/${encodeURIComponent(thread.id)}/replies` : "/threads", thread ? { id: attempt.id, text: text.trim() } : { id: attempt.id, text: text.trim(), context });
       const verified = await feedbackRequest<{ thread: FeedbackThread }>(`/threads/${encodeURIComponent(result.thread.id)}`);
-      replaceThread(verified.thread); setText(""); submission.current = null; setSuccess(true);
+      const applied = replaceThread(verified.thread, identity);
+      setText(""); submission.current = null; setSuccess(true);
       try { localStorage.removeItem(draftKey); } catch {}
-      onSaved(verified.thread); void refresh();
+      if (applied) { onSaved(verified.thread); void refresh(); }
     } catch (reason) {
       if (reason instanceof FeedbackRequestError && reason.status === 401) void refresh();
       setError(feedbackText(locale, "送信できませんでした。入力内容は残っています。", "发送失败，输入内容已保留。"));
@@ -224,12 +411,23 @@ export function FeedbackQuote({ context, locale = "ja" }: { context: FeedbackCon
 export function FeedbackThreadDetail({ thread, locale = "ja", context }: { thread: FeedbackThread; locale?: FeedbackLocale; context?: FeedbackContext }) {
   const { session, markRead, refresh, replaceThread } = useFeedback();
   const [notice, setNotice] = useState("");
-  const messagesKey = thread.messages.map(message => message.id).join(",");
-  useEffect(() => { void markRead(thread); }, [thread, messagesKey, markRead]);
+  const [busy, setBusy] = useState(false);
+  const patchAttempt = useRef<{ id: string; key: string } | null>(null);
+  useEffect(() => { void markRead(thread); }, [thread, markRead]);
   async function patch(body: { state?: FeedbackThread["state"]; hidden?: boolean }) {
-    setNotice("");
-    try { const result = await feedbackRequest<{ thread: FeedbackThread }>(`/threads/${encodeURIComponent(thread.id)}`, body, "PATCH"); replaceThread(result.thread); await refresh(); }
+    const identity = session?.identity?.id;
+    if (!identity || busy) return;
+    const key = JSON.stringify(body);
+    const attempt = patchAttempt.current?.key === key ? patchAttempt.current : { id: crypto.randomUUID(), key };
+    patchAttempt.current = attempt;
+    setBusy(true); setNotice("");
+    try {
+      const result = await feedbackRequest<{ thread: FeedbackThread }>(`/threads/${encodeURIComponent(thread.id)}`, { ...body, operationId: attempt.id }, "PATCH");
+      patchAttempt.current = null;
+      if (replaceThread(result.thread, identity)) await refresh();
+    }
     catch { setNotice(feedbackText(locale, "変更できませんでした。もう一度お試しください。", "修改失败，请重试。")); }
+    finally { setBusy(false); }
   }
   const stale = Boolean(context?.revision && thread.context.revision && context.revision !== thread.context.revision && context.blockId === thread.context.blockId && context.turnId === thread.context.turnId);
   return <div className="feedback-thread-detail">
@@ -237,7 +435,7 @@ export function FeedbackThreadDetail({ thread, locale = "ja", context }: { threa
     {stale && <p className="feedback-notice">{feedbackText(locale, "元の資料が更新されています。送信時の原文を表示しています。", "原资料已更新，这里保留的是发送时的原文。")}</p>}
     <a className="feedback-source-link" href={feedbackSourceHref(thread)}>{feedbackText(locale, "原文を見る", "查看原文")} ↗</a>
     <div className="feedback-messages">{thread.messages.map(message => <article className={`feedback-message${message.author.role === "owner" ? " feedback-message-owner" : ""}`} key={message.id}><header><strong>{message.author.name}</strong><span>{message.author.role === "owner" ? feedbackText(locale, "本人", "本人") : feedbackText(locale, "先生", "老师")}</span><time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString(locale === "ja" ? "ja-JP" : "zh-CN", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</time></header><p>{message.text}</p></article>)}</div>
-    {session?.identity?.role === "owner" && <div className="feedback-owner-actions"><label>{feedbackText(locale, "取り組み状況", "处理状态")}<select value={thread.state} onChange={event => void patch({ state: event.target.value as FeedbackThread["state"] })}><option value="open">{feedbackText(locale, "未対応", "未处理")}</option><option value="working">{feedbackText(locale, "取り組み中", "跟进中")}</option><option value="done">{feedbackText(locale, "対応済み", "已处理")}</option></select></label><button onClick={() => void patch({ hidden: !thread.hidden })}>{thread.hidden ? feedbackText(locale, "表示を戻す", "恢复显示") : feedbackText(locale, "この相談を非表示にする", "隐藏这个话题")}</button>{notice && <p role="alert" className="feedback-error">{notice}</p>}</div>}
+    {session?.identity?.role === "owner" && <div className="feedback-owner-actions"><label>{feedbackText(locale, "取り組み状況", "处理状态")}<select disabled={busy} value={thread.state} onChange={event => void patch({ state: event.target.value as FeedbackThread["state"] })}><option value="open">{feedbackText(locale, "未対応", "未处理")}</option><option value="working">{feedbackText(locale, "取り組み中", "跟进中")}</option><option value="done">{feedbackText(locale, "対応済み", "已处理")}</option></select></label><button disabled={busy} onClick={() => void patch({ hidden: !thread.hidden })}>{thread.hidden ? feedbackText(locale, "表示を戻す", "恢复显示") : feedbackText(locale, "この相談を非表示にする", "隐藏这个话题")}</button>{notice && <p role="alert" className="feedback-error">{notice}</p>}</div>}
     {!thread.hidden && <FeedbackComposer key={thread.id} context={thread.context} thread={thread} locale={locale} onSaved={() => {}} />}
   </div>;
 }
@@ -245,23 +443,19 @@ export function FeedbackThreadDetail({ thread, locale = "ja", context }: { threa
 export function FeedbackPanel({ context, threadId, onClose, locale: explicitLocale, inline = false }: { context?: FeedbackContext; threadId?: string; onClose: () => void; locale?: FeedbackLocale; inline?: boolean }) {
   const { locale: uiLocale } = useUiLocale();
   const locale = explicitLocale ?? uiLocale;
-  const { session, threads, error, refresh, replaceThread } = useFeedback();
+  const { session, error, refresh } = useFeedback();
   const pageContext = context ?? { pagePath: "/feedback", title: feedbackText(locale, "全体への相談", "一般咨询") };
   const scope = feedbackContextKey(pageContext);
   const [selection, setSelection] = useState<{ scope: string; id: string }>({ scope, id: threadId ?? "" });
   const selectedId = selection.scope === scope ? selection.id : threadId ?? "";
-  const thread = threads.find(item => item.id === selectedId);
-  const [missing, setMissing] = useState(false);
+  const detail = useFeedbackThread(selectedId);
+  const related = useFeedbackSummaries(selectedId ? null : pageContext.sessionId
+    ? { sessionId: pageContext.sessionId, ...(pageContext.blockId ? { blockId: pageContext.blockId } : {}) }
+    : { page: pageContext.pagePath });
+  const matching = related.page?.items ?? [];
   const [confirmed, setConfirmed] = useState(false);
   const panel = useRef<HTMLElement>(null);
   useEffect(() => { panel.current?.focus({ preventScroll: true }); }, []);
-  useEffect(() => {
-    if (!session?.identity || !selectedId || thread) return;
-    let active = true;
-    feedbackRequest<{ thread: FeedbackThread }>(`/threads/${encodeURIComponent(selectedId)}`).then(data => { if (active) replaceThread(data.thread); }).catch(() => { if (active) setMissing(true); });
-    return () => { active = false; };
-  }, [selectedId, thread, session?.identity, replaceThread]);
-  const matching = threads.filter(item => !item.hidden && (pageContext.sessionId ? item.context.sessionId === pageContext.sessionId && (!pageContext.blockId || item.context.blockId === pageContext.blockId) : item.context.pagePath === pageContext.pagePath));
   return <aside className={`feedback-panel${inline ? " feedback-panel-inline" : ""}`} ref={panel} tabIndex={-1} role={inline ? "complementary" : "dialog"} aria-modal={inline ? undefined : true} aria-label={feedbackText(locale, "コメント・返信", "老师交流与回复")} onKeyDown={event => {
     if (event.key === "Escape") { event.stopPropagation(); onClose(); }
     if (!inline && event.key === "Tab") {
@@ -276,9 +470,15 @@ export function FeedbackPanel({ context, threadId, onClose, locale: explicitLoca
       {!session?.identity ? <FeedbackLogin locale={locale} /> : <>
         <div className="feedback-panel-account"><span>{session.identity.name}</span><Link href="/feedback">{feedbackText(locale, "すべての相談", "全部交流")} →</Link></div>
         {error && <p className="feedback-notice" role="status">{feedbackText(locale, "最新のコメントを確認できませんでした。", "暂时无法更新留言。")}<button onClick={() => void refresh()}>{feedbackText(locale, "もう一度確認", "重试")}</button></p>}
-        {selectedId ? <><button className="feedback-link-button" onClick={() => { setSelection({ scope, id: "" }); setMissing(false); setConfirmed(false); }}>← {feedbackText(locale, "この資料のコメント", "当前资料的留言")}</button>{confirmed && <p className="feedback-success" role="status">{feedbackText(locale, "コメントを送信しました。", "留言已发送。")}</p>}{thread ? <FeedbackThreadDetail thread={thread} locale={locale} context={pageContext} /> : <p role="status">{missing ? feedbackText(locale, "このコメントは見つかりませんでした。", "未找到这条留言。") : feedbackText(locale, "コメントを読み込んでいます…", "正在读取留言…")}</p>}</> : <>
+        {selectedId ? <><button className="feedback-link-button" onClick={() => { setSelection({ scope, id: "" }); setConfirmed(false); }}>← {feedbackText(locale, "この資料のコメント", "当前资料的留言")}</button>{confirmed && <p className="feedback-success" role="status">{feedbackText(locale, "コメントを送信しました。", "留言已发送。")}</p>}{detail.thread && <FeedbackThreadDetail thread={detail.thread} locale={locale} context={pageContext} />}{(!detail.thread || detail.error !== undefined) && <FeedbackDetailStatus detail={detail} locale={locale} />}</> : <>
           <FeedbackComposer key={`${scope}:${session.identity.id}`} context={pageContext} locale={locale} onSaved={saved => { setSelection({ scope, id: saved.id }); setConfirmed(true); }} />
-          <section className="feedback-related"><h3>{feedbackText(locale, "この資料のコメント", "当前资料的留言")} <span>{matching.length}</span></h3>{matching.map(item => <button className="feedback-related-item" key={item.id} onClick={() => { setSelection({ scope, id: item.id }); setConfirmed(false); }}><strong>{item.messages[0]?.text.slice(0, 90)}</strong><span>{item.createdBy.name} · {item.messages.length} {feedbackText(locale, "件", "条")}{item.unread ? ` · ${feedbackText(locale, "新しい返信", "新回复")}` : ""}</span></button>)}{!matching.length && <p>{feedbackText(locale, "まだコメントはありません。一言からどうぞ。", "还没有留言，欢迎写下第一条建议。")}</p>}</section>
+          <section className="feedback-related">
+            <h3>{feedbackText(locale, "この資料のコメント", "当前资料的留言")} <span>{related.page?.total ?? ""}</span></h3>
+            {matching.map(item => <button className="feedback-related-item" key={item.id} onClick={() => { setSelection({ scope, id: item.id }); setConfirmed(false); }}><strong>{item.preview}</strong><span>{item.createdBy.name} · {item.messageCount} {feedbackText(locale, "件", "条")}{item.unread ? ` · ${feedbackText(locale, "新しい返信", "新回复")}` : ""}</span></button>)}
+            {related.error ? <button className="feedback-link-button" onClick={related.retry}>{feedbackText(locale, "一覧をもう一度確認", "重试读取留言列表")}</button>
+              : !matching.length && <p role="status">{related.loading ? feedbackText(locale, "読み込んでいます…", "正在读取…") : feedbackText(locale, "まだコメントはありません。一言からどうぞ。", "还没有留言，欢迎写下第一条建议。")}</p>}
+            {related.page?.nextCursor && <button className="feedback-link-button" disabled={related.loading} onClick={related.more}>{feedbackText(locale, "さらに見る", "查看更多")}</button>}
+          </section>
         </>}
       </>}
     </div>

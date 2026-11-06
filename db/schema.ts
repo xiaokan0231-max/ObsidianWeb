@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // 数据库只保存已发布日历的读取投影；原始笔记仍由 vault 管理。
@@ -73,11 +74,15 @@ export const readModelCatalog = sqliteTable("read_model_catalog", {
   scopesJson: text("scopes_json").notNull(), tagsJson: text("tags_json").notNull(), mtime: integer("mtime").notNull(),
 }, (table) => [primaryKey({ columns: [table.revision, table.path] }),
   index("read_catalog_revision_mtime").on(table.revision, table.mtime),
+  index("read_catalog_revision_ordinal").on(table.revision, table.ordinal),
+  index("read_catalog_revision_recent").on(table.revision, sql`${table.mtime} DESC`, table.ordinal),
   index("read_catalog_revision_group_type").on(table.revision, table.groupKey, table.typeLower),
   index("read_catalog_revision_status").on(table.revision, table.statusLower)]);
 export const readModelAliases = sqliteTable("read_model_aliases", {
   revision: text("revision").notNull(), target: text("target").notNull(), path: text("path").notNull(), exact: integer("exact").notNull(),
-}, (table) => [primaryKey({ columns: [table.revision, table.target, table.path, table.exact] }), index("read_alias_lookup").on(table.revision, table.target, table.exact)]);
+}, (table) => [primaryKey({ columns: [table.revision, table.target, table.path, table.exact] }),
+  index("read_alias_lookup").on(table.revision, table.target, table.exact),
+  index("read_alias_path_target").on(table.revision, table.path, table.target)]);
 export const readModelLinks = sqliteTable("read_model_links", {
   revision: text("revision").notNull(), sourcePath: text("source_path").notNull(), target: text("target").notNull(),
 }, (table) => [primaryKey({ columns: [table.revision, table.sourcePath, table.target] }), index("read_backlink_lookup").on(table.revision, table.target)]);

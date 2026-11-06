@@ -26,7 +26,7 @@ export async function GET(request: Request) {
         return Response.json({ error: "この形式の原稿はまだ登録されていません。" }, { status: 404, headers });
       }
       bytes = exportConsultationTranscript(transcript, view);
-      const kind = transcript.recordKind === "memory" ? "記憶から再構成" : view === "raw" ? "原始転写" : "可読整理稿";
+      const kind = transcript.recordKind === "summary" ? "面接まとめ" : transcript.recordKind === "memory" ? "記憶から再構成" : view === "raw" ? "原始転写" : "可読整理稿";
       filename = `${transcript.date || "日付未確認"}_${transcript.company}_${kind}.docx`;
     }
     return new Response(new Uint8Array(bytes), { headers: {

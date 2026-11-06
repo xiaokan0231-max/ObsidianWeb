@@ -14,6 +14,7 @@ export { selectConsultationReadingGroups } from "./consultation-reading-start.ts
 
 export type ConsultationReadingGuide = {
   featured: boolean; example?: boolean; introduction?: string; request?: string;
+  priority?: number;
   excerpts: { blockId: string; text: string }[]; blockCount: number;
 };
 
@@ -21,7 +22,7 @@ export type ConsultationSessionSummary = {
   id: string; companyId: string; company: string; date: string; round: string;
   outcome: string; outcomeKind: "offer" | "passed" | "rejected" | "waiting" | "unknown" | "not-applicable";
   hasRaw: boolean; hasReadable: boolean;
-  recordKind?: "transcript" | "memory";
+  recordKind?: "transcript" | "memory" | "summary";
   stage?: string;
   position?: string;
   readingGuide?: ConsultationReadingGuide;
@@ -37,6 +38,7 @@ export type ConsultationInterview = {
   id: string; date: string; round: string; stage: string; outcome: string;
   outcomeKind: ConsultationSessionSummary["outcomeKind"]; sessionId?: string;
   evidenceKind: "transcript" | "review" | "completed-prep" | "job-case" | "history" | "scheduled";
+  summaryId?: string;
   position?: string;
 };
 export type ConsultationMeetingHistory = { companyId: string; company: string; interview: ConsultationInterview };
@@ -180,6 +182,7 @@ function teacherText(source: SourceSession, key: string, maximum: number): strin
 function readingGuide(source: SourceSession, blocks: ConsultationTranscript["blocks"]): ConsultationReadingGuide {
   const introduction = teacherText(source, "teacher_intro_ja", 300);
   const request = teacherText(source, "teacher_request_ja", 500);
+  const priority = teacherField(source, "teacher_priority");
   const excerpts: ConsultationReadingGuide["excerpts"] = [];
   if (!isMemory(source)) {
     for (const block of blocks) {
@@ -199,6 +202,7 @@ function readingGuide(source: SourceSession, blocks: ConsultationTranscript["blo
     }
   }
   return { featured: teacherField(source, "teacher_featured") === true, example: teacherField(source, "teacher_example") === true,
+    ...(typeof priority === "number" && Number.isInteger(priority) && priority > 0 ? { priority } : {}),
     ...(introduction ? { introduction } : {}), ...(request ? { request } : {}), excerpts,
     blockCount: blocks.filter(block => block.turns.some(turn => turn.text.trim())).length };
 }
@@ -389,6 +393,7 @@ export function buildConsultationCatalog(notes: Note[]): ConsultationCatalog {
     const stage = interviewRound(entry.round);
     const projected: ConsultationInterview = { id: stableId("interview", entry.note.path), date: entry.date,
       round: safeText(interviewRoundLabelJa(entry.round) || entry.round), stage, ...result, evidenceKind: entry.kind, position: entry.position };
+    if (entry.kind === "review" && safeText(stripFrontmatter(entry.original.content)).trim()) projected.summaryId = stableId("summary", entry.original.path);
     if (completed.some(item => item.interview.id === projected.id)) continue;
     const time = interviewNoteTime(entry.note, entry.date);
     const matches = entry.date && entry.kind !== "history" ? completed.filter(item => item.companyId === companyId && item.interview.date === entry.date &&
@@ -396,6 +401,7 @@ export function buildConsultationCatalog(notes: Note[]): ConsultationCatalog {
       !(stage && item.interview.stage && stage !== item.interview.stage)) : [];
     if (matches.length === 1) {
       const existing = matches[0].interview;
+      if (!existing.summaryId && projected.summaryId) existing.summaryId = projected.summaryId;
       // 多版准备稿和同场复盘只算一次；当轮明确结果可补历史判断，但不修改案件的当前状态。
       if (explicit && !existing.sessionId && !["offer", "passed"].includes(existing.outcomeKind)) { existing.outcome = explicit.outcome; existing.outcomeKind = explicit.outcomeKind; }
       if (!existing.stage && stage) { existing.stage = stage; existing.round = projected.round; }
@@ -495,10 +501,21 @@ export function buildConsultationCatalog(notes: Note[]): ConsultationCatalog {
 }
 
 export function findConsultationTranscript(notes: Note[], id: string): ConsultationTranscript | null {
-  const { sources, sessions, blocksBySession } = model(notes);
+  const { sources, sessions, blocksBySession, evidence } = model(notes);
   const summary = sessions.find(session => session.id === id);
   const source = sources.find(candidate => sessionId(candidate) === id);
-  if (!summary || !source) return null;
+  if (!summary || !source) {
+    const entry = evidence.find(item => item.kind === "review" && stableId("summary", item.original.path) === id);
+    if (!entry) return null;
+    const catalog = buildConsultationCatalog(notes);
+    const company = catalog.companies.find(item => item.interviews?.some(interview => interview.summaryId === id));
+    const interview = company?.interviews?.find(item => item.summaryId === id);
+    if (!company || !interview) return null;
+    return { id, companyId: company.id, company: company.company, date: interview.date, round: interview.round, stage: interview.stage,
+      outcome: interview.outcome, outcomeKind: interview.outcomeKind, hasRaw: true, hasReadable: false, recordKind: "summary",
+      raw: safeText(stripFrontmatter(entry.original.content)), blocks: [],
+      notice: "面接後に作成したまとめ・復盤資料です。逐字稿ではありません。本人の記憶、企業からの評価、執筆者の解釈が含まれる場合があります。", selectionNotices: [] };
+  }
   const blocks = blocksBySession.get(id) ?? [];
   const notice = isMemory(source) ? "本人の記憶から再構成した資料です。実際の逐語発言とは区別してください。"
     : summary.hasReadable ? "読みやすく整理した記録です。フィラー等が省略されている場合があります。原音は未確認です。"

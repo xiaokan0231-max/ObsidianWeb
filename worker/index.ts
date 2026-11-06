@@ -3,10 +3,11 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { publishedRequestResponse } from "../lib/server/published-access";
 import { createPublishedVaultResponseHandler } from "../lib/server/published-vault-response";
-import { createCalendarReadModel } from "../lib/server/calendar-read-model";
+import { handleReadModelMaintenance } from "../lib/server/read-model-maintenance";
+import { publishedReadModelPolicy } from "../app/read-model-server";
 import { dispatchFeedbackRequest, type FeedbackDispatchEnv } from "../lib/server/feedback-dispatch";
 import { createSiteAccessGate, privateSiteResponse, type SiteAccessEnv } from "../lib/server/site-access";
-import { fetchSealedPublishedAsset } from "../lib/server/sealed-assets";
+import { fetchSealedPublishedAsset, publishedAssetSecrets } from "../lib/server/sealed-assets";
 import { isFeedbackOwnerRequest } from "../lib/server/feedback-owner-auth";
 
 interface Env extends FeedbackDispatchEnv, SiteAccessEnv {
@@ -14,6 +15,8 @@ interface Env extends FeedbackDispatchEnv, SiteAccessEnv {
   ASSETS: Fetcher;
   DB?: D1Database;
   SITE_ASSET_SECRET?: string;
+  SITE_ASSET_SECRET_NEXT?: string;
+  SITE_MAINTENANCE_SECRET?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -45,6 +48,13 @@ const worker = {
       const denied = await siteAccess(request, env);
       if (denied) return denied;
     }
+    if (published && url.pathname === "/api/read-model/maintenance/prune") {
+      // 必须先通过上面的站点会话门禁，再核对独立维护密钥；不能复用留言授权。
+      return privateSiteResponse(await handleReadModelMaintenance(request, env, async () => {
+        const policy = await publishedReadModelPolicy(true);
+        return { revision: policy.root.readModel.revision!, digest: policy.digest, allowed: policy.indexes.map(index => index.revision!) };
+      }));
+    }
     // 留言有独立鉴权；只为这一组精确路径放行，不能解除其他资料的只读保护。
     if (url.pathname.startsWith("/api/feedback/")) {
       const response = await dispatchFeedbackRequest(request, env);
@@ -53,7 +63,7 @@ const worker = {
     const guarded = publishedRequestResponse(request, published);
     if (guarded) return published ? privateSiteResponse(guarded) : guarded;
     const fetchAsset = (asset: Request) => new URL(asset.url).pathname.startsWith("/_published-vault/")
-      ? fetchSealedPublishedAsset(env.ASSETS, asset, env.SITE_ASSET_SECRET) : env.ASSETS.fetch(asset);
+      ? fetchSealedPublishedAsset(env.ASSETS, asset, publishedAssetSecrets(env)) : env.ASSETS.fetch(asset);
 
     // 线上先验证密码再取静态资源；ASSETS 绑定直接读取文件，不会重新进入业务 Worker。
     if (published && ["GET", "HEAD"].includes(request.method)) {
@@ -61,10 +71,10 @@ const worker = {
       if (asset.status !== 404) return privateSiteResponse(asset);
     }
 
-    if (published && ["/api/vault", "/api/calendar"].includes(url.pathname)) {
+    if (published && url.pathname === "/api/vault") {
       let respond = publishedResponses.get(env.ASSETS);
       if (!respond) {
-        respond = createPublishedVaultResponseHandler(fetchAsset, env.DB ? createCalendarReadModel(env.DB) : undefined);
+        respond = createPublishedVaultResponseHandler(fetchAsset);
         publishedResponses.set(env.ASSETS, respond);
       }
       const response = await respond(request, published);

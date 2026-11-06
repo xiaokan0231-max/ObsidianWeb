@@ -218,6 +218,29 @@ export function createCalendarReadModel(db: Database) {
     return summary;
   }
 
+  async function storeSummaries(revision: string, today: string, summaries: readonly CalendarPulseSummary[], indexed = false) {
+    requireRevision(revision);
+    requireSummaryDate(today, "");
+    if (!summaries.some((summary) => summary.month === "") || summaries.some((summary) => summary.today !== today)) throw invalid();
+    const rows = summaries.map((summary) => ({
+      month: summary.month, company_count: summary.applications.companyCount, position_count: summary.applications.positionCount,
+      bucket_counts: summary.applications.bucketCounts, waiting_count: summary.waitingCount,
+      historical_count: summary.historicalCount, historical_total: summary.historicalTotal,
+    }));
+    // 每个发布版本、JST 日期只生成一次全部月份；单条 SQL 原子写入包含完成哨兵的整批汇总。
+    const available = indexed ? " AND EXISTS (SELECT 1 FROM read_model_revisions WHERE revision = ?1 AND state = 'ready')" : "";
+    const results = await db.batch([db.prepare(`INSERT INTO calendar_projection_summaries
+      (revision, as_of_date, month, company_count, position_count, bucket_counts_json, waiting_count, historical_count, historical_total)
+      SELECT ?1, ?2, json_extract(value, '$.month'), json_extract(value, '$.company_count'), json_extract(value, '$.position_count'),
+        json_extract(value, '$.bucket_counts'), json_extract(value, '$.waiting_count'), json_extract(value, '$.historical_count'), json_extract(value, '$.historical_total')
+      FROM json_each(?3) WHERE NOT EXISTS (SELECT 1 FROM calendar_projection_summaries WHERE revision = ?1 AND as_of_date = ?2 AND month = '')${available}
+      ON CONFLICT (revision, as_of_date, month) DO UPDATE SET company_count = excluded.company_count,
+        position_count = excluded.position_count, bucket_counts_json = excluded.bucket_counts_json,
+        waiting_count = excluded.waiting_count, historical_count = excluded.historical_count, historical_total = excluded.historical_total`)
+      .bind(revision, today, JSON.stringify(rows))]);
+    if (results.length !== 1 || !results[0]?.success) throw new Error("日历数据库汇总失败");
+  }
+
   async function ensureSummary(revision: string, today: string, month: string, loadSnapshot: () => Promise<CalendarSnapshot>, publishedAt = ""): Promise<CalendarPulseSummary> {
     const cached = await readSummary(revision, today, month);
     if (cached) return cached;
@@ -226,22 +249,7 @@ export function createCalendarReadModel(db: Database) {
     if (!pending) {
       const task = (async () => {
         const snapshot = await ensure(revision, loadSnapshot, publishedAt);
-        const summaries = buildCalendarPulseSummaries(snapshot, today).map((summary) => ({
-          month: summary.month, company_count: summary.applications.companyCount, position_count: summary.applications.positionCount,
-          bucket_counts: summary.applications.bucketCounts, waiting_count: summary.waitingCount,
-          historical_count: summary.historicalCount, historical_total: summary.historicalTotal,
-        }));
-        // 每个发布版本、JST 日期只生成一次全部月份；单条 SQL 原子写入包含完成哨兵的整批汇总。
-        const results = await db.batch([db.prepare(`INSERT INTO calendar_projection_summaries
-          (revision, as_of_date, month, company_count, position_count, bucket_counts_json, waiting_count, historical_count, historical_total)
-          SELECT ?1, ?2, json_extract(value, '$.month'), json_extract(value, '$.company_count'), json_extract(value, '$.position_count'),
-            json_extract(value, '$.bucket_counts'), json_extract(value, '$.waiting_count'), json_extract(value, '$.historical_count'), json_extract(value, '$.historical_total')
-          FROM json_each(?3) WHERE NOT EXISTS (SELECT 1 FROM calendar_projection_summaries WHERE revision = ?1 AND as_of_date = ?2 AND month = '')
-          ON CONFLICT (revision, as_of_date, month) DO UPDATE SET company_count = excluded.company_count,
-            position_count = excluded.position_count, bucket_counts_json = excluded.bucket_counts_json,
-            waiting_count = excluded.waiting_count, historical_count = excluded.historical_count, historical_total = excluded.historical_total`)
-          .bind(revision, today, JSON.stringify(summaries))]);
-        if (results.length !== 1 || !results[0]?.success) throw new Error("日历数据库汇总失败");
+        await storeSummaries(revision, today, buildCalendarPulseSummaries(snapshot, today));
       })().finally(() => { if (summaryFlights.get(key) === task) summaryFlights.delete(key); });
       summaryFlights.set(key, task);
       pending = task;
@@ -252,5 +260,5 @@ export function createCalendarReadModel(db: Database) {
     return stored;
   }
 
-  return { read, ensure, readSummary, ensureSummary };
+  return { read, ensure, readSummary, storeSummaries, ensureSummary };
 }

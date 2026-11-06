@@ -418,3 +418,22 @@ test("每周补充代理面谈原稿和确约无稿场次，不把它们算成�
   assert.equal(catalog.scheduledInterviews[0].interview.sessionId, undefined);
   assert.doesNotMatch(JSON.stringify(catalog), /20_求職/);
 });
+
+test("无逐字稿的多轮复盘各自能读，摘要不冒充逐句稿并继续脱敏", () => {
+  const review = (name, date, round) => note(`${root}/${name}.md`, { type: "review", company: "株式会社テスト", date, round, result: "不採用" }, `# 面接復盤\n\n## 面接のまとめ\n本人の記憶と企業評価に基づく。 test@example.com [[内部資料]]`);
+  const notes = [review("first-summary", "2026-07-13", "一次"), review("final-summary", "2026-07-17", "最終")];
+  const company = buildConsultationCatalog(notes).companies[0];
+  assert.equal(company.interviews.length, 2);
+  for (const interview of company.interviews) {
+    assert.ok(interview.summaryId);
+    const detail = findConsultationTranscript(notes, interview.summaryId);
+    assert.equal(detail.recordKind, "summary");
+    assert.equal(detail.date, interview.date);
+    assert.equal(detail.hasReadable, false);
+    assert.deepEqual(detail.blocks, []);
+    assert.match(detail.notice, /逐字稿ではありません/);
+    assert.match(detail.raw, /本人の記憶と企業評価/);
+    assert.doesNotMatch(detail.raw, /test@example|内部資料/);
+  }
+  assert.equal(findConsultationTranscript(notes, "summary-unknown"), null);
+});

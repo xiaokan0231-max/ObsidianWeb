@@ -28,6 +28,7 @@ class MemoryBucket {
     const next = start + 2;
     return { objects: entries.slice(start, next).map(key => ({ key })), truncated: next < entries.length, cursor: next < entries.length ? String(next) : undefined };
   }
+  async delete(key) { for (const item of Array.isArray(key) ? key : [key]) this.records.delete(item); }
 }
 const origin = "https://feedback.example";
 const ownerKey = "test-owner-secret-with-at-least-32-characters";

@@ -17,6 +17,7 @@ test("目录分页只请求目录接口，保留筛选和同一资料版本再�
   await resource.more();
   assert.deepEqual(resource.getState().items.map((item) => item.path), ["资料/一.md", "资料/二.md"]);
   assert.equal(urls[1].searchParams.get("cursor"), "opaque-r1");
+  assert.equal(urls[1].searchParams.get("revision"), "r1");
   assert.equal(urls[1].searchParams.get("q"), "面接");
   assert.equal(urls[1].searchParams.get("tags"), "準備");
   assert.ok(urls.every((url) => url.pathname === "/api/read-model/library"));
@@ -54,6 +55,7 @@ test("旧游标过期或混入新版本时重取第一页，不拼接不同版�
     await resource.more();
     assert.equal(urls.length, 3);
     assert.equal(new URL(urls[2], "https://example.test").searchParams.has("cursor"), false);
+    assert.equal(new URL(urls[2], "https://example.test").searchParams.has("revision"), false);
     assert.deepEqual(resource.getState().items.map((item) => item.path), ["资料/新第一页.md"]);
   }
 });

@@ -22,15 +22,21 @@ export async function sealAsset(bytes: Uint8Array, secret: string): Promise<Uint
   return result;
 }
 
-export async function unsealAssetResponse(response: Response, secret?: string, method = "GET"): Promise<Response> {
+export async function unsealAssetResponse(response: Response, secret?: string | readonly string[], method = "GET"): Promise<Response> {
   if (!response.ok) return response;
-  const key = await encryptionKey(secret);
+  const secrets = (Array.isArray(secret) ? secret : [secret]).filter((value): value is string => Boolean(value));
+  if (!secrets.length) throw new Error("发布资料解密密钥未配置");
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (!isSealedAsset(bytes)) throw new Error("部署资料未加密，已拒绝读取");
-  let plaintext: ArrayBuffer;
-  try {
-    plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.slice(MAGIC.length, MAGIC.length + 12) }, key, bytes.slice(MAGIC.length + 12));
-  } catch { throw new Error("部署资料解密验证失败"); }
+  let plaintext: ArrayBuffer | undefined;
+  // 轮换期间保留上一发布密钥，旧安全版本回退时仍可解封自己的不可变资源。
+  for (const candidate of secrets.slice(0, 2)) {
+    try {
+      plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.slice(MAGIC.length, MAGIC.length + 12) }, await encryptionKey(candidate), bytes.slice(MAGIC.length + 12));
+      break;
+    } catch { /* 仅尝试配置的第二把密钥，不接受明文兜底。 */ }
+  }
+  if (!plaintext) throw new Error("部署资料解密验证失败");
   const headers = new Headers(response.headers);
   for (const name of ["Content-Length", "Content-Encoding", "ETag", "Last-Modified"]) headers.delete(name);
   headers.set("Cache-Control", "private, no-store");
@@ -38,11 +44,15 @@ export async function unsealAssetResponse(response: Response, secret?: string, m
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
 }
 
-export async function fetchSealedPublishedAsset(assets: { fetch(request: Request): Promise<Response> }, request: Request, secret?: string): Promise<Response> {
+export async function fetchSealedPublishedAsset(assets: { fetch(request: Request): Promise<Response> }, request: Request, secret?: string | readonly string[]): Promise<Response> {
   const headers = new Headers(request.headers);
   headers.set("Accept-Encoding", "identity");
   headers.delete("If-None-Match"); headers.delete("If-Modified-Since");
   // HEAD 也先取完整封装来验证，不能仅凭可伪造的响应头判断资料已加密。
   const response = await assets.fetch(new Request(request, { method: "GET", headers }));
   return unsealAssetResponse(response, secret, request.method);
+}
+
+export function publishedAssetSecrets(env: { SITE_ASSET_SECRET?: string; SITE_ASSET_SECRET_NEXT?: string }): string[] {
+  return [...new Set([env.SITE_ASSET_SECRET_NEXT, env.SITE_ASSET_SECRET].filter((value): value is string => Boolean(value)))];
 }

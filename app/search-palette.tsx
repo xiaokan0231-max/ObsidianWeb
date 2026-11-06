@@ -10,6 +10,7 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { isComposingKey } from "@/lib/keyboard";
 import { stripMarkdown, getTitle, type Note } from "@/lib/notes";
 import { getGroup, GROUPS, noteMatches, type GroupKey } from "@/lib/memory-atlas-data";
 import { readRecentPaths, rememberRecentPath } from "@/lib/recent-notes";
@@ -253,6 +254,7 @@ export default function SearchPalette({
           value={query}
           onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
           onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+            if (isComposingKey(event.nativeEvent)) return;
             if (event.key === "ArrowDown") {
               event.preventDefault();
               setActiveIndex((index) => Math.min(Math.max(0, itemCount - 1), index + 1));

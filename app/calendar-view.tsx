@@ -6,6 +6,7 @@ import type { CalendarModel } from "@/lib/calendar-snapshot";
 import type { CalendarPulseSummary } from "@/lib/calendar-pulse-summary";
 import type { CalendarDaySummary } from "@/lib/calendar-query-model";
 import type { CalendarProjection } from "./use-calendar-projection";
+import { calendarMonthParam, calendarWeekParam } from "./calendar-projection-resource";
 import ReadModelSyncStatus from "./read-model-sync-status";
 import { type UiLocale } from "@/lib/ui-locale";
 import { useUiLocale } from "./ui-locale";
@@ -233,7 +234,7 @@ type CalendarMode = "month" | "week";
 const CALENDAR_MODE_CODEC = enumCodec<CalendarMode>(["month", "week"]);
 /** 手改成周中某天也落到那周的周一，链接里写哪天都指向同一周。 */
 const WEEK_START_CODEC: UrlStateCodec<string> = {
-  parse: (raw) => /^20\d{2}-\d{2}-\d{2}$/.test(raw) && Number.isFinite(Date.parse(`${raw}T00:00:00Z`)) ? calendarWeekStart(raw) : null,
+  parse: calendarWeekParam,
 };
 
 /** 侧栏每组默认露出的条数；更多的折进「另有 N 项」，首屏不被一长串议程推走。 */
@@ -450,7 +451,8 @@ function CalendarView({
   const initialSearch = useInitialUrlSearch();
   const [month, setMonth] = useState(() => {
     const requested = new URLSearchParams(initialSearch).get("month") ?? "";
-    return /^20\d{2}-\d{2}$/.test(requested) ? monthOf(`${requested}-01`) : monthOf(today);
+    const month = calendarMonthParam(requested);
+    return month ? monthOf(`${month}-01`) : monthOf(today);
   });
   // 只记录用户翻月的方向；首次进入不带方向，入场交给视图转场，不和月格滑入叠在一起。
   const [monthDir, setMonthDir] = useState<"prev" | "next" | "">("");

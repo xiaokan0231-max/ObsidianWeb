@@ -69,3 +69,15 @@ test("公开模式不会启用本机自动本人代理", async (t) => {
   assert.deepEqual(await response.json(), { identity: null, configured: false });
   assert.equal(spy.mock.callCount(), 0);
 });
+
+test("未读条件轮询透传ETag和304，恢复提示透传Retry-After", async t => {
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    assert.equal(init.headers.get("If-None-Match"), '"test-version"');
+    return new Response(null, { status: 304, headers: { ETag: '"test-version"', "Retry-After": "3" } });
+  });
+  const response = await dispatchFeedbackRequest(new Request("http://localhost:3000/api/feedback/unread", { headers: { "If-None-Match": '"test-version"' } }), env);
+  assert.equal(response.status, 304);
+  assert.equal(await response.text(), "");
+  assert.equal(response.headers.get("ETag"), '"test-version"');
+  assert.equal(response.headers.get("Retry-After"), "3");
+});

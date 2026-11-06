@@ -13,14 +13,15 @@ import type { CompanyOverview } from "@/lib/company-overview";
 
 export type InterviewView = "session" | "prep" | "review" | "insights" | "practice";
 export type InterviewSelection = { sourcePath?: string; contextPath?: string; company?: string; paths?: string[]; overviewOnly?: boolean; calendar?: CalendarInterviewTarget };
+type ReviewErrors = { blocks: Record<string, string>; sections: Record<string, string>; qualityBlocks: Record<string, string> };
 export type InterviewRemoteReview = {
   projection: InterviewReviewProjection; blocks: Record<string, ReviewBlock>;
   quality: InterviewAnswerReview | null; advisory: InterviewAdvisory | null;
   qualityBlocks: Record<string, InterviewAnswerBlockReview>;
-  sections: { quality: boolean; advisory: boolean }; error: string;
-  loadBlocks: (ids: string[]) => Promise<void>;
-  loadSection: (section: "quality" | "advisory") => Promise<void>;
-  loadQualityBlock: (id: string) => Promise<void>;
+  sections: { quality: boolean; advisory: boolean }; errors: ReviewErrors;
+  loadBlocks: (ids: string[], retry?: boolean) => Promise<void>;
+  loadSection: (section: "quality" | "advisory", retry?: boolean) => Promise<void>;
+  loadQualityBlock: (id: string, retry?: boolean) => Promise<void>;
 };
 type State = { notes: Note[]; companyContexts?: CompanyOverview[]; catalog: InterviewCatalog | null; digest: InterviewTrends | null; target: CalendarInterviewTarget | null; revision: string; fetchedAt: number | null; syncState: "ready" | "building" | "failed"; ready: boolean; loading: boolean; error: string; sourcePath: string; contextPath: string; review: InterviewRemoteReview | null };
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
@@ -41,6 +42,7 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
   const blockCache = new Map<string, ReviewBlock>();
   const sectionCache = new Map<string, unknown>();
   const inFlight = new Map<string, Promise<unknown>>();
+  const expiredReviewReads = new Set<string>();
   const writtenNotes = new Map<string, { note: Note; revision: string; sourcePath: string }>();
   const publish = (next: State) => { state = next; for (const listener of listeners) listener(); };
   async function json<T>(url: string, signal?: AbortSignal): Promise<T> {
@@ -77,72 +79,91 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
     const sourcePath = projection.source.path;
     const current = () => id === generation && state.review?.projection.source.path === sourcePath && state.revision === revision;
     const update = (patch: Partial<InterviewRemoteReview>) => { if (current() && state.review) publish({ ...state, review: { ...state.review, ...patch } }); };
-    const requestOnce = (key: string, task: () => Promise<unknown>) => {
-      const pending = inFlight.get(key);
+    const localPending = new Set<string>();
+    const requestOnce = <T,>(key: string, task: () => Promise<T>) => {
+      const pending = inFlight.get(key) as Promise<T> | undefined;
       if (pending) return pending;
       const next = task().finally(() => { inFlight.delete(key); });
       inFlight.set(key, next);
       return next;
     };
+    async function recoverReview(loadCurrent: (review: InterviewRemoteReview) => Promise<void>) {
+      if (!current()) return;
+      const refresh = query("review", activeSelection, true);
+      const refreshGeneration = generation;
+      await refresh;
+      const next = state.review;
+      if (generation === refreshGeneration && state.ready && state.revision !== revision && next?.projection.source.path === sourcePath) await loadCurrent(next);
+    }
+    async function load<T>(kind: keyof ReviewErrors, item: string, retry: boolean, task: (key: string) => Promise<T>, apply: (value: T, review: InterviewRemoteReview) => Partial<InterviewRemoteReview>, loadCurrent: (review: InterviewRemoteReview) => Promise<void>) {
+      const review = state.review;
+      if (!current() || !review) return;
+      const key = JSON.stringify([revision, sourcePath, kind, item]);
+      const errors = review.errors[kind];
+      if (localPending.has(key) || (errors[item] && !retry)) return;
+      localPending.add(key);
+      try {
+        // 过期请求的重试先刷新同一场，再读取失败项，避免重复请求已撤回的版本。
+        if (retry && expiredReviewReads.has(key)) { await recoverReview(loadCurrent); return; }
+        if (errors[item]) {
+          const next = { ...errors };
+          delete next[item];
+          update({ errors: { ...review.errors, [kind]: next } });
+        }
+        // 共享的是这一版的资料，提交结果由每个等待者各自确认仍在对应场次。
+        const value = await requestOnce(key, () => task(key));
+        expiredReviewReads.delete(key);
+        if (current() && state.review) update(apply(value, state.review));
+      } catch (error) {
+        if (current() && state.review) {
+          const expired = error instanceof ReadModelFetchError && error.status === 409;
+          if (expired) expiredReviewReads.add(key);
+          const currentErrors = state.review.errors;
+          update({ errors: { ...currentErrors, [kind]: { ...currentErrors[kind], [item]: error instanceof Error ? error.message : "章节读取失败" } } });
+          if (expired && retry) await recoverReview(loadCurrent);
+        }
+      } finally { localPending.delete(key); }
+    }
+    const reviewData = <T,>(extra: Record<string, string>) => json<T>(endpoint("review", revision, { path: sourcePath, ...extra }), AbortSignal.timeout(65_000));
     const result: InterviewRemoteReview = {
-      projection, blocks: {}, quality: null, advisory: null, qualityBlocks: {}, sections: { quality: false, advisory: false }, error: "",
-      async loadBlocks(ids) {
-        try {
-          const requested = [...new Set(ids)];
-          const adjacent = requested.length === 1 ? projection.blocks.slice(Math.max(0, projection.blocks.findIndex((item) => item.id === requested[0]) - 1),
-            projection.blocks.findIndex((item) => item.id === requested[0]) + 2).map((item) => item.id) : [];
-          await Promise.all([...new Set([...requested, ...adjacent])].map((block) => {
-            if (!projection.blocks.some((item) => item.id === block)) return Promise.resolve();
-            const key = JSON.stringify([revision, sourcePath, block]);
-            return requestOnce(key, async () => {
-              let value = blockCache.get(key);
-              if (!value) {
-                const payload = await json<{ revision: string; block: InterviewReviewBlock }>(endpoint("review", revision, { path: sourcePath, block }));
-                if (payload.revision !== revision || payload.block.sourcePath !== sourcePath || payload.block.block.id !== block) throw new Error("面试分块版本不一致，请刷新重试");
-                value = payload.block.block;
-                blockCache.set(key, value);
-              }
-              if (current()) update({ blocks: { ...state.review!.blocks, [block]: value } });
-            });
-          }));
-        } catch (error) { update({ error: error instanceof Error ? error.message : "章节读取失败" }); }
+      projection, blocks: {}, quality: null, advisory: null, qualityBlocks: {}, sections: { quality: false, advisory: false }, errors: { blocks: {}, sections: {}, qualityBlocks: {} },
+      async loadBlocks(ids, retry = false) {
+        const requested = [...new Set(ids)];
+        const index = requested.length === 1 ? projection.blocks.findIndex((item) => item.id === requested[0]) : -1;
+        const adjacent = !retry && index >= 0 ? projection.blocks.slice(Math.max(0, index - 1), index + 2).map((item) => item.id) : [];
+        const needed = [...new Set([...requested, ...adjacent])].filter((block) => !state.review?.blocks[block] && projection.blocks.some((item) => item.id === block));
+        await Promise.all(needed.map((block) => load("blocks", block, retry, async (key) => {
+          const cached = blockCache.get(key);
+          if (cached) return cached;
+          const payload = await reviewData<{ revision: string; block: InterviewReviewBlock }>({ block });
+          if (payload.revision !== revision || payload.block.sourcePath !== sourcePath || payload.block.block.id !== block) throw new Error("面试分块版本不一致，请刷新重试");
+          blockCache.set(key, payload.block.block);
+          return payload.block.block;
+        }, (value, review) => ({ blocks: { ...review.blocks, [block]: value } }), (review) => review.loadBlocks([block]))));
       },
-      async loadSection(section) {
-        if ((section === "quality" && !projection.hasQuality) || (section === "advisory" && !projection.hasAdvisory)) return;
-        const key = JSON.stringify([revision, sourcePath, section]);
-        try {
-          await requestOnce(key, async () => {
-            let value = sectionCache.get(key);
-            if (!value) {
-              const payload = await json<{ revision: string; section: unknown }>(endpoint("review", revision, { path: sourcePath, section }));
-              if (payload.revision !== revision) throw new Error("复盘章节版本不一致，请刷新重试");
-              value = payload.section;
-              sectionCache.set(key, value);
-            }
-            if (current()) update({ [section]: section === "quality" ? qualityFromSection(value as InterviewQualitySection) : value,
-              sections: { ...state.review!.sections, [section]: true } });
-          });
-        } catch (error) { update({ error: error instanceof Error ? error.message : "章节读取失败" }); }
+      async loadSection(section, retry = false) {
+        if (state.review?.sections[section] || !(section === "quality" ? projection.hasQuality : projection.hasAdvisory)) return;
+        await load("sections", section, retry, async (key) => {
+          if (sectionCache.has(key)) return sectionCache.get(key);
+          const payload = await reviewData<{ revision: string; section: InterviewQualitySection | InterviewAdvisory }>({ section });
+          if (payload.revision !== revision) throw new Error("复盘章节版本不一致，请刷新重试");
+          const value = section === "quality" ? qualityFromSection(payload.section as InterviewQualitySection) : payload.section;
+          sectionCache.set(key, value);
+          return value;
+        }, (value, review) => ({ [section]: value, sections: { ...review.sections, [section]: true } }), (review) => review.loadSection(section));
       },
-      async loadQualityBlock(block) {
+      async loadQualityBlock(block, retry = false) {
         const blocks = state.review?.quality?.blocks ?? [];
         const index = blocks.findIndex((item) => item.blockId === block);
-        const ids = index >= 0 ? blocks.slice(Math.max(0, index - 1), index + 2).map((item) => item.blockId) : [block];
-        await Promise.all(ids.map(async (block) => {
-        const key = JSON.stringify([revision, sourcePath, "quality", block]);
-        try {
-          await requestOnce(key, async () => {
-            let value = sectionCache.get(key) as InterviewAnswerBlockReview | undefined;
-            if (!value) {
-              const payload = await json<{ revision: string; section: InterviewAnswerBlockReview }>(endpoint("review", revision, { path: sourcePath, section: block }));
-              if (payload.revision !== revision || payload.section.blockId !== block) throw new Error("回答评价章节版本不一致，请刷新重试");
-              value = payload.section;
-              sectionCache.set(key, value);
-            }
-            if (current()) update({ qualityBlocks: { ...state.review!.qualityBlocks, [block]: value } });
-          });
-        } catch (error) { update({ error: error instanceof Error ? error.message : "问题评价读取失败" }); }
-        }));
+        const ids = !retry && index >= 0 ? blocks.slice(Math.max(0, index - 1), index + 2).map((item) => item.blockId) : [block];
+        await Promise.all(ids.filter((item) => !state.review?.qualityBlocks[item]).map((item) => load("qualityBlocks", item, retry, async (key) => {
+          const cached = sectionCache.get(key) as InterviewAnswerBlockReview | undefined;
+          if (cached) return cached;
+          const payload = await reviewData<{ revision: string; section: InterviewAnswerBlockReview }>({ section: item });
+          if (payload.revision !== revision || payload.section.blockId !== item) throw new Error("回答评价章节版本不一致，请刷新重试");
+          sectionCache.set(key, payload.section);
+          return payload.section;
+        }, (value, review) => ({ qualityBlocks: { ...review.qualityBlocks, [item]: value } }), (review) => review.loadQualityBlock(item))));
       },
     };
     return result;
@@ -213,7 +234,7 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
         review = remoteReview(payload.review, revision, id);
         const previous = state.review;
         if (previous?.projection.source.path === sourcePath) {
-          if (state.revision === revision) review = { ...review, blocks: previous.blocks, quality: previous.quality, advisory: previous.advisory, qualityBlocks: previous.qualityBlocks, sections: previous.sections };
+          if (state.revision === revision) review = { ...review, blocks: previous.blocks, quality: previous.quality, advisory: previous.advisory, qualityBlocks: previous.qualityBlocks, sections: previous.sections, errors: previous.errors };
           else {
             // 保存后先补齐仍在阅读的章节，再原位换版；句卡不会被 loading 卸载，未提交草稿也保留。
             const blocks = await Promise.all(Object.keys(previous.blocks).filter((block) => payload.review.blocks.some((item) => item.id === block))
@@ -225,14 +246,18 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
               else review.advisory = value;
               review.sections[section] = true;
             }
-            const qualityBlocks = await Promise.all(Object.keys(previous.qualityBlocks).map(async (section) =>
+            const availableQualityBlocks = new Set(review.quality?.blocks.map((block) => block.blockId));
+            const qualityBlocks = await Promise.all(Object.keys(previous.qualityBlocks).filter((section) => availableQualityBlocks.has(section)).map(async (section) =>
               (await json<{ section: InterviewAnswerBlockReview }>(endpoint("review", revision, { path: sourcePath, section }), signal)).section));
             review.qualityBlocks = Object.fromEntries(qualityBlocks.map((block) => [block.blockId, block]));
           }
         }
       }
-      if (id === generation) publish({ notes, companyContexts, catalog, digest: trendPayload.digest, target, revision, fetchedAt: Date.now(), syncState: payload.syncState ?? "ready", ready: true, loading: false, error: "", sourcePath,
-        contextPath: contexts[0]?.context.contextPath ?? "", review });
+      if (id === generation) {
+        if (revision !== state.revision) expiredReviewReads.clear();
+        publish({ notes, companyContexts, catalog, digest: trendPayload.digest, target, revision, fetchedAt: Date.now(), syncState: payload.syncState ?? "ready", ready: true, loading: false, error: "", sourcePath,
+          contextPath: contexts[0]?.context.contextPath ?? "", review });
+      }
       if (id === generation && payload.syncState === "building" && Date.now() < pollDeadline) pollTimer = setTimeout(() => {
         pollTimer = null; void query(view, selection, true, true);
       }, 1_000);

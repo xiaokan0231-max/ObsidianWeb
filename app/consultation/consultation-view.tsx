@@ -6,9 +6,9 @@ import type { ConsultationCatalog, ConsultationCompany, ConsultationInterview, C
 import { selectConsultationReadingGroups } from "@/lib/consultation-reading-start";
 import type { ConsultationReadingHistory } from "@/lib/consultation-reading-start";
 import { consultationPage, paginationPageNumbers } from "@/lib/consultation-pagination";
-import type { FeedbackContext, FeedbackThread } from "@/lib/feedback";
-import { consultationBlockText, consultationContextIsCurrent, consultationFeedbackContext, feedbackQuoteRange } from "@/lib/feedback-annotations";
-import { FeedbackEntry, FeedbackHelp, FeedbackPanel, useFeedback } from "../feedback-ui";
+import type { FeedbackContext, FeedbackSummary } from "@/lib/feedback";
+import { consultationBlockText, consultationContextIsCurrent, consultationFeedbackContext, consultationQuoteFromSummary, feedbackQuoteRange } from "@/lib/feedback-annotations";
+import { FeedbackEntry, FeedbackHelp, FeedbackPanel, useFeedbackSummaries, useFeedbackThread } from "../feedback-ui";
 import { TEACHER_TOUR_STORAGE_KEY } from "../feedback-tour";
 import { UiLocaleProvider } from "../ui-locale";
 import SelectionNoticePanel from "../selection-notice";
@@ -150,7 +150,8 @@ function LibraryHeader({ onHelp }: { onHelp?: () => void }) {
     <Link className="consultation-brand" href="/consultation" aria-label="面接相談の資料のトップ"><span className="consultation-brand-mark"><BookIcon /></span><span><strong>Obsidian Memory Atlas</strong><small>資料を読んでコメントできます</small></span></Link>
     <div className="consultation-header-actions">
       <span className="consultation-header-note">日本語</span>
-      <button data-tour="help-entry" className="consultation-help-button" onClick={onHelp ?? (() => { window.location.href = "/consultation?help=1"; })}>使い方</button>
+      {onHelp ? <button data-tour="help-entry" className="consultation-help-button" onClick={onHelp}>使い方</button>
+        : <Link data-tour="help-entry" className="consultation-help-button" href="/consultation?help=1" prefetch={false}>使い方</Link>}
       <span data-tour="feedback-entry"><FeedbackEntry locale="ja" context={{ pagePath: "/consultation", title: "面接相談の資料" }} /></span>
       {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 独立阅读入口返回主站时需要完整加载首页。 */}
       <a className="consultation-home-link" href="/">← ホームに戻る</a>
@@ -230,6 +231,9 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
     lastSession.current = session.id;
     navigate({ sessionId: session.id, view: "readable", blockId, feedbackThread: "" });
   }
+  function openSummary(id: string) {
+    navigate({ sessionId: id, view: "raw", feedbackThread: "", blockId: "" });
+  }
   function showAllMaterials() {
     setPageSelection({ scope: "", page: 1 });
     navigate({ tab: "sessions", query: "", outcome: "all", progress: "all", companyId: "", sessionId: "", blockId: "", feedbackThread: "" });
@@ -246,7 +250,7 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
     ...readingStarts.map(session => ({ date: session.date, id: session.id, session, history: null })),
     ...(readingGroup?.histories ?? []).map(history => ({ date: history.interview.date, id: `${history.companyId}:${history.interview.id}`, session: null, history })),
   ];
-  if (readingGroup?.id === "recent") readingEntries.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+  if (readingGroup?.id === "recent") readingEntries.sort((a, b) => (a.session?.readingGuide?.priority ?? Infinity) - (b.session?.readingGuide?.priority ?? Infinity) || b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
   const manuscriptCompanyCount = new Set(sessions.map(session => session.companyId)).size;
   const selectedCompany = initial.companies.find(company => company.id === route.companyId);
   const visibleCompanies = filterConsultationCompanies(companies, sessions, query, route.outcome, route.progress);
@@ -274,15 +278,19 @@ export function ConsultationLibrary({ initial }: { initial: ConsultationCatalog 
       <main className="consultation-library">
         <section className="consultation-reading-start" data-tour="reading-start" aria-labelledby="reading-start-title">
           <header className="consultation-reading-start-heading"><div><h1 id="reading-start-title">面接相談の資料</h1><p>原稿を選び、気になる部分にコメントできます。</p></div><button data-tour="all-materials" className="consultation-all-materials" onClick={showAllMaterials}>すべての資料を見る<span aria-hidden="true">→</span></button></header>
-          {readingGroups.length > 0 && <div className="consultation-reading-choices" data-tour="reading-choice" role="group" aria-label="読み始める面接の種類">{readingGroups.map(group => <button key={group.id} className={`consultation-reading-choice is-${group.id}`} aria-pressed={readingGroup?.id === group.id} aria-controls="consultation-reading-selection" onClick={() => setReadingGroupId(group.id)}><span className="consultation-reading-choice-icon" aria-hidden="true"><ReadingGroupIcon group={group.id} /></span><strong>{group.title}</strong><span className="consultation-reading-choice-count">{group.sessions.length + group.histories.length}<small>{group.id === "final" ? "社" : "件"}</small></span></button>)}</div>}
+          {readingGroups.length > 0 && <div className="consultation-reading-choices" data-tour="reading-choice" role="group" aria-label="読み始める面接の種類">{readingGroups.map(group => <button key={group.id} className={`consultation-reading-choice is-${group.id}`} aria-pressed={readingGroup?.id === group.id} aria-controls="consultation-reading-selection" onClick={() => setReadingGroupId(group.id)}><span className="consultation-reading-choice-icon" aria-hidden="true"><ReadingGroupIcon group={group.id} /></span><strong>{group.title}</strong><span className="consultation-reading-choice-count">{group.id === "final" ? group.companyGroups?.length ?? 0 : group.sessions.length + group.histories.length}<small>{group.id === "final" ? "社" : "件"}</small></span></button>)}</div>}
           <div id="consultation-reading-selection" className={`consultation-reading-selection is-${readingGroup?.id ?? "recent"}`} aria-live="polite" aria-atomic="false">
             {readingGroup && <p className="consultation-reading-group-description">{readingGroup.description}</p>}
             <div className={`consultation-reading-start-grid${readingStarts.length + (readingGroup?.histories.length ?? 0) === 1 ? " is-single" : ""}${readingGroup?.id === "final" ? " is-final" : ""}`}>
-              {readingEntries.map(entry => entry.session
-                ? <ReadingStartCard key={entry.id} session={entry.session} recent={readingGroup?.id === "recent" && Boolean(entry.date)} label={readingGroup?.id === "recent" ? undefined : readingGroup?.title} onOpen={() => openSession(entry.session)} onExcerpt={blockId => openExcerpt(entry.session, blockId)} />
-                : <ReadingHistoryCard key={entry.id} history={entry.history} onBrowse={() => browseHistory(entry.history.company)} />)}
+              {readingGroup?.id === "final" ? readingGroup.companyGroups?.map(company => {
+                const entries = [
+                  ...company.sessions.map(session => ({ date: session.date, id: session.id, session, history: null })),
+                  ...company.histories.map(history => ({ date: history.interview.date, id: history.interview.id, session: null, history })),
+                ].sort((a, b) => Number(!a.date) - Number(!b.date) || a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+                return <section className="consultation-company-rounds" key={company.companyId} aria-label={`${company.company}の面接・面談`}><header><h2>{company.company}</h2><span>{entries.length}回の面接・面談</span></header><div className="consultation-reading-start-grid">{<ReadingEntries entries={entries} recent={false} onOpen={openSession} onExcerpt={openExcerpt} onBrowse={browseHistory} onSummary={openSummary} />}</div></section>;
+              }) : <ReadingEntries entries={readingEntries} recent={readingGroup?.id === "recent"} onOpen={openSession} onExcerpt={openExcerpt} onBrowse={browseHistory} onSummary={openSummary} />}
             </div>
-            {readingGroup?.id === "recent" && readingStarts.length + readingGroup.histories.length === 0 && <p className="consultation-reading-start-empty">最近1週間の面接・面談の記録はまだありません。過去の記録は「すべての資料を見る」から確認できます。</p>}
+            {readingGroup?.id === "recent" && readingStarts.length + readingGroup.histories.length === 0 && <p className="consultation-reading-start-empty">最近2週間の面接・面談の記録はまだありません。過去の記録は「すべての資料を見る」から確認できます。</p>}
           </div>
           {!readingGroup && <p className="consultation-reading-start-empty">原稿が登録されると、ここから読み始められます。企業一覧から、確認できている面接の履歴をご覧いただけます。</p>}
         </section>
@@ -312,9 +320,20 @@ export function ConsultationPagination({ page, pageCount, onChange }: { page: nu
   return <nav className="consultation-pagination" aria-label="資料一覧のページ"><span>{page} / {pageCount} ページ</span><div><button disabled={page === 1} onClick={() => onChange(page - 1)}>← 前へ</button>{paginationPageNumbers(page, pageCount).map(number => <button key={number} aria-label={`${number}ページ目`} aria-current={number === page ? "page" : undefined} onClick={() => onChange(number)}>{number}</button>)}<button disabled={page === pageCount} onClick={() => onChange(page + 1)}>次へ →</button></div></nav>;
 }
 
-export function ReadingHistoryCard({ history, onBrowse }: { history: ConsultationReadingHistory; onBrowse: () => void }) {
+type ReadingEntry = { id: string; date: string } & ({ session: ConsultationSessionSummary; history: null } | { session: null; history: ConsultationReadingHistory });
+// 渲染与导航事件分开，避免渲染辅助函数捕获滚动位置和阅读定位的 ref。
+function ReadingEntries({ entries, recent, onOpen, onExcerpt, onBrowse, onSummary }: {
+  entries: ReadingEntry[]; recent: boolean; onOpen: (session: ConsultationSessionSummary) => void;
+  onExcerpt: (session: ConsultationSessionSummary, blockId: string) => void; onBrowse: (company: string) => void; onSummary: (id: string) => void;
+}) {
+  return entries.map(entry => entry.session
+    ? <ReadingStartCard key={entry.id} session={entry.session} recent={recent && Boolean(entry.date)} onOpen={() => onOpen(entry.session)} onExcerpt={blockId => onExcerpt(entry.session, blockId)} />
+    : <ReadingHistoryCard key={entry.id} history={entry.history} onBrowse={() => onBrowse(entry.history.company)} onSummary={entry.history.interview.summaryId ? () => onSummary(entry.history.interview.summaryId!) : undefined} />);
+}
+
+export function ReadingHistoryCard({ history, onBrowse, onSummary }: { history: ConsultationReadingHistory; onBrowse: () => void; onSummary?: () => void }) {
   if (history.interview.evidenceKind === "scheduled") return <article className="consultation-reading-start-card consultation-reading-history"><div className="consultation-reading-start-main"><h3>{history.company}</h3><div className="consultation-reading-start-meta"><time dateTime={history.interview.date}>{dateLabel(history.interview.date)}</time><span>{stageLabel(history.interview)}</span><span className="reading-start-memory">日程確定</span></div></div><p className="consultation-reading-start-introduction">確定した日程です。実施記録・原稿はまだ登録されていません。</p><div className="consultation-reading-start-footer"><span>実施記録未登録</span></div></article>;
-  return <article className="consultation-reading-start-card consultation-reading-history"><div className="consultation-reading-start-main"><h3>{history.company}</h3><div className="consultation-reading-start-meta"><time dateTime={history.interview.date || undefined}>{dateLabel(history.interview.date)}</time><span>{stageLabel(history.interview)}</span><span className="reading-start-memory">原稿未登録</span></div></div><p className="consultation-reading-start-introduction">{stageLabel(history.interview)}の履歴です。逐字の原稿は登録されていません。</p><div className="consultation-reading-start-footer"><span>日付・結果を確認できます</span><button className="consultation-reading-start-open" onClick={onBrowse}>面接履歴を見る<span aria-hidden="true">→</span></button></div></article>;
+  return <article className="consultation-reading-start-card consultation-reading-history"><div className="consultation-reading-start-main"><h3>{history.company}</h3><div className="consultation-reading-start-meta"><time dateTime={history.interview.date || undefined}>{dateLabel(history.interview.date)}</time><span>{stageLabel(history.interview)}</span><span className="reading-start-memory">{onSummary ? "面接まとめあり・逐字稿なし" : "原稿未登録"}</span></div></div><p className="consultation-reading-start-introduction">{onSummary ? "当時の面接まとめ・復盤を確認できます。逐語の発言記録とは区別してお読みください。" : `${stageLabel(history.interview)}の履歴です。逐字の原稿は登録されていません。`}</p><div className="consultation-reading-start-footer"><span>日付・結果を確認できます</span><button className="consultation-reading-start-open" onClick={onSummary ?? onBrowse}>{onSummary ? "面接まとめを読む" : "面接履歴を見る"}<span aria-hidden="true">→</span></button></div></article>;
 }
 
 function ReadingGroupIcon({ group }: { group: string }) {
@@ -327,6 +346,7 @@ export function ReadingStartCard({ session, onOpen, onExcerpt }: { session: Cons
   const introduction = guide?.introduction || (session.recordKind === "memory" ? "当日の記憶から再構成した記録です。会話の内容を中心にご覧いただけます。" : session.date ? `${dateLabel(session.date)}の${stageLabel(session)}です。気になるやり取りからコメントできます。` : "日付未確認の面接記録です。原稿から、確認できるやり取りをご覧いただけます。");
   return <article className={`consultation-reading-start-card${guide?.featured ? " is-featured" : ""}${excerpts.length ? " has-preview" : ""}`}>
     <div className="consultation-reading-start-main">
+      {guide?.priority && <span className="consultation-priority-label">今回の相談</span>}
       <h3>{session.company}</h3>
       <div className="consultation-reading-start-meta"><time dateTime={session.date || undefined}>{dateLabel(session.date)}</time><span>{stageLabel(session)}</span>{session.recordKind === "memory" ? <span className="reading-start-memory">記憶から再構成</span> : <span>{session.hasReadable ? "可読整理稿" : "原始転写"}</span>}</div>
       {session.position && <p className="consultation-reading-start-position">{session.position}</p>}
@@ -356,9 +376,9 @@ function EmptyState({ filtered, onReset }: { filtered: boolean; onReset: () => v
   return <div className="consultation-empty"><BookIcon /><h2>{filtered ? "条件に合う資料はありません" : "資料はまだありません"}</h2><p>{filtered ? "企業名や選考結果を変えて、もう一度お探しください。" : "資料が登録されると、ここに表示されます。"}</p>{filtered && <button onClick={onReset}>絞り込みをすべて解除</button>}</div>;
 }
 
-type AnnotationRange = { start: number; end: number; thread: FeedbackThread };
+type AnnotationRange = { start: number; end: number; thread: FeedbackSummary };
 
-function AnnotatedText({ text, ranges, onOpen }: { text: string; ranges: AnnotationRange[]; onOpen: (thread: FeedbackThread) => void }) {
+function AnnotatedText({ text, ranges, onOpen }: { text: string; ranges: AnnotationRange[]; onOpen: (thread: FeedbackSummary) => void }) {
   if (!ranges.length) return <>{text}</>;
   const points = [...new Set([0, text.length, ...ranges.flatMap(range => [range.start, range.end])])].sort((a, b) => a - b);
   return <>{points.slice(0, -1).map((point, index) => {
@@ -377,7 +397,7 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
   const [fontSize, setFontSize] = useState(18);
   const [panel, setPanel] = useState<{ context: FeedbackContext; threadId?: string } | null>(null);
   const [selection, setSelection] = useState<{ context: FeedbackContext; left: number; top: number } | null>(null);
-  const { threads } = useFeedback();
+  const annotations = useFeedbackSummaries({ sessionId: initial.id, limit: "50" }, true);
   const title = useRef<HTMLHeadingElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const positions = useRef<Record<TranscriptView, number>>({ readable: 0, raw: 0 });
@@ -385,13 +405,16 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
   const openedRequest = useRef("");
   const positionedThread = useRef("");
   const positionedBlock = useRef("");
-  const readable = view === "readable";
+  const summary = initial.recordKind === "summary";
+  const readable = view === "readable" && !summary;
   const available = readable ? initial.hasReadable && initial.blocks.some(block => block.turns.length > 0) : initial.hasRaw && Boolean(initial.raw.trim());
-  const related = threads.filter(thread => thread.context.sessionId === initial.id && !thread.hidden);
+  const related = annotations.page?.items ?? [];
   const sessionContext = consultationFeedbackContext(initial, view);
-  const currentThread = panel?.threadId ? threads.find(thread => thread.id === panel.threadId) : undefined;
-  const sourceContext = currentThread?.context ?? panel?.context;
-  const stale = Boolean(sourceContext?.blockId && !consultationContextIsCurrent(initial, sourceContext));
+  const detail = useFeedbackThread(panel?.threadId ?? "");
+  const threadSummary = panel?.threadId ? related.find(thread => thread.id === panel.threadId) : undefined;
+  const sourceContext = detail.thread?.context ?? threadSummary?.context ?? panel?.context;
+  const quoteProof = detail.thread ? undefined : threadSummary;
+  const stale = Boolean(sourceContext?.blockId && !consultationContextIsCurrent(initial, sourceContext, quoteProof));
 
   useEffect(() => { title.current?.focus({ preventScroll: true }); }, [initial.id]);
   useEffect(() => {
@@ -416,29 +439,30 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
   }, [view]);
   useEffect(() => {
     if (!requestedThreadId) return;
-    const thread = threads.find(item => item.id === requestedThreadId);
     let active = true;
     queueMicrotask(() => {
       if (!active) return;
       if (openedRequest.current !== requestedThreadId) {
         openedRequest.current = requestedThreadId;
-        setPanel({ context: thread?.context ?? consultationFeedbackContext(initial, view), threadId: requestedThreadId });
-      } else if (thread) {
-        setPanel(previous => previous?.threadId === requestedThreadId && previous.context !== thread.context ? { ...previous, context: thread.context } : previous);
+        setPanel({ context: consultationFeedbackContext(initial, view), threadId: requestedThreadId });
       }
     });
     return () => { active = false; };
-  }, [requestedThreadId, threads, initial, view]);
+  }, [requestedThreadId, initial, view]);
   useEffect(() => {
-    if (!panel?.threadId || !sourceContext?.blockId || positionedThread.current === panel.threadId || !consultationContextIsCurrent(initial, sourceContext)) return;
+    if (!panel?.threadId || !sourceContext?.blockId || positionedThread.current === panel.threadId || !consultationContextIsCurrent(initial, sourceContext, quoteProof)) return;
     const rawTarget = sourceContext.blockId === "raw" ? "transcript-block-raw" : `transcript-block-${sourceContext.blockId}`;
     // 长段落居中会把被点评的句子滚出视野，优先定位准确的高亮文字。
     const exact = document.querySelector<HTMLElement>(`[data-feedback-threads~="${CSS.escape(panel.threadId)}"]`);
+    if (!exact && sourceContext.quote && annotations.loading) return;
     const target = exact ?? document.getElementById(rawTarget);
     if (!target) return;
-    positionedThread.current = panel.threadId;
-    window.requestAnimationFrame(() => target.scrollIntoView({ block: exact ? "center" : "start", behavior: "instant" }));
-  }, [panel?.threadId, sourceContext, initial, view]);
+    const frame = window.requestAnimationFrame(() => {
+      positionedThread.current = panel.threadId!;
+      target.scrollIntoView({ block: exact ? "center" : "start", behavior: "instant" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [panel?.threadId, sourceContext, quoteProof, initial, view, annotations.loading]);
 
   function openPanel(context: FeedbackContext, threadId?: string) {
     setSelection(null);
@@ -456,7 +480,9 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
     url.searchParams.delete("feedbackThread"); url.searchParams.delete("feedback");
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
   }
-  function openThread(thread: FeedbackThread) { openPanel(thread.context, thread.id); }
+  function openThread(thread: FeedbackSummary) {
+    openPanel(consultationQuoteFromSummary(initial, thread) ?? sessionContext, thread.id);
+  }
   function captureSelection() {
     const selected = window.getSelection();
     if (!selected || selected.isCollapsed || !selected.rangeCount || selected.toString().trim().length < 1) { setSelection(null); return; }
@@ -508,7 +534,7 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
     return related.flatMap(thread => {
       const context = thread.context;
       if (context.blockId !== block.id || (context.turnId && context.turnId !== turn.id)) return [];
-      const range = feedbackQuoteRange(context.turnId ? turn.text : consultationBlockText(block), context);
+      const range = feedbackQuoteRange(context.turnId ? turn.text : consultationBlockText(block), context, thread);
       if (!range) return [];
       const start = context.turnId ? range.start : Math.max(0, range.start - before);
       const end = context.turnId ? range.end : Math.min(turn.text.length, range.end - before);
@@ -520,7 +546,7 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
     return related.flatMap(thread => {
       const context = thread.context;
       if (context.blockId !== `raw-line-${index}` && context.blockId !== "raw") return [];
-      const range = feedbackQuoteRange(context.blockId === "raw" ? initial.raw : line, context);
+      const range = feedbackQuoteRange(context.blockId === "raw" ? initial.raw : line, context, thread);
       if (!range) return [];
       const start = context.blockId === "raw" ? Math.max(0, range.start - before) : range.start;
       const end = context.blockId === "raw" ? Math.min(line.length, range.end - before) : range.end;
@@ -533,11 +559,11 @@ export function ConsultationTranscriptReader({ initial, view = "readable", reque
     else if (panel) { event.stopPropagation(); closePanel(); }
     else onClose();
   }}>
-    <div className="consultation-reader-toolbar"><button className="consultation-back" onClick={onClose}>← 一覧に戻る</button><div className="consultation-reader-switch" role="group" aria-label="原稿の表示形式"><button aria-pressed={readable} onClick={() => onView("readable")}>可読整理稿</button><button aria-pressed={!readable} onClick={() => onView("raw")}>原始転写</button></div><div className="consultation-reader-actions"><button className="consultation-comment-button" onClick={() => openPanel(sessionContext)}>この面接にコメント{related.length > 0 && <span>{related.length}</span>}</button><div className="consultation-font-controls" role="group" aria-label="本文の文字サイズ"><button aria-label="文字を小さく" disabled={fontSize === 16} onClick={() => setFontSize(value => Math.max(16, value - 2))}>A−</button><button aria-label="文字を大きく" disabled={fontSize === 24} onClick={() => setFontSize(value => Math.min(24, value + 2))}>A＋</button></div><button className="consultation-print-button" onClick={() => window.print()}>印刷</button>{available && <a className="consultation-download-link" href={exportHref(initial.id, view)} download><DownloadIcon />Word で保存</a>}</div></div>
-    <div className="consultation-reader-scroll" ref={scroll}><div className={`consultation-reader-layout${panel ? " consultation-reader-layout-commenting" : ""}`}><main className="consultation-reading-paper" onMouseUp={captureSelection} onKeyUp={event => { if (event.key.startsWith("Arrow") || event.key === "Shift") captureSelection(); }} style={{ "--consultation-reading-size": `${fontSize}px` } as React.CSSProperties}><header className="consultation-transcript-heading"><p className="consultation-eyebrow">面接の記録 · {initial.recordKind === "memory" ? "記憶から再構成" : readable ? "可読整理稿" : "原始転写"}</p><h1 ref={title} tabIndex={-1}>{initial.company}</h1><div className="consultation-transcript-meta"><span>{dateLabel(initial.date)}</span><span>{stageLabel(initial)}</span><span className="consultation-round-result-label">この回の結果</span><Badge kind={initial.outcomeKind} /></div>{initial.outcome && initial.outcome !== OUTCOMES[initial.outcomeKind] && <p className="consultation-outcome-detail">{initial.outcome}</p>}</header>
+    <div className="consultation-reader-toolbar"><button className="consultation-back" onClick={onClose}>← 一覧に戻る</button>{!summary && <div className="consultation-reader-switch" role="group" aria-label="原稿の表示形式"><button aria-pressed={readable} onClick={() => onView("readable")}>可読整理稿</button><button aria-pressed={!readable} onClick={() => onView("raw")}>原始転写</button></div>}<div className="consultation-reader-actions"><button className="consultation-comment-button" onClick={() => openPanel(sessionContext)}>この面接にコメント{related.length > 0 && <span>{related.length}</span>}</button><div className="consultation-font-controls" role="group" aria-label="本文の文字サイズ"><button aria-label="文字を小さく" disabled={fontSize === 16} onClick={() => setFontSize(value => Math.max(16, value - 2))}>A−</button><button aria-label="文字を大きく" disabled={fontSize === 24} onClick={() => setFontSize(value => Math.min(24, value + 2))}>A＋</button></div><button className="consultation-print-button" onClick={() => window.print()}>印刷</button>{available && <a className="consultation-download-link" href={exportHref(initial.id, summary ? "raw" : view)} download><DownloadIcon />Word で保存</a>}</div></div>
+    <div className="consultation-reader-scroll" ref={scroll}><div className={`consultation-reader-layout${panel ? " consultation-reader-layout-commenting" : ""}`}><main className="consultation-reading-paper" onMouseUp={captureSelection} onKeyUp={event => { if (event.key.startsWith("Arrow") || event.key === "Shift") captureSelection(); }} style={{ "--consultation-reading-size": `${fontSize}px` } as React.CSSProperties}><header className="consultation-transcript-heading"><p className="consultation-eyebrow">面接の記録 · {summary ? "面接まとめ" : initial.recordKind === "memory" ? "記憶から再構成" : readable ? "可読整理稿" : "原始転写"}</p><h1 ref={title} tabIndex={-1}>{initial.company}</h1>{annotations.error && <p className="consultation-source-updated" role="status">コメントの位置を確認できませんでした。 <button className="feedback-link-button" onClick={annotations.retry}>もう一度確認</button></p>}<div className="consultation-transcript-meta"><span>{dateLabel(initial.date)}</span><span>{stageLabel(initial)}</span><span className="consultation-round-result-label">この回の結果</span><Badge kind={initial.outcomeKind} /></div>{initial.outcome && initial.outcome !== OUTCOMES[initial.outcomeKind] && <p className="consultation-outcome-detail">{initial.outcome}</p>}</header>
       <SelectionNoticePanel key={initial.id} notices={initial.selectionNotices ?? []} locale="ja" rejected={initial.outcomeKind === "rejected"} />
       {Boolean(initial.selectionNotices?.length) && <p className="consultation-notice-privacy">連絡先・内部リンクは非表示です。通知の文面は翻訳せずに掲載しています。</p>}
-      <div className="consultation-transcript-notice"><strong>{initial.recordKind === "memory" ? "面接後の記憶から再構成した資料です" : readable ? "当日の会話を読みやすく整理した原稿です" : "元の文字起こしをそのまま確認するための資料です"}</strong><p>{readable || initial.recordKind === "memory" ? initial.notice || "音声認識による誤りや、話者を確定できない箇所が残る場合があります。" : "録音からの文字起こしです。誤認識や発言者の区別に未確認の箇所があります。原音は未確認です。"}</p><p>{initial.recordKind === "memory" ? "録音の逐語転写ではありません。発言の内容や順序は、当日の会話と異なる場合があります。" : readable ? "「面接官」「私」を区別して表示しています。話者・転写が未確認の箇所には注記があります。" : "話者の表記や録音の区切りは、実際の話者と一致しない場合があります。"}</p></div>
+      {summary ? <div className="consultation-transcript-notice"><strong>面接後のまとめ・復盤資料です（逐字稿ではありません）</strong><p>{initial.notice}</p></div> : <div className="consultation-transcript-notice"><strong>{initial.recordKind === "memory" ? "面接後の記憶から再構成した資料です" : readable ? "当日の会話を読みやすく整理した原稿です" : "元の文字起こしをそのまま確認するための資料です"}</strong><p>{readable || initial.recordKind === "memory" ? initial.notice || "音声認識による誤りや、話者を確定できない箇所が残る場合があります。" : "録音からの文字起こしです。誤認識や発言者の区別に未確認の箇所があります。原音は未確認です。"}</p><p>{initial.recordKind === "memory" ? "録音の逐語転写ではありません。発言の内容や順序は、当日の会話と異なる場合があります。" : readable ? "「面接官」「私」を区別して表示しています。話者・転写が未確認の箇所には注記があります。" : "話者の表記や録音の区切りは、実際の話者と一致しない場合があります。"}</p></div>}
       {available ? readable ? <div className="consultation-conversation">{initial.blocks.map((block, index) => {
         const blockThreads = related.filter(thread => thread.context.blockId === block.id);
         const context = consultationFeedbackContext(initial, view, { blockId: block.id, text: consultationBlockText(block) });

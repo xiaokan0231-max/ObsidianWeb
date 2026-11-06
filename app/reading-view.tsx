@@ -1,5 +1,6 @@
 "use client";
 
+import "./styles/reading.css";
 import { useEffect, useMemo, useState } from "react";
 import type { Note } from "@/lib/notes";
 import {

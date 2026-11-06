@@ -92,12 +92,72 @@ test("卡片和搜索打开路径携带目录版本，更多按钮仅请求下�
   assert.deepEqual(opened, [[cards[0].path, "r-index"], [cards[0].path, "r-index"]]);
 });
 
+test("全局搜索把候选词方向键与确认键留给输入法", async () => {
+  const navigated = [];
+  const { default: SearchPalette } = await loadAppModule("app/search-palette.tsx", { stubs: { react: hooks, "./ui-locale": locale } });
+  const tree = SearchPalette({ ...searchProps, indexed: false, notes: [], onNavigate: (view) => navigated.push(view) });
+  const input = elements(tree).find((element) => element.props?.role === "combobox");
+  let intercepted = 0;
+  for (const key of ["Enter", "ArrowDown", "ArrowUp"]) {
+    for (const nativeEvent of [{ isComposing: true, keyCode: 13 }, { isComposing: false, keyCode: 229 }]) {
+      input.props.onKeyDown({ key, nativeEvent, preventDefault() { intercepted++; } });
+    }
+  }
+  assert.equal(intercepted, 0);
+  assert.deepEqual(navigated, []);
+  input.props.onKeyDown({ key: "Enter", nativeEvent: { isComposing: false, keyCode: 13 }, preventDefault() { intercepted++; } });
+  assert.equal(intercepted, 1);
+  assert.equal(navigated.length, 1);
+});
+
 test("多标签通过重复参数保持AND筛选，逗号属于标签原文", async () => {
   const { libraryReadModelUrl } = await loadAppModule("app/use-read-model-library.ts");
   const url = new URL(libraryReadModelUrl({ query: "面接", tags: ["复盘", "C#,CI"], group: "career", scope: "interview" }), "https://example.test");
   assert.deepEqual(url.searchParams.getAll("tags"), ["复盘", "C#,CI"]);
   assert.equal(url.searchParams.get("limit"), "24");
   assert.equal(url.searchParams.get("q"), "面接");
+});
+
+test("资料库快速键入只发送停顿后的关键词，初次读取不延迟", async () => {
+  const calls = [], effects = [], slots = [], timers = new Map();
+  let stateIndex = 0, effectIndex = 0, timerIndex = 0;
+  const empty = { page: null, items: [], loading: false, error: "", syncState: null };
+  let address = "";
+  const resource = { subscribe: () => () => {}, getState: () => ({ ...empty, page, items: cards }), getServerState: () => empty,
+    matches: (url) => address === url, query: (url) => { address = url; calls.push(new URL(url, "https://example.test").searchParams.get("q")); },
+    dispose() {}, more() {}, retry() {} };
+  const { useReadModelLibrary } = await loadAppModule("app/use-read-model-library.ts", { stubs: {
+    "./read-model-resource": { createReadModelResource: () => resource },
+    react: { ...hooks,
+      useState(initial) {
+        const index = stateIndex++;
+        if (!(index in slots)) slots[index] = typeof initial === "function" ? initial() : initial;
+        return [slots[index], (next) => { slots[index] = next; }];
+      },
+      useEffect(run, deps) {
+        const index = effectIndex++, previous = effects[index];
+        if (!previous || deps.some((value, offset) => !Object.is(value, previous.deps[offset]))) {
+          previous?.cleanup?.();
+          effects[index] = { deps, cleanup: run() };
+        }
+      },
+      useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
+    },
+  }, globals: { window: {
+    setTimeout(callback, delay) { timers.set(++timerIndex, { callback, delay }); return timerIndex; },
+    clearTimeout(id) { timers.delete(id); },
+  } } });
+  const HookHarness = (query) => { stateIndex = effectIndex = 0; return useReadModelLibrary({ query }, true, 0, 200); };
+  HookHarness("初期");
+  assert.deepEqual(calls, ["初期"]);
+  assert.equal(HookHarness("面").page, null);
+  assert.equal(HookHarness("面接").loading, true);
+  assert.deepEqual(calls, ["初期"]);
+  assert.equal(timers.size, 1);
+  const [timer] = timers.values();
+  assert.equal(timer.delay, 200);
+  timer.callback(); HookHarness("面接");
+  assert.deepEqual(calls, ["初期", "面接"]);
 });
 
 test("构建或失败时保留目录并显示同步状态，不把旧版当空库", async () => {

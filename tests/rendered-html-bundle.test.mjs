@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 
 const clientRoot = new URL("../dist/client/", import.meta.url);
 const serverRoot = new URL("../dist/server/", import.meta.url);
@@ -68,4 +69,26 @@ test("快练样式随日语训练模块加载，不进入全局与日历首屏 C
   assert.doesNotMatch(initialCss, /\.quick-card\b/);
   const training = staticClosure(client, ["app/japanese-training.tsx"]);
   assert.match(await cssFor(client, training, clientRoot), /\.quick-card\b/);
+});
+
+test("日历首屏不带专题和3D样式，按构建闭包限制初始CSS字节", async () => {
+  const initialFiles = new Map();
+  const addFiles = (manifest, keys, root) => {
+    for (const key of keys) for (const path of manifest[key].css ?? []) initialFiles.set(path, new URL(path, root));
+  };
+  const serverEntry = Object.keys(server).filter((key) => server[key].isEntry);
+  addFiles(server, staticClosure(server, serverEntry), serverRoot);
+  addFiles(client, staticClosure(client, ["app/memory-atlas.tsx", "app/feedback-ui.tsx"]), clientRoot);
+  const chunks = await Promise.all([...initialFiles.values()].map((path) => readFile(path)));
+  const css = chunks.map((chunk) => chunk.toString()).join("\n");
+  assert.match(css, /\.app-shell\b/);
+  assert.doesNotMatch(css, /\.reading-workspace\b|\.space-graph-pointer-fx\b/);
+  const rawBytes = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const gzipBytes = chunks.reduce((sum, chunk) => sum + gzipSync(chunk, { level: 6 }).length, 0);
+  assert.ok(rawBytes <= 768_000, `日历初始 CSS 原始字节 ${rawBytes}`);
+  assert.ok(gzipBytes <= 126_000, `日历初始 CSS gzip 字节 ${gzipBytes}`);
+  assert.match(await cssFor(client, staticClosure(client, ["app/reading-view.tsx"]), clientRoot), /\.reading-workspace\b/);
+  for (const view of ["graph-view", "timeline-view"]) {
+    assert.match(await cssFor(client, staticClosure(client, [`app/${view}.tsx`]), clientRoot), /\.space-graph-pointer-fx\b/);
+  }
 });

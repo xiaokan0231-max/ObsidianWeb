@@ -1,7 +1,7 @@
 import { createReadModel, readModelHash } from "@/lib/server/read-model";
 import type { ReadModelBatch, ReadModelManifest, ReadModelStatus } from "@/lib/read-model";
 import type { Note } from "@/lib/notes";
-import { fetchSealedPublishedAsset } from "@/lib/server/sealed-assets";
+import { fetchSealedPublishedAsset, publishedAssetSecrets } from "@/lib/server/sealed-assets";
 
 type PublishedIndex = { revision?: string; manifestFile: string; batches: string[]; bodyIndexFile: string };
 type PublishedRoot = { publishedAt: string; readModel: PublishedIndex; readModels?: PublishedIndex[] };
@@ -36,13 +36,14 @@ export async function publishedReadModelPolicy(fresh = false): Promise<Published
   const { env } = await import("cloudflare:workers");
   const assets = env.ASSETS;
   if (!assets) throw new ReadModelError("发布资料索引不可用");
-  const secret = (env as { SITE_ASSET_SECRET?: string }).SITE_ASSET_SECRET;
+  const secrets = publishedAssetSecrets(env as { SITE_ASSET_SECRET?: string; SITE_ASSET_SECRET_NEXT?: string });
+  const secret = secrets.join(":");
   const previous = publishedPolicies.get(assets);
   if (!fresh && previous && previous.secret === secret) return previous.pending;
   const pending = (async () => {
     async function asset<T>(file: string): Promise<T> {
       if (file !== "manifest.json" && !assetName.test(file)) throw new ReadModelError("发布索引路径无效");
-      const response = await fetchSealedPublishedAsset(assets!, new Request(`http://localhost/_published-vault/${file}`), secret);
+      const response = await fetchSealedPublishedAsset(assets!, new Request(`http://localhost/_published-vault/${file}`), secrets);
       if (!response.ok) throw new ReadModelError("发布资料尚未准备完成");
       if (file.endsWith(".gz")) {
         if (!response.body) throw new ReadModelError("发布资料内容不完整");

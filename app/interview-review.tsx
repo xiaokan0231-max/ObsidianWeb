@@ -283,6 +283,11 @@ function projectReview(remote: InterviewRemoteReview): ReviewDoc {
     deepReview, practiceBlockIds: new Set(projection.practiceBlockIds), feedbackByBlock: group(projection.feedback, (item) => item.blockId) };
 }
 
+function ReviewReadStatus({ label, error, onRetry }: { label: string; error?: string; onRetry: () => void }) {
+  const menu = useInterviewMenu();
+  return error ? <p role="alert">{error} <button type="button" onClick={onRetry}>{menu("重试")}</button></p> : <ScopeLoading label={label} />;
+}
+
 type WriteResponse = { ok?: boolean; error?: string; note?: Note };
 
 /**
@@ -808,7 +813,12 @@ function InterviewReview({
 
   // 连读直接使用整份整理稿，不能继承学习页的筛选或句卡展开状态。
   if (mode === "novel" && panel === "source") {
-    if (remoteReview && remoteReview.projection.blocks.some((block) => !remoteReview.blocks[block.id])) return <><button type="button" onClick={() => switchMode(previousMode.current)}>{menu("返回")}</button><ScopeLoading label={t("全文阅读")} />{remoteReview.error && <p role="alert">{remoteReview.error}<button type="button" onClick={() => void remoteReview.loadBlocks(remoteReview.projection.blocks.map((block) => block.id))}>{menu("重试")}</button></p>}</>;
+    if (remoteReview && remoteReview.projection.blocks.some((block) => !remoteReview.blocks[block.id])) {
+      const failures = Object.entries(remoteReview.errors.blocks);
+      return <><button type="button" onClick={() => switchMode(previousMode.current)}>{menu("返回")}</button>
+        <ReviewReadStatus label={t("全文阅读")} error={failures[0]?.[1]} onRetry={() => void remoteReview.loadBlocks(failures.map(([id]) => id), true)} />
+      </>;
+    }
     return (
       <>
         <InterviewNovelReader
@@ -1020,8 +1030,7 @@ function InterviewReview({
 
       {doc.deepReview?.overviewZh && panel === "advisory" && <details className="rv-previous-introduction"><summary>{t("查看之前的面谈导读")}</summary><ReviewIntroduction review={doc.deepReview} /></details>}
 
-      {remoteReview?.error && <p role="alert">{remoteReview.error}</p>}
-      <div className="rv-panel" hidden={panel !== "advisory"}>{remoteReview?.projection.hasAdvisory && !remoteReview.sections.advisory ? <ScopeLoading label={menu("顾问解读")} /> : <InterviewAdvisory key={doc.key} report={doc.deepReview?.advisory} notes={notes} notePath={doc.key}
+      <div className="rv-panel" hidden={panel !== "advisory"}>{remoteReview?.projection.hasAdvisory && !remoteReview.sections.advisory ? <ReviewReadStatus label={menu("顾问解读")} error={remoteReview.errors.sections.advisory} onRetry={() => void remoteReview.loadSection("advisory", true)} /> : <InterviewAdvisory key={doc.key} report={doc.deepReview?.advisory} notes={notes} notePath={doc.key}
         onOpenEvidence={onOpenEvidence} onVaultChanged={onVaultChanged} onNoteWritten={onNoteWritten} onOpenInsights={onOpenInsights} />}</div>
 
       <div className="rv-panel" hidden={panel !== "source"}>
@@ -1103,7 +1112,7 @@ function InterviewReview({
       </details>
       </div>
       <div className="rv-panel" hidden={panel !== "quality"}>
-      {remoteReview?.projection.hasQuality && !remoteReview.sections.quality ? <ScopeLoading label={menu("回答质量")} /> : <>
+      {remoteReview?.projection.hasQuality && !remoteReview.sections.quality ? <ReviewReadStatus label={menu("回答质量")} error={remoteReview.errors.sections.quality} onRetry={() => void remoteReview.loadSection("quality", true)} /> : <>
       <JapanSignalsPanel review={doc.deepReview} outcome={outcomes.get(doc.key) ?? null} t={signalsT}
         onEvidence={(_blockId, sentenceIds) => { if (sentenceIds[0]) jumpToEvidence(sentenceIds[0]); }} />
       {!findInterviewReassessment(notes, doc.key) && <section className={`rv-deep-stage ${unresolvedDecisionTasks.length > 0 ? "locked" : "ready"}`}>
@@ -1222,6 +1231,7 @@ function InterviewReview({
           onFeedback={(blockId, kind, feedbackText) =>
             submitReviewFeedback(doc, blockId, kind, feedbackText)}
           remoteBlocks={remoteReview?.qualityBlocks}
+          remoteBlockErrors={remoteReview?.errors.qualityBlocks}
           onLoadBlock={remoteReview?.loadQualityBlock}
         />
       )}
@@ -1312,7 +1322,7 @@ function InterviewReview({
             </header>
             {isOpen && (
               <div className="rv-block-body" id={`rvb-body-${block.id}`}>
-                {remoteReview && !remoteReview.blocks[block.id] ? <ScopeLoading label={block.title} /> : sentences.map((sentence) => (
+                {remoteReview && !remoteReview.blocks[block.id] ? <ReviewReadStatus label={block.title} error={remoteReview.errors.blocks[block.id]} onRetry={() => void remoteReview.loadBlocks([block.id], true)} /> : sentences.map((sentence) => (
                   <SentenceCard
                     key={`${doc.key}:${sentence.id}`}
                     doc={doc}
@@ -1513,6 +1523,7 @@ export function DeepReviewPanel({
   onQueuePractice,
   onFeedback,
   remoteBlocks,
+  remoteBlockErrors,
   onLoadBlock,
 }: {
   review: InterviewAnswerReview;
@@ -1532,7 +1543,8 @@ export function DeepReviewPanel({
     text: string,
   ) => Promise<boolean>;
   remoteBlocks?: Record<string, InterviewAnswerBlockReview>;
-  onLoadBlock?: (id: string) => Promise<void>;
+  remoteBlockErrors?: Record<string, string>;
+  onLoadBlock?: (id: string, retry?: boolean) => Promise<void>;
 }) {
   const menu = useInterviewMenu();
   const [showAllBlocks, setShowAllBlocks] = useState(Boolean(focusBlockId));
@@ -1791,7 +1803,7 @@ export function DeepReviewPanel({
                 <i aria-hidden="true">⌄</i>
               </summary>
               <div className="rv-deep-block-body">
-                {remoteBlocks && !remoteBlocks[block.blockId] ? <ScopeLoading label={block.questionTitle} /> : <>
+                {remoteBlocks && !remoteBlocks[block.blockId] ? <ReviewReadStatus label={block.questionTitle} error={remoteBlockErrors?.[block.blockId]} onRetry={() => void onLoadBlock?.(block.blockId, true)} /> : <>
                 <p className="rv-deep-intent"><span>{menu("面试官意图")}</span>{block.interviewerIntentZh}</p>
                 <div className="rv-coverage">
                   <div><h4>{menu("问了什么")}</h4><ul>{block.askedPoints.map((item) => <li key={item}>{item}</li>)}</ul></div>

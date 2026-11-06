@@ -81,10 +81,13 @@ export function createReadModelResource<T extends CollectionPage>(fetcher: ReadM
     const active = controller;
     publish({ ...state, loading: true, error: "" });
     const params = new URLSearchParams(address.split("?")[1] ?? "");
-    if (cursor) params.set("cursor", cursor);
-    const target = `${address.split("?")[0]}?${params.toString()}`;
     const previousItems = state.items;
     const previousRevision = state.page?.revision;
+    if (cursor) {
+      params.set("cursor", cursor);
+      if (previousRevision) params.set("revision", previousRevision);
+    }
+    const target = `${address.split("?")[0]}?${params.toString()}`;
     const accept = (body: T) => {
       if (!body || typeof body.revision !== "string" || !Array.isArray(body.items)
         || body.items.some((item) => !item || typeof item !== "object" || (item as { kind?: unknown }).kind !== "note-card")) throw new Error("资料目录格式无效");
@@ -112,6 +115,7 @@ export function createReadModelResource<T extends CollectionPage>(fetcher: ReadM
     subscribe(notify: () => void) { subscribers.add(notify); return () => { subscribers.delete(notify); }; },
     getState: () => state,
     getServerState: () => initial,
+    matches: (url: string) => address === url,
     query(url: string, force = false) {
       if (address !== url) {
         address = url;

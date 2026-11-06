@@ -17,7 +17,7 @@ function clientAcceptEncoding(request: Request) {
   return cf?.clientAcceptEncoding ?? request.headers.get("Accept-Encoding") ?? "";
 }
 
-function selectEncoding(request: Request, entry: PublishedVaultResponse): Encoding | null {
+export function selectEncoding(request: Request, entry: PublishedVaultResponse): Encoding | null {
   const accepted = new Map<string, number>();
   for (const part of clientAcceptEncoding(request).split(",")) {
     const [name, ...parameters] = part.trim().toLowerCase().split(";");
@@ -37,7 +37,7 @@ function selectEncoding(request: Request, entry: PublishedVaultResponse): Encodi
   return candidates[0]?.encoding ?? null;
 }
 
-function etagMatches(header: string | null, etag: string) {
+export function etagMatches(header: string | null, etag: string) {
   const weak = (value: string) => value.replace(/^W\//, "");
   return header?.split(",").some((value) => value.trim() === "*" || weak(value.trim()) === weak(etag)) ?? false;
 }

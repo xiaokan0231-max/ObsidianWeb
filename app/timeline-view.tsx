@@ -1,5 +1,6 @@
 "use client";
 
+import "./styles/stage-3d.css";
 import { useStageMenu } from "./stage-menu-copy";
 
 import { memo, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";

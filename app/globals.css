@@ -6,7 +6,6 @@
 @import "tailwindcss";
 @import "./styles/base.css";
 @import "./styles/shell.css";
-@import "./styles/stage-3d.css";
 @import "./styles/timeline.css";
 @import "./styles/note-reading.css";
 @import "./styles/jobs.css";
@@ -30,4 +29,3 @@
 @import "./styles/interview-advisory.css";
 @import "./styles/interview-question-collection.css";
 @import "./styles/calendar-motion.css";
-@import "./styles/reading.css";

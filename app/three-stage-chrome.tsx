@@ -3,7 +3,7 @@
 import { useStageMenu } from "./stage-menu-copy";
 
 // 3D 舞台共享 chrome：与场景无关的 React 部件与 hooks。
-// 这里的 JSX 结构必须与 globals.css 的 .space-graph-* 规则逐字节对齐——
+// 这里的 JSX 结构必须与 stage-3d.css 的 .space-graph-* 规则对齐——
 // 两个视图（星图／航道）共用同一套样式，改标记等于同时改两个视图。
 // 本模块不 import three，保持 chunk 边界干净。
 import {

@@ -8,7 +8,7 @@ import { createVaultReader } from "../lib/vault-reader.ts";
 import { vaultScopeForView } from "../lib/vault-scope.ts";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
-test("直达页面预加载各自的摘要、专题目录或笔记范围", async () => {
+test("直达页面只为实际读取该接口的页面预取，索引页面不读取旧全量接口", async () => {
   const { default: Section } = await loadAppModule("app/[section]/[[...rest]]/page.tsx", {
     stubs: {
       "next/navigation": { notFound() { throw new Error("not found"); }, redirect() { throw new Error("redirect"); } },
@@ -18,17 +18,17 @@ test("直达页面预加载各自的摘要、专题目录或笔记范围", async
   for (const view of APP_VIEWS) {
     const [section, ...rest] = appViewHref(view).slice(1).split("/");
     const tree = await Section({ params: Promise.resolve({ section, rest }), searchParams: Promise.resolve({}) });
-    const preload = tree.props.children.find((child) => child.type === "link");
-    const shell = tree.props.children.find((child) => child.props.initialView);
+    const preload = tree.props.children.find((child) => child?.type === "link");
+    const shell = tree.props.children.find((child) => child?.props.initialView);
     assert.equal(shell.props.initialView, view);
+    if (["calendar", "library", "session", "prep", "review", "insights", "practice"].includes(view)) {
+      assert.equal(preload, undefined);
+      assert.doesNotMatch(renderToStaticMarkup(tree), /\/api\/(?:calendar|vault)/);
+      continue;
+    }
     assert.equal(preload.props.rel, "preload");
     assert.equal(preload.props.as, "fetch");
     assert.equal(preload.props.crossOrigin, "anonymous", "匹配普通 fetch 的 cors 模式与同源凭证");
-    if (view === "calendar") {
-      assert.equal(preload.props.href, "/api/calendar");
-      assert.doesNotMatch(renderToStaticMarkup(tree), /\/api\/vault/);
-      continue;
-    }
     if (view === "reading") {
       const { libraryReadModelUrl } = await loadAppModule("app/use-read-model-library.ts");
       assert.equal(preload.props.href, libraryReadModelUrl({ query: "type:language-reading-list", scope: "language", sort: "recent" }));
@@ -77,7 +77,7 @@ test("刷新日历时服务端保留请求月份和周视图，重复参数不�
   });
   const render = (search) => Section({ params: Promise.resolve({ section: "calendar" }), searchParams: Promise.resolve(search) });
   const month = await render({ month: "2026-07", tag: ["甲", "乙"], omitted: undefined });
-  const shell = month.props.children.find((child) => child.props.initialView);
+  const shell = month.props.children.find((child) => child?.props.initialView);
   assert.deepEqual([...new URLSearchParams(shell.props.initialSearch)], [["month", "2026-07"], ["tag", "甲"], ["tag", "乙"]]);
   assert.match(renderToStaticMarkup(month), /2026年7月/);
   const week = await render({ month: "2026-07", calview: "week", calweek: "2026-07-06" });
@@ -92,15 +92,19 @@ test("首屏 HTML 已包含月度汇总，不等待浏览器请求日历明细",
   const { default: Section } = await loadAppModule("app/[section]/[[...rest]]/page.tsx", {
     stubs: {
       "next/navigation": { notFound() { throw new Error("not found"); }, redirect() { throw new Error("redirect"); } },
-      "../../calendar-server": { calendarPulseSummary: async (month, today) => {
+      "../../read-model-calendar": { calendarInitialPulse: async (month, today) => {
         calls.push(month);
-        return { today, month, applications: { companyCount: 189, positionCount: 200,
+        const summary = { today, month, applications: { companyCount: 189, positionCount: 200,
           bucketCounts: { "needs-user": 0, progressing: 2, unknown: 0, waiting: 60, paused: 0, closed: 127 } },
-        waitingCount: 3, historicalCount: 10, historicalTotal: 34 };
+          waitingCount: 3, historicalCount: 10, historicalTotal: 34 };
+        return { revision: "fixture-calendar-r1", today, summary };
       } },
     },
   });
   const tree = await Section({ params: Promise.resolve({ section: "calendar" }), searchParams: Promise.resolve({ month: "2026-08" }) });
+  const shell = tree.props.children.find((child) => child?.props.initialView);
+  assert.equal(shell.props.initialCalendarRevision, "fixture-calendar-r1");
+  assert.equal(shell.props.initialCalendarToday, shell.props.initialSummary.today);
   const html = renderToStaticMarkup(tree);
   const pulse = html.slice(html.indexOf('class="calendar-pulse"'), html.indexOf('class="calendar-layout"'));
   assert.match(pulse, /<strong>189<\/strong>/);

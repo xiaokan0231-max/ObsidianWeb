@@ -1,5 +1,6 @@
 "use client";
 
+import "./styles/stage-3d.css";
 import { STAGE_MENU_COPY, useStageMenu } from "./stage-menu-copy";
 
 import {

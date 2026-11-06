@@ -438,3 +438,10 @@
 .consultation-shell .consultation-pagination button[aria-current="page"] { color: #fff; background: #5960d5; border-color: #5960d5; }
 .consultation-reading-preview > button > span:last-child { margin-left: auto; color: #7f88b9; }
 .consultation-reading-history { background: #f9fafe; }
+
+/* 公司内按轮次阅读，老师才能对照初面与终面的变化。 */
+.consultation-company-rounds { display: grid; gap: 12px; padding: 16px; border: 1px solid #e2d4ee; border-radius: 14px; background: #f8f5fc; }
+.consultation-company-rounds > header { display: flex; align-items: baseline; gap: 16px; }
+.consultation-company-rounds h2 { margin: 0; color: #49385f; font-size: 19px; }
+.consultation-company-rounds > header > span { color: #82748f; font-size: 14px; }
+.consultation-priority-label { display: inline-block; margin-bottom: 8px; color: #76539b; font-size: 13px; font-weight: 600; }

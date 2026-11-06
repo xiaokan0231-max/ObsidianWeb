@@ -10,6 +10,11 @@ import { buildReadModelArtifact, READ_MODEL_BATCH_BYTES, READ_MODEL_SCOPES, read
 
 type Database = Pick<D1Database, "prepare" | "batch">;
 type CatalogRow = ReadModelCatalogRow & { revision: string };
+type Candidate = Pick<CatalogRow, "path" | "hash" | "ordinal" | "mtime">;
+type RankedCandidate = Candidate & { title: string };
+type LibraryFacets = LibraryPage["facets"];
+type CandidateFilter = { where: string; values: string[] };
+type LibraryPlan = { facets: LibraryFacets; ranked: { path: string; hits?: LibraryHits }[] } | { facets: LibraryFacets; filter: CandidateFilter };
 type RevisionRow = { revision: string; state: "building" | "ready"; manifest_json: string; source_updated_at: number; indexed_at: number; completed: number };
 
 export class ReadModelError extends Error {
@@ -75,36 +80,40 @@ function normalizedQuery(input: LibraryQuery) {
     ? (hasTerms ? "relevance" : "recent") : input.sort;
   return { query: input.query ?? "", group: input.group ?? "all", scope: input.scope ?? "all", tags: [...new Set(input.tags ?? [])], sort };
 }
+function pageSize(input: number | undefined, maximum: number) {
+  return input === undefined || !Number.isFinite(input) ? maximum : Math.max(1, Math.min(maximum, Math.floor(input)));
+}
 
 /** 统一的 D1 查询层；请求只读取目录或命中候选的索引文本，不把全库 Note[] 送到浏览器。 */
 export function createReadModel(db: Database, { retention = true }: { retention?: boolean } = {}) {
   const inflight = new Map<string, Promise<ReadModelStatus>>();
-  const results = new Map<string, { json: string; bytes: number }>();
+  const queryPlans = new Map<string, Promise<LibraryPlan>>();
+  const cacheTtl = 5 * 60_000;
+  const results = new Map<string, { json: string; bytes: number; expiresAt: number }>();
   let resultBytes = 0;
-  const resultBudget = 8_000_000;
+  const resultBudget = 8 * 1024 * 1024;
   function cachedResult<T>(key: string): T | undefined {
     const cached = results.get(key);
     if (!cached) return undefined;
-    results.delete(key); results.set(key, cached);
+    results.delete(key);
+    if (cached.expiresAt <= Date.now()) { resultBytes -= cached.bytes; return undefined; }
+    results.set(key, cached);
     // 缓存只保存不可变的小 DTO；调用端改动返回值也不会污染下一次查询。
     return JSON.parse(cached.json) as T;
   }
-  function rememberResult(key: string, value: LibraryPage | SearchPage) {
+  function rememberResult(key: string, value: LibraryPage | SearchPage | LibraryPlan) {
     const json = JSON.stringify(value);
     const bytes = Math.max(json.length * 2, new TextEncoder().encode(json).byteLength) + key.length * 2 + 128;
     if (bytes > resultBudget) return;
     const previous = results.get(key);
     if (previous) { results.delete(key); resultBytes -= previous.bytes; }
-    results.set(key, { json, bytes }); resultBytes += bytes;
+    results.set(key, { json, bytes, expiresAt: Date.now() + cacheTtl }); resultBytes += bytes;
     while (results.size > 64 || resultBytes > resultBudget) {
       const oldest = results.keys().next().value;
       if (oldest === undefined) break;
       resultBytes -= results.get(oldest)!.bytes; results.delete(oldest);
     }
   }
-  const texts = new Map<string, string>();
-  let textBytes = 0;
-  const textBudget = 8_000_000;
   async function query<T>(sql: string, values: unknown[] = []) { return rows<T>((await db.batch([db.prepare(sql).bind(...values)]))[0]); }
   async function status(revision: string): Promise<ReadModelStatus | null> {
     revisionKey(revision);
@@ -205,7 +214,7 @@ export function createReadModel(db: Database, { retention = true }: { retention?
     ) UNION SELECT revision FROM read_model_revisions WHERE state='building' AND revision<>?1 AND created_at<?2`, [revision, Date.now() - 24 * 60 * 60 * 1000]);
     if (retired.length) {
       const old = JSON.stringify(retired.map((item) => item.revision));
-      const tables = ["read_model_catalog", "read_model_aliases", "read_model_links", "read_model_records", "read_model_batches", "read_model_content_refs", "read_model_revisions"];
+      const tables = ["read_model_catalog", "read_model_aliases", "read_model_links", "read_model_records", "read_model_batches", "read_model_content_refs", "calendar_projection_summaries", "read_model_revisions"];
       await db.batch(tables.map((table) => db.prepare(`DELETE FROM ${table} WHERE revision IN (SELECT value FROM json_each(?))`).bind(old)));
       await db.batch([db.prepare("DELETE FROM read_model_chunks WHERE NOT EXISTS (SELECT 1 FROM read_model_content_refs r WHERE r.hash=read_model_chunks.hash)")]);
     }
@@ -229,25 +238,23 @@ export function createReadModel(db: Database, { retention = true }: { retention?
     inflight.set(revision, task);
     return task;
   }
-  function rememberText(key: string, value: string) {
-    if (value.length > textBudget) return;
-    texts.set(key, value); textBytes += value.length;
-    while (textBytes > textBudget) { const oldest = texts.keys().next().value; if (oldest === undefined) break; textBytes -= texts.get(oldest)!.length; texts.delete(oldest); }
-  }
-  async function channelValues(hashes: string[], channel: string) {
+  const textKey = (hash: string, channel: string) => `${hash}:${channel}`;
+  async function channelTexts(hashes: string[], channels: string[]) {
     const values = new Map<string, string>();
-    const missing = [...new Set(hashes)].filter((hash) => {
-      const cached = texts.get(`${hash}:${channel}`);
-      if (cached !== undefined) { values.set(hash, cached); return false; }
-      return true;
-    });
-    // 每次只解码少量文档的文本块，长稿不会和全库正文一起占满 Worker 内存。
-    for (let start = 0; start < missing.length; start += 24) {
-      const group = missing.slice(start, start + 24);
-      const chunks = await query<ReadModelChunkRow>("SELECT * FROM read_model_chunks WHERE channel=? AND hash IN (SELECT value FROM json_each(?)) ORDER BY hash,ordinal", [channel, JSON.stringify(group)]);
-      const byHash = new Map<string, ReadModelChunkRow[]>();
-      for (const chunk of chunks) { const list = byHash.get(chunk.hash) ?? []; list.push(chunk); byHash.set(chunk.hash, list); }
-      for (const hash of group) { const text = joinChunks(byHash.get(hash) ?? []); values.set(hash, text); rememberText(`${hash}:${channel}`, text); }
+    const missing = [...new Set(hashes)].flatMap((hash) => channels.map((channel) => [hash, channel] as const));
+    // 每次只组装少量文档的文本；相关度计算完成一组就释放这组长稿。
+    for (let start = 0; start < missing.length; start += 48) {
+      const pairs = missing.slice(start, start + 48);
+      const chunks = await query<ReadModelChunkRow>(`SELECT x.* FROM json_each(?) p
+        JOIN read_model_chunks x ON x.hash=json_extract(p.value,'$[0]') AND x.channel=json_extract(p.value,'$[1]')
+        ORDER BY x.hash,x.channel,x.ordinal`, [JSON.stringify(pairs)]);
+      const grouped = new Map<string, ReadModelChunkRow[]>();
+      for (const chunk of chunks) { const key = textKey(chunk.hash, chunk.channel); const list = grouped.get(key) ?? []; list.push(chunk); grouped.set(key, list); }
+      for (const [hash, channel] of pairs) {
+        const key = textKey(hash, channel);
+        const value = joinChunks(grouped.get(key) ?? []);
+        values.set(key, value);
+      }
     }
     return values;
   }
@@ -255,13 +262,16 @@ export function createReadModel(db: Database, { retention = true }: { retention?
     const conditions: string[] = [], values: string[] = [], longTokens: string[] = [], folders: string[][] = [];
     for (const token of rawQuery.trim().toLowerCase().split(/\s+/).filter(Boolean)) {
       const [prefix, ...rest] = token.split(":"), value = rest.join(":"), alternatives = value.split("|").filter(Boolean);
-      // SQLite lower 只折叠 ASCII；目录条件在小目录行上精确验证，保留 JS 的 Unicode 口径。
       if (prefix === "folder" && value && alternatives.length) { folders.push(alternatives); continue; }
       const column = prefix === "type" ? "c.type_lower" : prefix === "status" ? "c.status_lower" : null;
-      if (column && value && alternatives.length) { conditions.push(`(${alternatives.map(() => `instr(${column},?)>0`).join(" OR ")})`); values.push(...alternatives); continue; }
+      if (column && value && alternatives.length) {
+        conditions.push(`EXISTS (SELECT 1 FROM json_each(?) term WHERE instr(${column},term.value)>0)`);
+        values.push(JSON.stringify(alternatives));
+        continue;
+      }
       const anchor = [...token].slice(0, 3).join("");
       if ([...anchor].length === 3) {
-        // FTS 候选集一次生成，不能对每张目录卡片重新执行同一份倒排检索。
+        // 三字倒排只缩小候选，短词和跨块仍以子串检查为准。
         conditions.push("c.hash IN (SELECT x.hash FROM read_model_fts JOIN read_model_chunks x ON x.rowid=read_model_fts.rowid WHERE read_model_fts MATCH ? AND x.channel='match')");
         values.push(`"${anchor.replaceAll('"', '""')}"`);
       }
@@ -270,80 +280,159 @@ export function createReadModel(db: Database, { retention = true }: { retention?
     }
     return { conditions, values, longTokens, folders };
   }
-  async function candidates(revision: string, rawQuery: string) {
-    const compiled = queryCondition(rawQuery);
-    let result = await query<CatalogRow>(`SELECT c.* FROM read_model_catalog c WHERE c.revision=? ${compiled.conditions.map((condition) => `AND ${condition}`).join(" ")} ORDER BY c.ordinal`, [revision, ...compiled.values]);
-    if (compiled.folders.length) result = result.filter((row) => compiled.folders.every((choices) => choices.some((choice) => row.path.toLowerCase().includes(choice))));
-    if (compiled.longTokens.length) {
-      const match = await channelValues(result.map((row) => row.hash), "match");
-      result = result.filter((row) => compiled.longTokens.every((token) => match.get(row.hash)!.includes(token)));
+  async function candidateFilter(revision: string, rawQuery: string): Promise<CandidateFilter> {
+    const { conditions, values, folders, longTokens } = queryCondition(rawQuery);
+    const where = ["c.revision=?", ...conditions].join(" AND ");
+    const args = [revision, ...values];
+    if (!folders.length && !longTokens.length) return { where, values: args };
+    // SQLite lower 只处理 ASCII；长词也可能跨出索引重叠区。先查窄列，再按原语义确认。
+    const paths: string[] = [];
+    const candidateRows = await query<Pick<Candidate, "path" | "hash">>(
+      `SELECT c.path,c.hash FROM read_model_catalog c WHERE ${where}`, args);
+    const folderMatches = candidateRows.filter(({ path }) => {
+      const lower = path.toLowerCase();
+      return folders.every((choices) => choices.some((choice) => lower.includes(choice)));
+    });
+    for (let start = 0; start < folderMatches.length; start += 24) {
+      const group = folderMatches.slice(start, start + 24);
+      const text = longTokens.length ? await channelTexts(group.map((row) => row.hash), ["match"]) : null;
+      for (const row of group) if (!text || longTokens.every((token) => text.get(textKey(row.hash, "match"))!.includes(token))) paths.push(row.path);
     }
-    return result;
+    return { where: "c.revision=? AND c.path IN (SELECT value FROM json_each(?))", values: [revision, JSON.stringify(paths)] };
   }
-  async function hitsFor(rows: CatalogRow[], rawQuery: string) {
+  function libraryPredicate(input: ReturnType<typeof normalizedQuery>) {
+    return {
+      group: "(?='all' OR c.group_key=?)",
+      scope: "EXISTS (SELECT 1 FROM json_each(c.scopes_json) scope WHERE scope.value=?)",
+      tags: `NOT EXISTS (SELECT 1 FROM json_each(?) wanted
+        WHERE NOT EXISTS (SELECT 1 FROM json_each(c.tags_json) own WHERE own.value=wanted.value))`,
+      values: [input.group, input.group, input.scope, JSON.stringify(input.tags)],
+    };
+  }
+  async function libraryFacets(filter: CandidateFilter, input: ReturnType<typeof normalizedQuery>): Promise<LibraryFacets> {
+    const p = libraryPredicate(input);
+    const counts = await query<{ kind: "group" | "scope" | "tag"; key: string; count: number; popularity: number }>(`WITH flags AS (
+      SELECT c.group_key,c.scopes_json,c.tags_json,${p.group} in_group,${p.scope} in_scope,${p.tags} tagged
+      FROM read_model_catalog c WHERE ${filter.where}
+    )
+    SELECT 'group' kind,group_key key,COUNT(*) count,0 popularity FROM flags WHERE in_scope AND tagged GROUP BY group_key
+    UNION ALL SELECT 'scope',scope.value,COUNT(*),0 FROM flags,json_each(scopes_json) scope WHERE in_group AND tagged GROUP BY scope.value
+    UNION ALL SELECT 'tag',tag.value,SUM(tagged),COUNT(*) FROM flags,json_each(tags_json) tag WHERE in_group AND in_scope GROUP BY tag.value`,
+    [...p.values, ...filter.values]);
+    const groups = { all: 0, ...Object.fromEntries(Object.keys(GROUPS).map((key) => [key, 0])) } as LibraryFacets["groups"];
+    const scopes = Object.fromEntries(READ_MODEL_SCOPES.map((key) => [key, 0])) as LibraryFacets["scopes"];
+    const tags: { tag: string; count: number; popularity: number }[] = [];
+    for (const row of counts) {
+      if (row.kind === "group") { groups.all += row.count; groups[row.key as GroupKey] = row.count; }
+      else if (row.kind === "scope") scopes[row.key as LibraryScope] = row.count;
+      else tags.push({ tag: row.key, count: row.count, popularity: row.popularity });
+    }
+    const sorted = tags.sort((a, b) => b.popularity - a.popularity || a.tag.localeCompare(b.tag, "zh-CN")).slice(0, 12);
+    for (const tag of input.tags) if (!sorted.some((row) => row.tag === tag)) sorted.push(tags.find((row) => row.tag === tag) ?? { tag, count: 0, popularity: 0 });
+    return { groups, scopes, tags: sorted.map(({ tag, count }) => ({ tag, count })) };
+  }
+  async function hitCounts(source: RankedCandidate[], rawQuery: string) {
     const terms = highlightTerms(rawQuery), hits = new Map<string, LibraryHits>();
     if (!terms.length) return hits;
-    const body = await channelValues(rows.map((row) => row.hash), "body");
-    const front = await channelValues(rows.map((row) => row.hash), "front");
-    for (const row of rows) {
-      const title = countIn((JSON.parse(row.card_json) as NoteCard).title, terms), frontmatter = countIn(front.get(row.hash) ?? "", terms), bodyCount = countIn(body.get(row.hash) ?? "", terms);
-      hits.set(row.path, { title, frontmatter, body: bodyCount, total: title + frontmatter + bodyCount });
+    for (let start = 0; start < source.length; start += 24) {
+      const group = source.slice(start, start + 24);
+      const text = await channelTexts(group.map((row) => row.hash), ["body", "front"]);
+      for (const row of group) {
+        const title = countIn(row.title, terms);
+        const frontmatter = countIn(text.get(textKey(row.hash, "front")) ?? "", terms);
+        const body = countIn(text.get(textKey(row.hash, "body")) ?? "", terms);
+        hits.set(row.path, { title, frontmatter, body, total: title + frontmatter + body });
+      }
     }
     return hits;
   }
+  async function catalogCards(revision: string, paths: string[]) {
+    if (!paths.length) return [];
+    return query<CatalogRow>(`SELECT c.* FROM json_each(?) selected CROSS JOIN read_model_catalog c
+      ON c.revision=? AND c.path=selected.value ORDER BY CAST(selected.key AS INTEGER)`, [JSON.stringify(paths), revision]);
+  }
   async function resultCards(source: CatalogRow[], rawQuery: string, hits?: Map<string, LibraryHits>, palette = false): Promise<LibraryResult[]> {
     const terms = highlightTerms(rawQuery);
-    const body = terms.length || palette ? await channelValues(source.map((row) => row.hash), palette ? "palette" : "body") : new Map<string, string>();
+    const channel = palette ? "palette" : "body";
+    const text = terms.length || palette ? await channelTexts(source.map((row) => row.hash), [channel]) : new Map<string, string>();
     return source.map((row) => {
-      const card = cardOf(row), parts = terms.length || palette ? searchSnippet(body.get(row.hash) ?? "", rawQuery, palette ? {} : { radius: 30, fallback: 0 }) : null;
+      const card = cardOf(row), parts = terms.length || palette ? searchSnippet(text.get(textKey(row.hash, channel)) ?? "", rawQuery, palette ? {} : { radius: 30, fallback: 0 }) : null;
       return { ...card, titleParts: splitByTerms(card.title, terms), snippetParts: palette || parts?.some((part) => part.hit) ? parts : null, hits: hits?.get(row.path) ?? null };
     });
+  }
+  function libraryPlan(revision: string, key: string, input: ReturnType<typeof normalizedQuery>) {
+    const planKey = JSON.stringify(["library-plan", revision, key]);
+    const cached = cachedResult<LibraryPlan>(planKey);
+    if (cached) return Promise.resolve(cached);
+    const existing = queryPlans.get(planKey);
+    if (existing) return existing;
+    const task = (async () => {
+      const filter = await candidateFilter(revision, input.query);
+      const facets = await libraryFacets(filter, input);
+      let result: LibraryPlan = { facets, filter };
+      if (input.sort === "title" || input.sort === "relevance") {
+        const p = libraryPredicate(input);
+        const source = await query<RankedCandidate>(`SELECT c.path,c.hash,c.ordinal,c.mtime,json_extract(c.card_json,'$.title') title
+          FROM read_model_catalog c WHERE ${filter.where} AND ${p.group} AND ${p.scope} AND ${p.tags} ORDER BY c.ordinal`, [...filter.values, ...p.values]);
+        const hits = input.sort === "relevance" ? await hitCounts(source, input.query) : new Map<string, LibraryHits>();
+        const collator = new Intl.Collator("zh-CN");
+        source.sort((a, b) => input.sort === "relevance" ? compareRelevance(hits.get(a.path)!, hits.get(b.path)!) || b.mtime - a.mtime : collator.compare(a.title, b.title));
+        result = { facets, ranked: source.map(({ path }) => ({ path, hits: hits.get(path) })) };
+      }
+      rememberResult(planKey, result);
+      return result;
+    })().finally(() => { queryPlans.delete(planKey); });
+    queryPlans.set(planKey, task);
+    return task;
   }
   async function library(revision: string, input: LibraryQuery = {}): Promise<LibraryPage> {
     const version = await ready(revision), normalized = normalizedQuery(input);
     const key = await readModelHash(JSON.stringify(normalized));
-    const offset = decodeCursor(input.cursor, revision, key), limit = Math.max(1, Math.min(24, input.limit ?? 24));
+    const offset = decodeCursor(input.cursor, revision, key), limit = pageSize(input.limit, 24);
     const resultKey = JSON.stringify(["library", revision, tokyoParts().date, key, offset, limit]);
     const cached = cachedResult<LibraryPage>(resultKey);
     if (cached) return cached;
-    const found = await candidates(revision, normalized.query);
-    const tagged = found.filter((row) => normalized.tags.every((tag) => (JSON.parse(row.tags_json) as string[]).includes(tag)));
-    const inGroup = (row: CatalogRow) => normalized.group === "all" || row.group_key === normalized.group;
-    const inScope = (row: CatalogRow, scope = normalized.scope) => (JSON.parse(row.scopes_json) as string[]).includes(scope);
-    const filtered = tagged.filter((row) => inGroup(row) && inScope(row));
-    const groups = { all: tagged.filter((row) => inScope(row)).length,
-      ...Object.fromEntries(Object.keys(GROUPS).map((group) => [group, tagged.filter((row) => row.group_key === group && inScope(row)).length])) } as Record<GroupKey | "all", number>;
-    const scopes = Object.fromEntries(READ_MODEL_SCOPES.map((scope) => [scope, tagged.filter((row) => inGroup(row) && inScope(row, scope)).length])) as Record<LibraryScope, number>;
-    const tagCounts = new Map<string, number>();
-    for (const row of found.filter((row) => inGroup(row) && inScope(row))) for (const tag of JSON.parse(row.tags_json) as string[]) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
-    const tags = [...tagCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-CN")).slice(0, 12).map(([tag]) => tag);
-    for (const tag of normalized.tags) if (!tags.includes(tag)) tags.push(tag);
-    const tagFacet = tags.map((tag) => ({ tag, count: filtered.filter((row) => (JSON.parse(row.tags_json) as string[]).includes(tag)).length }));
-    const hits = await hitsFor(filtered, normalized.query), collator = new Intl.Collator("zh-CN");
-    filtered.sort((a, b) => normalized.sort === "relevance" ? compareRelevance(hits.get(a.path)!, hits.get(b.path)!) || b.mtime - a.mtime
-      : normalized.sort === "connections" ? (JSON.parse(b.card_json) as NoteCard).links - (JSON.parse(a.card_json) as NoteCard).links || b.mtime - a.mtime
-      : normalized.sort === "title" ? collator.compare((JSON.parse(a.card_json) as NoteCard).title, (JSON.parse(b.card_json) as NoteCard).title) : b.mtime - a.mtime);
-    const page = filtered.slice(offset, offset + limit);
-    const result: LibraryPage = { revision, items: await resultCards(page, normalized.query, hits), total: filtered.length,
-      nextCursor: offset + limit < filtered.length ? encodeCursor(revision, key, offset + limit) : null,
-      facets: { groups, scopes, tags: tagFacet }, effectiveSort: normalized.sort, sourceUpdatedAt: version.sourceUpdatedAt, indexedAt: version.indexedAt };
+    const plan = await libraryPlan(revision, key, normalized), facets = structuredClone(plan.facets);
+    const total = Object.hasOwn(facets.groups, normalized.group) ? facets.groups[normalized.group] : 0;
+    let page: CatalogRow[];
+    let hits: Map<string, LibraryHits>;
+    if ("ranked" in plan) {
+      const selected = plan.ranked.slice(offset, offset + limit);
+      page = await catalogCards(revision, selected.map((item) => item.path));
+      hits = normalized.sort === "relevance" ? new Map(selected.flatMap(({ path, hits }) => hits ? [[path, hits]] : [])) :
+        await hitCounts(page.map((row) => ({ ...row, title: (JSON.parse(row.card_json) as NoteCard).title })), normalized.query);
+    } else {
+      const { filter } = plan, p = libraryPredicate(normalized);
+      const order = normalized.sort === "connections" ? "json_extract(c.card_json,'$.links') DESC,c.mtime DESC,c.ordinal" : "c.mtime DESC,c.ordinal";
+      page = await query<CatalogRow>(`SELECT c.* FROM read_model_catalog c WHERE ${filter.where} AND ${p.group} AND ${p.scope} AND ${p.tags}
+        ORDER BY ${order} LIMIT ? OFFSET ?`, [...filter.values, ...p.values, limit, offset]);
+      hits = await hitCounts(page.map((row) => ({ ...row, title: (JSON.parse(row.card_json) as NoteCard).title })), normalized.query);
+    }
+    const result: LibraryPage = { revision, items: await resultCards(page, normalized.query, hits), total,
+      nextCursor: offset + limit < total ? encodeCursor(revision, key, offset + limit) : null,
+      facets, effectiveSort: normalized.sort, sourceUpdatedAt: version.sourceUpdatedAt, indexedAt: version.indexedAt };
     rememberResult(resultKey, result);
     return result;
   }
   async function search(revision: string, rawQuery = "", limit = 8, recentPaths: string[] = []): Promise<SearchPage> {
-    const version = await ready(revision);
-    const size = Math.max(1, Math.min(8, limit));
-    const resultKey = JSON.stringify(["search", revision, tokyoParts().date, rawQuery, size, rawQuery.trim() ? [] : [...new Set(recentPaths)]]);
+    const version = await ready(revision), size = pageSize(limit, 8);
+    const hasQuery = Boolean(rawQuery.trim());
+    const recent = hasQuery ? [] : [...new Set(recentPaths)];
+    const resultKey = JSON.stringify(["search", revision, tokyoParts().date, rawQuery, size, recent]);
     const cached = cachedResult<SearchPage>(resultKey);
     if (cached) return cached;
-    const found = await candidates(revision, rawQuery);
-    let selected: CatalogRow[];
-    if (!rawQuery.trim() && recentPaths.length) {
-      const byPath = new Map(found.map((row) => [row.path, row]));
-      selected = [...new Set(recentPaths)].flatMap((path) => byPath.has(path) ? [byPath.get(path)!] : []).slice(0, size);
-      if (!selected.length) selected = found.sort((a, b) => b.mtime - a.mtime).slice(0, size);
-    } else selected = (!rawQuery.trim() ? found.sort((a, b) => b.mtime - a.mtime) : found).slice(0, size);
-    const result = { revision, items: await resultCards(selected, rawQuery, undefined, true), total: found.length, sourceUpdatedAt: version.sourceUpdatedAt, indexedAt: version.indexedAt };
+    const filter = await candidateFilter(revision, rawQuery);
+    const countStatement = db.prepare(`SELECT COUNT(*) total FROM read_model_catalog c WHERE ${filter.where}`).bind(...filter.values);
+    const pageStatement = recent.length
+      ? db.prepare(`SELECT c.* FROM json_each(?) selected CROSS JOIN read_model_catalog c ON c.revision=? AND c.path=selected.value
+        ORDER BY CAST(selected.key AS INTEGER) LIMIT ?`).bind(JSON.stringify(recent), revision, size)
+      : db.prepare(`SELECT c.* FROM read_model_catalog c WHERE ${filter.where}
+        ORDER BY ${hasQuery ? "c.ordinal" : "c.mtime DESC,c.ordinal"} LIMIT ?`).bind(...filter.values, size);
+    const [count, selected] = await db.batch([countStatement, pageStatement]);
+    const [{ total }] = rows<{ total: number }>(count);
+    let page = rows<CatalogRow>(selected);
+    if (recent.length && !page.length) page = await query<CatalogRow>("SELECT c.* FROM read_model_catalog c WHERE c.revision=? ORDER BY c.mtime DESC,c.ordinal LIMIT ?", [revision, size]);
+    const result = { revision, items: await resultCards(page, rawQuery, undefined, true), total, sourceUpdatedAt: version.sourceUpdatedAt, indexedAt: version.indexedAt };
     rememberResult(resultKey, result);
     return result;
   }
@@ -359,18 +448,21 @@ export function createReadModel(db: Database, { retention = true }: { retention?
   }
   async function backlinks(revision: string, path: string): Promise<BacklinksPage> {
     await ready(revision);
-    // 完整路径优先；短链只有唯一目标才成为关系，重名来源不能串到另一份资料。
-    const resolved = `WITH candidates AS (
-      SELECT l.source_path,l.target,a.path,a.exact,MAX(a.exact) OVER (PARTITION BY l.source_path,l.target) priority
-      FROM read_model_links l JOIN read_model_aliases a ON a.revision=l.revision AND a.target=l.target WHERE l.revision=?1
+    // 先定位当前笔记可涉及的目标，再走目标索引，避免查询计划反向扫整版链接。
+    const source = await query<CatalogRow & { direction: string }>(`WITH targets AS (
+      SELECT target FROM read_model_aliases WHERE revision=?1 AND path=?2
+      UNION SELECT target FROM read_model_links WHERE revision=?1 AND source_path=?2
+    ), candidates AS (
+      SELECT a.target,a.path,a.exact,MAX(a.exact) OVER (PARTITION BY a.target) priority
+      FROM targets t CROSS JOIN read_model_aliases a ON a.revision=?1 AND a.target=t.target
     ), resolved AS (
-      SELECT source_path,target,MIN(path) path FROM candidates WHERE exact=priority GROUP BY source_path,target HAVING COUNT(*)=1
-    )`;
-    const source = await query<CatalogRow & { direction: string }>(`${resolved}
-      SELECT c.*,'back' direction FROM read_model_catalog c WHERE c.revision=?1 AND c.path<>?2
-      AND EXISTS (SELECT 1 FROM resolved r WHERE r.source_path=c.path AND r.path=?2)
-      UNION ALL SELECT c.*,'out' direction FROM read_model_catalog c WHERE c.revision=?1
-      AND EXISTS (SELECT 1 FROM resolved r WHERE r.source_path=?2 AND r.path=c.path) ORDER BY ordinal`, [revision, path]);
+      SELECT target,MIN(path) path FROM candidates WHERE exact=priority GROUP BY target HAVING COUNT(*)=1
+    ), edges AS (
+      SELECT l.source_path path,'back' direction FROM resolved r
+      CROSS JOIN read_model_links l INDEXED BY read_backlink_lookup ON l.revision=?1 AND l.target=r.target WHERE r.path=?2 AND l.source_path<>?2
+      UNION SELECT r.path,'out' direction FROM read_model_links l
+      JOIN resolved r ON r.target=l.target WHERE l.revision=?1 AND l.source_path=?2
+    ) SELECT c.*,e.direction FROM edges e CROSS JOIN read_model_catalog c ON c.revision=?1 AND c.path=e.path ORDER BY c.ordinal`, [revision, path]);
     const incoming = source.filter((row) => row.direction === "back"), outgoing = source.filter((row) => row.direction === "out");
     return { revision, items: incoming.map(cardOf), outlinks: outgoing.map(cardOf), total: incoming.length };
   }

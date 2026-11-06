@@ -282,7 +282,7 @@ function LibraryView({
   const sort: LibrarySort = sortChoice === "auto" || (sortChoice === "relevance" && !hasTerms)
     ? (hasTerms ? "relevance" : "recent")
     : sortChoice;
-  const remote = useReadModelLibrary({ query, group: filter, scope, tags: selectedTags, sort: sortChoice }, indexed, revision);
+  const remote = useReadModelLibrary({ query, group: filter, scope, tags: selectedTags, sort: sortChoice }, indexed, revision, 200);
 
   const queryMatched = useMemo(
     () => indexed ? [] : notes.filter((note) => noteMatches(note, query)),

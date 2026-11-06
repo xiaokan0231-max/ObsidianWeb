@@ -12,3 +12,8 @@ export function isTypingTarget(target: EventTarget | null | undefined): boolean 
   if (element.isContentEditable === true) return true;
   return typeof element.tagName === "string" && /^(INPUT|TEXTAREA|SELECT)$/i.test(element.tagName);
 }
+
+/** 部分输入法在组字确认键上只保留 229，快捷键也要让出这次按键。 */
+export function isComposingKey(event: Pick<KeyboardEvent, "isComposing" | "keyCode">): boolean {
+  return event.isComposing || event.keyCode === 229;
+}
