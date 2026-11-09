@@ -1,4 +1,5 @@
 import type { CodexRuntimeStatus } from "@/lib/dojo/types";
+import { RequestRejectedError } from "./write-guards.ts";
 
 const BRIDGE_URL = (
   process.env.CODEX_BRIDGE_URL ?? "http://127.0.0.1:43127"
@@ -30,11 +31,10 @@ function bridgeHeaders() {
  * 集中訓練の完了はこの呼び出しをキューの外に出してあるので、待たされても
  * 自動保存・退出時の保存はブロックされない（app/api/language/v2/batch/complete）。
  */
-async function bridgeFetch(path: string, init: RequestInit) {
+async function bridgeRequest(path: string, init: RequestInit) {
   const headers = { ...bridgeHeaders(), ...(init.headers ?? {}) };
-  let response: Response;
   try {
-    response = await fetch(`${BRIDGE_URL}${path}`, {
+    return await fetch(`${BRIDGE_URL}${path}`, {
       ...init,
       headers,
       cache: "no-store",
@@ -46,6 +46,10 @@ async function bridgeFetch(path: string, init: RequestInit) {
       }`,
     );
   }
+}
+
+async function bridgeFetch(path: string, init: RequestInit) {
+  const response = await bridgeRequest(path, init);
   // 收到服务器响应后，任务错误应原样展示，不能被改写成连接失败。
   const result = (await response.json()) as {
     error?: string;
@@ -57,6 +61,22 @@ async function bridgeFetch(path: string, init: RequestInit) {
     throw new Error(result.error || `Codex Bridge 返回 ${response.status}`);
   }
   return result;
+}
+
+export async function interviewChatBridge<T>(init: RequestInit): Promise<T> {
+  try {
+    const response = await bridgeRequest("/interview-chat", { ...init, signal: AbortSignal.timeout(35_000) });
+    const result = (await response.json()) as T & { error?: string };
+    if (!response.ok) {
+      const status = response.status;
+      if (![422, 429, 502, 503, 504].includes(status)) throw new Error();
+      throw new RequestRejectedError(result.error || "本机 AI 对话暂时不可用。", status);
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof RequestRejectedError) throw error;
+    throw new RequestRejectedError("本机 AI 对话尚未启动。请通过 npm run dev 重新启动。", 503);
+  }
 }
 
 export async function getCodexRuntime(): Promise<CodexRuntimeStatus> {

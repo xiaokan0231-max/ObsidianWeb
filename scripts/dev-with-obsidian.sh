@@ -82,7 +82,7 @@ fi
 
 # vinext は画面/APIをホットリロードするが、別プロセスの bridge はその対象外。
 # タスク白名单だけ新しくなった時に「画面は新・bridge は旧」という不整合を残さない。
-node --watch scripts/codex-bridge.mjs &
+node --env-file-if-exists="$project_dir/.env.coach.local" --watch scripts/codex-bridge.mjs &
 CODEX_BRIDGE_PID=$!
 
 cleanup() {

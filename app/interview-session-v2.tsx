@@ -2,7 +2,7 @@
 
 import { useInterviewMenu } from "./interview-menu-copy";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { PREP_V2_REPLAY_COMPARISON_TITLE, PREP_V2_SECTIONS, getPrepV2Section, prepInlineText, type InterviewPrepDoc, type PrepExternalLink } from "@/lib/interview-prep-doc";
 import { prepSourceHost, prepV2BlockLinks, prepV2Overview, prepV2StageSections } from "@/lib/interview-prep-v2";
 import { selectRelevantInterviewPrepDoc, type InterviewPrepSeries } from "@/lib/interview-prep-index";
@@ -11,6 +11,7 @@ import { noteBasename, type Note } from "@/lib/notes";
 import { Blocks } from "./prep-doc-render";
 import { copySelectionWithoutRuby } from "./ruby-copy";
 import PrepMaterialReader from "./prep-material-reader";
+import InterviewAiChat from "./interview-ai-chat";
 import { OPEN_NOTE_LABEL } from "@/lib/ui-labels";
 import { menuLabel } from "@/lib/ui-menu-labels";
 import { useUiLocale } from "./ui-locale";
@@ -125,11 +126,12 @@ function tabFromUrl(): SectionId | null {
   return value && (value === "company" || value === "reviews" || value === "backup" || PREP_V2_SECTIONS.some((section) => section.id === value)) ? value as SectionId : null;
 }
 
-export default function InterviewSessionV2({ doc, series, selectedSeries, sources, today, onSelect, onOpen, onOpenWiki, onOpenCard, onOpenAsset, companyOverview, externalReviews, contextPicker, companyAction, briefing }: {
+export default function InterviewSessionV2({ doc, series, selectedSeries, sources, today, onSelect, onOpen, onOpenWiki, onOpenCard, onOpenAsset, companyOverview, externalReviews, contextPicker, companyAction, briefing, chatRevision }: {
   companyOverview: ReactNode | ((onOpenReviews: () => void) => ReactNode);
   externalReviews?: ReactNode;
   /** v1 の「本轮提醒」（復盤から出た弱点）。纵览の頭に出す——skill が既定で v2 を出す今、ここに無いと復盤の沈殿が次の面接に届かない。 */
   briefing?: ReactNode;
+  chatRevision?: string;
   contextPicker: ReactNode;
   companyAction: ReactNode;
   doc: InterviewPrepDoc;
@@ -164,6 +166,11 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   const [visibleKitSection, setVisibleKitSection] = useState<KitSection>(() => KIT_SECTIONS.some((id) => id === landing.tab) ? landing.tab as KitSection : "motivation");
   // section：当前章节的专注阅读；stage：临场卡。
   const [reading, setReading] = useState<"section" | "stage" | null>(landing.stage ? "stage" : null);
+  const [chatOpen, setChatOpen] = useState<boolean | null>(null);
+  const chatId = useId();
+  const chatButtonRef = useRef<HTMLButtonElement>(null);
+  const chatEnabled = Boolean(chatRevision && !doc.replayOf);
+  const showingChat = chatEnabled && chatOpen === true;
   const [currentHeading, setCurrentHeading] = useState<number | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLElement>(null);
@@ -327,9 +334,11 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
         id={`v2-tab-${item.id}`} aria-controls="v2-panel" aria-selected={primary === item.id} tabIndex={primary === item.id ? 0 : -1}
         onKeyDown={(event) => navKey(event, index)} onClick={() => switchSection(item.section)}><i className="v2-tab-icon"><TabIcon tab={item.id} /></i><span className="v2-tab-copy"><span className="v2-tab-label">{t(item.navLabel)}</span><small className="v2-tab-caption">{t(item.caption)}</small></span><span className="v2-tab-index" aria-hidden="true">0{index + 1}</span></button>)}
         <SlidingIndicator className="v2-tab-indicator" selector={'[role="tab"][aria-selected="true"]'} watch={`${active}:${locale}`} /></div>
-      <div className="v2-nav-utilities">{hasStageLines && <button type="button" className="v2-stage-nav" onClick={() => { savePosition(); setReading("stage"); }}>{t("临场卡")} ↗</button>}<button type="button" className={`v2-backup v2-backup-toggle${active === "backup" ? " active" : ""}`} aria-pressed={active === "backup"} onClick={() => switchSection("backup")}>{t("临场备用")}</button></div>
+      <div className="v2-nav-utilities">{hasStageLines && <button type="button" className="v2-stage-nav" onClick={() => { savePosition(); setReading("stage"); }}>{t("临场卡")} ↗</button>}<button type="button" className={`v2-backup v2-backup-toggle${active === "backup" ? " active" : ""}`} aria-pressed={active === "backup"} onClick={() => switchSection("backup")}>{t("临场备用")}</button>
+        {chatEnabled && <button ref={chatButtonRef} type="button" className="v2-chat-toggle" aria-expanded={showingChat} aria-controls={chatOpen !== null ? chatId : undefined} onClick={() => setChatOpen(!showingChat)}>{locale === "ja" ? "AI チャット" : "AI 对话"}</button>}
+      </div>
     </nav>
-    <div className={`v2-layout${primary !== "kit" ? " v2-company-layout" : ""}`}>
+    <div className={`v2-layout${primary !== "kit" ? " v2-company-layout" : ""}${showingChat ? " v2-layout-chat" : ""}`}>
       {primary === "story" ? <main key="story" id="v2-panel" role="tabpanel" aria-labelledby="v2-tab-story" tabIndex={0} className="v2-company-panel v2-story-panel" ref={mainRef}>
         <nav className="v2-story-jumps" aria-label={t("本章目录")}>{[["v2-company-story", menu("公司与岗位")], ["v2-interview-overview", menu("本轮面试")]].map(([id, label]) => <a key={id} href={`#${id}`} onClick={(event) => { event.preventDefault(); document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "instant" }); }}>{t(label)} ↓</a>)}</nav>
         {active === "overview" && overviewBody}<div id="v2-company-story"><CompanyStory content={companyOverview} onOpenReviews={() => switchSection("reviews")} /></div>{active !== "overview" && overviewBody}
@@ -346,7 +355,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
           </section>; })}
         </>}
       </main>
-      <aside className="v2-rail" ref={railRef} aria-label={t("章节目录与研究来源")}>
+      {!showingChat && <aside className="v2-rail" ref={railRef} aria-label={t("章节目录与研究来源")}>
         <div className="v2-quick"><button type="button" onClick={openMotivation}>{menu("志望動機 ")}<span>{t("20 秒版 ↗")}</span></button><button type="button" onClick={() => switchSection("questions")}>{menu("逆質問 ")}<span>{t("3 个主问题 →")}</span></button>
           {hasStageLines && <button type="button" className="v2-stage-entry" onClick={() => { savePosition(); setReading("stage"); }}>{t("临场卡")} <span>{t("按现场顺序 ↗")}</span></button>}</div>
         {headings.length > 1 && <nav className="v2-toc" aria-label={t("本章目录")}><h3>{t("本章目录")}</h3><ol>{headings.map((heading) => <li key={heading.index}><a href={`#${prefix}-h-${heading.index}`} onClick={(event) => {
@@ -357,8 +366,11 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
         {citations.length > 0 && <section><h3>{t("当前主题的来源")}</h3>{sourceList(citations)}</section>}
         {featured.length > 0 && <section><h3>{t("优先阅读")}</h3>{sourceList(featured)}</section>}
         <div className="v2-original"><button type="button" onClick={() => { savePosition(); onOpen(doc.note); }}>{t(OPEN_NOTE_LABEL)}</button>{(doc.caseLink || doc.meetingLink) && <button type="button" onClick={() => refs.onOpenWiki(doc.caseLink || doc.meetingLink)}>{t(doc.caseLink ? "案件记录" : "面谈记录")}</button>}</div>
-      </aside>
+      </aside>}
       </>}
+      {chatRevision && chatEnabled && chatOpen !== null && <InterviewAiChat key={`${doc.note.path}:${chatRevision}`} id={chatId}
+        open={showingChat} path={doc.note.path} revision={chatRevision} scope={[doc.company || doc.title, overview.position, doc.round].filter(Boolean).join(" · ")}
+        onClose={() => { setChatOpen(false); chatButtonRef.current?.focus(); }} />}
     </div>
     {reading === "section" && <PrepMaterialReader prepVersion={2} documentKey={`${doc.note.path}:${readingSectionId}`} title={readingTitle} sections={[{ id: section?.id ?? readingSectionId, title: readingTitle, blocks }]} onClose={() => setReading(null)} onOpenWiki={refs.onOpenWiki} onOpenCard={refs.onOpenCard} />}
     {reading === "stage" && <PrepMaterialReader prepVersion={2} presentation="stage" documentKey={`${doc.note.path}:stage`} title={`${doc.company || doc.title} · ${t("临场卡")}`} sections={stageSections} onClose={closeStage} onOpenWiki={refs.onOpenWiki} onOpenCard={refs.onOpenCard} />}

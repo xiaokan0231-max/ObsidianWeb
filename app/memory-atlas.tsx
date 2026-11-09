@@ -466,9 +466,9 @@ function useQuickDueBadge(loaded: boolean, viewRef: { readonly current: string }
   return { quickDue, onQuickSummary };
 }
 
-type MemoryAtlasProps = { initialView?: AppView; initialSearch?: string; initialSummary?: CalendarPulseSummary | null; initialCalendarRevision?: string; initialCalendarToday?: string };
+type MemoryAtlasProps = { initialView?: AppView; initialSearch?: string; initialSummary?: CalendarPulseSummary | null; initialCalendarRevision?: string; initialCalendarToday?: string; interviewChatAvailable?: boolean };
 
-function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialCalendarRevision, initialCalendarToday }: MemoryAtlasProps) {
+function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialCalendarRevision, initialCalendarToday, interviewChatAvailable }: MemoryAtlasProps) {
   const initialSearch = useInitialUrlSearch();
   const { locale, setLocale } = useUiLocale();
   const { theme, setTheme } = useUiTheme();
@@ -1706,6 +1706,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
                   key={interviewRouteVersion}
                   catalog={interviewRead.catalog}
                   remoteDigest={interviewRead.digest}
+                  chatRevision={interviewChatAvailable ? interviewRead.revision : undefined}
                   onRemoteSelect={interviewRead.select}
                   notes={notes}
                   today={today}

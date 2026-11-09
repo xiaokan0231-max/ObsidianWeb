@@ -1,0 +1,143 @@
+.session-v2 .v2-nav-three > .v2-nav-utilities:has(.v2-chat-toggle) {
+  grid-template-columns: auto auto;
+  column-gap: 6px;
+}
+
+.session-v2 .v2-nav-utilities .v2-chat-toggle {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  padding: 7px 10px;
+  border: 1px solid var(--v2-line);
+  border-radius: 5px;
+  color: var(--interactive);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.session-v2 .v2-nav-utilities .v2-chat-toggle[aria-expanded="true"] {
+  border-color: var(--interactive);
+  background: var(--surface-sunken);
+}
+
+.session-v2 .v2-layout.v2-layout-chat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(295px, 35%);
+  gap: 24px;
+}
+
+.interview-chat {
+  position: sticky;
+  top: calc(var(--chrome-top, 76px) + 100px);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: calc(100dvh - var(--chrome-top, 76px) - 112px);
+  border: 1px solid var(--v2-line);
+  border-radius: 10px;
+  margin-top: 14px;
+  background: var(--surface-raised-solid);
+  color: var(--ink);
+  font-size: .875rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.interview-chat[hidden] { display: none; }
+.v2-layout:not(.v2-company-layout) .interview-chat { margin-top: 0; }
+
+.interview-chat-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--v2-line);
+}
+
+.interview-chat h2 { margin: 0; font-size: 1rem; font-weight: 650; }
+.interview-chat h3 { margin: 0 0 3px; color: var(--text-secondary); font-size: .8125rem; font-weight: 650; }
+.interview-chat p { margin: 0; }
+.interview-chat-header p, .interview-chat-status { color: var(--text-secondary); font-size: .8125rem; }
+
+.interview-chat-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 14px;
+  scrollbar-width: thin;
+}
+
+.interview-chat summary {
+  color: var(--text-secondary);
+  font-size: .8125rem;
+  cursor: pointer;
+}
+
+.interview-chat details[open] > summary { margin-bottom: 5px; }
+.interview-chat-disclosure > p { color: var(--text-secondary); font-size: .8125rem; }
+.interview-chat-sources { list-style: none; margin: 4px 0 0; padding: 0; }
+.interview-chat-sources li { padding: 6px 0; border-bottom: 1px solid var(--v2-line); font-size: .8125rem; }
+.interview-chat-sources p { white-space: pre-wrap; }
+.interview-chat-turn { margin-top: 12px; }
+.interview-chat-question { padding: 8px 10px; border-radius: 6px; background: var(--surface-sunken); }
+.interview-chat-answer { padding: 8px 0; }
+.interview-chat-turn :is(.interview-chat-question, .interview-chat-answer) > p { white-space: pre-wrap; }
+.interview-chat-answer details { margin-top: 5px; }
+
+.interview-chat-composer {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--v2-line);
+}
+
+.interview-chat-composer label { font-weight: 600; font-size: .8125rem; }
+
+.interview-chat textarea {
+  display: block;
+  min-width: 0;
+  width: 100%;
+  min-height: 66px;
+  max-height: 150px;
+  resize: vertical;
+  padding: 7px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface-raised-solid);
+  color: var(--ink);
+  font: inherit;
+}
+
+.interview-chat textarea::placeholder { color: var(--text-secondary); }
+.interview-chat-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+
+.interview-chat button {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--v2-line);
+  border-radius: 5px;
+  background: transparent;
+  font-size: .8125rem;
+}
+
+.interview-chat button:hover:not(:disabled) { background: var(--surface-sunken); }
+
+.interview-chat .interview-chat-send {
+  padding: 5px 13px;
+  border-color: var(--interactive-fill);
+  background: var(--interactive-fill);
+  color: var(--on-interactive);
+  font-weight: 650;
+}
+
+.interview-chat .interview-chat-send:hover:not(:disabled) { background: var(--interactive); }
+.interview-chat button:disabled { cursor: not-allowed; opacity: .55; }
+.interview-chat .interview-chat-error { color: var(--danger-strong); font-size: .8125rem; }
+.interview-chat-scroll > button { margin-top: 5px; }
+
+@media print {
+  .session-v2 .v2-layout.v2-layout-chat { display: block; }
+  .interview-chat { display: none; }
+}

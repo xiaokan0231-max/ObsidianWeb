@@ -36,6 +36,7 @@ export default async function AppSectionPage({
   return <>
     {preload && <link rel="preload" as="fetch" href={preload} crossOrigin="anonymous" />}
     <MemoryAtlas initialView={initialView} initialSearch={search} initialSummary={initialPulse?.summary}
-      initialCalendarRevision={initialPulse?.revision} initialCalendarToday={initialPulse?.today ?? today} />
+      initialCalendarRevision={initialPulse?.revision} initialCalendarToday={initialPulse?.today ?? today}
+      interviewChatAvailable={process.env.OBSIDIAN_DATA_SOURCE === "live"} />
   </>;
 }

@@ -146,7 +146,7 @@ test("the dev launcher selects a free bridge port when the default is occupied",
   assert.ok(source.includes('error.code !== "EADDRINUSE"'));
   assert.ok(source.includes('fallback.listen(0, "127.0.0.1"'));
   assert.ok(source.includes('CODEX_BRIDGE_URL="http://127.0.0.1:$CODEX_BRIDGE_PORT"'));
-  assert.ok(source.includes("node --watch scripts/codex-bridge.mjs"));
+  assert.match(source, /node [^\n]*--watch scripts\/codex-bridge\.mjs/);
 });
 
 test("unsafe personal examples are hidden and stale facts are excluded", async () => {

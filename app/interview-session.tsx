@@ -1126,6 +1126,7 @@ function InterviewSession({
   onOpenInsights,
   catalog,
   remoteDigest,
+  chatRevision,
   onRemoteSelect,
   companyContexts,
 }: {
@@ -1147,6 +1148,7 @@ function InterviewSession({
   onOpenInsights?: (contextPath?: string) => void;
   catalog?: InterviewCatalog | null;
   remoteDigest?: InterviewTrends | null;
+  chatRevision?: string;
   onRemoteSelect?: (selection: InterviewSelection) => void;
   /** 「今日」は殻が持つ。memo 越しなので中で求めると、日付を跨いでも昨日のまま凍る
    *  ——当日かどうかで既定モード（确认/冲刺/深度）が変わる画面なので、ここが一番効く。 */
@@ -1352,6 +1354,7 @@ function InterviewSession({
     const shownSources = shown === selected ? externalLinks : mergePrepExternalLinks(sourceDocs.map((doc) => doc === selected ? shown : doc));
     return <><InterviewSessionV2 key={shown.note.path} doc={shown} series={series} selectedSeries={selectedSeries}
       sources={shownSources} today={today} onSelect={selectDoc} onOpen={onOpen} onOpenWiki={onOpenWiki}
+      chatRevision={chatRevision}
       onOpenCard={onOpenCard} onOpenAsset={onOpenAsset}
       companyOverview={(onOpenReviews) => <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} view="story" onOpenReviews={onOpenReviews} />}
       externalReviews={<CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} view="reviews" />}

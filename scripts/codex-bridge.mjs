@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCodexExecutable } from "./codex-executable.mjs";
+import { InterviewChatError, readInterviewChatKey, requestInterviewChat } from "./interview-chat-openai.mjs";
 import { buildApplicationReadModel, createLocalReadModelSource } from "./read-model-source.mjs";
 import { interviewDiagnosticInstruction } from "../.agents/skills/review-interview-answers/scripts/diagnostic-prompt.mjs";
 import { scoredEvidenceErrors } from "../.agents/skills/review-interview-answers/scripts/diagnostic-checks.mjs";
@@ -449,6 +450,7 @@ function buildPrompt(task, payload) {
 function safeEnvironment() {
   const env = { ...process.env };
   delete env.OPENAI_API_KEY;
+  delete env.INTERVIEW_CHAT_OPENAI_KEY_FILE;
   delete env.CODEX_API_KEY;
   delete env.CODEX_BRIDGE_TOKEN;
   return env;
@@ -681,6 +683,8 @@ async function readBody(request) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
+let interviewChatPending = false;
+
 const server = createServer(async (request, response) => {
   if (request.headers.authorization !== `Bearer ${TOKEN}`) {
     json(response, 401, { error: "Unauthorized" });
@@ -690,6 +694,22 @@ const server = createServer(async (request, response) => {
     await checkRuntime();
     json(response, 200, statusPayload());
     return;
+  }
+  if (request.url === "/interview-chat") {
+    if (request.method === "GET") return json(response, 200, { configured: Boolean(await readInterviewChatKey()) });
+    if (request.method !== "POST") return json(response, 405, { error: "请求方法无效。" });
+    // 计费请求单独限并发，不占用既有 Codex 任务队列。
+    if (interviewChatPending) return json(response, 429, { error: "已有一条 AI 对话正在回复，请稍候。" });
+    interviewChatPending = true;
+    try {
+      return json(response, 200, await requestInterviewChat(await readBody(request)));
+    } catch (error) {
+      return json(response, error instanceof InterviewChatError ? error.status : 502, {
+        error: error instanceof InterviewChatError ? error.message : "本机 AI 对话暂时不可用。",
+      });
+    } finally {
+      interviewChatPending = false;
+    }
   }
   const readModelUrl = new URL(request.url, `http://${HOST}:${PORT}`);
   if (readModelUrl.pathname.startsWith("/read-model/")) {
