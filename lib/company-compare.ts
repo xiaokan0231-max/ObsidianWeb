@@ -92,7 +92,7 @@ const byName = (a: CompanyCompareCandidate, b: CompanyCompareCandidate) =>
 export function buildCompanyCompareCandidates(contexts: CompanyOverview[], notes: Note[], today: string): CompanyCompareCandidate[] {
   const byPath = new Map(notes.map((note) => [note.path, note]));
   // 日程沿用日历正本的投影规则；准备制作日、due 与 profile 更新时间都不能充作面谈日。
-  const events = buildCalendarEvents(notes, new Date(`${today}T12:00:00`));
+  const events = buildCalendarEvents(notes, new Date(`${today}T12:00:00`)).filter((event) => !event.tentative);
   const origins = buildCalendarEventOrigins(events, notes);
   const related = new Map<string, CalendarEvent[]>();
   for (const event of events) {

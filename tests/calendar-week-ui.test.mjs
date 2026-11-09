@@ -106,6 +106,23 @@ test("周视图日语界面", () => {
   assert.doesNotMatch(html, /周视图|全天|本周|上一周|时间冲突/);
 });
 
+test("候选面试在月格和周格标为未确认，并保留起点或全天", () => {
+  const tentativeEvents = [
+    event("候補A", { tentative: true, time: "10:00" }),
+    event("候補B", { tentative: true, time: "", date: "2026-08-13" }),
+  ];
+  const monthly = render(month, { events: tentativeEvents });
+  assert.match(monthly, /calendar-event upcoming kind-event status-tentative[^>]*aria-label="[^"]*10:00[^"]*待确认/);
+  assert.match(monthly, /calendar-event-stage">全天<\/span><span class="calendar-tentative-label">待确认/);
+  assert.doesNotMatch(monthly, /class="agenda-item |时间冲突/);
+  assert.match(monthly, /未来七天没有已确认的安排/);
+
+  const weekly = render(ja, { events: tentativeEvents });
+  assert.match(weekly, /class="cw-block cw-short upcoming status-tentative"/);
+  assert.match(weekly, /dateTime="2026-08-12T10:00\+09:00">10:00<\/time><span class="calendar-tentative-label">未確定/);
+  assert.match(weekly, /class="cw-chip upcoming status-tentative"[\s\S]*?cw-block-time">終日<\/span><span class="calendar-tentative-label">未確定/);
+});
+
 test("不带 calview 时仍是月格，分段控件停在「月」", () => {
   const html = render(month);
   assert.match(html, /role="grid"/);

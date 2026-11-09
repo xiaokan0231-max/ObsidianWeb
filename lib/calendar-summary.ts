@@ -37,16 +37,17 @@ type SummaryProgress = Pick<CalendarProgress, "tone"> & Partial<Pick<CalendarPro
  * 同一天的场次可能已面完（已有整理稿或准备稿已完成），phase 仍是 upcoming——它已计入等回复与最近记录，
  * 不能同时再当下一场；历史通过和拒信之后残留的旧预约也不是要去的面试。
  */
-export function isCalendarLiveEvent(event: Pick<CalendarEvent, "phase" | "date">, progress: SummaryProgress | undefined, today: string) {
-  return event.phase === "upcoming" && event.date >= today && !progress?.occurred && progress?.tone !== "closed"
+export function isCalendarLiveEvent(event: Pick<CalendarEvent, "phase" | "date" | "tentative">, progress: SummaryProgress | undefined, today: string) {
+  return !event.tentative && event.phase === "upcoming" && event.date >= today && !progress?.occurred && progress?.tone !== "closed"
     && !(progress?.code && isCalendarHistoricalProgress({ code: progress.code }));
 }
 
-export function calendarProgressCounts(events: readonly Pick<CalendarEvent, "id" | "caseId">[], progressByEvent: ReadonlyMap<string, SummaryProgress>) {
+export function calendarProgressCounts(events: readonly Pick<CalendarEvent, "id" | "caseId" | "tentative">[], progressByEvent: ReadonlyMap<string, SummaryProgress>) {
   const waiting = new Set<string>();
   const unknown = new Set<string>();
   const historical = new Set<string>();
   for (const event of events) {
+    if (event.tentative) continue;
     const progress = progressByEvent.get(event.id);
     if (progress?.tone === "waiting") waiting.add(progress.ownerKey || (event.caseId ? `case:${event.caseId}` : `event:${event.id}`));
     if (progress?.code === "association-conflict") unknown.add(event.id);

@@ -34,7 +34,7 @@ import {
   type CalendarEvent,
 } from "@/lib/memory-atlas-data";
 
-type ProgressTone = CalendarProgress["tone"];
+type ProgressTone = CalendarProgress["tone"] | "tentative";
 
 const WAITING_FOR_JA: Record<string, string> = { self: "本人", company: "企業", agent: "エージェント", platform: "媒体" };
 
@@ -43,7 +43,7 @@ const calendarZh = {
   timezone: "日本时间（JST）",
   progressLegend: "日程状态图例",
   progress: {
-    active: "进行中", waiting: "等回复", closed: "已结束", paused: "暂停推进", neutral: "历史记录", unknown: "关联冲突",
+    active: "进行中", waiting: "等回复", tentative: "待确认", closed: "已结束", paused: "暂停推进", neutral: "历史记录", unknown: "关联冲突",
   } satisfies Record<ProgressTone, string>,
   // 中文是 lib 里的正本：aria-label 和 title 依赖原句（含 waiting_label 原文）。
   progressDetail: (progress: CalendarProgress) => progress.detail,
@@ -167,6 +167,7 @@ function japaneseProgressDetail(progress: CalendarProgress) {
     case "offer": return "この案件は内定と記録されています。";
     case "meeting-closed": return "この面談の後続は終了と明記されています。";
     case "scheduled": return "確定済みの予定で、まだ完了の記録はありません。";
+    case "tentative": return "提示した最も早い候補日時です。面接日時は調整中です。";
     case "waiting-case": return `予定は過ぎ、この案件は${WAITING_FOR_JA[progress.waitingFor ?? ""] ?? "相手"}からの返信待ちです${waitingNote}。`;
     case "active-self": return "予定は過ぎ、案件は進行中です。記録上の待機先は本人ですが、具体的な対応は確認済み TODO に基づきます。";
     case "active-case": return "予定は過ぎ、案件はまだ選考中です。";
@@ -187,7 +188,7 @@ const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
   "zh-CN": calendarZh,
   ja: {
     calendar: "カレンダー", timezone: "日本時間（JST）", progressLegend: "予定の状態の凡例",
-    progress: { active: "進行中", waiting: "返信待ち", closed: "終了", paused: "一時保留", neutral: "過去の記録", unknown: "関連付けの矛盾" },
+    progress: { active: "進行中", waiting: "返信待ち", tentative: "未確定", closed: "終了", paused: "一時保留", neutral: "過去の記録", unknown: "関連付けの矛盾" },
     progressDetail: japaneseProgressDetail,
     focusTone: (label) => `「${label}」の予定だけを強調（もう一度押すと解除）`,
     pending: "実施予定", offer: "内定獲得",
@@ -309,7 +310,11 @@ function RoundHelp({ copy }: { copy: CalendarCopy }) {
 function progressLabel(progress: CalendarProgress, copy: CalendarCopy) {
   const historical = { "recorded-rejected": copy.historicalRejected, "recorded-passed": copy.historicalPassed, "recorded-meeting-completed": copy.historicalMeetingCompleted, "historical-result": copy.historicalResult, "association-missing": copy.historicalMissing, "meeting-unrecorded": copy.historicalUnrecorded, unrecorded: copy.historicalUnrecorded };
   if (progress.code in historical) return historical[progress.code as keyof typeof historical];
-  return progress.code === "scheduled" ? copy.pending : progress.code === "offer" ? copy.offer : copy.progress[progress.tone];
+  return progress.code === "scheduled" ? copy.pending : progress.code === "offer" ? copy.offer : copy.progress[progress.code === "tentative" ? "tentative" : progress.tone];
+}
+
+function eventProgressTone(event: CalendarEvent, progress: CalendarProgress): ProgressTone {
+  return event.tentative ? "tentative" : progress.tone;
 }
 
 function scoreText(score: CalendarInterviewScore | null | undefined, copy: CalendarCopy) {
@@ -327,7 +332,7 @@ function InterviewScoreBadge({ score, copy, compact = false }: { score?: Calenda
 
 function eventActionLabel(event: CalendarEvent, progress: CalendarProgress, copy: CalendarCopy, target?: CalendarInterviewTarget, conflict = false, score?: CalendarInterviewScore | null) {
   const round = eventRoundBadge(event, copy);
-  const context = [event.date, calendarEventTime(event), "JST", event.company, copy.eventLabel(event.label),
+  const context = [event.date, event.tentative && !event.time ? copy.allDay : calendarEventTime(event), "JST", event.company, copy.eventLabel(event.label),
     round?.kind === "unknown" ? copy.unknownRound : ""].filter(Boolean).join(" · ");
   return `${context} · ${progressLabel(progress, copy)}：${copy.progressDetail(progress)} · ${score ? `${scoreText(score, copy)} · ` : ""}${target ? interviewDestination(target, copy) : copy.source}${conflict ? ` · ${copy.conflict}` : ""}`;
 }
@@ -525,7 +530,7 @@ function CalendarView({
   // 说明列表与统计共用同一判定，并按场次去重；翻月不能让这个数字换口径。
   const historicalEvents = useMemo(() => [...new Map(events.filter((event) => {
     const progress = progressByEvent.get(event.id);
-    return progress && isCalendarHistoricalProgress(progress) && (!projection || projection.history.eventIds.has(event.id));
+    return !event.tentative && progress && isCalendarHistoricalProgress(progress) && (!projection || projection.history.eventIds.has(event.id));
   }).map((event) => [event.id, event])).values()].sort((left, right) => right.date.localeCompare(left.date) || left.id.localeCompare(right.id)), [events, progressByEvent, projection]);
   const associationConflicts = useMemo(() => [...new Map(events.filter((event) => progressByEvent.get(event.id)?.code === "association-conflict").map((event) => [event.id, event])).values()], [events, progressByEvent]);
   const horizon = shiftCalendarDay(today, 6);
@@ -536,7 +541,7 @@ function CalendarView({
   // 当天已面完的场次已退出「未来 7 天」，要在这里接住，不能两边都消失。
   // 不在这里截断：计数要是真实总数，默认只露几条交给 AgendaGroup 的 limit 与展开。
   const recent = events
-    .filter((event) => event.phase === "past" || progressByEvent.get(event.id)?.occurred)
+    .filter((event) => !event.tentative && (event.phase === "past" || progressByEvent.get(event.id)?.occurred))
     .sort((left, right) => right.date.localeCompare(left.date) || right.time.localeCompare(left.time));
   const recentDisplayed = projection ? projection.recent.loaded ? recent.filter((event) => projection.recent.eventIds.has(event.id)) : recent.slice(0, 6) : recent;
   // 首屏汇总可先于详情到达；只借用同一天、同月份的结果，翻月或详情齐全后不能沿用旧数字。
@@ -888,15 +893,17 @@ function CalendarView({
                               const actionLabel = eventActionLabel(event, progress, copy, target, conflict, scoreByEvent.get(event.id));
                               return (
                                 <div className="calendar-event-item" key={event.id}><button
-                                  className={`calendar-event ${event.phase} kind-${event.kind} status-${progress.tone}${conflict ? " conflict" : ""}`}
+                                  className={`calendar-event ${event.phase} kind-${event.kind} status-${eventProgressTone(event, progress)}${conflict ? " conflict" : ""}`}
                                   onClick={() => openEvent(event)}
                                   title={actionLabel}
                                   aria-label={actionLabel}
                                 >
                                   <span className="calendar-event-heading">
-                                    {event.time ? <time className="calendar-event-time" dateTime={`${event.date}T${event.time}+09:00`}>{event.time}</time> : <span className="calendar-event-stage">{stage}</span>}
-                                    {round && <RoundBadge round={round} />}
-                                    <span className="calendar-status-dot" aria-hidden="true" />
+                                    {event.time ? <time className="calendar-event-time" dateTime={`${event.date}T${event.time}+09:00`}>{event.time}</time> : <span className="calendar-event-stage">{event.tentative ? copy.allDay : stage}</span>}
+                                    {event.tentative ? <span className="calendar-tentative-label">{copy.progress.tentative}</span> : <>
+                                      {round && <RoundBadge round={round} />}
+                                      <span className="calendar-status-dot" aria-hidden="true" />
+                                    </>}
                                   </span>
                                   <strong>{compactCompany(event.company)}</strong>
                                   <span className="calendar-month-signals">
@@ -1094,7 +1101,7 @@ function WeekBoard({
     return (
       <div className={`cw-event-shell${className.includes("cw-block") ? " timed" : ""}`} key={event.id} style={style}><button
         type="button"
-        className={`${className} ${event.phase} status-${progress.tone}${conflict ? " conflict" : ""}`}
+        className={`${className} ${event.phase} status-${eventProgressTone(event, progress)}${conflict ? " conflict" : ""}`}
         onClick={() => onOpenEvent(event)}
         title={actionLabel}
         aria-label={actionLabel}
@@ -1102,8 +1109,13 @@ function WeekBoard({
       >
         <span className="cw-block-meta">
           {event.time && <time className="cw-block-time" dateTime={`${event.date}T${event.time}+09:00`}>{scoreInMeta || short ? event.time : calendarEventTime(event)}</time>}
-          {round && <RoundBadge round={round} />}
-          <span className="cw-block-stage">{eventStage(event, round, copy)}</span>
+          {event.tentative ? <>
+            {!event.time && <span className="cw-block-time">{copy.allDay}</span>}
+            <span className="calendar-tentative-label">{copy.progress.tentative}</span>
+          </> : <>
+            {round && <RoundBadge round={round} />}
+            <span className="cw-block-stage">{eventStage(event, round, copy)}</span>
+          </>}
           {scoreInMeta && score}
         </span>
         <span className="cw-block-title"><strong className="cw-block-company">{compactCompany(event.company)}</strong>{!scoreInMeta && score}{short && <CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact />}</span>
@@ -1173,9 +1185,9 @@ function WeekBoard({
             data-day={day.date}
           >
             {/* 每小时 48px，不到 50 分钟的块放不下两行：改成「时刻＋公司」单行，公司名不被挤出可见区。 */}
-            {day.blocks.map((block) => eventButton(block.event, block.end - block.start < 50 ? "cw-block cw-short" : "cw-block", {
+            {day.blocks.map((block) => eventButton(block.event, block.event.tentative || block.end - block.start < 50 ? "cw-block cw-short" : "cw-block", {
               top: percent(block.start),
-              height: `${((block.end - block.start) / total) * 100}%`,
+              height: block.event.tentative ? undefined : `${((block.end - block.start) / total) * 100}%`,
               left: `calc(${(block.column / block.columns) * 100}% + 2px)`,
               width: `calc(${100 / block.columns}% - 4px)`,
             }))}
@@ -1246,7 +1258,7 @@ function AgendaGroup({
           const actionLabel = eventActionLabel(event, progress, copy, target, conflict, scoreByEvent.get(event.id));
           const offset = calendarDayOffset(today, event.date);
           return (
-            <div className={`agenda-item ${event.phase} kind-${event.kind} status-${progress.tone}${conflict ? " conflict" : ""}`} key={event.id} data-next={event.id === nextEventId ? "" : undefined}>
+            <div className={`agenda-item ${event.phase} kind-${event.kind} status-${eventProgressTone(event, progress)}${conflict ? " conflict" : ""}`} key={event.id} data-next={event.id === nextEventId ? "" : undefined}>
               <button
                 className="agenda-main"
                 onClick={() => target ? onInterview(event) : onOpen(event.note)}
@@ -1260,11 +1272,12 @@ function AgendaGroup({
                 <span className="agenda-copy">
                   <span className="agenda-context">
                     {event.id === nextEventId && <span className="agenda-next-label">{copy.nextUp}</span>}
+                    {event.tentative && <span className="calendar-tentative-label">{copy.progress.tentative}</span>}
                     {offset !== null && <span className="agenda-when" data-soon={offset === 0 || offset === 1 ? "" : undefined}>{copy.countdown(offset)}</span>}
                   </span>
                   <strong>{compactCompany(event.company)}</strong>
                   <span className="agenda-event-meta">
-                    {event.time && <span className="agenda-time">{calendarEventTime(event)}</span>}
+                    {event.time ? <span className="agenda-time">{calendarEventTime(event)}</span> : event.tentative && <span className="agenda-time">{copy.allDay}</span>}
                     {round && <RoundBadge round={round} />}
                     <InterviewScoreBadge score={scoreByEvent.get(event.id)} copy={copy} />
                     <small>{copy.eventLabel(event.label)}</small>

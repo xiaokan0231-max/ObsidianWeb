@@ -15,11 +15,12 @@ function minutesOf(time: string | undefined) {
  * 和所有更早开始、尚未结束的场次比，而不只是相邻的上一场——一场长会可能盖住后面好几场。
  */
 export function calendarConflicts(
-  events: ReadonlyArray<Pick<CalendarEvent, "id" | "date" | "time" | "endTime">>,
+  events: ReadonlyArray<Pick<CalendarEvent, "id" | "date" | "time" | "endTime" | "tentative">>,
   defaultMinutes = DEFAULT_EVENT_MINUTES,
 ): Set<string> {
   const byDate = new Map<string, { id: string; start: number; end: number }[]>();
   for (const event of events) {
+    if (event.tentative) continue;
     const start = minutesOf(event.time);
     if (start === null) continue;
     const declaredEnd = minutesOf(event.endTime);

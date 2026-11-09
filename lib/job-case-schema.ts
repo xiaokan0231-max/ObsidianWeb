@@ -20,6 +20,7 @@ import {
   // 「.ts が葉の .mjs を明示拡張子で読む」だけが両方で通る（lib/jobs.ts と同じ形）。
 } from "./job-status.mjs";
 import { JOB_CASE_ORIGINS } from "./vault-boundary.mjs";
+import { parseCalendarCandidateStart } from "./calendar-candidates.ts";
 
 type FieldRule = {
   required?: boolean;
@@ -203,6 +204,12 @@ export function validateJobCaseFrontmatter(frontmatter: Frontmatter): string[] {
     if (rule.requiresField && !fm[rule.requiresField]) {
       problems.push(`${key} があるなら ${rule.requiresField} も必要`);
     }
+  }
+
+  const candidates = fm.next_event_candidates;
+  if (candidates !== undefined && (!Array.isArray(candidates) || candidates.length === 0
+    || candidates.some((candidate) => !parseCalendarCandidateStart(candidate)))) {
+    problems.push("next_event_candidates は実在する YYYY-MM-DD または YYYY-MM-DD HH:MM の文字列リストが必要");
   }
 
   // 执行者是实际申请的事实，和写推荐的作者分开；旧案件不要求补猜执行者。

@@ -157,6 +157,7 @@
 /* 颜色与形状共同表示进展，避免小尺寸下等待与结束难以分辨。 */
 .calendar-view .status-active { --calendar-status-color: var(--success); }
 .calendar-view .status-waiting { --calendar-status-color: var(--info); }
+.calendar-view .status-tentative { --calendar-status-color: var(--violet-deep); }
 .calendar-view .status-closed { --calendar-status-color: var(--danger); }
 .calendar-view .status-paused { --calendar-status-color: var(--text-tertiary); }
 /* 历史关联缺口用中性灰；只有明确关联冲突才使用警示色。 */
@@ -227,6 +228,11 @@
 
 .calendar-view .status-neutral .calendar-status-dot {
   border: 1px solid var(--calendar-status-color);
+  background: transparent;
+}
+
+.calendar-view .status-tentative .calendar-status-dot {
+  border: 1px dashed var(--calendar-status-color);
   background: transparent;
 }
 
@@ -553,6 +559,22 @@
   --commitment-wash: var(--info-wash);
 }
 
+.calendar-view :is(.calendar-event, .agenda-item, .cw-block, .cw-chip).status-tentative {
+  --commitment-tone: var(--violet);
+  --commitment-wash: var(--violet-wash);
+  border: 1px dashed color-mix(in oklab, var(--violet) 65%, var(--line));
+}
+
+.calendar-view .calendar-tentative-label {
+  flex: 0 0 auto;
+  color: var(--violet-deep);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
 .calendar-view .calendar-event.status-unknown,
 .calendar-view .agenda-item.status-unknown {
   --commitment-tone: var(--gold-text);
@@ -659,6 +681,7 @@
 
 .calendar-view[data-focus-tone="active"] :is(.calendar-event, .agenda-item).status-active,
 .calendar-view[data-focus-tone="waiting"] :is(.calendar-event, .agenda-item).status-waiting,
+.calendar-view[data-focus-tone="tentative"] :is(.calendar-event, .agenda-item).status-tentative,
 .calendar-view[data-focus-tone="closed"] :is(.calendar-event, .agenda-item).status-closed,
 .calendar-view[data-focus-tone="paused"] :is(.calendar-event, .agenda-item).status-paused,
 .calendar-view[data-focus-tone="neutral"] :is(.calendar-event, .agenda-item).status-neutral,
@@ -1253,6 +1276,7 @@
 
 .calendar-view[data-focus-tone="active"] :is(.cw-block, .cw-chip).status-active,
 .calendar-view[data-focus-tone="waiting"] :is(.cw-block, .cw-chip).status-waiting,
+.calendar-view[data-focus-tone="tentative"] :is(.cw-block, .cw-chip).status-tentative,
 .calendar-view[data-focus-tone="closed"] :is(.cw-block, .cw-chip).status-closed,
 .calendar-view[data-focus-tone="paused"] :is(.cw-block, .cw-chip).status-paused,
 .calendar-view[data-focus-tone="neutral"] :is(.cw-block, .cw-chip).status-neutral,
@@ -1358,6 +1382,9 @@
 .cw-event-shell { position: relative; min-width: 0; }
 .cw-event-shell.timed { position: absolute; z-index: 1; min-height: 22px; }
 .cw-event-shell.timed > .cw-block { position: relative; width: 100%; height: 100%; }
+/* 候选时间只在周历标出起点，不把卡片高度解释成已占用时长。 */
+.cw-event-shell.timed > .cw-block.status-tentative { height: 32px; }
+.cw-block.status-tentative .cw-block-meta { padding-right: 0; }
 .cw-event-shell > .cw-chip { width: 100%; }
 .cw-event-shell > .calendar-interview-links { position: absolute; top: 100%; left: 0; z-index: 3; width: max-content; padding: 3px 7px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-overlay); box-shadow: var(--shadow); visibility: hidden; }
 .cw-event-shell:is(:hover, :focus-within) { z-index: 5; }

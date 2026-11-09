@@ -56,6 +56,14 @@ const CURRICULUM_END = "<!-- language-curriculum-json:end -->";
 const BATCH_START = "<!-- language-batch-json:start -->";
 const BATCH_END = "<!-- language-batch-json:end -->";
 
+function readStructuredFrontmatter(content) {
+  const raw = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? "";
+  // JSON_SCHEMA 保留日期字符串，与当前日程字段的 JST 口径一致。
+  const parsed = loadYaml(raw, { schema: JSON_SCHEMA });
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("frontmatter 不是对象");
+  return parsed;
+}
+
 const problems = [];
 // 警告は exit code を変えない。「直すべきだが、止めると他が全部止まる」もの専用。
 const warnings = [];
@@ -67,7 +75,16 @@ const caseNextEvent = new Map();
 const today = new Date().toLocaleDateString("sv-SE");
 
 for (const note of notes) {
-  const fm = note.frontmatter;
+  let fm = note.frontmatter;
+  // 旧读取器保留列表元素的引号，只对新增候选字段采用实际 YAML 值。
+  if (fm.next_event_candidates !== undefined) {
+    try {
+      fm = { ...fm, next_event_candidates: readStructuredFrontmatter(note.content).next_event_candidates };
+    } catch (error) {
+      problems.push(`${note.name}: next_event_candidates YAML 无法解析: ${error.message}`);
+      fm = { ...fm, next_event_candidates: undefined };
+    }
+  }
 
   // 形の検査は lib/job-case-schema.ts が唯一の正本。ここで条件を書き足さないこと
   // ——書き足した瞬間に「書く側の規約」と「読む側の規約」がまた分裂する。
@@ -162,11 +179,8 @@ const graphNotes = files.map((path) => {
   // 只扩展新结构，避免改变历史笔记既有校验口径。JSON_SCHEMA 不把日期变成 Date。
   if (frontmatter.company_profile !== undefined || frontmatter.company_summary !== undefined ||
     ["company-fit", "company-summary"].includes(String(frontmatter.report_kind ?? "").replace(/^["']|["']$/g, ""))) {
-    const raw = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? "";
     try {
-      const parsed = loadYaml(raw, { schema: JSON_SCHEMA });
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("frontmatter 不是对象");
-      frontmatter = parsed;
+      frontmatter = readStructuredFrontmatter(content);
     } catch (error) {
       problems.push(`${relative(VAULT, path)}: company overview YAML 无法解析: ${error.message}`);
     }

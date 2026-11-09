@@ -164,6 +164,16 @@ test("schema：保留は日付が定まらない状態なので status_updated �
   assert.deepEqual(problems, []);
 });
 
+test("schema：面接の候補はJSTの日時または終日の日付を並べた文字列リスト", () => {
+  assert.deepEqual(validateJobCaseFrontmatter({
+    ...valid, next_event_candidates: ["2026-12-10", "2026-12-11 14:30"],
+  }), []);
+  for (const next_event_candidates of ["2026-12-10", [], ["2026-02-30"], ["2026-12-11 25:00"], ["2026-12-11T14:30+09:00"]]) {
+    assert.ok(validateJobCaseFrontmatter({ ...valid, next_event_candidates })
+      .some((problem) => problem.includes("next_event_candidates")));
+  }
+});
+
 test("schema：実在しない日付・範囲外 rating・依存フィールド欠落を捕まえる", () => {
   const problems = validateJobCaseFrontmatter({
     ...valid,

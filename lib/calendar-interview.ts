@@ -302,6 +302,9 @@ function calendarInterviewTarget(event: Commitment, view: CalendarInterviewTarge
 /** 显式入口不随场次结束而消失；资料缺失或有歧义时，也要保留这场的空状态。 */
 export function resolveCalendarInterviewDestinations(event: Commitment, notes: Note[]): CalendarInterviewDestinations {
   if (!isInterviewEvent(event)) return { session: null, review: null };
+  if (event.kind === "event" && event.tentative) {
+    return { session: calendarInterviewTarget(event, "session", event.prepPath || null), review: null };
+  }
   const materials = calendarInterviewMaterials(event, notes);
   return {
     session: calendarInterviewTarget(event, "session", materials.prep?.path ?? null),
@@ -318,7 +321,8 @@ export function resolveCalendarInterviewRequest(
 ): CalendarInterviewTarget {
   const source = notes.find((note) => note.path === requested.sourcePath);
   if (!source) return { ...requested, path: null };
-  const event = events.find((item) => item.date === requested.date && item.note.path === requested.sourcePath);
+  const event = events.find((item) => item.date === requested.date && item.note.path === requested.sourcePath &&
+    (!item.time || !requested.time || item.time === requested.time));
   const destinations = resolveCalendarInterviewDestinations({
     id: event?.id ?? requested.sourcePath,
     note: source,
@@ -329,13 +333,15 @@ export function resolveCalendarInterviewRequest(
     label: requested.label,
     phase: requested.date < today ? "past" : "upcoming",
     caseId: requested.caseId,
-    prepPath: "",
+    prepPath: event?.prepPath ?? "",
+    ...(event?.tentative ? { tentative: true as const } : {}),
   }, notes);
   return destinations[requested.view] ?? { ...requested, path: null };
 }
 
 export function resolveCalendarInterview(event: Commitment, notes: Note[]): CalendarInterviewTarget | null {
   if (!isInterviewEvent(event)) return null;
+  if (event.kind === "event" && event.tentative) return calendarInterviewTarget(event, "session", event.prepPath || null);
   const { prep, review, transcript } = calendarInterviewMaterials(event, notes);
   const completedPrep = prep && getString(prep.frontmatter.session_status ?? prep.frontmatter.schedule_status) === "completed";
   const sourceReview = getType(event.note) === "review" && getString(event.note.frontmatter.date) === event.date;

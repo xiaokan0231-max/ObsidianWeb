@@ -8,7 +8,7 @@ import { getString, getType, type Note } from "./notes.ts";
  * 日语界面按 code 取译文；waitingFor / waitingLabel / reason 是译文需要拼回的原始值。
  */
 export type CalendarProgressCode =
-  | "rejected" | "paused" | "offer" | "meeting-closed" | "scheduled"
+  | "rejected" | "paused" | "offer" | "meeting-closed" | "scheduled" | "tentative"
   | "waiting-case" | "active-self" | "active-case" | "meeting-waiting" | "unrecorded"
   | "historical-unlinked" | "association-missing" | "association-conflict" | "meeting-unrecorded"
   | "recorded-rejected" | "recorded-passed" | "recorded-meeting-completed" | "historical-result";
@@ -57,6 +57,10 @@ export function calendarProgress(
   notes: Note[],
   target?: CalendarInterviewTarget,
 ): CalendarProgress {
+  if (event.tentative) return {
+    tone: "neutral", code: "tentative", label: "待确认", detail: "日历显示已提出的最早候选，具体日程等待对方确认。",
+    occurred: false,
+  };
   let ownerSource = event.note;
   let ownerEventCaseId = event.caseId;
   let owner = resolveInterviewOwner(event.note, notes, event.caseId);

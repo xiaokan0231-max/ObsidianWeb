@@ -15,9 +15,10 @@ import {
   type Note,
 } from "./notes.ts";
 import { JOB_CASE_TYPE } from "./vault-boundary.mjs";
+import { earliestCalendarCandidate, parseCalendarCandidateStart } from "./calendar-candidates.ts";
 import type { SnippetPart } from "./search-snippet.ts";
 import type { UiLocale } from "./ui-locale.ts";
-import { interviewContext, interviewNoteTime, matchingInterviewPrep, matchingInterviewContext, resolveCalendarRoundBadge } from "./calendar-interview.ts";
+import { interviewContext, interviewNoteTime, isInterviewEvent, matchingInterviewPrep, matchingInterviewContext, resolveCalendarRoundBadge, resolveInterviewOwner } from "./calendar-interview.ts";
 import { calendarRoundBadge, interviewRound } from "./interview-round.ts";
 
 export type GroupKey = GraphGroup;
@@ -35,6 +36,7 @@ export type CalendarEvent = {
   phase: "upcoming" | "past";
   caseId: string;
   prepPath: string;
+  tentative?: true;
 };
 
 export type Commitment = CalendarEvent | {
@@ -642,9 +644,7 @@ function calendarCompanyDisplayScore(company: string) {
 }
 
 function validCalendarDate(date: string) {
-  if (!/^20\d{2}-\d{2}-\d{2}$/.test(date)) return false;
-  const timestamp = Date.parse(`${date}T00:00:00Z`);
-  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === date;
+  return parseCalendarCandidateStart(date)?.time === "";
 }
 
 export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEvent[] {
@@ -656,6 +656,7 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
   const matchingNotes = notes.filter((note) => getType(note) !== "interview-prep" || eligiblePrep(note));
   type Candidate = CalendarEvent & { priority: number; identity: string };
   const candidates: Candidate[] = [];
+  const scheduledCases = new Set<string>();
 
   const addEvent = (note: Note, date: string, time: string, label: string, priority: number, endTime?: string) => {
     if (!validCalendarDate(date) || contexts.get(note.path)?.invalid) return;
@@ -709,6 +710,7 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
     const scheduled = getString(note.frontmatter.next_event_at);
     const match = scheduled.match(/^(20\d{2}-\d{2}-\d{2})(?:[ T]((?:[01]?\d|2[0-3]):[0-5]\d))?(?:\s+([^\d].*))?$/u);
     if (!match) continue;
+    if (type === JOB_CASE_TYPE && validCalendarDate(match[1])) scheduledCases.add(note.path);
     const time = match[2]?.padStart(5, "0") ?? "";
     // 当前行动可能谈的是下一轮或复盘，只由本场资料补轮次，不借它给历史场次贴标签。
     const label = detectEventLabel(getString(note.frontmatter.next_event_label)) ?? detectEventLabel(match[3] ?? "") ??
@@ -747,7 +749,40 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
       prepPath: winner.prepPath || other.prepPath,
     };
   }
-  return events.sort((left, right) => left.date.localeCompare(right.date) ||
+  const tentativeEvents: CalendarEvent[] = [];
+  for (const note of notes) {
+    if (getType(note) !== JOB_CASE_TYPE || scheduledCases.has(note.path) ||
+      normalizeJobStatus(getString(note.frontmatter.status)) !== "書類通過") continue;
+    const start = earliestCalendarCandidate(note.frontmatter.next_event_candidates);
+    const context = contexts.get(note.path);
+    if (!start || !context || context.invalid) continue;
+    // 尚未确定日期的准备稿只能按明确案件归属打开，不能拿候选日期匹配旧稿。
+    const preps = notes.filter((item) => {
+      if (getType(item) !== "interview-prep" || !["", "未定", "待定"].includes(getString(item.frontmatter.date).trim()) ||
+        !["", "preparing"].includes(getString(item.frontmatter.session_status ?? item.frontmatter.schedule_status))) return false;
+      const prepContext = contexts.get(item.path);
+      return prepContext && !prepContext.invalid && prepContext.ownerKind === "case" && prepContext.owner === context.owner;
+    });
+    const prep = preps.length === 1 ? preps[0] : undefined;
+    const label = detectEventLabel(getString(prep?.frontmatter.round)) ?? "面试";
+    const round = interviewRound(label);
+    const statusDate = getString(note.frontmatter.status_updated);
+    const since = validCalendarDate(statusDate) && statusDate < start.date ? statusDate : start.date;
+    if (events.some((event) => {
+      if (event.date < since || !isInterviewEvent(event)) return false;
+      const confirmedRound = roundOf(event);
+      return (!round || !confirmedRound || round === confirmedRound) &&
+        resolveInterviewOwner(event.note, notes, event.caseId)?.path === note.path;
+    })) continue;
+
+    tentativeEvents.push({
+      id: `tentative|${note.path}`, note, kind: "event", tentative: true, ...start,
+      company: getString(note.frontmatter.company) || getTitle(note), label,
+      phase: start.date >= today ? "upcoming" : "past",
+      caseId: context.caseId, prepPath: prep?.path ?? "",
+    });
+  }
+  return [...events, ...tentativeEvents].sort((left, right) => left.date.localeCompare(right.date) ||
     left.time.localeCompare(right.time) || left.id.localeCompare(right.id));
 }
 
@@ -764,7 +799,7 @@ export function buildCommitments(
   events = buildCalendarEvents(notes, now),
 ): Commitment[] {
   const today = localDateKey(now);
-  const commitments: Commitment[] = [...events];
+  const commitments: Commitment[] = events.filter((event) => !event.tentative);
   for (const note of notes) {
     const type = getType(note);
     if (type === "todo" && todoStatus(note) !== "完了") {
@@ -886,7 +921,7 @@ export function buildDerivedData(notes: Note[], now = new Date()): DerivedData {
     .map((note) => ({ note, date: getNoteDate(note) }))
     .filter((item) => item.date)
     .sort((left, right) => right.date.localeCompare(left.date));
-  const calendarEvents = buildCalendarEvents(notes, now);
+  const calendarEvents = buildCalendarEvents(notes, now).filter((event) => !event.tentative);
   const commitments = buildCommitments(notes, now, calendarEvents);
   const errorDictionary = notes.find((note) => noteBasename(note.path) === "誤用辞典");
   const promotedCorrections = notes.find(

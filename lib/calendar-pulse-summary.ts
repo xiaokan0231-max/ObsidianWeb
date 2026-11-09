@@ -19,25 +19,26 @@ export type CalendarPulseSummary = {
 
 type PulseProgress = Pick<CalendarProgress, "tone" | "code" | "ownerKey" | "occurred">;
 export type CalendarPulseSource = Pick<CalendarSnapshot, "applicationNotes"> & {
-  events: (Pick<CalendarEvent, "id" | "date" | "time" | "caseId"> & Record<"upcoming" | "past", PulseProgress>)[];
+  events: (Pick<CalendarEvent, "id" | "date" | "time" | "caseId" | "tentative"> & Record<"upcoming" | "past", PulseProgress>)[];
 };
 
 export function calendarPulseSource(snapshot: CalendarSnapshot): CalendarPulseSource {
   const progress = ({ tone, code, ownerKey, occurred }: CalendarProgress): PulseProgress => ({ tone, code, ownerKey, occurred });
   return { applicationNotes: snapshot.applicationNotes, events: snapshot.events.map(({ event, upcoming, past }) => ({
     id: event.id, date: event.date, time: event.time, caseId: event.caseId,
+    ...(event.tentative ? { tentative: event.tentative } : {}),
     upcoming: progress(upcoming.progress), past: progress(past.progress),
   })) };
 }
 
 function pulseDay(source: CalendarPulseSource, today: string) {
   const progressByEvent = new Map<string, PulseProgress>();
-  const events = source.events.map(({ id, date, time, upcoming, past }) => {
+  const events = source.events.map(({ id, date, time, tentative, upcoming, past }) => {
     const phase = date < today ? "past" : "upcoming";
     const progress = phase === "past" ? past : upcoming;
     progressByEvent.set(id, progress);
-    return { id, date, time, live: isCalendarLiveEvent({ date, phase }, progress, today),
-      occurred: phase === "past" || progress.occurred, historical: isCalendarHistoricalProgress(progress) };
+    return { id, date, time, live: isCalendarLiveEvent({ date, phase, tentative }, progress, today),
+      occurred: !tentative && (phase === "past" || progress.occurred), historical: !tentative && isCalendarHistoricalProgress(progress) };
   });
   const applicationDays = buildAiApplicationDays(source.applicationNotes, today);
   const { waitingCount, historicalCount } = calendarProgressCounts(source.events, progressByEvent);
