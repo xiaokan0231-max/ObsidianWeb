@@ -464,3 +464,73 @@ test("v2 素材不把基本信息或其他章节混入主题出处", async () =>
   assert.deepEqual(prepV2BlockLinks(overview.blocks).map((link) => link.href), ["https://example.com/overview"]);
   assert.doesNotMatch(JSON.stringify(doc.externalLinks), /meeting|overview/);
 });
+
+test("首屏先显示本轮求人和公司入口，继承资料不取代本轮求人", async () => {
+  const { prepOpeningSources } = await import("../lib/interview-prep-v2.ts");
+  const current = parseInterviewPrepDoc(prepNote(BODY.replace("### ⭐ [公司直接页面](https://example.com/company)", `### ★ [当前求人票：数据工程师](https://example.com/jobs/44)
+
+### [公司官网](https://example.com/)
+
+### [公司技术博客](https://example.com/company/blog/updates)
+
+### [招聘信息一覧](https://example.com/recruit/)
+
+### [另一个招聘岗位](https://example.com/jobs/55/)
+
+### [企业站内原文](https://example.com/messages/123)
+
+### [公司直接页面](https://example.com/company)`)), []);
+  const previous = parseInterviewPrepDoc(prepNote(`# テスト
+
+## 11．会社研究リンク集
+
+### 求人・採用
+
+- ★ [原求人票](https://example.com/jobs/22/)
+
+- [旧轮中的同一岗位](https://example.com/jobs/44/)
+
+### 公式サイト・プロダクト
+
+- [旧版公司官网](https://example.com/)
+`, 1), []);
+  const summary = [{ label: "公司官网", url: "https://example.com" }, { label: "产品案例", url: "https://example.com/services/data" }];
+  const result = prepOpeningSources([...previous.externalLinks, ...current.externalLinks], "https://example.com/jobs/22", summary, current.externalLinks);
+  assert.deepEqual(result.job.map((link) => link.href), ["https://example.com/jobs/44"]);
+  assert.equal(result.job[0].label, "当前求人票：数据工程师");
+  assert.deepEqual(result.company.slice(0, 2).map((link) => link.label), ["公司官网", "公司技术博客"]);
+  assert.equal(result.company.filter((link) => link.href === "https://example.com/").length, 1);
+  assert.ok(result.company.some((link) => link.label === "产品案例"));
+  assert.ok(result.other.some((link) => link.label === "原求人票"));
+  assert.ok(result.other.some((link) => link.label === "另一个招聘岗位"));
+  assert.doesNotMatch(JSON.stringify(result), /messages/);
+});
+
+test("首屏求人只回退到案件中可辨认的岗位原文", async () => {
+  const { prepOpeningSources } = await import("../lib/interview-prep-v2.ts");
+  const link = { label: "官方通年採用", href: "https://example.com/recruit/yearround/", group: "", starred: true };
+  assert.deepEqual(prepOpeningSources([link], "https://example.com/recruit/yearround").job, [link]);
+  assert.equal(prepOpeningSources([link]).job.length, 0);
+  assert.equal(prepOpeningSources([], "https://example.com/jobs/1").job[0].href, "https://example.com/jobs/1");
+  const comparison = { label: "对比岗位", href: "https://example.com/jobs/2", group: "", starred: false };
+  const fromCase = prepOpeningSources([comparison], "https://example.com/jobs/1");
+  assert.deepEqual(fromCase.job.map((source) => source.href), ["https://example.com/jobs/1"]);
+  assert.deepEqual(fromCase.other, [comparison]);
+  assert.equal(prepOpeningSources([], "https://example.com/recruit").job.length, 0);
+  const roleSection = { label: "中途採用 04 JAVA", href: "https://example.com/recruit/#position-java", group: "", starred: true };
+  assert.deepEqual(prepOpeningSources([roleSection]).job, [roleSection]);
+  assert.equal(prepOpeningSources([], "https://example.com/career/14").job[0].href, "https://example.com/career/14");
+  assert.equal(prepOpeningSources([], "https://mail.google.com/mail/u/1/#inbox/test").job.length, 0);
+  assert.equal(prepOpeningSources([], "javascript:alert(1)").job.length, 0);
+});
+
+test("公司事实优先呈现规模和业务并保留来源与口径", async () => {
+  const { prepOpeningCompanyFacts } = await import("../lib/interview-prep-v2.ts");
+  const facts = [
+    { id: "founded", label: "成立", value: "2010 年", asOf: "", scope: "", sources: [] },
+    { id: "business", label: "业务", value: "企业软件", asOf: "", scope: "", sources: [] },
+    { id: "workforce", label: "人员构成", value: "100 人", asOf: "2026-09-01", scope: "全公司", sources: [{ label: "官网", url: "https://example.com/company" }] },
+  ];
+  assert.deepEqual(prepOpeningCompanyFacts(facts), [facts[2], facts[1], facts[0]]);
+  assert.equal(facts[0].id, "founded");
+});

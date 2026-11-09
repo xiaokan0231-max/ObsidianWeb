@@ -1,11 +1,4 @@
-.session-v2 .v2-nav-three > .v2-nav-utilities:has(.v2-chat-toggle) {
-  grid-template-columns: auto auto;
-  column-gap: 6px;
-}
-
 .session-v2 .v2-nav-utilities .v2-chat-toggle {
-  grid-column: 2;
-  grid-row: 1 / span 2;
   align-self: center;
   padding: 7px 10px;
   border: 1px solid var(--v2-line);

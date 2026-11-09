@@ -4,7 +4,7 @@ import { useInterviewMenu } from "./interview-menu-copy";
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { PREP_V2_REPLAY_COMPARISON_TITLE, PREP_V2_SECTIONS, getPrepV2Section, prepInlineText, type InterviewPrepDoc, type PrepExternalLink } from "@/lib/interview-prep-doc";
-import { prepSourceHost, prepV2BlockLinks, prepV2Overview, prepV2StageSections } from "@/lib/interview-prep-v2";
+import { prepOpeningSources, prepSourceHost, prepV2BlockLinks, prepV2Overview, prepV2StageSections } from "@/lib/interview-prep-v2";
 import { selectRelevantInterviewPrepDoc, type InterviewPrepSeries } from "@/lib/interview-prep-index";
 import { companyMotivationAssetTarget, type SharedAssetTarget } from "@/lib/interview-shared-assets";
 import { noteBasename, type Note } from "@/lib/notes";
@@ -38,10 +38,12 @@ const V2_COPY_JA: Record<string, string> = {
   "外部评价": "外部評価",
   "面谈锦囊": "面接ツール",
   "本轮面试": "今回の面接",
-  "公司与岗位": "会社とポジション",
-  "公司故事与本轮判断": "会社の背景と今回の判断",
-  "员工视角与实际差异": "社員の声と体験の違い",
-  "动机 · 提问 · 资料": "動機・逆質問・資料",
+  "求人票": "求人票",
+  "公司官网与资料": "会社サイト・関連資料",
+  "未收录求人票直链": "求人票の直リンク未登録",
+  "未收录公司资料链接": "会社資料へのリンク未登録",
+  "更多资料（{count}）": "ほかの資料（{count}件）",
+  "打开案件记录": "応募記録を開く",
 };
 
 /**
@@ -87,15 +89,10 @@ function SlidingIndicator({ selector, watch, className }: { selector: string; wa
   return <span ref={ref} className={className} aria-hidden="true" />;
 }
 
-/** `YYYY-MM-DD` の翌日（UTC 計算で十分：日付文字列同士の比較にしか使わない）。 */
-function nextDay(day: string) {
-  const [year, month, date] = day.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10);
-}
-const MAIN_SECTIONS: { id: PrimaryTab; section: SectionId; navLabel: string; caption: string }[] = [
-  { id: "story", section: "company", navLabel: "面试故事", caption: "公司故事与本轮判断" },
-  { id: "reviews", section: "reviews", navLabel: "外部评价", caption: "员工视角与实际差异" },
-  { id: "kit", section: "motivation", navLabel: "面谈锦囊", caption: "动机 · 提问 · 资料" },
+const MAIN_SECTIONS: { id: PrimaryTab; section: SectionId; navLabel: string }[] = [
+  { id: "story", section: "company", navLabel: "面试故事" },
+  { id: "reviews", section: "reviews", navLabel: "外部评价" },
+  { id: "kit", section: "motivation", navLabel: "面谈锦囊" },
 ];
 function primaryTab(section: SectionId): PrimaryTab {
   return section === "company" || section === "overview" ? "story" : section === "reviews" ? "reviews" : "kit";
@@ -126,7 +123,7 @@ function tabFromUrl(): SectionId | null {
   return value && (value === "company" || value === "reviews" || value === "backup" || PREP_V2_SECTIONS.some((section) => section.id === value)) ? value as SectionId : null;
 }
 
-export default function InterviewSessionV2({ doc, series, selectedSeries, sources, today, onSelect, onOpen, onOpenWiki, onOpenCard, onOpenAsset, companyOverview, externalReviews, contextPicker, companyAction, briefing, chatRevision }: {
+export default function InterviewSessionV2({ doc, series, selectedSeries, sources, openingSources, jobCase, today, onSelect, onOpen, onOpenWiki, onOpenCard, onOpenAsset, companyOverview, externalReviews, contextPicker, companyAction, briefing, chatRevision }: {
   companyOverview: ReactNode | ((onOpenReviews: () => void) => ReactNode);
   externalReviews?: ReactNode;
   /** v1 の「本轮提醒」（復盤から出た弱点）。纵览の頭に出す——skill が既定で v2 を出す今、ここに無いと復盤の沈殿が次の面接に届かない。 */
@@ -138,6 +135,8 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   series: InterviewPrepSeries[];
   selectedSeries: InterviewPrepSeries | null;
   sources: PrepExternalLink[];
+  openingSources?: ReturnType<typeof prepOpeningSources>;
+  jobCase?: Note | null;
   today: string;
   onSelect: (doc: InterviewPrepDoc) => void;
   onOpen: (note: Note) => void;
@@ -154,18 +153,11 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   const stageSections = useMemo(() => prepV2StageSections(doc), [doc]);
   // 一句台词都没有时不出入口：点进去只剩一句空提示，等于白跑一趟。
   const hasStageLines = stageSections.some((item) => item.blocks.some((block) => block.kind === "say"));
-  // 既定落点：URL 写了就按 URL。面试在今天或明天时直接打开临场卡（底下停在纵览）——当天要的是
-  // 说出口的话，没时间再读纵览；稿里没有台词就停在纵览。对照样稿落在纵览（对照节在最上面）。其余日子落在公司总览。
-  const [landing] = useState<{ tab: SectionId; stage: boolean }>(() => {
-    const fromUrl = tabFromUrl();
-    if (fromUrl) return { tab: fromUrl, stage: false };
-    const imminent = /^\d{4}-\d{2}-\d{2}$/.test(doc.date) && doc.date <= nextDay(today) && doc.date >= today;
-    return { tab: imminent || doc.replayOf ? "overview" : "company", stage: imminent && hasStageLines };
-  });
-  const [active, setActive] = useState<SectionId>(landing.tab);
-  const [visibleKitSection, setVisibleKitSection] = useState<KitSection>(() => KIT_SECTIONS.some((id) => id === landing.tab) ? landing.tab as KitSection : "motivation");
+  // 普通入口先读岗位和公司，临场卡由本人打开。已有章节链接与对照样稿仍落在指定正文。
+  const [active, setActive] = useState<SectionId>(() => tabFromUrl() ?? (doc.replayOf ? "overview" : "company"));
+  const [visibleKitSection, setVisibleKitSection] = useState<KitSection>(() => KIT_SECTIONS.some((id) => id === active) ? active as KitSection : "motivation");
   // section：当前章节的专注阅读；stage：临场卡。
-  const [reading, setReading] = useState<"section" | "stage" | null>(landing.stage ? "stage" : null);
+  const [reading, setReading] = useState<"section" | "stage" | null>(null);
   const [chatOpen, setChatOpen] = useState<boolean | null>(null);
   const chatId = useId();
   const chatButtonRef = useRef<HTMLButtonElement>(null);
@@ -194,7 +186,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   const savePosition = () => {
     positionsRef.current[active] = window.scrollY;
   };
-  // 刷新、分享时回到同一处（不进历史）。公司总览也要写：面试当天不写 URL 就等于默认，刷新会再弹临场卡。
+  // 刷新、分享时回到同一处（不进历史）。
   const rememberTab = (tab: SectionId) => {
     const params = new URLSearchParams(window.location.search);
     params.set("prepTab", tab === "backup" ? "backup" : primaryTab(tab));
@@ -215,16 +207,11 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
     setActive(next);
     rememberTab(next);
   };
-  // 关掉临场卡就记下当前标签：当天手动关过，刷新时不再自动弹出。
-  const closeStage = () => {
-    setReading(null);
-    rememberTab(active);
-  };
   useLayoutEffect(() => {
     if (railRef.current) railRef.current.scrollTop = 0;
     const position = positionsRef.current[active];
     if (position !== undefined) window.scrollTo({ top: position, behavior: "instant" });
-    else if (active === "company" && Object.keys(positionsRef.current).length) document.getElementById("v2-company-story")?.scrollIntoView({ block: "start", behavior: "instant" });
+    else if (active === "company" && Object.keys(positionsRef.current).length) document.getElementById("v2-panel")?.scrollIntoView({ block: "start", behavior: "instant" });
     else if (active === "motivation") document.getElementById("v2-panel")?.scrollIntoView({ block: "start", behavior: "instant" });
     else if (KIT_SECTIONS.some((id) => id === active)) document.getElementById(`v2-kit-${active}`)?.scrollIntoView({ block: "start", behavior: "instant" });
     else if (active === "overview") document.getElementById("v2-interview-overview")?.scrollIntoView({ block: "start", behavior: "instant" });
@@ -291,6 +278,25 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
     <a href={link.href} target="_blank" rel="noopener noreferrer"><span>{link.label.replace(/^★\s*/, "")}</span><span aria-hidden="true">↗</span></a>
     <small>{prepSourceHost(link.href)}</small>
   </li>)}</ol>;
+  const { job, company, other } = openingSources ?? prepOpeningSources(doc.externalLinks);
+  const additionalSources = [...job.slice(2), ...company.slice(3), ...other];
+  const openingLink = (link: PrepExternalLink) => <a key={link.href} href={link.href} title={prepSourceHost(link.href)} target="_blank" rel="noopener noreferrer">{t(link.label.replace(/^★\s*/, ""))} <span aria-hidden="true">↗</span></a>;
+  const opening = <div className="v2-opening">
+    <section className="v2-opening-row" aria-labelledby="v2-job-heading">
+      <h2 id="v2-job-heading">{t("求人票")}</h2>
+      <div className="v2-opening-links">{job.length ? job.slice(0, 2).map(openingLink) : <span>{t("未收录求人票直链")}</span>}
+        {jobCase && <button type="button" onClick={() => { savePosition(); onOpen(jobCase); }}>{t("打开案件记录")} <span aria-hidden="true">↗</span></button>}
+      </div>
+    </section>
+    <section className="v2-opening-row" aria-labelledby="v2-company-links-heading">
+      <h2 id="v2-company-links-heading">{t("公司官网与资料")}</h2>
+      <div className="v2-opening-links">{company.length ? company.slice(0, 3).map(openingLink) : <span>{t("未收录公司资料链接")}</span>}</div>
+    </section>
+    <div className="v2-opening-actions">
+      {additionalSources.length > 0 && <details><summary>{t("更多资料（{count}）", { count: additionalSources.length })}</summary>{sourceList(additionalSources)}</details>}
+      <a href="#v2-interview-overview" onClick={(event) => { event.preventDefault(); document.getElementById("v2-interview-overview")?.scrollIntoView({ block: "start", behavior: "instant" }); }}>{t("本轮面试")} <span aria-hidden="true">↓</span></a>
+    </div>
+  </div>;
   const overviewBody = <section className="v2-body v2-story-overview" id="v2-interview-overview">
     {briefing}
     {comparison && <section className="v2-replay-comparison" aria-labelledby="v2-replay-comparison-title"><h2 id="v2-replay-comparison-title">{comparison.title}</h2><Blocks blocks={comparison.blocks} refs={refs} idPrefix="v2-replay-cmp" /></section>}
@@ -332,7 +338,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
     <nav className="v2-nav v2-nav-three" ref={navRef} aria-label={t("面试准备章节")}>
       <div className="v2-tablist" role="tablist" aria-label={t("准备正文")}>{MAIN_SECTIONS.map((item, index) => <button key={item.id} type="button" role="tab" className="v2-prep-tab" data-section={item.id}
         id={`v2-tab-${item.id}`} aria-controls="v2-panel" aria-selected={primary === item.id} tabIndex={primary === item.id ? 0 : -1}
-        onKeyDown={(event) => navKey(event, index)} onClick={() => switchSection(item.section)}><i className="v2-tab-icon"><TabIcon tab={item.id} /></i><span className="v2-tab-copy"><span className="v2-tab-label">{t(item.navLabel)}</span><small className="v2-tab-caption">{t(item.caption)}</small></span><span className="v2-tab-index" aria-hidden="true">0{index + 1}</span></button>)}
+        onKeyDown={(event) => navKey(event, index)} onClick={() => switchSection(item.section)}><i className="v2-tab-icon"><TabIcon tab={item.id} /></i><span>{t(item.navLabel)}</span></button>)}
         <SlidingIndicator className="v2-tab-indicator" selector={'[role="tab"][aria-selected="true"]'} watch={`${active}:${locale}`} /></div>
       <div className="v2-nav-utilities">{hasStageLines && <button type="button" className="v2-stage-nav" onClick={() => { savePosition(); setReading("stage"); }}>{t("临场卡")} ↗</button>}<button type="button" className={`v2-backup v2-backup-toggle${active === "backup" ? " active" : ""}`} aria-pressed={active === "backup"} onClick={() => switchSection("backup")}>{t("临场备用")}</button>
         {chatEnabled && <button ref={chatButtonRef} type="button" className="v2-chat-toggle" aria-expanded={showingChat} aria-controls={chatOpen !== null ? chatId : undefined} onClick={() => setChatOpen(!showingChat)}>{locale === "ja" ? "AI チャット" : "AI 对话"}</button>}
@@ -340,8 +346,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
     </nav>
     <div className={`v2-layout${primary !== "kit" ? " v2-company-layout" : ""}${showingChat ? " v2-layout-chat" : ""}`}>
       {primary === "story" ? <main key="story" id="v2-panel" role="tabpanel" aria-labelledby="v2-tab-story" tabIndex={0} className="v2-company-panel v2-story-panel" ref={mainRef}>
-        <nav className="v2-story-jumps" aria-label={t("本章目录")}>{[["v2-company-story", menu("公司与岗位")], ["v2-interview-overview", menu("本轮面试")]].map(([id, label]) => <a key={id} href={`#${id}`} onClick={(event) => { event.preventDefault(); document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "instant" }); }}>{t(label)} ↓</a>)}</nav>
-        {active === "overview" && overviewBody}<div id="v2-company-story"><CompanyStory content={companyOverview} onOpenReviews={() => switchSection("reviews")} /></div>{active !== "overview" && overviewBody}
+        {active === "overview" && overviewBody}{opening}<div id="v2-company-story"><CompanyStory content={companyOverview} onOpenReviews={() => switchSection("reviews")} /></div>{active !== "overview" && overviewBody}
       </main> : primary === "reviews" ? <main key="reviews" id="v2-panel" role="tabpanel" aria-labelledby="v2-tab-reviews" tabIndex={0} className="v2-company-panel v2-reviews-panel" ref={mainRef}>{externalReviews ?? <p className="v2-empty">{menu("尚未收录可核对的外部评价。")}</p>}</main> : <>
       <main key="kit" id="v2-panel" role="tabpanel" aria-labelledby="v2-tab-kit" tabIndex={0} className={`v2-body v2-${active}`} ref={mainRef}>
         {active === "backup" ? <><header className="v2-section-head"><h2 id="v2-section-title">{section?.title ?? t("临场备用")}</h2><button type="button" onClick={() => { savePosition(); setReading("section"); }}>{t("专注阅读")}</button></header>
@@ -373,6 +378,6 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
         onClose={() => { setChatOpen(false); chatButtonRef.current?.focus(); }} />}
     </div>
     {reading === "section" && <PrepMaterialReader prepVersion={2} documentKey={`${doc.note.path}:${readingSectionId}`} title={readingTitle} sections={[{ id: section?.id ?? readingSectionId, title: readingTitle, blocks }]} onClose={() => setReading(null)} onOpenWiki={refs.onOpenWiki} onOpenCard={refs.onOpenCard} />}
-    {reading === "stage" && <PrepMaterialReader prepVersion={2} presentation="stage" documentKey={`${doc.note.path}:stage`} title={`${doc.company || doc.title} · ${t("临场卡")}`} sections={stageSections} onClose={closeStage} onOpenWiki={refs.onOpenWiki} onOpenCard={refs.onOpenCard} />}
+    {reading === "stage" && <PrepMaterialReader prepVersion={2} presentation="stage" documentKey={`${doc.note.path}:stage`} title={`${doc.company || doc.title} · ${t("临场卡")}`} sections={stageSections} onClose={() => setReading(null)} onOpenWiki={refs.onOpenWiki} onOpenCard={refs.onOpenCard} />}
   </div>;
 }

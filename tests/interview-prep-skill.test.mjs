@@ -138,7 +138,7 @@ test("SKILL 与方法论：被问到才说边界，逆質問用双方信息把�
     assert.match(text, /【内部】栏永远不进稿/);
   }
   assert.match(methodology, /結論→証拠二文→止める/);
-  assert.match(skill, /面试当天和前一天默认打开临场卡/);
+  assert.match(skill, /临场卡由本人点击打开/);
   assert.match(skill, /### 面接官研究/);
   assert.match(skill, /type: interview-prep-replay/);
   assert.match(skill, /## 对照：当时实际发生了什么／新稿会改变什么/);

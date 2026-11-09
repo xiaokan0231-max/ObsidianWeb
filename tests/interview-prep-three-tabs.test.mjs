@@ -42,6 +42,8 @@ const content = `# 株式会社テスト 面接準備
 
 [本轮业务来源](https://example.com/current-research)
 
+[本次求人票](https://example.com/jobs/42) · [公司官网](https://example.com/company) · [技术博客](https://example.com/blog/platform)
+
 ## 临场备用
 
 ### 追问备用
@@ -126,6 +128,22 @@ test("面试故事合并公司故事和本轮纵览，并给公司组件传入�
   assert.match(body, /本轮纵览正文独有/);
   assert.match(body, /本轮复盘提醒独有/);
   assert.doesNotMatch(body, /外部评价正文独有|动机正文独有|逆質問正文独有|研究正文独有/);
+});
+
+test("默认面试故事先显示求人票直链，再显示公司官网和博客，最后阅读公司及本轮正文", async () => {
+  const html = await render();
+  assertTabs(html, "story");
+  const body = panel(html);
+  const job = body.match(/<section[^>]+aria-labelledby="v2-job-heading"[^>]*>([\s\S]*?)<\/section>/)?.[1];
+  const company = body.match(/<section[^>]+aria-labelledby="v2-company-links-heading"[^>]*>([\s\S]*?)<\/section>/)?.[1];
+  assert.ok(job);
+  assert.ok(company);
+  assert.match(job, /href="https:\/\/example.com\/jobs\/42"[^>]*>本次求人票/);
+  assert.match(company, /href="https:\/\/example.com\/company"[^>]*>公司官网/);
+  assert.match(company, /href="https:\/\/example.com\/blog\/platform"[^>]*>技术博客/);
+  assert.ok(body.indexOf(job) < body.indexOf(company));
+  assert.ok(body.indexOf(company) < body.indexOf("公司故事正文独有"));
+  assert.ok(body.indexOf("公司故事正文独有") < body.indexOf("本轮纵览正文独有"));
 });
 
 test("外部评价独立显示传入内容，不混公司故事、纵览或锦囊正文", async () => {

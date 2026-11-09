@@ -185,7 +185,7 @@ test("2026-11 的規律与事実カード上卡：規律→冒頭→事実カー
   assert.match(html, /<table>[\s\S]*直近は株式会社テストでリードエンジニアを担当しました[\s\S]*<table>[\s\S]*事業の縮小に伴い/);
 });
 
-test("面试当天和前一天默认打开临场卡，底下停在纵览；URL 的 prepTab 与无台词稿不弹", async () => {
+test("面试当天、前一天及其他日期默认先看求人和公司，临场卡从按钮打开", async () => {
   const doc = parseInterviewPrepDoc(prepNote(STAGE_BODY), []);
   const render = async ({ today, search = "", target = doc }) => {
     const opened = [];
@@ -203,16 +203,13 @@ test("面试当天和前一天默认打开临场卡，底下停在纵览；URL �
     }));
     return { html, opened };
   };
-  for (const today of ["2026-10-20", "2026-10-19"]) {
+  for (const today of ["2026-10-20", "2026-10-19", "2026-10-16"]) {
     const { html, opened } = await render({ today });
-    assert.equal(opened.length, 1, today);
-    assert.equal(opened[0].presentation, "stage");
-    assert.deepEqual(opened[0].sections.map((section) => section.title).slice(0, 2), ["冒頭30秒", "本場の懸念 TOP3 と先回り一言"]);
+    assert.equal(opened.length, 0, today);
     assert.match(html, /id="v2-tab-story"[^>]*aria-selected="true"/);
+    assert.match(html, /class="v2-stage-nav"/);
+    assert.ok(html.indexOf('id="v2-job-heading"') < html.indexOf('id="v2-interview-overview"'));
   }
-  const later = await render({ today: "2026-10-16" });
-  assert.equal(later.opened.length, 0);
-  assert.match(later.html, /id="v2-tab-story"[^>]*aria-selected="true"/);
   const fromUrl = await render({ today: "2026-10-20", search: "?prepTab=questions" });
   assert.equal(fromUrl.opened.length, 0);
   assert.match(fromUrl.html, /id="v2-tab-kit"[^>]*aria-selected="true"/);
@@ -259,7 +256,7 @@ test("本场面试页头显示倒计时，临场卡入口只在有台词章节�
   };
   const doc = parseInterviewPrepDoc(note, []);
   assert.ok(doc);
-  // 自动打开仍按日期判断；手动入口始终留在三标签旁，便于提前练习。
+  // 倒计时与手动临场入口都留在页头，便于提前练习。
   for (const [locale, today, label] of [["zh-CN", "2026-10-03", "明天"], ["ja", "2026-10-04", "今日"], ["zh-CN", "2026-09-30", "4 天后"]]) {
     const { default: Session } = await loadAppModule("app/interview-session-v2.tsx", {
       stubs: { "./ui-locale": { useUiLocale: () => ({ locale, setLocale() {} }) }, "./prep-material-reader": { default: () => null } },

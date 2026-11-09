@@ -5,18 +5,16 @@ import { compileFunction } from "node:vm";
 import ts from "typescript";
 import { PREP_V2_SECTIONS } from "../lib/interview-prep-doc.ts";
 
-// 本场面试页的既定与 URL 状态：v2 落在临场卡、纵览还是公司总览由 ?prepTab=／面试临近程度决定，
-// v1 的模式写进 ?prepMode=；两者都不能借用殻的 ?section=（原笔记抽屉的锚点）和看板的 ?mode=。
+// v2 的正文标签写进 ?prepTab=，v1 的模式写进 ?prepMode=。
+// 两者都不能借用殻的 ?section=（原笔记抽屉的锚点）和看板的 ?mode=。
 const v2 = await readFile(new URL("../app/interview-session-v2.tsx", import.meta.url), "utf8");
 const v1 = await readFile(new URL("../app/interview-session.tsx", import.meta.url), "utf8");
 
-test("v2：URL 的 prepTab 优先，面试在明天之内默认打开临场卡（底下是纵览）；切换标签与关掉临场卡都写回 URL；纵览顶部渲染本轮提醒", () => {
+test("v2：正文标签使用独立 URL 参数，切换标签写回 URL，纵览接收本轮提醒", () => {
   assert.match(v2, /get\("prepTab"\)/);
   assert.doesNotMatch(v2, /get\("section"\)|set\("section"/, "不能占用殻的 ?section=");
-  assert.match(v2, /tab: imminent \|\| doc\.replayOf \? "overview" : "company", stage: imminent && hasStageLines/);
-  assert.doesNotMatch(v2, /params\.delete\("prepTab"\)/, "公司总览也要写进 URL，否则面试当天刷新会再弹临场卡");
+  assert.doesNotMatch(v2, /params\.delete\("prepTab"\)/, "公司总览也要写进 URL，刷新后保持所选标签");
   assert.match(v2, /rememberTab\(next\)/);
-  assert.match(v2, /onClose=\{closeStage\}/);
   assert.match(v2, /briefing\?: ReactNode/);
 });
 

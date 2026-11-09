@@ -81,6 +81,15 @@
 .co-external { border-top: 1px solid var(--co-line); padding-top: 20px; scroll-margin-top: 110px; }
 .company-overview.co-view-reviews { padding-top: 0; }
 .co-view-reviews > .co-external { border-top: 0; padding-top: 0; }
+.co-view-story .co-company-facts { border-top: 0; padding: 0 0 14px; }
+.co-view-story .co-company-summary { padding: 14px 0 12px; }
+.co-view-story .co-summary-prose { max-width: 88ch; }
+.co-view-story .co-fact-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: 12px 20px; }
+.co-view-story .co-fact-grid dt { font-size: .8125rem; }
+.co-view-story .co-more-facts { margin-top: 8px; font-size: .8125rem; }
+.co-view-story .co-more-facts[open] > summary { margin-bottom: 8px; }
+.co-fit-disclosure { border-block: 1px solid var(--co-line); }
+.co-fit-disclosure > summary { padding-block: 8px; font-weight: 650; }
 .co-review-synthesis { margin-bottom: 24px; padding: 16px 20px; border-left: 3px solid var(--co-green); background: var(--surface-recessed, var(--paper)); }
 .co-review-synthesis > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 20px; margin-bottom: 10px; }
 .co-review-synthesis h3 { margin: 0; color: var(--co-green); font-size: 13px; font-weight: 650; }
@@ -187,7 +196,6 @@
 .session-v2:has(.v2-nav-three) .co-context-trigger-label { white-space: nowrap; }
 
 .session-v2:has(.v2-nav-three) .v2-logistics { padding-bottom: 12px; gap: 8px 16px; font-size: 13px; }
-.session-v2:has(.v2-nav-three) .v2-nav [role="tab"] { padding-top: 12px; padding-bottom: 10px; }
 
 .session-v2 .v2-logistics .co-compare-toggle { margin-left: auto; }
 .session-v2 .v2-logistics .co-compare-toggle + .v2-meeting { margin-left: 0; }

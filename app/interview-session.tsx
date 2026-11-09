@@ -52,6 +52,7 @@ import PrepMaterialReader from "./prep-material-reader";
 import InterviewSessionV2 from "./interview-session-v2";
 import { buildCompanyOverviews, resolveCompanyOverviewFrom, type CompanyOverview } from "@/lib/company-overview";
 import CompanyOverviewContent from "./company-overview";
+import { prepOpeningSources } from "@/lib/interview-prep-v2";
 import ContextPicker from "./context-picker";
 import CompanyHeroCard from "./company-hero";
 import { buildContextPickerGroups } from "@/lib/context-picker";
@@ -1352,8 +1353,11 @@ function InterviewSession({
   if (selected && (selected.prepVersion === 2 || showingReplay)) {
     const shown = showingReplay && replay ? replay : selected;
     const shownSources = shown === selected ? externalLinks : mergePrepExternalLinks(sourceDocs.map((doc) => doc === selected ? shown : doc));
+    const jobCase = shown.replayOf ? null : context?.kind === "case" ? context.note : linkedCase;
+    const companyEvidence = shown.replayOf ? [] : [...(context?.summary?.sources ?? []), ...(context?.profile?.facts.flatMap((fact) => fact.sources) ?? [])];
     return <><InterviewSessionV2 key={shown.note.path} doc={shown} series={series} selectedSeries={selectedSeries}
       sources={shownSources} today={today} onSelect={selectDoc} onOpen={onOpen} onOpenWiki={onOpenWiki}
+      openingSources={prepOpeningSources(shownSources, getString(jobCase?.frontmatter.url), companyEvidence, shown.externalLinks)} jobCase={jobCase}
       chatRevision={chatRevision}
       onOpenCard={onOpenCard} onOpenAsset={onOpenAsset}
       companyOverview={(onOpenReviews) => <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} view="story" onOpenReviews={onOpenReviews} />}
