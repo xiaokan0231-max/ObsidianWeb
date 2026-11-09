@@ -120,8 +120,8 @@
 .session-v2 .v2-toc[data-indicator="ready"] a[aria-current] { border-left-color: transparent; }
 .session-v2 .v2-nav [role="tab"] { transition: color var(--dur-fast) var(--ease-out); }
 
-/* 切标签：正文区以 key 重挂，淡入即可（位移会和刚恢复的滚动位置打架）。 */
-.session-v2 #v2-panel { animation: fade-in var(--dur-base) var(--ease-out); }
+/* 首屏资料直接可读，其他标签切换时保留淡入。 */
+.session-v2 #v2-panel:where(:not(.v2-story-panel)) { animation: fade-in var(--dur-base) var(--ease-out); }
 .session-v2 .v2-quick .v2-stage-entry { border-style: dashed; }
 
 /*

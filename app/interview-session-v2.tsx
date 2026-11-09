@@ -302,7 +302,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
         const overview = document.getElementById("v2-interview-overview");
         overview?.focus({ preventScroll: true });
         overview?.scrollIntoView({ block: "start", behavior: "instant" });
-      }}>{t("完整岗位与面试分析")} <span aria-hidden="true">↓</span></a>
+      }} className="v2-analysis-link">{t("完整岗位与面试分析")} <span aria-hidden="true">↓</span></a>
     </div>
   </div>;
   const overviewBody = <section className="v2-body v2-story-overview" id="v2-interview-overview" aria-labelledby="v2-overview-heading" tabIndex={-1}>
@@ -336,8 +336,8 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
       {doc.replayOf && <p className="v2-replay-note">{t("对照样稿：按 {date} 以前能拿到的信息重写，不是当时的准备稿；文末「对照」一节写当时实际发生了什么。", { date: doc.replayAsOf || doc.date })}</p>}
       <div className="v2-job-summary">
         <dl className="v2-job-facts">
-          <div><dt>{t("岗位")}</dt><dd>{position || t("岗位未记录")}</dd></div>
-          {!doc.replayOf && <div><dt>{t("求人年收")}</dt><dd title={jobCard?.salaryText || undefined}>{advertisedSalary || t("年收未记录")}</dd></div>}
+          <div className="v2-job-role"><dt>{t("岗位")}</dt><dd>{position || t("岗位未记录")}</dd></div>
+          {!doc.replayOf && <div className="v2-job-pay" data-known={jobCard?.salary.min != null}><dt>{t("求人年收")}</dt><dd title={jobCard?.salaryText || undefined}>{advertisedSalary || t("年收未记录")}</dd></div>}
         </dl>
         <section className="v2-job-posting" aria-labelledby="v2-job-heading">
           <h2 id="v2-job-heading">{t("求人票")}</h2>
