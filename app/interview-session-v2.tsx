@@ -7,6 +7,7 @@ import { PREP_V2_REPLAY_COMPARISON_TITLE, PREP_V2_SECTIONS, getPrepV2Section, pr
 import { prepOpeningSources, prepSourceHost, prepV2BlockLinks, prepV2Overview, prepV2StageSections } from "@/lib/interview-prep-v2";
 import { selectRelevantInterviewPrepDoc, type InterviewPrepSeries } from "@/lib/interview-prep-index";
 import { companyMotivationAssetTarget, type SharedAssetTarget } from "@/lib/interview-shared-assets";
+import { salaryLabel, toJobCard } from "@/lib/jobs";
 import { noteBasename, type Note } from "@/lib/notes";
 import { Blocks } from "./prep-doc-render";
 import { copySelectionWithoutRuby } from "./ruby-copy";
@@ -37,7 +38,12 @@ const V2_COPY_JA: Record<string, string> = {
   "面试故事": "面接ストーリー",
   "外部评价": "外部評価",
   "面谈锦囊": "面接ツール",
-  "本轮面试": "今回の面接",
+  "本轮岗位与面试分析": "今回のポジションと面接の分析",
+  "完整岗位与面试分析": "ポジションと面接の分析を読む",
+  "岗位": "職種",
+  "岗位未记录": "職種未登録",
+  "求人年收": "求人票の年収",
+  "年收未记录": "年収未登録",
   "求人票": "求人票",
   "公司官网与资料": "会社サイト・関連資料",
   "未收录求人票直链": "求人票の直リンク未登録",
@@ -170,6 +176,9 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   const railRef = useRef<HTMLElement>(null);
   const positionsRef = useRef<Partial<Record<SectionId, number>>>({});
   const overview = useMemo(() => prepV2Overview(doc), [doc]);
+  const jobCard = jobCase && !doc.replayOf ? toJobCard(jobCase) : null;
+  const position = overview.position || jobCard?.position;
+  const advertisedSalary = jobCard && (jobCard.salary.min !== null || jobCard.salaryText.trim()) ? salaryLabel(jobCard) : "";
   // 对照样稿文末的对照节写的是面试后才知道的事，放在面谈纵览最上面，不混进按面试前信息写的五章。
   const comparison = doc.replayOf ? doc.sections.find((item) => item.title === PREP_V2_REPLAY_COMPARISON_TITLE) ?? null : null;
   // 对照样稿不在轮次列表里，下拉仍停在它所对照的那一轮。
@@ -282,28 +291,27 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   const additionalSources = [...job.slice(2), ...company.slice(3), ...other];
   const openingLink = (link: PrepExternalLink) => <a key={link.href} href={link.href} title={prepSourceHost(link.href)} target="_blank" rel="noopener noreferrer">{t(link.label.replace(/^★\s*/, ""))} <span aria-hidden="true">↗</span></a>;
   const opening = <div className="v2-opening">
-    <section className="v2-opening-row" aria-labelledby="v2-job-heading">
-      <h2 id="v2-job-heading">{t("求人票")}</h2>
-      <div className="v2-opening-links">{job.length ? job.slice(0, 2).map(openingLink) : <span>{t("未收录求人票直链")}</span>}
-        {jobCase && <button type="button" onClick={() => { savePosition(); onOpen(jobCase); }}>{t("打开案件记录")} <span aria-hidden="true">↗</span></button>}
-      </div>
-    </section>
     <section className="v2-opening-row" aria-labelledby="v2-company-links-heading">
       <h2 id="v2-company-links-heading">{t("公司官网与资料")}</h2>
       <div className="v2-opening-links">{company.length ? company.slice(0, 3).map(openingLink) : <span>{t("未收录公司资料链接")}</span>}</div>
     </section>
     <div className="v2-opening-actions">
       {additionalSources.length > 0 && <details><summary>{t("更多资料（{count}）", { count: additionalSources.length })}</summary>{sourceList(additionalSources)}</details>}
-      <a href="#v2-interview-overview" onClick={(event) => { event.preventDefault(); document.getElementById("v2-interview-overview")?.scrollIntoView({ block: "start", behavior: "instant" }); }}>{t("本轮面试")} <span aria-hidden="true">↓</span></a>
+      <a href="#v2-interview-overview" onClick={(event) => {
+        event.preventDefault();
+        const overview = document.getElementById("v2-interview-overview");
+        overview?.focus({ preventScroll: true });
+        overview?.scrollIntoView({ block: "start", behavior: "instant" });
+      }}>{t("完整岗位与面试分析")} <span aria-hidden="true">↓</span></a>
     </div>
   </div>;
-  const overviewBody = <section className="v2-body v2-story-overview" id="v2-interview-overview">
+  const overviewBody = <section className="v2-body v2-story-overview" id="v2-interview-overview" aria-labelledby="v2-overview-heading" tabIndex={-1}>
     {briefing}
     {comparison && <section className="v2-replay-comparison" aria-labelledby="v2-replay-comparison-title"><h2 id="v2-replay-comparison-title">{comparison.title}</h2><Blocks blocks={comparison.blocks} refs={refs} idPrefix="v2-replay-cmp" /></section>}
-    <header className="v2-section-head"><h2>{t("本轮面试")}</h2><button type="button" onClick={() => { savePosition(); setReading("section"); }}>{t("专注阅读")}</button></header>
+    <header className="v2-section-head"><h2 id="v2-overview-heading">{t("本轮岗位与面试分析")}</h2><button type="button" onClick={() => { savePosition(); setReading("section"); }}>{t("专注阅读")}</button></header>
     {overview.blocks.length ? <Blocks blocks={overview.blocks} refs={refs} idPrefix="session-v2-overview" /> : <p className="v2-empty">{menu("本轮没有需要补充的内容，可从回答库打开共用话术。")}</p>}
   </section>;
-  const readingTitle = primary === "story" ? t("本轮面试") : section?.title ?? t("临场备用");
+  const readingTitle = primary === "story" ? t("本轮岗位与面试分析") : section?.title ?? t("临场备用");
 
   return <div className="session-v2" onCopy={copySelectionWithoutRuby}>
     <header className="v2-header" ref={headerRef}>
@@ -312,7 +320,6 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
           {doc.replayOf ? <><b className="v2-replay-badge">{t("对照样稿")}</b>{doc.replayAsOf && <span className="v2-replay-asof">{t("信息截至 {date}", { date: doc.replayAsOf })}</span>}</>
             : countdown && <b className={`v2-countdown ${countdown.tone}`}>{countdownText}</b>}</p>
         <h1>{doc.company || doc.title}</h1>
-        {overview.position && <p className="v2-position">{overview.position}</p>}
       </div>
       <div className="v2-switches">
         {contextPicker || <label>{t("公司／案件")}<select aria-label={t("切换公司、案件或面谈")} value={selectedSeries?.key ?? ""} onChange={(event) => {
@@ -327,6 +334,18 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
         {companyAction}
       </div>
       {doc.replayOf && <p className="v2-replay-note">{t("对照样稿：按 {date} 以前能拿到的信息重写，不是当时的准备稿；文末「对照」一节写当时实际发生了什么。", { date: doc.replayAsOf || doc.date })}</p>}
+      <div className="v2-job-summary">
+        <dl className="v2-job-facts">
+          <div><dt>{t("岗位")}</dt><dd>{position || t("岗位未记录")}</dd></div>
+          {!doc.replayOf && <div><dt>{t("求人年收")}</dt><dd title={jobCard?.salaryText || undefined}>{advertisedSalary || t("年收未记录")}</dd></div>}
+        </dl>
+        <section className="v2-job-posting" aria-labelledby="v2-job-heading">
+          <h2 id="v2-job-heading">{t("求人票")}</h2>
+          <div className="v2-opening-links">{job.length ? job.slice(0, 2).map(openingLink) : <span>{t("未收录求人票直链")}</span>}
+            {jobCard && <button type="button" onClick={() => { savePosition(); onOpen(jobCard.note); }}>{t("打开案件记录")} <span aria-hidden="true">↗</span></button>}
+          </div>
+        </section>
+      </div>
       <div className="v2-logistics"><time>{overview.dateTime || menu("日程待定")}</time>
         {doc.format && <span>{doc.format}</span>}
         {overview.place && overview.place !== doc.format && overview.place !== "进入会议" && <span>{overview.place}</span>}
@@ -374,7 +393,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
       </aside>}
       </>}
       {chatRevision && chatEnabled && chatOpen !== null && <InterviewAiChat key={`${doc.note.path}:${chatRevision}`} id={chatId}
-        open={showingChat} path={doc.note.path} revision={chatRevision} scope={[doc.company || doc.title, overview.position, doc.round].filter(Boolean).join(" · ")}
+        open={showingChat} path={doc.note.path} revision={chatRevision} scope={[doc.company || doc.title, position, doc.round].filter(Boolean).join(" · ")}
         onClose={() => { setChatOpen(false); chatButtonRef.current?.focus(); }} />}
     </div>
     {reading === "section" && <PrepMaterialReader prepVersion={2} documentKey={`${doc.note.path}:${readingSectionId}`} title={readingTitle} sections={[{ id: section?.id ?? readingSectionId, title: readingTitle, blocks }]} onClose={() => setReading(null)} onOpenWiki={refs.onOpenWiki} onOpenCard={refs.onOpenCard} />}

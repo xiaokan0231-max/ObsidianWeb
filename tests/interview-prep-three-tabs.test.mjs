@@ -22,6 +22,12 @@ const content = `# 株式会社テスト 面接準備
 
 本轮纵览正文独有：说明这次交流要解决的问题。
 
+### 岗位与面试分析
+
+岗位分析正文独有：先区分该岗位的公开职责与首个实际项目，再用既有工作经历说明能承担的交付范围。
+
+面试分析收尾独有：最后根据对方回答判断何时能参与设计、由谁审查，以及入职后第一件要交付的工作。
+
 ## 志望動機
 
 ### 20秒版
@@ -56,6 +62,11 @@ const note = {
 };
 const doc = parseInterviewPrepDoc(note, []);
 assert.ok(doc);
+const caseContent = "# 株式会社テスト — 案件原文の職位\n";
+const jobCase = {
+  path: "20_求職/テスト/案件.md", content: caseContent, tags: [], stat: { ctime: 0, mtime: 0, size: caseContent.length },
+  frontmatter: { type: "job-case", company: "株式会社テスト", salary: "月給30万円", salary_min: 430, salary_max: 590, url: "https://example.com/apply/42" },
+};
 const carried = { label: "前轮保留来源", href: "https://example.com/previous-research", group: "前轮", starred: false };
 const baseProps = {
   doc, series: [], selectedSeries: null, sources: [...doc.externalLinks, carried], today: "2026-10-25",
@@ -130,20 +141,44 @@ test("面试故事合并公司故事和本轮纵览，并给公司组件传入�
   assert.doesNotMatch(body, /外部评价正文独有|动机正文独有|逆質問正文独有|研究正文独有/);
 });
 
-test("默认面试故事先显示求人票直链，再显示公司官网和博客，最后阅读公司及本轮正文", async () => {
-  const html = await render();
+test("默认首屏把本场岗位、案件求人年收和求人票直链放在公司资料之前", async () => {
+  const html = await render("", { jobCase });
   assertTabs(html, "story");
+  const header = html.match(/<header\b[^>]*\bclass="v2-header"[^>]*>([\s\S]*?)<\/header>/)?.[1];
+  assert.ok(header);
+  assert.match(header, /岗位[\s\S]*テスト・データ基盤[\s\S]*求人年收[\s\S]*430[〜～–-]590万[\s\S]*href="https:\/\/example.com\/jobs\/42"/);
+  assert.doesNotMatch(header, /案件原文の職位|href="https:\/\/example.com\/apply\/42"/);
   const body = panel(html);
-  const job = body.match(/<section[^>]+aria-labelledby="v2-job-heading"[^>]*>([\s\S]*?)<\/section>/)?.[1];
   const company = body.match(/<section[^>]+aria-labelledby="v2-company-links-heading"[^>]*>([\s\S]*?)<\/section>/)?.[1];
-  assert.ok(job);
   assert.ok(company);
-  assert.match(job, /href="https:\/\/example.com\/jobs\/42"[^>]*>本次求人票/);
   assert.match(company, /href="https:\/\/example.com\/company"[^>]*>公司官网/);
   assert.match(company, /href="https:\/\/example.com\/blog\/platform"[^>]*>技术博客/);
-  assert.ok(body.indexOf(job) < body.indexOf(company));
+  assert.ok(html.indexOf(header) < html.indexOf(company));
   assert.ok(body.indexOf(company) < body.indexOf("公司故事正文独有"));
   assert.ok(body.indexOf("公司故事正文独有") < body.indexOf("本轮纵览正文独有"));
+});
+
+test("准备稿未填岗位时沿用对应案件标题，不显示公司名冒充岗位", async () => {
+  const withoutPosition = parseInterviewPrepDoc({ ...note, content: content.replace(/^\| 岗位 \|.*\n/m, "") }, []);
+  assert.ok(withoutPosition);
+  const html = await render("", { doc: withoutPosition, jobCase });
+  assert.match(html, /岗位[\s\S]*案件原文の職位[\s\S]*430[〜～–-]590万/);
+});
+
+test("无对应案件时提示年收未记录，历史对照稿不借用现行案件年收", async () => {
+  const unlinked = await render();
+  assert.match(unlinked, /求人年收[\s\S]*年收未记录/);
+  const replay = await render("", { doc: { ...doc, replayOf: "面接準備_s01" }, jobCase });
+  assert.doesNotMatch(replay, /求人年收|430[〜～–-]590万|打开案件记录/);
+});
+
+test("完整岗位与面试分析有明确入口，正文保留分析和收尾段", async () => {
+  const html = await render();
+  assert.match(html, /<a\b[^>]*href="#v2-interview-overview"[^>]*>[^<]*完整岗位与面试分析/);
+  const body = panel(html);
+  const overview = body.slice(body.indexOf('id="v2-interview-overview"'));
+  assert.match(overview, /本轮纵览正文独有[\s\S]*岗位分析正文独有[\s\S]*面试分析收尾独有/);
+  assert.doesNotMatch(overview, /<details\b[^>]*>[\s\S]*岗位分析正文独有[\s\S]*<\/details>/);
 });
 
 test("外部评价独立显示传入内容，不混公司故事、纵览或锦囊正文", async () => {

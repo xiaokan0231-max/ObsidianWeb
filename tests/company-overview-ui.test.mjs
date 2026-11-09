@@ -319,17 +319,21 @@ function storyAndReviewContext() {
   return item;
 }
 
-test("故事模式先显示公司规模和业务，契合画像按需展开，外部评价详情由独立入口承接", () => {
+test("故事模式先显示公司规模和业务，完整呈现公司故事与岗位分析，仅六维评分折叠", () => {
   const item = storyAndReviewContext();
   item.profile.facts.push({ id: "employees", label: "员工规模", value: "120人", asOf: "2026-01-03", scope: "公司公开资料", sources: [] });
+  item.assessment.questions.push("首项交付是什么", "由谁做设计评审", "工作地点如何确定");
   const html = render(components.default, { context: item, view: "story", onOpenWiki() {}, onOpenReviews() {} });
   assert.match(html, /class="company-overview co-view-story"/);
-  assert.match(html, /数据平台岗位的独立判断/);
-  assert.match(html, /企业业务故事/);
-  assert.match(html, /公司故事里原有的员工观察仍完整保留/);
   assert.match(html, /员工规模[\s\S]*120人[\s\S]*业务软件开发[\s\S]*企业业务故事/);
-  assert.match(html, /<details class="co-fit-disclosure"><summary>岗位契合与六维依据<\/summary>[\s\S]*class="co-radar"/);
-  assert.ok(html.indexOf("企业业务故事") < html.indexOf("岗位契合与六维依据"));
+  assert.match(html, /<div class="co-summary-prose">[\s\S]*企业业务故事[\s\S]*公司故事里原有的员工观察仍完整保留[\s\S]*?<\/div>/);
+  assert.doesNotMatch(html, /co-summary-continuation|co-more-questions/);
+  const disclosure = html.indexOf('<details class="co-fit-disclosure">');
+  assert.ok(disclosure > 0);
+  const visible = html.slice(0, disclosure);
+  assert.match(visible, /数据平台岗位的独立判断[\s\S]*发挥已有经验[\s\S]*实际职责待确认[\s\S]*工作地点如何确定/);
+  assert.doesNotMatch(visible, /co-radar|co-dimensions/);
+  assert.match(html.slice(disclosure), /^<details class="co-fit-disclosure"><summary>六维评分与依据<\/summary>[\s\S]*class="co-radar"[\s\S]*class="co-dimensions"/);
   assert.match(html, /<button type="button">查看外部评价 →<\/button>/);
   assert.doesNotMatch(html, /class="co-external"|class="co-review-synthesis"|class="co-review-platform"|员工评价的总体综合判断|3\.7<small>/);
   assert.doesNotMatch(html, /href="#[^"]+-reviews"/);

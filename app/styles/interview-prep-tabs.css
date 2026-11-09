@@ -90,6 +90,18 @@
 .session-v2 .v2-nav-utilities .v2-stage-nav { color: var(--v2-accent); font-weight: 650; }
 .session-v2 .v2-nav-utilities button:hover { color: var(--ink); background: var(--surface-sunken); border-radius: 4px; }
 
+.session-v2 .v2-job-summary,
+.session-v2 .v2-job-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 24px; }
+.session-v2 .v2-job-summary { grid-column: 1 / -1; font-size: .875rem; }
+.session-v2 .v2-job-facts { margin: 0; }
+.session-v2 .v2-job-facts > div,
+.session-v2 .v2-job-posting { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.session-v2 .v2-job-facts dt,
+.session-v2 .v2-job-posting h2 { margin: 0; color: var(--text-secondary); font-size: inherit; font-weight: 500; white-space: nowrap; }
+.session-v2 .v2-job-facts dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.session-v2 .v2-job-facts > div:first-child dd { font-size: .9375rem; }
+.session-v2 .v2-job-facts > div + div dd { font-variant-numeric: tabular-nums; }
+
 .session-v2 .v2-opening { padding: 8px 0 4px; border-bottom: 1px solid var(--v2-line); }
 .session-v2 .v2-opening-row {
   display: grid;
@@ -120,7 +132,7 @@
 .session-v2 .v2-opening-links :is(a, button):hover,
 .session-v2 .v2-opening-actions :is(a, summary):hover { color: var(--v2-ink); }
 .session-v2 .v2-opening-actions { display: flex; align-items: baseline; gap: 18px; font-size: .8125rem; }
-.session-v2 .v2-opening-actions > a { margin-left: auto; flex-shrink: 0; }
+.session-v2 .v2-opening-actions > a { margin-left: auto; flex-shrink: 0; font-weight: 650; }
 .session-v2 .v2-opening-actions details { min-width: 0; }
 .session-v2 .v2-opening-actions summary { cursor: pointer; color: var(--v2-muted); }
 .session-v2 .v2-opening-actions summary:focus-visible { outline: 2px solid var(--v2-accent); outline-offset: 4px; }

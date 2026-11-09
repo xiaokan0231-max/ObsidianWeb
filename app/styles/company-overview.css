@@ -88,8 +88,11 @@
 .co-view-story .co-fact-grid dt { font-size: .8125rem; }
 .co-view-story .co-more-facts { margin-top: 8px; font-size: .8125rem; }
 .co-view-story .co-more-facts[open] > summary { margin-bottom: 8px; }
-.co-fit-disclosure { border-block: 1px solid var(--co-line); }
+.co-view-story .co-fit-brief { max-width: 920px; }
+.co-fit-disclosure { margin-top: 16px; border-block: 1px solid var(--co-line); }
 .co-fit-disclosure > summary { padding-block: 8px; font-weight: 650; }
+.co-fit-disclosure .co-fit-chart { max-width: 276px; padding-left: 0; border-left: 0; }
+.co-fit-disclosure .co-footnote { margin-bottom: 12px; }
 .co-review-synthesis { margin-bottom: 24px; padding: 16px 20px; border-left: 3px solid var(--co-green); background: var(--surface-recessed, var(--paper)); }
 .co-review-synthesis > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 20px; margin-bottom: 10px; }
 .co-review-synthesis h3 { margin: 0; color: var(--co-green); font-size: 13px; font-weight: 650; }
@@ -184,7 +187,6 @@
 .session-v2:has(.v2-nav-three) .v2-header { grid-template-columns: minmax(0,1fr) auto; gap: 10px 24px; }
 .session-v2:has(.v2-nav-three) .v2-kicker { margin-bottom: 6px; }
 .session-v2:has(.v2-nav-three) h1 { font-size: clamp(28px,2.4vw,34px); }
-.session-v2:has(.v2-nav-three) .v2-position { margin-top: 6px; }
 /* 社名、岗位和日期已在标题与日程行呈现；选择按钮保留操作名，避免再占三行。 */
 .session-v2:has(.v2-nav-three) .v2-switches { display: flex; flex-wrap: wrap; align-items: center; align-content: start; justify-content: flex-end; gap: 7px; max-width: 480px; }
 .session-v2:has(.v2-nav-three) .v2-switches > label { flex-basis: 100%; }

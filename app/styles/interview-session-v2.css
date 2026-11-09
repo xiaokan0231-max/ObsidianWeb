@@ -20,7 +20,6 @@
 .session-v2 .v2-kicker { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 10px; font-size: .8125rem; font-weight: 700; color: var(--v2-accent); }
 .session-v2 .v2-kicker span { font-weight: 400; color: var(--v2-muted); }
 .session-v2 h1 { margin: 0; font-size: clamp(1.65rem, 2.8vw, 2.35rem); line-height: 1.2; letter-spacing: -.025em; font-weight: 650; overflow-wrap: anywhere; }
-.session-v2 .v2-position { margin: 10px 0 0; font-size: .9375rem; line-height: 1.6; color: var(--v2-muted); }
 .session-v2 .v2-switches { display: grid; gap: 10px; align-content: start; }
 .session-v2 .v2-switches label { display: grid; gap: 5px; font-size: .8125rem; color: var(--v2-muted); }
 .session-v2 .v2-switches select { min-width: 0; width: 100%; min-height: 38px; background: transparent; border: 1px solid var(--v2-line); border-radius: 5px; padding: 7px 10px; font-size: .875rem; }
