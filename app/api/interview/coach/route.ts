@@ -5,7 +5,7 @@ import { readModelHash } from "@/lib/server/read-model-build";
 import { RequestRejectedError } from "@/lib/server/write-guards";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
-type CoachInput = { action?: unknown; path?: unknown; revision?: unknown; digest?: unknown; messages?: unknown };
+type CoachInput = { action?: unknown; path?: unknown; revision?: unknown; digest?: unknown; messages?: unknown; includePrivatePrep?: unknown };
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 function reply(body: unknown, status = 200) {
@@ -35,15 +35,19 @@ export async function POST(request: Request) {
     if (!input || (input.action !== "preview" && input.action !== "chat")) throw badRequestError("请求操作无效。");
     const path = parseRequiredText(input.path, "面试准备稿");
     const revision = parseRequiredText(input.revision, "资料版本");
+    if (input.includePrivatePrep !== undefined && typeof input.includePrivatePrep !== "boolean") {
+      throw badRequestError("准备资料的发送范围无效。");
+    }
+    const includePrivatePrep = input.includePrivatePrep === true;
     const messages = input.action === "chat" ? chatMessages(input.messages) : null;
     if (!messages) {
       const status = await interviewChatBridge<{ configured: boolean }>({ method: "GET" });
       if (!status.configured) return reply({ error: "本机尚未配置面试对话的 OpenAI Key。" }, 503);
     }
 
-    const { sources, limited } = await readInterviewAiContext(path, revision);
-    const digest = await readModelHash(JSON.stringify({ path, revision, sources }));
-    if (!messages) return reply({ sources, digest, limited });
+    const { sources, limited, usingPrivatePrep } = await readInterviewAiContext(path, revision, includePrivatePrep);
+    const digest = await readModelHash(JSON.stringify({ path, revision, includePrivatePrep, sources }));
+    if (!messages) return reply({ sources, digest, limited, usingPrivatePrep });
     if (input.digest !== digest) return reply({ error: "面试资料已变化，请重新查看发送范围。" }, 409);
 
     const result = await interviewChatBridge<{ answer: string; evidenceIds: string[] }>({

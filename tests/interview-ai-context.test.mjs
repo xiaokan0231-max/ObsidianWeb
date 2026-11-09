@@ -22,6 +22,8 @@ function fixture(prep = note(prepPath, prepFrontmatter, `# 株式会社テスト
 
 ## 纵览与建议
 
+面试重点是说明如何用真实项目验证质量。
+
 ### 基本情報
 
 | 项目 | 内容 |
@@ -30,7 +32,7 @@ function fixture(prep = note(prepPath, prepFrontmatter, `# 株式会社テスト
 | 日時 | 虚构面谈时间 |
 | 場所 | [虚构会议](https://example.com/secret) |
 
-### 工作与机会
+### 这家公司的机会与我的切入点
 
 负责代码レビュー与质量监控，和[不外发的链接标题](https://example.com/jobs)有关。
 
@@ -46,6 +48,14 @@ function fixture(prep = note(prepPath, prepFrontmatter, `# 株式会社テスト
 
 嵌套标题下的私有文字。
 
+### 先读公司的故事与本轮人物
+
+这句人物信息只留在原笔记。
+
+### 团队现在要解决什么
+
+- 先把监控责任与告警流程拆开。
+
 ## 志望動機
 
 ### 20秒版（既定）
@@ -56,15 +66,59 @@ function fixture(prep = note(prepPath, prepFrontmatter, `# 株式会社テスト
 
 【あなた】另一个话题的非选中答案。
 
+## 逆質問
+
+### 面接官研究
+
+【あなた】单独人物台词。
+
+### 1. 〔事业课题型〕质量标准
+
+【あなた】御社の品質基準はどのように決めていますか。
+
+【面接官】反向提问模拟回答。
+
+【あなた】追问题也暂不选中。
+
+### 2. 〔确认型〕薪酬条件
+
+【あなた】这个主问题不进入对话。
+
+### 4. 备用｜〔经验连接型〕临场补问
+
+【あなた】备用问题也不进入对话。
+
 ## 研究资料
 
 全量资料没有选中。
 
 ## 临场备用
 
+### 本場の規律
+
+- 先用一句话回答结论。
+
 ### HR事実カード
 
 绝密本人事实。
+
+### 本場の懸念 TOP3 と先回り一言
+
+#### 1. 质量责任范围
+
+【あなた】品質監視の設計から障害対応まで担当しました。
+
+#### 2. 在留
+
+【あなた】不外发的临场口径。
+
+### 締めの一言
+
+【あなた】御社の品質改善に貢献したいと考えています。
+
+#### 当日お礼メッセージ
+
+【あなた】私有感谢草稿。
 `)) {
   const summary = note(summaryPath, {
     type: "ai-report", report_kind: "company-summary", schema_version: 1, assessed_on: "2026-10-15",
@@ -123,22 +177,37 @@ test("只使用同版当前案件的业务总结、当前轮准备片段与简�
   const sources = reader(fixture());
   const context = await resolveInterviewAiContext(prepPath, sources);
   assert.equal(context.limited, false);
+  assert.equal(context.usingPrivatePrep, false);
   assert.deepEqual(sources.reads, [prepPath, casePath, summaryPath]);
-  assert.deepEqual(context.sources.map((item) => item.id), ["scope", "company", "role", "motivation"]);
+  assert.deepEqual(context.sources.map((item) => item.id), ["scope", "company", "role", "motivation", "questions", "preparation"]);
   const outbound = JSON.stringify(context.sources);
   assert.match(outbound, /株式会社テスト · 一次面接/);
   assert.match(outbound, /向零售客户提供报表平台/);
   assert.match(outbound, /数据质量工程师.*代码レビュー与质量监控/);
+  assert.match(outbound, /用真实项目验证质量/);
+  assert.match(outbound, /监控责任与告警流程/);
   assert.match(outbound, /データ品質の改善に取り組みたい/);
-  assert.doesNotMatch(outbound, /绝密|另一岗位|候选人私密|虚构会议|虚构面谈时间|不外发|嵌套标题|非选中|全量资料|example\.com|08012345678|jobtalk\.jp|\[\[/);
+  assert.match(outbound, /品質基準はどのように決めていますか/);
+  assert.match(outbound, /先用一句话回答结论/);
+  assert.match(outbound, /品質監視の設計から障害対応まで担当しました/);
+  assert.match(outbound, /御社の品質改善に貢献したい/);
+  assert.doesNotMatch(outbound, /绝密|另一岗位|候选人私密|虚构会议|虚构面谈时间|不外发|嵌套标题|非选中|全量资料|example\.com|08012345678|jobtalk\.jp|\[\[|人物信息|人物台词|模拟回答|追问题|这个主问题|备用问题|私有感谢/);
 });
 
 test("公司总结不可外发时只回退到业务事实", async () => {
   const data = fixture();
   data.summary.frontmatter.publish = false;
   const context = await resolveInterviewAiContext(prepPath, reader(data));
+  assert.equal(context.limited, true);
+  assert.equal(context.usingPrivatePrep, false);
   assert.equal(context.sources.find((source) => source.id === "company")?.excerpt, "主要业务：企业报表软件");
   assert.doesNotMatch(JSON.stringify(context.sources), /零售客户/);
+
+  const enabled = await resolveInterviewAiContext(prepPath, reader(data), true);
+  assert.equal(enabled.limited, true);
+  assert.equal(enabled.usingPrivatePrep, true);
+  assert.equal(enabled.sources.find((source) => source.id === "company")?.excerpt, "公司向零售客户提供报表平台。");
+  assert.doesNotMatch(JSON.stringify(enabled.sources), /评论正文|jobtalk/);
 });
 
 test("私有准备稿仅绑定本场，独立允许的公司总结可以使用", async () => {
@@ -146,6 +215,7 @@ test("私有准备稿仅绑定本场，独立允许的公司总结可以使用",
     "## 纵览与建议\n### 工作与机会\n不外发的岗位片段。"));
   const context = await resolveInterviewAiContext(prepPath, reader(data));
   assert.equal(context.limited, true);
+  assert.equal(context.usingPrivatePrep, false);
   assert.deepEqual(context.sources.map((source) => source.id), ["scope", "company"]);
   assert.equal(context.sources[0].excerpt, company);
   assert.match(context.sources[1].excerpt, /向零售客户提供报表平台/);
@@ -154,6 +224,25 @@ test("私有准备稿仅绑定本场，独立允许的公司总结可以使用",
   data.notes.find((item) => item.path === casePath).frontmatter.publish = false;
   const privateCase = await resolveInterviewAiContext(prepPath, reader(data));
   assert.deepEqual(privateCase.sources.map((source) => source.id), ["company"]);
+});
+
+test("明确选择后仅加入当前私有准备稿与安全摘要，私有卷宗仍不外发", async () => {
+  const prep = fixture().prep;
+  const data = fixture({ ...prep, frontmatter: { ...prep.frontmatter, publish: false } });
+  data.summary.frontmatter.publish = false;
+  data.notes.find((item) => item.path === dossierPath).frontmatter.publish = false;
+  data.notes.find((item) => item.path === casePath).frontmatter.publish = false;
+  const disabled = await resolveInterviewAiContext(prepPath, reader(data));
+  assert.deepEqual(disabled, { limited: true, usingPrivatePrep: false, sources: [] });
+
+  const enabled = await resolveInterviewAiContext(prepPath, reader(data), true);
+  assert.equal(enabled.limited, true);
+  assert.equal(enabled.usingPrivatePrep, true);
+  assert.deepEqual(enabled.sources.map((source) => source.id), ["scope", "company", "role", "motivation", "questions", "preparation"]);
+  const excerpts = JSON.stringify(enabled.sources);
+  assert.match(excerpts, /零售客户提供报表平台/);
+  assert.match(excerpts, /先用一句话回答结论/);
+  assert.doesNotMatch(excerpts, /企业报表软件|另一岗位|绝密|在留|样本|评论正文|jobtalk/);
 });
 
 test("没有可用资料时允许空来源，旧稿和对照稿仍拒绝", async () => {
@@ -172,5 +261,6 @@ test("没有可用资料时允许空来源，旧稿和对照稿仍拒绝", async
     const context = await resolveInterviewAiContext(prepPath, reader(empty));
     assert.equal(context.limited, !publish);
     assert.deepEqual(context.sources, []);
+    assert.deepEqual(await resolveInterviewAiContext(prepPath, reader(empty), true), context);
   }
 });

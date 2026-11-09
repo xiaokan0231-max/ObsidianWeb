@@ -16,7 +16,7 @@ Obsidian 是资料正本。Cloudflare D1 保存可重建的目录、关系、搜
 
 使用 `npm run dev`，它会启动持有本地凭据的 Node bridge。bridge 增量检测 Vault 文件变更，在宿主机生成索引，避免在 Worker 请求中复制整库正文。成功写回会精准失效受影响路径。未变正文按哈希复用；新索引可复用 D1 已完成版本中的内容块。
 
-本场面试的 AI 对话通过本机 bridge 请求 OpenAI。启动前可以在不入库的 `.env.coach.local` 配置 `INTERVIEW_CHAT_OPENAI_KEY_FILE`，指向当前用户拥有的私有 JSON 凭据文件（包含 `OPENAI_API_KEY` 字段），或通过运行环境提供 `OPENAI_API_KEY`。对话只在主动发送时传出页面预览中的资料片段和最近对话，结果留在当前页面。
+本场面试的 AI 对话通过本机 bridge 请求 OpenAI。启动前可以在不入库的 `.env.coach.local` 配置 `INTERVIEW_CHAT_OPENAI_KEY_FILE`，指向当前用户拥有的私有 JSON 凭据文件（包含 `OPENAI_API_KEY` 字段），或通过运行环境提供 `OPENAI_API_KEY`。对话只在主动发送时传出页面预览中的资料片段和最近对话，结果留在当前页面。当前准备稿及案件关联的公司总结若标记为仅本机，须在当前对话明确选择加入，才会发送预览中的选段。切换资料范围会开始新的对话，避免继续传送此前使用过的资料。
 
 `node scripts/warm-read-model.mjs` 会分批导入并验证索引。只有批次摘要、行数和内容引用都正确，版本才转为 ready；正在同步或失败时保留上一个完整版本，并返回同步状态。首次无完整版本时返回带 Retry-After 的 503，不返回假空列表。
 

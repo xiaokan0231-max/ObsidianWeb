@@ -6,6 +6,7 @@ const path = "面试准备/株式会社テスト-一面.md";
 const revision = "test-revision";
 const messages = [{ role: "user", content: "这家公司做什么？" }];
 const sources = [{ id: "company", label: "公司总结", excerpt: "株式会社テスト开发库存软件。" }];
+const prepSource = { id: "preparation", label: "本轮准备要点", excerpt: "准备说明自己负责的数据质量监控范围。" };
 
 function request(body, host = "localhost", site = "same-origin") {
   return new Request(`http://${host}/api/interview/coach`, {
@@ -28,13 +29,20 @@ test("本场对话只有在同源本机确认同版资料后才调用付费服�
       bridge.push(init);
       return init.method === "GET" ? { configured: true } : { answer: "开发库存软件。", evidenceIds: ["company"] };
     } },
-    "@/lib/server/interview-ai-context": { async readInterviewAiContext(prepPath, dataRevision) {
+    "@/lib/server/interview-ai-context": { async readInterviewAiContext(prepPath, dataRevision, includePrivatePrep) {
       assert.equal(dataRevision, revision);
-      return { sources: prepPath === path ? sources : [{ ...sources[0], excerpt: "另一家公司的资料。" }] };
+      return {
+        limited: true,
+        usingPrivatePrep: includePrivatePrep,
+        sources: prepPath === path
+          ? (includePrivatePrep ? [...sources, prepSource] : sources)
+          : [{ ...sources[0], excerpt: "另一家公司的资料。" }],
+      };
     } },
   } });
   assert.equal((await POST(request({ action: "preview" }, "example.test"))).status, 403);
   assert.equal((await POST(request({ action: "preview" }, "localhost", "cross-site"))).status, 403);
+  assert.equal((await POST(request({ action: "preview", includePrivatePrep: "true" }))).status, 400);
   assert.equal(bridge.length, 0);
 
   const preview = await POST(request({ action: "preview" }));
@@ -50,7 +58,20 @@ test("本场对话只有在同源本机确认同版资料后才调用付费服�
   assert.equal(answer.status, 200);
   assert.deepEqual(JSON.parse(bridge[1].body), { sources, messages });
   assert.deepEqual(await answer.json(), { answer: "开发库存软件。", evidenceIds: ["company"] });
+
+  const chosen = await (await POST(request({ action: "preview", includePrivatePrep: true }))).json();
+  assert.equal(chosen.limited, true);
+  assert.equal(chosen.usingPrivatePrep, true);
+  assert.deepEqual(chosen.sources, [...sources, prepSource]);
+  assert.notEqual(chosen.digest, digest);
+  assert.equal((await POST(request({ action: "chat", includePrivatePrep: true, digest, messages }))).status, 409);
+  assert.equal((await POST(request({ action: "chat", digest: chosen.digest, messages }))).status, 409);
+  assert.equal(bridge.length, 3);
+  const withPrep = await POST(request({ action: "chat", includePrivatePrep: true, digest: chosen.digest, messages }));
+  assert.equal(withPrep.status, 200);
+  assert.deepEqual(JSON.parse(bridge[3].body), { sources: chosen.sources, messages });
+
   process.env.OBSIDIAN_DATA_SOURCE = "published";
   assert.equal((await POST(request({ action: "chat", digest, messages }))).status, 403);
-  assert.equal(bridge.length, 2);
+  assert.equal(bridge.length, 4);
 });

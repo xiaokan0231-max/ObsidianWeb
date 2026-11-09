@@ -60,6 +60,23 @@
 .interview-chat p { margin: 0; }
 .interview-chat-header p, .interview-chat-status { color: var(--text-secondary); font-size: .8125rem; }
 
+.interview-chat-prep-scope {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--v2-line);
+}
+
+.interview-chat-prep-scope label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  font-weight: 600;
+}
+
+.interview-chat-prep-scope input { accent-color: var(--interactive-fill); }
+.interview-chat-prep-scope p { color: var(--text-secondary); font-size: .8125rem; }
+
 .interview-chat-scroll {
   min-height: 0;
   overflow-y: auto;
