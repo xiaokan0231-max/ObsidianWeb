@@ -31,7 +31,7 @@ export default async function AppSectionPage({
   const initialPulse = initialView === "calendar" ? await calendarInitialPulse(calendarInitialRange(search, today).month, today).catch(() => null) : null;
   // 使用索引的页面由自己的资源读取；只为仍读原 scope 的入口预取相同接口。
   const preload = initialView === "reading" ? "/api/read-model/library?q=type%3Alanguage-reading-list&group=all&scope=language&sort=recent&limit=24"
-    : ["calendar", "library", "session", "prep", "review", "insights", "practice"].includes(initialView) ? null
+    : ["calendar", "library", "graduate", "session", "prep", "review", "insights", "practice"].includes(initialView) ? null
     : `/api/vault?scope=${vaultScopeForView(initialView)}`;
   return <>
     {preload && <link rel="preload" as="fetch" href={preload} crossOrigin="anonymous" />}

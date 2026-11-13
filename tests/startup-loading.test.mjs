@@ -21,7 +21,7 @@ test("直达页面只为实际读取该接口的页面预取，索引页面不�
     const preload = tree.props.children.find((child) => child?.type === "link");
     const shell = tree.props.children.find((child) => child?.props.initialView);
     assert.equal(shell.props.initialView, view);
-    if (["calendar", "library", "session", "prep", "review", "insights", "practice"].includes(view)) {
+    if (["calendar", "library", "graduate", "session", "prep", "review", "insights", "practice"].includes(view)) {
       assert.equal(preload, undefined);
       assert.doesNotMatch(renderToStaticMarkup(tree), /\/api\/(?:calendar|vault)/);
       continue;

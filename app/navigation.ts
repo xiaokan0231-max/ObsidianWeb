@@ -12,11 +12,12 @@ import type { UiLocale } from "../lib/ui-locale.ts";
 export type PrimaryNavId =
   | "actions"
   | "career"
+  | "graduate"
   | "interview"
   | "training"
   | "resources"
   | "settings";
-export type NavIconName = "actions" | "career" | "interview" | "training" | "resources" | "settings";
+export type NavIconName = "actions" | "career" | "graduate" | "interview" | "training" | "resources" | "settings";
 
 export type PrimaryNavigationItem = {
   id: PrimaryNavId;
@@ -71,6 +72,15 @@ export const NAVIGATION: PrimaryNavigationItem[] = [
     target: "jobs",
     views: ["jobs", "analytics"],
   },
+  // 进学是和求职并行的另一条出路：招生期限只在本区出现，不并入求职选考和面试日历。
+  {
+    id: "graduate",
+    label: "大学院",
+    mobileLabel: "大学院",
+    glyph: "graduate",
+    target: "graduate",
+    views: ["graduate"],
+  },
   {
     id: "resources",
     label: "资料库",
@@ -121,6 +131,7 @@ export const SECONDARY_NAVIGATION: Partial<Record<PrimaryNavId, SecondaryNavigat
 const JAPANESE_PRIMARY_LABELS: Record<PrimaryNavId, { label: string; mobileLabel: string }> = {
   actions: { label: "カレンダー", mobileLabel: "予定" },
   career: { label: "就職活動", mobileLabel: "就活" },
+  graduate: { label: "大学院・編入", mobileLabel: "進学" },
   interview: { label: "面接対策", mobileLabel: "面接" },
   training: { label: "トレーニング", mobileLabel: "練習" },
   resources: { label: "資料ライブラリ", mobileLabel: "資料" },
@@ -132,6 +143,7 @@ const JAPANESE_SECONDARY_LABELS: Record<Exclude<AppView, "calendar">, string> = 
   activity: "最近の進展",
   jobs: "求人・応募先",
   analytics: "選考・分析",
+  graduate: "大学院・編入",
   session: "面接準備",
   prep: "基本の準備",
   review: "面接の振り返り",
@@ -206,6 +218,7 @@ const PAGE_COMMAND_HINTS: Record<AppView, { description: string; keywords: strin
   calendar: { description: "已约定的面试与面谈日程", keywords: "日历 首页 日程 安排 面试时间 home calendar schedule 予定 カレンダー" },
   jobs: { description: "判断下一项応募", keywords: "岗位 机会 求职 応募 求人 就職 就活 job" },
   analytics: { description: "选考进度、渠道与到达率", keywords: "选考 分析 进度 统计 漏斗 渠道 pipeline analytics progress 選考 応募状況" },
+  graduate: { description: "候选学校的修士与编入路线、招生期限和费用", keywords: "大学院 研究生 读研 修士 硕士 编入 插班 本科 候选学校 出愿 招生 期限 学费 备考 小论文 graduate school master transfer admission 進学 院試 編入 出願 学費 小論文" },
   session: { description: "当前这场面试的准备稿与话术", keywords: "本场 面试 当日 准备稿 session interview 面接 本番 志望動機 逆質問" },
   prep: { description: "通用回答库与标准答案", keywords: "通用 准备 回答库 标准答案 playbook prep answers 回答集 自己紹介" },
   review: { description: "面试复盘与待裁定的批注", keywords: "复盘 面试 裁定 批注 review 振り返り 反省" },
@@ -226,6 +239,7 @@ const JAPANESE_COMMAND_DESCRIPTIONS: Record<AppView, string> = {
   calendar: "確定した面接・面談の予定",
   jobs: "次の応募先を検討する",
   analytics: "選考の進捗・応募経路・通過率",
+  graduate: "候補校の修士・編入ルートと出願期限・学費",
   session: "今回の面接の準備メモ・回答例",
   prep: "共通の回答集・標準回答",
   review: "面接の振り返り・未確認のコメント",

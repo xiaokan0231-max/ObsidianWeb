@@ -108,6 +108,7 @@ const VIEW_MODULES = {
   language: createPreloadable(() => import("./japanese-training")),
   topics: createPreloadable(() => import("./language-expression-courses")),
   reading: createPreloadable(() => import("./reading-view")),
+  graduate: createPreloadable(() => import("./graduate-view")),
   analytics: createPreloadable(() => import("./jobs-analytics")),
   jobs: createPreloadable(() => import("./jobs-view")),
   graph: createPreloadable(() => import("./graph-view")),
@@ -123,6 +124,7 @@ const InterviewSession = lazy(VIEW_MODULES.session.load);
 const JapaneseTraining = lazy(VIEW_MODULES.language.load);
 const LanguageExpressionCourses = lazy(VIEW_MODULES.topics.load);
 const ReadingView = lazy(VIEW_MODULES.reading.load);
+const GraduateView = lazy(VIEW_MODULES.graduate.load);
 const JobsAnalytics = lazy(VIEW_MODULES.analytics.load);
 const JobsView = lazy(VIEW_MODULES.jobs.load);
 const GraphView = lazy(VIEW_MODULES.graph.load);
@@ -134,6 +136,12 @@ const ProgressWorkspace = lazy(PROGRESS_MODULE.load);
 const NoteDrawer = lazy(() => import("./note-drawer"));
 const SceneNoteReader = lazy(() => import("./scene-note-reader"));
 const InterviewSharedAsset = lazy(() => import("./interview-shared-asset"));
+
+/**
+ * 只从 D1 查询索引读目录、正文按需读取的页面：不加载整库 scope，刷新时推进 indexSeed 让页面重读同一接口。
+ * 大学院专区也在这里——候选表是索引投影，整库正文进来只会拖慢首屏。
+ */
+const INDEX_ONLY_VIEWS: ReadonlySet<AppView> = new Set<AppView>(["library", "reading", "graduate"]);
 
 /** 日历是外壳的静态依赖，不在表里；其余页面按需预取，失败留给页面自己的错误边界。 */
 function viewModule(view: AppView) {
@@ -164,6 +172,7 @@ function NavigationIcon({ name }: { name: NavIconName }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" focusable="false">
       {name === "actions" && <><rect x="4" y="5.5" width="16" height="15" rx="2" /><path d="M8 3.5v4M16 3.5v4M4 10.5h16M8 14h2M14 14h2M8 17h2" /></>}
       {name === "career" && <><path d="M4 8.5h16v10.8H4z" /><path d="M8.5 8.5V5.7h7v2.8M4 12.5c4.8 2 11.2 2 16 0M10.5 13.3h3" /></>}
+      {name === "graduate" && <><path d="M3.5 9.5 12 4.5l8.5 5" /><path d="M5.5 10.5v7M9.8 10.5v7M14.2 10.5v7M18.5 10.5v7M3.5 20h17" /></>}
       {name === "interview" && <><path d="M4 5.5h16v11H9l-5 3.2z" /><path d="M8 9.5h8M8 12.5h5" /></>}
       {name === "training" && <><path d="m3.5 7 8.5-3 8.5 3-8.5 3z" /><path d="M6.2 8.2v5.6c3.6 2.8 8 2.8 11.6 0V8.2M20.5 7v7" /></>}
       {name === "resources" && <><path d="M5 4.5h12a2 2 0 0 1 2 2V20H7a2 2 0 0 1-2-2z" /><path d="M7 4.5v15.5M10 8h6M10 11.5h6M10 15h4" /></>}
@@ -558,10 +567,10 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
   const calendarModel = calendarRead.model;
   const compactCalendar = view === "calendar";
   const loading = compactCalendar ? calendarRead.loading || !calendarRead.revision && !calendarRead.error
-    : indexedInterview ? !interviewRead.fetchedAt && !interviewRead.error : view === "library" || view === "reading" ? false
+    : indexedInterview ? !interviewRead.fetchedAt && !interviewRead.error : INDEX_ONLY_VIEWS.has(view) ? false
     : vaultState.loading || vaultState.readyScopes.size === 0 && vaultState.errors.size === 0;
   const activeScope = vaultScopeForView(view);
-  const error = compactCalendar ? calendarRead.error : indexedInterview ? interviewRead.error : view === "library" || view === "reading" ? "" : vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
+  const error = compactCalendar ? calendarRead.error : indexedInterview ? interviewRead.error : INDEX_ONLY_VIEWS.has(view) ? "" : vaultState.errors.get(activeScope) ?? vaultState.errors.get("all") ?? "";
   const [writeError, setWriteError] = useState("");
   // 撤销失败而它的提示已被新的一次写入顶掉时，理由落到全局的写入错误横幅上（见 useUndoFlash）。
   const reportStaleUndoFailure = useCallback((message: string) => setWriteError(`撤销没有完成：${message}`), [setWriteError]);
@@ -572,7 +581,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
   const readyScopes = vaultState.readyScopes;
   // 目录可能先到，完整场次首次到齐后再挂载；刷新空正文的复盘目录也不能卸载已打开的页面。
   const interviewScopeReady = indexedInterview ? Boolean(interviewRead.fetchedAt) : readyScopes.has("all") || readyScopes.has("interview");
-  const scopeReady = compactCalendar ? Boolean(calendarRead.revision) : indexedInterview ? Boolean(interviewRead.fetchedAt) : view === "library" || view === "reading" ? true : readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
+  const scopeReady = compactCalendar ? Boolean(calendarRead.revision) : indexedInterview ? Boolean(interviewRead.fetchedAt) : INDEX_ONLY_VIEWS.has(view) ? true : readyScopes.has("all") || readyScopes.has(vaultScopeForView(view));
   const actionsReady = readyScopes.has("all") || readyScopes.has("actions");
   const activityReady = readyScopes.has("all") || readyScopes.has("activity");
   const activityError = vaultState.errors.get("activity") ?? vaultState.errors.get("all") ?? "";
@@ -658,7 +667,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
       return;
     }
     if (["session", "prep", "review", "insights", "practice"].includes(currentView.current)) { await refreshInterview(); return; }
-    if (currentView.current === "library" || currentView.current === "reading") { setIndexSeed((seed) => seed + 1); return; }
+    if (INDEX_ONLY_VIEWS.has(currentView.current)) { setIndexSeed((seed) => seed + 1); return; }
     await vaultReader.request(options);
   }, [vaultReader, refreshCalendar, refreshInterview]);
 
@@ -976,7 +985,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
 
   useEffect(() => {
     // rAF は非アクティブなタブでは発火しないため timer で初回ロードする。
-    if (["calendar", "library", "reading", "session", "prep", "review", "insights", "practice"].includes(initialView)) return;
+    if (["calendar", "session", "prep", "review", "insights", "practice"].includes(initialView) || INDEX_ONLY_VIEWS.has(initialView)) return;
     const timer = window.setTimeout(() => void loadVault({ scope: vaultScopeForView(initialView) }), 0);
     return () => window.clearTimeout(timer);
   }, [initialView, loadVault]);
@@ -984,7 +993,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
   const { quickDue, onQuickSummary } = useQuickDueBadge(Boolean(fetchedAt), currentView);
 
   useEffect(() => {
-    if (["calendar", "library", "reading", "session", "prep", "review", "insights", "practice"].includes(view)) return;
+    if (["calendar", "session", "prep", "review", "insights", "practice"].includes(view) || INDEX_ONLY_VIEWS.has(view)) return;
     const scope = vaultScopeForView(view);
     if (vaultReader.getState().readyScopes.has("all") || vaultReader.getState().readyScopes.has(scope)) return;
     void loadVault({ scope });
@@ -1746,6 +1755,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
                 />
               )}
               {view === "reading" && <ReadingView revision={indexSeed} onOpenSource={openNotePath} />}
+              {view === "graduate" && <GraduateView revision={indexSeed} onOpenSource={openNotePath} onOpenWiki={openWikiLink} />}
               {view === "jobs" && (
                 <JobsView
                   loading={!scopeReady && !error}

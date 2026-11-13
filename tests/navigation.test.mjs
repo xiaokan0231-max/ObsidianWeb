@@ -64,7 +64,7 @@ test("高频日历与面试优先，事项并入最近进展而不增加入口",
   assert.deepEqual((SECONDARY_NAVIGATION[calendar.id] ?? []).map(item => item.id), ["calendar", "activity"]);
   assert.equal(PAGE_COMMANDS.some(command => command.view === "actions"), false);
   assert.equal(navigationView("actions"), "activity");
-  assert.deepEqual(NAVIGATION.map(item => item.id), ["actions", "interview", "training", "career", "resources", "settings"]);
+  assert.deepEqual(NAVIGATION.map(item => item.id), ["actions", "interview", "training", "career", "graduate", "resources", "settings"]);
   assert.deepEqual(SECONDARY_NAVIGATION.interview.map(item => item.id), ["session", "review", "insights", "practice", "prep"]);
   assert.equal(SECONDARY_NAVIGATION.interview[0].label, "面试准备");
   assert.ok(PAGE_COMMANDS.some(command => command.view === "activity" && command.label === "最近进展"));
@@ -139,4 +139,16 @@ test("命令与导航的文字都不为空，命令名取自导航表", () => {
   for (const view of DEFAULT_PAGE_COMMAND_VIEWS) {
     assert.ok(PAGE_COMMANDS.some((command) => command.view === view), `默认命令 ${view} 必须存在`);
   }
+});
+
+test("大学院是求职下方的同级入口，⌘K 用中日文和「研究生／修士」都能找到", () => {
+  const index = NAVIGATION.findIndex((item) => item.id === "graduate");
+  assert.equal(NAVIGATION[index - 1].id, "career");
+  assert.equal(NAVIGATION[index].target, "graduate");
+  assert.deepEqual(NAVIGATION[index].views, ["graduate"]);
+  assert.equal(SECONDARY_NAVIGATION.graduate, undefined, "单页分区不另设二级菜单");
+  const command = PAGE_COMMANDS.find(({ view }) => view === "graduate");
+  assert.equal(command.label, "大学院");
+  for (const keyword of ["研究生", "修士", "编入", "院試", "graduate"]) assert.ok(command.keywords.includes(keyword), keyword);
+  assert.equal(getPageCommands("ja").find(({ view }) => view === "graduate").label, "大学院・編入");
 });

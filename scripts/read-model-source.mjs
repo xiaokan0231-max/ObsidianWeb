@@ -77,10 +77,11 @@ export function createLocalReadModelSource({ base, key, build, fetcher = fetch }
 }
 
 export async function buildApplicationReadModel(notes, today, publishedAt, options = {}) {
-  const [{ buildReadModelArtifact, readModelHash }, { buildInterviewReadModelRecords }, { buildCalendarReadModelRecords }] = await Promise.all([
-    import("../lib/server/read-model-build.ts"), import("../lib/interview-read-model.ts"), import("../lib/calendar-query-model.ts"),
+  const [{ buildReadModelArtifact, readModelHash }, { buildInterviewReadModelRecords }, { buildCalendarReadModelRecords }, { buildGraduateReadModelRecords }] = await Promise.all([
+    import("../lib/server/read-model-build.ts"), import("../lib/interview-read-model.ts"), import("../lib/calendar-query-model.ts"), import("../lib/graduate.ts"),
   ]);
-  const records = [...buildCalendarReadModelRecords(notes, today), ...buildInterviewReadModelRecords(notes, { today })];
+  // 大学院候选表是独立投影：招生期限只在专区内读取，不并入日历和面试的记录。
+  const records = [...buildCalendarReadModelRecords(notes, today), ...buildInterviewReadModelRecords(notes, { today }), ...buildGraduateReadModelRecords(notes)];
   const artifact = await buildReadModelArtifact(notes, { records, publishedAt, skipContentHashes: options.skipContentHashes });
   artifact.manifest.revision = `rm-v2-${artifact.manifest.revision}`;
   if (options.baseRevision) { artifact.manifest.baseRevision = options.baseRevision; artifact.manifest.revision += `-from-${await readModelHash(options.baseRevision)}`; }
