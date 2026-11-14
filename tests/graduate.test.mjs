@@ -10,7 +10,9 @@ import {
   buildGraduateCatalog,
   buildGraduateReadModelRecords,
   graduateCatalogEntries,
+  graduateBand,
   graduateDateLabel,
+  graduateDeviationRange,
   graduateLocationFromSearch,
   graduateManYen,
   graduateNoteSections,
@@ -21,6 +23,7 @@ import {
   nextGraduateDeadline,
   nextGraduateEvent,
   overdueGraduatePrerequisites,
+  parseGraduateReference,
   parseGraduateSchool,
 } from "../lib/graduate.ts";
 import { includePublishedNote } from "../lib/vault-boundary.mjs";
@@ -48,6 +51,14 @@ const school = ({ path = "40_大学院/テスト工科大学.md", id = "test-tec
   frontmatter: { type: "graduate-school", schema_version: 1, publish: false, school_id: id, school: "テスト工科大学", school_zh: "测试工科大学",
     sort, checked_on: "2026-11-13", indicators: [{ kind: "ranking", label: "テストランキング2025", value: "201+", scope: "2025年発表・大学全体", url: "https://example.test/rank" }], routes, ...frontmatter },
   content: content ?? `---\ntype: graduate-school\n---\n# テスト工科大学\n\n> 导语\n\n## 学校口径\n\n- 排名说明\n\n${routes.map((item) => `## ${item.label}\n\n### 出愿资格与匹配\n\n资格段落\n\n### 出愿与材料\n\n材料段落\n`).join("\n")}\n## 出处\n\n- [要项](https://example.test/guide.pdf)\n`,
+});
+const level = { focus: "情報学部", focus_low: 37.5, focus_high: 37.5, school_low: 35, school_high: 45, url: "https://example.test/border" };
+const referenceNote = (frontmatter = {}) => ({
+  path: "40_大学院/层次对照.md", stat: { ctime: 1, mtime: 1, size: 1 }, tags: [], content: "# 对照\n",
+  frontmatter: { type: "graduate-reference", publish: false, checked_on: "2026-11-13", source_label: "测试偏差值", source_url: "https://example.test/rank", analogy_author: "Claude",
+    bands: [{ min: 60, label: "难关", analogy: "类比甲" }, { min: 42.5, label: "中段", analogy: "类比乙" }, { min: 37.5, label: "中下", analogy: "类比丙" }, { min: 35, label: "低门槛", analogy: "类比丁" }],
+    anchors: [{ name: "参照工业大学", note: "私立 · 工学部", low: 42.5, high: 62.5, url: "https://example.test/a" }],
+    notes: ["35.0 即 37.4 以下", "修士入学不看偏差值"], ...frontmatter },
 });
 const prepNote = (path = "40_大学院/テスト工科大学_備考.md") => ({
   path, stat: { ctime: 1, mtime: 1, size: 1 }, tags: [],
@@ -182,7 +193,7 @@ test("发布快照：publish: false 的大学院资料不进正文、目录和�
   const directory = await mkdtemp(join(tmpdir(), "graduate-published-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const shared = { path: "30_資料/公开资料.md", stat: { ctime: 1, mtime: 1, size: 1 }, tags: [], frontmatter: { type: "material" }, content: "# 公开资料\n\n可以发布。" };
-  const notes = [school(), prepNote(), shared];
+  const notes = [school(), prepNote(), referenceNote(), shared];
   assert.deepEqual(notes.filter(includePublishedNote).map((note) => note.path), [shared.path]);
   const index = await writeReadModelAssets(notes, directory, "2026-11-13T00:00:00Z");
   const read = async (file) => {
@@ -196,25 +207,25 @@ test("发布快照：publish: false 的大学院资料不进正文、目录和�
   const model = createReadModel(database(t).db);
   await model.importArtifact(manifest.revision, { manifest, batches });
   const catalog = await model.readRecord(manifest.revision, GRADUATE_RECORD_KIND, "root");
-  assert.deepEqual(catalog, { schemaVersion: 1, schools: [], issues: [] });
+  assert.deepEqual(catalog, { schemaVersion: 1, schools: [], reference: null, issues: [] });
 });
 
 test("候选表一行一条路线：学位、学制、两种费用、科目和下一道截止并排；过期前置手续标红", async () => {
   const { CandidateTable, GRADUATE_COPY } = await loadAppModule("app/graduate-view.tsx");
-  const catalog = buildGraduateCatalog([school()]);
-  const html = renderToStaticMarkup(createElement(CandidateTable, { entries: graduateCatalogEntries(catalog, "master"), track: "master", today: "2026-11-13", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} }));
+  const catalog = buildGraduateCatalog([school({ level }), referenceNote()]);
+  const html = renderToStaticMarkup(createElement(CandidateTable, { entries: graduateCatalogEntries(catalog, "master"), reference: catalog.reference, track: "master", today: "2026-11-13", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} }));
   assert.equal((html.match(/<tr data-track=/g) ?? []).length, 1);
   assert.match(html, /href="\/graduate\?school=test-tech&amp;route=test-master"/);
-  for (const text of ["测试工科大学", "test-master 中文名", "修士（工学）", "2 年", "100.1", "179.0", "小論文", "11/30（一）", "必着", "事前協議申込", "还剩 17 天"]) assert.ok(html.includes(text), text);
-  const late = renderToStaticMarkup(createElement(CandidateTable, { entries: graduateCatalogEntries(catalog, "master"), track: "master", today: "2026-12-01", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} }));
+  for (const text of ["中下", "类比丙", "情報学部 37.5", "测试工科大学", "test-master 中文名", "修士（工学）", "2 年", "100.1", "179.0", "小論文", "11/30（一）", "必着", "事前協議申込", "还剩 17 天"]) assert.ok(html.includes(text), text);
+  const late = renderToStaticMarkup(createElement(CandidateTable, { entries: graduateCatalogEntries(catalog, "master"), reference: catalog.reference, track: "master", today: "2026-12-01", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} }));
   assert.match(late, /前置期限已过：事前協議申込/);
   assert.match(late, /1\/15（五）/);
 });
 
 test("学校详情首屏：当前要做的事带截止与必着，前置过期给出核对提示", async () => {
   const { SchoolDetail, GRADUATE_COPY } = await loadAppModule("app/graduate-view.tsx");
-  const catalog = buildGraduateCatalog([school({ routes: [route("test-master", "master", { prep: "[[テスト工科大学_備考]]" })] }), prepNote()]);
-  const props = { school: catalog.schools[0], route: catalog.schools[0].routes[0], revision: "r1", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"],
+  const catalog = buildGraduateCatalog([school({ level, routes: [route("test-master", "master", { prep: "[[テスト工科大学_備考]]" })] }), prepNote(), referenceNote()]);
+  const props = { school: catalog.schools[0], route: catalog.schools[0].routes[0], schools: catalog.schools, reference: catalog.reference, revision: "r1", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"],
     onSelectRoute() {}, onBack() {}, onOpenSource() {}, onOpenWiki() {} };
   const html = renderToStaticMarkup(createElement(SchoolDetail, { ...props, today: "2026-11-13" }));
   assert.match(html, /当前要做的事/);
@@ -222,9 +233,44 @@ test("学校详情首屏：当前要做的事带截止与必着，前置过期�
   assert.match(html, /11\/30（一）/);
   assert.match(html, /还剩 17 天/);
   assert.match(html, /备考资料 →/, "有备考时首屏就能跳到备考");
-  for (const anchor of ["graduate-apply", "graduate-fees", "graduate-exam", "graduate-sources"]) assert.match(html, new RegExp(`href="#${anchor}"`));
+  for (const anchor of ["graduate-level", "graduate-apply", "graduate-fees", "graduate-exam", "graduate-sources"]) assert.match(html, new RegExp(`href="#${anchor}"`));
+  assert.match(html, /情報学部偏差值 37\.5，属于「中下」一档，类比丙/);
+  assert.match(html, /data-current="true"/, "对照图里高亮当前学校");
   assert.ok(html.indexOf("出愿与材料") < html.indexOf("学位与费用") && html.indexOf("学位与费用") < html.indexOf("考试与备考") && html.indexOf("考试与备考") < html.indexOf(">出处<"));
   const late = renderToStaticMarkup(createElement(SchoolDetail, { ...props, today: "2026-12-01" }));
   assert.match(late, /前置期限已过，没有完成记录/);
   assert.match(late, /正式出願/);
+});
+
+test("层次对照：档位从高到低取第一个不高于偏差值的，参照校跨档时写成档位区间", async () => {
+  const { reference, issues } = parseGraduateReference(referenceNote());
+  assert.deepEqual(issues, []);
+  assert.equal(graduateBand(reference.bands, 62.5).label, "难关");
+  assert.equal(graduateBand(reference.bands, 45).label, "中段");
+  assert.equal(graduateBand(reference.bands, 37.5).label, "中下");
+  assert.equal(graduateBand(reference.bands, 35).label, "低门槛", "35.0 是最低一档（37.4 以下）");
+  assert.equal(graduateDeviationRange(37.5, 37.5), "37.5");
+  assert.equal(graduateDeviationRange(35, 45), "35.0–45.0");
+  const { LevelScale, GRADUATE_COPY } = await loadAppModule("app/graduate-view.tsx");
+  const catalog = buildGraduateCatalog([school({ level }), referenceNote()]);
+  const html = renderToStaticMarkup(createElement(LevelScale, { reference: catalog.reference, schools: catalog.schools, locale: "zh-CN", t: GRADUATE_COPY["zh-CN"] }));
+  assert.ok(html.indexOf("参照工业大学") < html.indexOf("测试工科大学"), "按偏差值从高到低排");
+  assert.match(html, /中段～难关/, "跨档的参照校不按最高学部归档");
+  assert.match(html, /data-candidate="true"/);
+  assert.match(html, /37\.4 以下/);
+  assert.match(html, /Claude 为建立概念做的粗略类比/);
+});
+
+test("层次资料写错时拒收：偏差值不在刻度、档位顺序反了、类比没有署名", () => {
+  const bad = parseGraduateReference(referenceNote({ analogy_author: "AI", bands: [{ min: 37.5, label: "中下", analogy: "x" }, { min: 60, label: "难关", analogy: "y" }], anchors: [{ name: "错值大学", low: 41, high: 40 }] }));
+  assert.equal(bad.reference, null);
+  for (const expected of ["analogy_author", "min の高い順", "最後の band の min は 35", "anchors[0].low は河合塾の偏差値帯"]) {
+    assert.ok(bad.issues.some((issue) => issue.includes(expected)), `缺少问题：${expected}\n${bad.issues.join("\n")}`);
+  }
+  const wrongLevel = parseGraduateSchool(school({ level: { ...level, focus_high: 50, school_high: 45 } }));
+  assert.ok(wrongLevel.issues.some((issue) => issue.includes("focus の範囲が school の範囲を超えている")));
+  const offScale = parseGraduateSchool(school({ level: { ...level, focus_low: 36 } }));
+  assert.ok(offScale.issues.some((issue) => issue.includes("level.focus_low")));
+  const twice = buildGraduateCatalog([referenceNote(), { ...referenceNote(), path: "40_大学院/另一份对照.md" }]);
+  assert.ok(twice.issues.some((issue) => issue.message.includes("graduate-reference は全庫で1件だけ")));
 });

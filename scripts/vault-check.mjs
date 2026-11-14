@@ -40,7 +40,7 @@ import {
 import { GENERATED_LIFECYCLES, markerJson } from "../lib/vault-compact.mjs";
 import { validateCompanyOverviewNotes } from "../lib/company-overview.ts";
 import { todoActionMetadataIssues } from "../lib/todo-action-schema.ts";
-import { buildGraduateCatalog, GRADUATE_PREP_TYPE, GRADUATE_SCHOOL_TYPE } from "../lib/graduate.ts";
+import { buildGraduateCatalog, GRADUATE_PREP_TYPE, GRADUATE_REFERENCE_TYPE, GRADUATE_SCHOOL_TYPE } from "../lib/graduate.ts";
 
 const PREP_REQUIRED = ["company", "round", "format", "interviewers"];
 const PREP_SESSION_STATUSES = ["preparing", "scheduled", "completed", "cancelled"];
@@ -200,7 +200,7 @@ problems.push(...validateCompanyOverviewNotes(graphNotes));
 // 日期或必着／消印有効写坏时页面只会少显示一步，截止被漏看，所以在这里拦。
 const graduateNotes = [];
 for (const note of graphNotes) {
-  if (![GRADUATE_SCHOOL_TYPE, GRADUATE_PREP_TYPE].includes(String(note.frontmatter.type ?? ""))) continue;
+  if (![GRADUATE_SCHOOL_TYPE, GRADUATE_PREP_TYPE, GRADUATE_REFERENCE_TYPE].includes(String(note.frontmatter.type ?? ""))) continue;
   try {
     graduateNotes.push({ ...note, frontmatter: readStructuredFrontmatter(note.content) });
   } catch (error) {

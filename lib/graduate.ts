@@ -11,6 +11,7 @@ import type { ReadModelRecord } from "./read-model.ts";
 
 export const GRADUATE_SCHOOL_TYPE = "graduate-school";
 export const GRADUATE_PREP_TYPE = "graduate-prep";
+export const GRADUATE_REFERENCE_TYPE = "graduate-reference";
 export const GRADUATE_RECORD_KIND = "graduate-catalog";
 export const GRADUATE_TRACKS = ["master", "bachelor"] as const;
 export const GRADUATE_TRACK_FILTERS = ["master", "bachelor", "all"] as const;
@@ -59,6 +60,10 @@ export type GraduateRoute = {
   steps: GraduateStep[];
 };
 export type GraduateIndicator = { kind: GraduateIndicatorKind; label: string; value: string; scope: string; url?: string };
+/** 学校是什么性质、多大、多老：帮助没有日本升学经验的人先建立概念。 */
+export type GraduateProfile = { kind: string; founded: string; size: string; url?: string };
+/** 河合塾ボーダー偏差値：focus 是与路线最接近的学部，school 是全校各学部的范围。 */
+export type GraduateLevel = { focus: string; focusLow: number; focusHigh: number; schoolLow: number; schoolHigh: number; url?: string };
 export type GraduateSchool = {
   path: string;
   id: string;
@@ -67,8 +72,17 @@ export type GraduateSchool = {
   sort: number;
   checkedOn: string;
   location: string;
+  profile?: GraduateProfile;
+  level?: GraduateLevel;
   indicators: GraduateIndicator[];
   routes: GraduateRoute[];
+};
+export type GraduateBand = { min: number; label: string; analogy: string };
+export type GraduateAnchor = { name: string; note: string; low: number; high: number; url?: string };
+/** 层次对照：参照校的偏差值是事实，档位与国内批次的类比是署名的 AI 判断。 */
+export type GraduateReference = {
+  path: string; checkedOn: string; sourceLabel: string; sourceUrl?: string; analogyAuthor: string;
+  bands: GraduateBand[]; anchors: GraduateAnchor[]; notes: string[];
 };
 
 /** 目录只带比较和算期限要用的字段；材料链接、说明和出处随学校正文按需读取。 */
@@ -78,9 +92,9 @@ export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh
   prepPath: string | null;
   steps: GraduateCatalogStep[];
 };
-export type GraduateCatalogSchool = Pick<GraduateSchool, "path" | "id" | "name" | "nameZh" | "sort" | "checkedOn"> & { routes: GraduateCatalogRoute[] };
+export type GraduateCatalogSchool = Pick<GraduateSchool, "path" | "id" | "name" | "nameZh" | "sort" | "checkedOn" | "level"> & { routes: GraduateCatalogRoute[] };
 export type GraduateIssue = { path: string; message: string };
-export type GraduateCatalog = { schemaVersion: 1; schools: GraduateCatalogSchool[]; issues: GraduateIssue[] };
+export type GraduateCatalog = { schemaVersion: 1; schools: GraduateCatalogSchool[]; reference: GraduateReference | null; issues: GraduateIssue[] };
 export type GraduateCatalogPage = GraduateCatalog & {
   syncState?: "ready" | "building" | "failed";
   revision: string;
@@ -92,7 +106,7 @@ export type GraduateCatalogPage = GraduateCatalog & {
 };
 
 export function emptyGraduateCatalog(): GraduateCatalog {
-  return { schemaVersion: 1, schools: [], issues: [] };
+  return { schemaVersion: 1, schools: [], reference: null, issues: [] };
 }
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
@@ -175,6 +189,40 @@ function parseStep(value: unknown, where: string, issues: string[]): GraduateSte
   };
 }
 
+/** 河合塾按 2.5 一档公布，最低显示 35.0（=37.4 以下）、最高 72.5。不在刻度上的数多半是手抄错。 */
+function deviation(value: unknown, where: string, issues: string[]) {
+  const number = typeof value === "number" ? value : Number(text(value));
+  if (!Number.isFinite(number) || number < 35 || number > 72.5 || Math.round(number * 2) % 5 !== 0) {
+    issues.push(`${where} は河合塾の偏差値帯（35.0〜72.5、2.5 刻み）にする（今: ${text(value) || "空"}）`);
+    return null;
+  }
+  return number;
+}
+
+function parseLevel(value: unknown, issues: string[]): GraduateLevel | undefined {
+  if (value === undefined) return undefined;
+  const source = record(value);
+  if (!source) { issues.push("level は対象（focus・focus_low・focus_high・school_low・school_high）にする"); return undefined; }
+  const focus = text(source.focus);
+  if (!focus) issues.push("level.focus に比べる学部を書く");
+  const focusLow = deviation(source.focus_low, "level.focus_low", issues), focusHigh = deviation(source.focus_high, "level.focus_high", issues);
+  const schoolLow = deviation(source.school_low, "level.school_low", issues), schoolHigh = deviation(source.school_high, "level.school_high", issues);
+  if (focusLow === null || focusHigh === null || schoolLow === null || schoolHigh === null) return undefined;
+  if (focusLow > focusHigh || schoolLow > schoolHigh) issues.push("level の low が high より大きい");
+  if (focusLow < schoolLow || focusHigh > schoolHigh) issues.push("level.focus の範囲が school の範囲を超えている");
+  const url = optionalUrl(source.url, "level", issues);
+  return { focus, focusLow, focusHigh, schoolLow, schoolHigh, ...(url ? { url } : {}) };
+}
+
+function parseProfile(value: unknown, issues: string[]): GraduateProfile | undefined {
+  if (value === undefined) return undefined;
+  const source = record(value);
+  const kind = text(source?.kind), founded = text(source?.founded), size = text(source?.size);
+  if (!kind || !founded || !size) { issues.push("profile は kind・founded・size が必須"); return undefined; }
+  const url = optionalUrl(source?.url, "profile", issues);
+  return { kind, founded, size, ...(url ? { url } : {}) };
+}
+
 function integerYen(value: unknown) {
   const number = typeof value === "number" ? value : Number(text(value));
   return Number.isSafeInteger(number) && number >= 0 ? number : null;
@@ -244,9 +292,12 @@ export function parseGraduateSchool(note: Note): { school: GraduateSchool | null
     if (routeIds.has(route.id)) issues.push(`routes の id「${route.id}」が重複`);
     routeIds.add(route.id);
   }
+  const profile = parseProfile(frontmatter.profile, issues);
+  const level = parseLevel(frontmatter.level, issues);
   const school: GraduateSchool = {
     path: note.path, id, name, nameZh: text(frontmatter.school_zh) || name,
-    sort: Number.isFinite(sortValue) ? sortValue : 99, checkedOn: checkedOn ?? "", location: text(frontmatter.location), indicators, routes,
+    sort: Number.isFinite(sortValue) ? sortValue : 99, checkedOn: checkedOn ?? "", location: text(frontmatter.location),
+    ...(profile ? { profile } : {}), ...(level ? { level } : {}), indicators, routes,
   };
   return { school: issues.length ? null : school, issues };
 }
@@ -258,6 +309,54 @@ export function graduatePrepIssues(note: Note) {
   if (!ID_PATTERN.test(text(note.frontmatter.route))) issues.push("route に対象路線の id を書く");
   if (!wikiTarget(note.frontmatter.source_note)) issues.push("source_note に学校卷宗への双链を書く");
   return issues;
+}
+
+/** 层次对照笔记：档位从高到低、参照校偏差值必须在河合塾刻度上。 */
+export function parseGraduateReference(note: Note): { reference: GraduateReference | null; issues: string[] } {
+  const frontmatter = note.frontmatter ?? {};
+  const issues: string[] = [];
+  if (frontmatter.publish !== false && frontmatter.publish !== "false") issues.push("publish: false が必須（大学院資料は公開スナップショットに入れない）");
+  const checkedOn = graduateDate(frontmatter.checked_on);
+  if (!checkedOn) issues.push(`checked_on は "YYYY-MM-DD"（今: ${text(frontmatter.checked_on) || "空"}）`);
+  const analogyAuthor = text(frontmatter.analogy_author);
+  // 与国内批次的对应没有官方口径，必须看得出是谁的判断。
+  if (!analogyAuthor || analogyAuthor === "AI") issues.push("analogy_author に類比を書いた AI の具体名（Claude / Codex など）を書く");
+  const bands: GraduateBand[] = [];
+  for (const [index, item] of (Array.isArray(frontmatter.bands) ? frontmatter.bands : []).entries()) {
+    const source = record(item);
+    const min = deviation(source?.min, `bands[${index}].min`, issues), label = text(source?.label), analogy = text(source?.analogy);
+    if (!label || !analogy) { issues.push(`bands[${index}] は label・analogy が必須`); continue; }
+    if (min !== null) bands.push({ min, label, analogy });
+  }
+  if (!bands.length) issues.push("bands が無い");
+  if (bands.some((band, index) => index > 0 && band.min >= bands[index - 1].min)) issues.push("bands は min の高い順に並べる");
+  if (bands.length && bands.at(-1)!.min !== 35) issues.push("最後の band の min は 35（最低帯）にする");
+  const anchors: GraduateAnchor[] = [];
+  for (const [index, item] of (Array.isArray(frontmatter.anchors) ? frontmatter.anchors : []).entries()) {
+    const source = record(item);
+    const name = text(source?.name), anchorNote = text(source?.note);
+    const low = deviation(source?.low, `anchors[${index}].low`, issues), high = deviation(source?.high, `anchors[${index}].high`, issues);
+    if (!name) { issues.push(`anchors[${index}] に name が無い`); continue; }
+    if (low === null || high === null) continue;
+    if (low > high) issues.push(`anchors[${index}]（${name}）の low が high より大きい`);
+    const url = optionalUrl(source?.url, `anchors[${index}]`, issues);
+    anchors.push({ name, note: anchorNote, low, high, ...(url ? { url } : {}) });
+  }
+  const notes = Array.isArray(frontmatter.notes) ? frontmatter.notes.map(text).filter(Boolean) : [];
+  const sourceUrl = optionalUrl(frontmatter.source_url, "source_url", issues);
+  const reference: GraduateReference = { path: note.path, checkedOn: checkedOn ?? "", sourceLabel: text(frontmatter.source_label), ...(sourceUrl ? { sourceUrl } : {}),
+    analogyAuthor, bands, anchors, notes };
+  return { reference: issues.length ? null : reference, issues };
+}
+
+/** 偏差值落在哪一档：档位按 min 从高到低，取第一个不高于该值的。 */
+export function graduateBand(bands: readonly GraduateBand[], value: number) {
+  return bands.find((band) => value >= band.min) ?? null;
+}
+
+/** 河合塾把 37.4 以下统一显示成 35.0；页面照录数字，但说清它是「最低一档」。 */
+export function graduateDeviationRange(low: number, high: number) {
+  return low === high ? low.toFixed(1) : `${low.toFixed(1)}–${high.toFixed(1)}`;
 }
 
 function catalogStep(step: GraduateStep): GraduateCatalogStep {
@@ -279,7 +378,16 @@ export function buildGraduateCatalog(notes: Note[]): GraduateCatalog {
   const issues: GraduateIssue[] = [];
   const schools: GraduateCatalogSchool[] = [];
   const schoolIds = new Map<string, string>(), routeIds = new Map<string, string>();
+  let reference: GraduateReference | null = null;
   for (const note of notes) {
+    if (note.frontmatter?.type === GRADUATE_REFERENCE_TYPE) {
+      const parsed = parseGraduateReference(note);
+      for (const message of parsed.issues) issues.push({ path: note.path, message });
+      // 对照表全库只认一份：两份并存时页面无法判断该用哪套档位。
+      if (parsed.reference && reference) issues.push({ path: note.path, message: `graduate-reference は全庫で1件だけ（既に ${reference.path}）` });
+      else if (parsed.reference) reference = parsed.reference;
+      continue;
+    }
     if (note.frontmatter?.type === GRADUATE_PREP_TYPE) {
       for (const message of graduatePrepIssues(note)) issues.push({ path: note.path, message });
       continue;
@@ -302,10 +410,11 @@ export function buildGraduateCatalog(notes: Note[]): GraduateCatalog {
       routes.push({ id: route.id, label: route.label, labelZh: route.labelZh, track: route.track, degree: route.degree, years: route.years, entry: route.entry, exams: route.exams,
         fees: { firstYear: route.fees.firstYear, annual: route.fees.annual }, prepPath, steps: route.steps.map(catalogStep) });
     }
-    schools.push({ path: school.path, id: school.id, name: school.name, nameZh: school.nameZh, sort: school.sort, checkedOn: school.checkedOn, routes });
+    schools.push({ path: school.path, id: school.id, name: school.name, nameZh: school.nameZh, sort: school.sort, checkedOn: school.checkedOn,
+      ...(school.level ? { level: school.level } : {}), routes });
   }
   schools.sort((left, right) => left.sort - right.sort || left.path.localeCompare(right.path));
-  return { schemaVersion: 1, schools, issues };
+  return { schemaVersion: 1, schools, reference, issues };
 }
 
 export function buildGraduateReadModelRecords(notes: Note[]): ReadModelRecord[] {

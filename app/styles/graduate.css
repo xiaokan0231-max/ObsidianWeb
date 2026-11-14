@@ -35,11 +35,12 @@
 .graduate-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--surface-raised-solid); text-align: left; }
 .graduate-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .graduate-table thead th { padding: 10px 14px; color: var(--text-secondary); background: color-mix(in oklab, var(--green) 9%, var(--surface-raised-solid)); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.graduate-table thead th:nth-child(1) { width: 27%; }
-.graduate-table thead th:nth-child(2) { width: 12%; }
-.graduate-table thead th:nth-child(3) { width: 6%; }
-.graduate-table thead th:nth-child(4), .graduate-table thead th:nth-child(5) { width: 9%; }
-.graduate-table thead th:nth-child(6) { width: 15%; }
+.graduate-table thead th:nth-child(1) { width: 22%; }
+.graduate-table thead th:nth-child(2) { width: 15%; }
+.graduate-table thead th:nth-child(3) { width: 10%; }
+.graduate-table thead th:nth-child(4) { width: 5%; }
+.graduate-table thead th:nth-child(5), .graduate-table thead th:nth-child(6) { width: 8%; }
+.graduate-table thead th:nth-child(7) { width: 13%; }
 .graduate-table tbody th, .graduate-table tbody td { padding: 13px 14px; vertical-align: top; border-bottom: 1px solid var(--line); font-weight: 400; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .graduate-table tbody tr:last-child > * { border-bottom: 0; }
 .graduate-table tbody tr { cursor: pointer; transition: background-color var(--dur-fast, 120ms) ease; }
@@ -169,3 +170,63 @@
 .graduate-md .markdown-document > :first-child { margin-top: 4px; }
 .graduate-md .markdown-document p, .graduate-md .md-list-item { margin: 5px 0; font-size: 13px; line-height: 1.8; }
 .graduate-md .md-list-item > i { margin-top: 10px; }
+
+/* ── 学校层次 ───────────────────────────────────────── */
+/* 候选＝强调色，参照＝灰色衬底；每行都直接写校名、数值和档位，颜色不承担唯一的辨识。
+   颜色经 dataviz 校验：两色在常见色觉差异下 ΔE ≥ 16；灰色对底色不足 3:1，由行内文字补足。 */
+.graduate-workspace { --graduate-mark: #3a9e72; --graduate-context: #4f5d56; }
+:root[data-theme="light"] .graduate-workspace { --graduate-mark: #16825a; --graduate-context: #b0b7b2; }
+
+.graduate-level-cell { display: flex; flex-direction: column; gap: 2px; font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+.graduate-level-cell small { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.graduate-level-band { align-self: flex-start; padding: 0 7px; border: 1px solid var(--line); border-radius: 4px; color: var(--ink); background: var(--surface); font-size: 12px; font-weight: 650; }
+
+.graduate-level-panel { margin-top: 14px; padding: 16px 20px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-raised-solid); }
+.graduate-scale { margin: 0; }
+.graduate-scale figcaption { display: flex; flex-direction: column; gap: 3px; margin-bottom: 12px; }
+.graduate-scale figcaption strong { font-size: 15px; font-weight: 650; }
+.graduate-scale figcaption span { color: var(--text-secondary); font-size: 12.5px; line-height: 1.65; }
+.graduate-scale-grid { display: flex; flex-direction: column; }
+.graduate-scale-row { display: grid; grid-template-columns: 210px minmax(0, 1fr) 112px; align-items: center; gap: 14px; min-height: 34px; }
+.graduate-scale-row + .graduate-scale-row { border-top: 1px solid var(--line-soft, var(--line)); }
+.graduate-scale-head, .graduate-scale-axis { border-top: 0 !important; min-height: 22px; }
+.graduate-scale-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+.graduate-scale-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.graduate-scale-name small { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.graduate-scale-name em { margin-right: 6px; padding: 0 5px; border-radius: 3px; color: var(--on-fill, #fff); background: var(--graduate-mark); font-style: normal; font-weight: 600; }
+.graduate-scale-row[data-candidate] .graduate-scale-name strong { color: var(--ink); }
+.graduate-scale-track { position: relative; height: 22px; }
+.graduate-scale-head .graduate-scale-track { height: 20px; }
+.graduate-scale-zone { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; border-left: 1px dashed var(--line); color: var(--muted); font-size: 11px; white-space: nowrap; }
+.graduate-scale-zone b { font-weight: 600; }
+.graduate-scale-bg { position: absolute; top: 0; bottom: 0; border-left: 1px dashed color-mix(in oklab, var(--line) 70%, transparent); }
+.graduate-scale-bg:nth-child(even) { background: color-mix(in oklab, var(--ink) 3%, transparent); }
+.graduate-scale-school { position: absolute; top: 50%; height: 2px; margin-top: -1px; border-radius: 2px; background: color-mix(in oklab, var(--graduate-mark) 55%, transparent); }
+.graduate-scale-bar { position: absolute; top: 5px; bottom: 5px; border-radius: 4px; background: var(--graduate-context); box-shadow: 0 0 0 2px var(--surface-raised-solid); }
+.graduate-scale-row[data-candidate] .graduate-scale-bar { background: var(--graduate-mark); }
+.graduate-scale-row[data-current] { background: color-mix(in oklab, var(--graduate-mark) 9%, transparent); border-radius: 6px; }
+.graduate-scale-row[data-current] .graduate-scale-name strong::after { content: " ◀"; color: var(--graduate-mark); font-size: 10px; }
+.graduate-scale-value { display: flex; flex-direction: column; line-height: 1.3; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.graduate-scale-value strong { font-size: 13px; font-weight: 650; color: var(--ink); }
+.graduate-scale-value small { color: var(--muted); font-size: 11px; }
+.graduate-scale-head > span:last-child { color: var(--muted); font-size: 11px; }
+.graduate-scale-axis .graduate-scale-track span { position: absolute; transform: translateX(-50%); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.graduate-scale-axis .graduate-scale-track span:first-child { transform: none; }
+.graduate-scale-axis .graduate-scale-track span:last-child { transform: translateX(-100%); }
+.graduate-scale-bands { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 14px 0 10px; }
+.graduate-scale-bands > div { padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+.graduate-scale-bands dt { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; font-size: 13px; font-weight: 650; }
+.graduate-scale-bands dt span { color: var(--muted); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.graduate-scale-bands dd { margin: 3px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
+.graduate-scale-notes { margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 12px; line-height: 1.75; }
+.graduate-scale-notes a { color: var(--green); }
+
+.graduate-profile { display: grid; grid-template-columns: 1fr 2fr 2fr; margin: 0 0 12px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.graduate-profile > div { padding: 10px 14px; border-right: 1px solid var(--line); }
+.graduate-profile > div:last-child { border-right: 0; }
+.graduate-profile dt { color: var(--muted); font-size: 11.5px; }
+.graduate-profile dd { margin: 3px 0 0; font-size: 13px; line-height: 1.6; }
+.graduate-profile dd a { color: var(--green); font-size: 12px; }
+.graduate-level-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 14px; font-size: 14.5px; font-weight: 600; line-height: 1.6; }
+.graduate-level-summary span { color: var(--muted); font-size: 12px; font-weight: 400; }
+.graduate-level-summary a { color: var(--green); }

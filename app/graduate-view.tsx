@@ -9,7 +9,9 @@ import { URL_CHANGE_EVENT, useInitialUrlSearch } from "./use-url-state";
 import { useUiLocale } from "./ui-locale";
 import { appViewHref } from "./app-route";
 import {
+  graduateBand,
   graduateCatalogEntries,
+  graduateDeviationRange,
   graduateDateLabel,
   graduateDaysUntil,
   graduateLocationFromSearch,
@@ -30,6 +32,7 @@ import {
   type GraduateCatalogStep,
   type GraduateDeadlineType,
   type GraduateLocation,
+  type GraduateReference,
   type GraduateRoute,
   type GraduateSchool,
   type GraduateStep,
@@ -43,7 +46,15 @@ import type { UiLocale } from "@/lib/ui-locale";
 const COPY = {
   "zh-CN": {
     module: "大学院", title: "候选学校", tracks: { master: "修士", bachelor: "本科", all: "全部" }, trackLabel: "路线类型",
-    columns: { route: "学校与路线", degree: "学位", years: "学制", firstYear: "首年费用", total: "预计总费用", exams: "考试科目", next: "下一道截止" },
+    columns: { route: "学校与路线", level: "学校层次", degree: "学位", years: "学制", firstYear: "首年费用", total: "预计总费用", exams: "考试科目", next: "下一道截止" },
+    level: {
+      section: "学校层次", title: "学校层次怎么看", subtitle: "河合塾本科一般入试的偏差值（2027 年度预测）：越靠右越难考进。候选校画的是相关学部，细线是全校各学部的范围。",
+      candidate: "候选", reference: "参照", focus: "相关学部", school: "全校各学部", deviation: "偏差值",
+      lowest: "35.0 是河合塾的最低一档，意思是「37.4 以下」。", analogyBy: (name: string) => `「约等于国内哪一档」是 ${name} 为建立概念做的粗略类比，日本没有批次线，不是官方换算。`,
+      source: "数据来源", profileKind: "学校性质", founded: "创立", size: "规模", none: "这所学校还没有层次资料。",
+      summary: (focus: string, range: string, band: string, analogy: string) => `${focus}偏差值 ${range}，属于「${band}」一档，${analogy}。`,
+      schoolRange: (range: string) => `全校各学部 ${range}`,
+    },
     years: (count: number) => `${count} 年`, man: "万日元", byYears: (count: number) => `按 ${count} 年计`,
     daysLeft: (days: number) => days === 0 ? "今天截止" : `还剩 ${days} 天`, closed: "已截止", noDeadline: "暂无后续截止",
     overdue: "前置期限已过", loading: "正在读取候选学校…", indexing: "资料索引正在同步，完成后自动显示。",
@@ -55,7 +66,7 @@ const COPY = {
     back: "候选学校", routes: "本校路线", now: "当前要做的事", nowEvent: "下一项日程", nothingLeft: "这条路线已没有待办的日程。",
     overdueTitle: "前置期限已过，没有完成记录", overdueHelp: "请核对这些前置手续是否已经办完；办完后在笔记该步骤加 done_on，提示就会消失。",
     materials: "要交的材料", method: "提交方式", openSource: "官方页面", sections: "本页内容",
-    apply: "出愿与材料", fees: "学位与费用", exam: "考试与备考", sources: "出处",
+    apply: "出愿与材料", fees: "学位与费用", exam: "考试与备考", sources: "出处", levelNav: "学校层次",
     fit: "出愿资格与匹配", fitHint: "含 AI 判断，署名见正文",
     kinds: { prerequisite: "前置手续", application: "出愿", exam: "考试・面谈", result: "发表", enrollment: "入学手续" } satisfies Record<GraduateStepKind, string>,
     states: { done: "已完成", closed: "已过", open: "进行中", upcoming: "未开始", undated: "无校方日期" },
@@ -71,7 +82,15 @@ const COPY = {
   },
   ja: {
     module: "大学院", title: "候補校", tracks: { master: "修士", bachelor: "学部", all: "すべて" }, trackLabel: "ルートの種類",
-    columns: { route: "学校とルート", degree: "学位", years: "年限", firstYear: "初年度", total: "卒業までの概算", exams: "試験科目", next: "次の締切" },
+    columns: { route: "学校とルート", level: "大学のレベル", degree: "学位", years: "年限", firstYear: "初年度", total: "卒業までの概算", exams: "試験科目", next: "次の締切" },
+    level: {
+      section: "大学のレベル", title: "大学のレベルの目安", subtitle: "河合塾の学部一般選抜ボーダー偏差値（2027年度予想）。右ほど入りにくい。候補校は関連学部、細線は全学部の範囲。",
+      candidate: "候補", reference: "参照", focus: "関連学部", school: "全学部", deviation: "偏差値",
+      lowest: "35.0 は河合塾の最低帯で「37.4以下」を表します。", analogyBy: (name: string) => `中国の合格ライン区分との対応は ${name} による大まかな類比で、公式な換算ではありません。`,
+      source: "出典", profileKind: "種別", founded: "設立", size: "規模", none: "この学校のレベル資料はまだありません。",
+      summary: (focus: string, range: string, band: string, analogy: string) => `${focus}の偏差値は ${range}、「${band}」の帯（${analogy}）。`,
+      schoolRange: (range: string) => `全学部 ${range}`,
+    },
     years: (count: number) => `${count}年`, man: "万円", byYears: (count: number) => `${count}年分`,
     daysLeft: (days: number) => days === 0 ? "本日締切" : `残り${days}日`, closed: "締切済み", noDeadline: "今後の締切なし",
     overdue: "前提手続きの期限切れ", loading: "候補校を読み込んでいます…", indexing: "資料の索引を同期中です。完了すると表示されます。",
@@ -83,7 +102,7 @@ const COPY = {
     back: "候補校", routes: "この学校のルート", now: "今やること", nowEvent: "次の予定", nothingLeft: "このルートに残っている予定はありません。",
     overdueTitle: "前提手続きの期限が過ぎ、完了記録がありません", overdueHelp: "手続きが済んでいるか確認してください。済んだらノートの該当ステップに done_on を書くと表示が消えます。",
     materials: "提出書類", method: "提出方法", openSource: "公式ページ", sections: "このページ",
-    apply: "出願と書類", fees: "学位と学費", exam: "試験と対策", sources: "出典",
+    apply: "出願と書類", fees: "学位と学費", exam: "試験と対策", sources: "出典", levelNav: "大学のレベル",
     fit: "出願資格と適合", fitHint: "AI の判断を含む（署名は本文）",
     kinds: { prerequisite: "事前手続き", application: "出願", exam: "試験・面談", result: "発表", enrollment: "入学手続" } satisfies Record<GraduateStepKind, string>,
     states: { done: "完了", closed: "終了", open: "受付中", upcoming: "未開始", undated: "学校の期日なし" },
@@ -171,14 +190,91 @@ function examShort(exam: string) {
   return exam.replace(/[（(].*$/, "").trim() || exam;
 }
 
-export function CandidateTable({ entries, track, today, locale, t, onOpen }: {
-  entries: GraduateCatalogEntry[]; track: GraduateTrackFilter; today: string; locale: UiLocale; t: Copy;
+const SCALE_MIN = 35, SCALE_MAX = 65;
+/** 河合塾每档宽 2.5：37.5 表示 37.5～39.9，所以条形画到 high＋2.5。35.0 一档实际是「37.4 以下」，画在最左端。 */
+function scaleSpan(low: number, high: number) {
+  const left = (Math.max(SCALE_MIN, low) - SCALE_MIN) / (SCALE_MAX - SCALE_MIN) * 100;
+  const right = (Math.min(SCALE_MAX, high + 2.5) - SCALE_MIN) / (SCALE_MAX - SCALE_MIN) * 100;
+  return { left: `${left}%`, width: `${Math.max(1, right - left)}%` };
+}
+
+type ScaleRow = { key: string; name: string; note: string; low: number; high: number; schoolLow?: number; schoolHigh?: number; candidate: boolean; current: boolean };
+
+/** 候选校与参照校排在同一把偏差值尺上：数字和档位都直接写在行上，颜色只区分「候选／参照」。 */
+export function LevelScale({ reference, schools, current, locale, t }: {
+  reference: GraduateReference; schools: GraduateCatalogSchool[]; current?: string; locale: UiLocale; t: Copy;
+}) {
+  const rows: ScaleRow[] = [
+    ...reference.anchors.map((anchor) => ({ key: `anchor:${anchor.name}`, name: anchor.name, note: anchor.note, low: anchor.low, high: anchor.high, candidate: false, current: false })),
+    ...schools.filter((school) => school.level).map((school) => ({ key: `school:${school.id}`, name: locale === "ja" ? school.name : school.nameZh, note: school.level!.focus,
+      low: school.level!.focusLow, high: school.level!.focusHigh, schoolLow: school.level!.schoolLow, schoolHigh: school.level!.schoolHigh, candidate: true, current: school.id === current })),
+  ].sort((left, right) => right.high - left.high || right.low - left.low || Number(left.candidate) - Number(right.candidate));
+  const zones = reference.bands.map((band, index) => ({ band, low: band.min, high: index === 0 ? SCALE_MAX - 2.5 : reference.bands[index - 1].min - 2.5 }));
+  const ticks = [35, 40, 45, 50, 55, 60, 65];
+  return <figure className="graduate-scale">
+    <figcaption><strong>{t.level.title}</strong><span>{t.level.subtitle}</span></figcaption>
+    <div className="graduate-scale-grid" role="table" aria-label={t.level.title}>
+      <div className="graduate-scale-row graduate-scale-head" role="row">
+        <span role="columnheader" />
+        <div className="graduate-scale-track" role="columnheader">
+          {zones.map(({ band, low, high }) => <span key={band.label} className="graduate-scale-zone" style={scaleSpan(low, high)}><b>{band.label}</b></span>)}
+        </div>
+        <span role="columnheader">{t.level.deviation}</span>
+      </div>
+      {rows.map((row) => {
+        // 参照校跨好几档时写「中段～中上」，不能只按最高那个学部归档。
+        const band = graduateBand(reference.bands, row.high), lowBand = graduateBand(reference.bands, row.low);
+        const bandLabel = band && lowBand && lowBand.label !== band.label ? `${lowBand.label}～${band.label}` : band?.label ?? "";
+        const range = graduateDeviationRange(row.low, row.high);
+        return <div key={row.key} className="graduate-scale-row" role="row" data-candidate={row.candidate || undefined} data-current={row.current || undefined}>
+          <span className="graduate-scale-name" role="rowheader">
+            <strong>{row.name}</strong>
+            <small>{row.candidate && <em>{t.level.candidate}</em>}{row.note}</small>
+          </span>
+          <div className="graduate-scale-track" role="cell">
+            {zones.map(({ band: zone, low, high }) => <i key={zone.label} className="graduate-scale-bg" style={scaleSpan(low, high)} />)}
+            {row.schoolLow !== undefined && row.schoolHigh !== undefined && <span className="graduate-scale-school" style={scaleSpan(row.schoolLow, row.schoolHigh)} title={t.level.schoolRange(graduateDeviationRange(row.schoolLow, row.schoolHigh))} />}
+            <span className="graduate-scale-bar" style={scaleSpan(row.low, row.high)} title={`${row.name}：${t.level.deviation} ${range}${bandLabel ? `（${bandLabel}）` : ""}`} />
+          </div>
+          <span className="graduate-scale-value" role="cell"><strong>{range}</strong>{bandLabel && <small>{bandLabel}</small>}</span>
+        </div>;
+      })}
+      <div className="graduate-scale-row graduate-scale-axis" aria-hidden="true">
+        <span />
+        <div className="graduate-scale-track">{ticks.map((tick) => <span key={tick} style={{ left: `${(tick - SCALE_MIN) / (SCALE_MAX - SCALE_MIN) * 100}%` }}>{tick}</span>)}</div>
+        <span />
+      </div>
+    </div>
+    <dl className="graduate-scale-bands">
+      {reference.bands.map((band) => <div key={band.label}><dt>{band.label}<span>{band.min === SCALE_MIN ? "35.0" : `≥ ${band.min.toFixed(1)}`}</span></dt><dd>{band.analogy}</dd></div>)}
+    </dl>
+    <ul className="graduate-scale-notes">
+      <li>{t.level.lowest}</li>
+      <li>{t.level.analogyBy(reference.analogyAuthor)}</li>
+      {reference.notes.filter((note) => !note.includes("37.4") && !note.includes("类比")).map((note) => <li key={note}>{note}</li>)}
+      <li>{t.level.source}：{reference.sourceUrl ? <a href={reference.sourceUrl} target="_blank" rel="noreferrer">{reference.sourceLabel} ↗</a> : reference.sourceLabel}（{reference.checkedOn}）</li>
+    </ul>
+  </figure>;
+}
+
+function LevelCell({ school, reference }: { school: GraduateCatalogSchool; reference: GraduateReference | null }) {
+  if (!school.level) return <span className="graduate-muted">—</span>;
+  const band = reference ? graduateBand(reference.bands, school.level.focusHigh) : null;
+  return <div className="graduate-level-cell">
+    {band && <span className="graduate-level-band" data-band={band.label}>{band.label}</span>}
+    {band && <span>{band.analogy}</span>}
+    <small>{school.level.focus} {graduateDeviationRange(school.level.focusLow, school.level.focusHigh)}</small>
+  </div>;
+}
+
+export function CandidateTable({ entries, reference, track, today, locale, t, onOpen }: {
+  entries: GraduateCatalogEntry[]; reference: GraduateReference | null; track: GraduateTrackFilter; today: string; locale: UiLocale; t: Copy;
   onOpen: (event: MouseEvent<HTMLElement>, entry: GraduateCatalogEntry) => void;
 }) {
   return <table className="graduate-table">
     <caption>{t.title}</caption>
     <thead><tr>
-      <th scope="col">{t.columns.route}</th><th scope="col">{t.columns.degree}</th><th scope="col">{t.columns.years}</th>
+      <th scope="col">{t.columns.route}</th><th scope="col">{t.columns.level}</th><th scope="col">{t.columns.degree}</th><th scope="col">{t.columns.years}</th>
       <th scope="col" className="graduate-num">{t.columns.firstYear}</th><th scope="col" className="graduate-num">{t.columns.total}</th>
       <th scope="col">{t.columns.exams}</th><th scope="col">{t.columns.next}</th>
     </tr></thead>
@@ -198,6 +294,7 @@ export function CandidateTable({ entries, track, today, locale, t, onOpen }: {
             </a>
             <small>{locale === "ja" ? route.entry : route.label}</small>
           </th>
+          <td><LevelCell school={school} reference={reference} /></td>
           <td><span className={`graduate-track-badge ${route.track}`}>{t.tracks[route.track]}</span><span className="graduate-degree">{route.degree}</span></td>
           <td className="graduate-years">{t.years(route.years)}</td>
           <td className="graduate-num"><strong>{graduateManYen(route.fees.firstYear)}</strong><small>{t.man}</small></td>
@@ -305,8 +402,9 @@ function FeePanel({ route, fullRoute, t }: { route: GraduateCatalogRoute; fullRo
   </div>;
 }
 
-export function SchoolDetail({ school, route, revision, today, locale, t, onSelectRoute, onBack, onOpenSource, onOpenWiki }: {
-  school: GraduateCatalogSchool; route: GraduateCatalogRoute; revision: string; today: string; locale: UiLocale; t: Copy;
+export function SchoolDetail({ school, route, schools, reference, revision, today, locale, t, onSelectRoute, onBack, onOpenSource, onOpenWiki }: {
+  school: GraduateCatalogSchool; route: GraduateCatalogRoute; schools: GraduateCatalogSchool[]; reference: GraduateReference | null;
+  revision: string; today: string; locale: UiLocale; t: Copy;
   onSelectRoute: (routeId: string) => void; onBack: () => void;
   onOpenSource: (path: string, revision?: string) => void; onOpenWiki: (target: string, section?: string) => void;
 }) {
@@ -350,8 +448,24 @@ export function SchoolDetail({ school, route, revision, today, locale, t, onSele
     {detail.error && <p className="graduate-status" role="alert">{t.detailFailed}<button type="button" onClick={detail.retry}>{t.retry}</button></p>}
     {parsed && !fullSchool && <p className="graduate-status" role="alert">{t.detailIssues}</p>}
     <nav className="graduate-section-nav" aria-label={t.sections}>
-      <a href="#graduate-apply">{t.apply}</a><a href="#graduate-fees">{t.fees}</a><a href="#graduate-exam">{t.exam}</a><a href="#graduate-sources">{t.sources}</a>
+      <a href="#graduate-level">{t.levelNav}</a><a href="#graduate-apply">{t.apply}</a><a href="#graduate-fees">{t.fees}</a><a href="#graduate-exam">{t.exam}</a><a href="#graduate-sources">{t.sources}</a>
     </nav>
+    <section id="graduate-level" className="graduate-section">
+      <h2>{t.level.section}</h2>
+      {fullSchool?.profile && <dl className="graduate-profile">
+        <div><dt>{t.level.profileKind}</dt><dd>{fullSchool.profile.kind}</dd></div>
+        <div><dt>{t.level.founded}</dt><dd>{fullSchool.profile.founded}</dd></div>
+        <div><dt>{t.level.size}</dt><dd>{fullSchool.profile.size}{fullSchool.profile.url && <> <a href={fullSchool.profile.url} target="_blank" rel="noreferrer">{t.indicatorSource} ↗</a></>}</dd></div>
+      </dl>}
+      {school.level && reference ? (() => {
+        const band = graduateBand(reference.bands, school.level.focusHigh);
+        return <p className="graduate-level-summary">
+          {band && t.level.summary(school.level.focus, graduateDeviationRange(school.level.focusLow, school.level.focusHigh), band.label, band.analogy)}
+          <span>{t.level.schoolRange(graduateDeviationRange(school.level.schoolLow, school.level.schoolHigh))}{school.level.url && <> · <a href={school.level.url} target="_blank" rel="noreferrer">{t.indicatorSource} ↗</a></>}</span>
+        </p>;
+      })() : <p className="graduate-muted">{t.level.none}</p>}
+      {reference && <LevelScale reference={reference} schools={schools} current={school.id} locale={locale} t={t} />}
+    </section>
     <section id="graduate-apply" className="graduate-section">
       <h2>{t.apply}</h2>
       <StepTimeline route={route} fullRoute={fullRoute} today={today} locale={locale} t={t} />
@@ -459,7 +573,7 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
     if (!school || !route) return <section className="graduate-workspace">{notices}<div className="graduate-status-page"><h1>{t.notFound}</h1><button type="button" onClick={backToList}>{t.back}</button></div></section>;
     return <section className="graduate-workspace" aria-label={t.module}>
       {notices}
-      <SchoolDetail key={`${school.id}:${route.id}`} school={school} route={route} revision={page.revision} today={today} locale={locale} t={t}
+      <SchoolDetail key={`${school.id}:${route.id}`} school={school} route={route} schools={page.schools} reference={page.reference ?? null} revision={page.revision} today={today} locale={locale} t={t}
         onSelectRoute={(routeId) => write({ ...location, route: routeId }, "replace")} onBack={backToList} onOpenSource={onOpenSource} onOpenWiki={onOpenWiki} />
     </section>;
   }
@@ -476,6 +590,9 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
     </header>
     {notices}
     {notIndexed || (page.schools.length === 0 ? <div className="graduate-status-page"><h2>{t.empty}</h2><p>{t.emptyDetail}</p></div>
-      : <CandidateTable entries={entries} track={location.track} today={today} locale={locale} t={t} onOpen={openEntry} />)}
+      : <>
+        <CandidateTable entries={entries} reference={page.reference ?? null} track={location.track} today={today} locale={locale} t={t} onOpen={openEntry} />
+        {page.reference && <section className="graduate-level-panel" aria-label={t.level.title}><LevelScale reference={page.reference} schools={page.schools} locale={locale} t={t} /></section>}
+      </>)}
   </section>;
 }
