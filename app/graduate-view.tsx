@@ -46,7 +46,7 @@ import type { UiLocale } from "@/lib/ui-locale";
 
 const COPY = {
   "zh-CN": {
-    module: "大学院", title: "候选学校", tracks: { tokyo: "东京社会人", master: "修士", bachelor: "本科", all: "全部" }, trackLabel: "路线类型",
+    module: "大学院", title: "大学院申请", tracks: { tokyo: "东京社会人入试", master: "修士", bachelor: "本科", all: "全部" }, trackLabel: "路线类型",
     columns: { school: "学校", program: "专业", deadline: "最早截止日", result: "放榜日" },
     level: {
       section: "学校层次", title: "学校层次怎么看", subtitle: "河合塾本科一般入试的偏差值（2027 年度预测）：越靠右越难考进。候选校画的是相关学部，细线是全校各学部的范围。",
@@ -62,15 +62,15 @@ const COPY = {
     failed: "候选学校暂时无法读取", retry: "重试", empty: "还没有候选学校",
     emptyDetail: "在 Vault 的 40_大学院/ 新建 type: graduate-school 的学校卷宗后会出现在这里。大学院资料只在本机，公开快照不包含。",
     notIndexed: "当前资料版本还没有大学院索引，重新同步资料后显示。",
-    syncing: "资料正在更新，当前显示上一完整版本。", syncFailed: "资料更新未完成，当前显示上一完整版本。",
+    syncing: "资料正在更新，当前显示上一完整版本。", syncDelayed: "资料更新超时，当前显示上一完整版本。", syncFailed: "资料更新未完成，当前显示上一完整版本。",
     issues: (count: number) => `${count} 处大学院资料格式有误，相关路线未列入候选表：`,
     back: "候选学校", routes: "本校路线", now: "当前要做的事", nowEvent: "下一项日程", nothingLeft: "这条路线已没有待办的日程。",
     overdueTitle: "前置期限已过，没有完成记录", overdueHelp: "请核对这些前置手续是否已经办完；办完后在笔记该步骤加 done_on，提示就会消失。",
     materials: "要交的材料", method: "提交方式", openSource: "官方页面", sections: "本页内容",
-    apply: "出愿与材料", fees: "学位与费用", exam: "考试与备考", sources: "出处", levelNav: "学校层次",
+    apply: "报名与材料", fees: "学位与费用", exam: "考试与备考", sources: "出处", levelNav: "学校层次",
     officialSources: "官方资料", renewal: "留学续签说明", difficulty: "申请难度", conditionalDeadline: "如需资格审查",
     fit: "出愿资格与匹配", fitHint: "含 AI 判断，署名见正文",
-    kinds: { prerequisite: "前置手续", application: "出愿", exam: "考试・面谈", result: "发表", enrollment: "入学手续" } satisfies Record<GraduateStepKind, string>,
+    kinds: { prerequisite: "前置手续", application: "报名", exam: "考试和面谈", result: "放榜", enrollment: "入学手续" } satisfies Record<GraduateStepKind, string>,
     states: { done: "已完成", closed: "已过", open: "进行中", upcoming: "未开始", undated: "无校方日期" },
     optional: "建议做", doneOn: "完成于",
     degree: "学位", duration: "学制", entry: "入学", firstYear: "首年", annual: "之后每年", total: "毕业前预计合计",
@@ -81,6 +81,7 @@ const COPY = {
     detailLoading: "正在读取学校资料…", detailFailed: "学校资料暂时无法读取", notFound: "没有找到这所学校或路线",
     detailIssues: "学校卷宗格式有误，以下只显示候选表中的精简信息。",
     deadlineTypes: { "必着": "截止日当天必须送达", "消印有効": "截止日当天的邮戳有效", "期限内必着": "期限内必须送达", "Web締切": "网上提交截止" } satisfies Record<GraduateDeadlineType, string>,
+    deadlineLabels: { "必着": "须送达", "消印有効": "邮戳有效", "期限内必着": "须在期限内送达", "Web締切": "网上截止" } satisfies Record<GraduateDeadlineType, string>,
   },
   ja: {
     module: "大学院", title: "候補校", tracks: { tokyo: "東京・社会人", master: "修士", bachelor: "学部", all: "すべて" }, trackLabel: "ルートの種類",
@@ -99,7 +100,7 @@ const COPY = {
     failed: "候補校を読み込めませんでした", retry: "再試行", empty: "候補校はまだありません",
     emptyDetail: "Vault の 40_大学院/ に type: graduate-school の学校ノートを作るとここに表示されます。大学院資料はこの端末だけにあり、公開スナップショットには含まれません。",
     notIndexed: "現在の資料版には大学院の索引がありません。資料を再同期すると表示されます。",
-    syncing: "資料を更新中です。前回の完全な版を表示しています。", syncFailed: "更新は未完了です。前回の完全な版を表示しています。",
+    syncing: "資料を更新中です。前回の完全な版を表示しています。", syncDelayed: "資料の更新がタイムアウトしました。前回の完全な版を表示しています。", syncFailed: "更新は未完了です。前回の完全な版を表示しています。",
     issues: (count: number) => `大学院資料に ${count} 件の形式エラーがあり、該当ルートは一覧に出ていません：`,
     back: "候補校", routes: "この学校のルート", now: "今やること", nowEvent: "次の予定", nothingLeft: "このルートに残っている予定はありません。",
     overdueTitle: "前提手続きの期限が過ぎ、完了記録がありません", overdueHelp: "手続きが済んでいるか確認してください。済んだらノートの該当ステップに done_on を書くと表示が消えます。",
@@ -118,6 +119,7 @@ const COPY = {
     detailLoading: "学校の資料を読み込んでいます…", detailFailed: "学校の資料を読み込めませんでした", notFound: "この学校またはルートが見つかりません",
     detailIssues: "学校ノートの形式に誤りがあるため、一覧の簡易情報だけを表示しています。",
     deadlineTypes: { "必着": "締切日までに到着していること", "消印有効": "締切日の消印まで有効", "期限内必着": "期限内に到着していること", "Web締切": "オンラインでの提出期限" } satisfies Record<GraduateDeadlineType, string>,
+    deadlineLabels: { "必着": "必着", "消印有効": "消印有効", "期限内必着": "期限内必着", "Web締切": "Web締切" } satisfies Record<GraduateDeadlineType, string>,
   },
 };
 /** 测试与页面共用同一份文言，断言不必另抄一遍。 */
@@ -137,8 +139,10 @@ function useGraduateCatalog(refreshVersion: number | undefined) {
   const [result, setResult] = useState<{ key: string; page: GraduateCatalogPage | null; error: string }>({ key: "", page: null, error: "" });
   useEffect(() => {
     const controller = new AbortController();
+    // 全量索引每次只导入两批，可能超过通用目录的一分钟等待时间。
     void readReadModelJSON<GraduateCatalogPage>("/api/graduate/catalog", controller.signal, fetch,
-      (progress) => { if (!controller.signal.aborted) setResult({ key: `${key}:building`, page: progress, error: "" }); })
+      (progress) => { if (!controller.signal.aborted) setResult({ key: `${key}:building`, page: progress, error: "" }); },
+      { retryBudgetMs: 180_000, pollDelayMs: 500 })
       .then((page) => { if (!controller.signal.aborted) setResult({ key, page, error: "" }); })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
@@ -173,7 +177,11 @@ function jstToday() {
 }
 
 function DeadlineTag({ type, t }: { type?: GraduateDeadlineType; t: Copy }) {
-  return type ? <span className="graduate-deadline-type" title={t.deadlineTypes[type]}>{type}</span> : null;
+  return type ? <span className="graduate-deadline-type" title={t.deadlineTypes[type]}>{t.deadlineLabels[type]}</span> : null;
+}
+
+function stepLabel(step: GraduateCatalogStep, locale: UiLocale) {
+  return locale === "zh-CN" ? step.labelZh ?? step.label : step.label;
 }
 
 const SCALE_MIN = 35, SCALE_MAX = 65;
@@ -317,7 +325,7 @@ function CurrentTask({ route, fullRoute, today, locale, t, onShowPrep }: {
   return <section className="graduate-now" aria-label={t.now}>
     {overdue.length > 0 && <div className="graduate-overdue" role="alert">
       <strong>{t.overdueTitle}</strong>
-      <ul>{overdue.map((item) => <li key={item.id}>{item.label} · <StepDate step={item} locale={locale} today={today} /> <DeadlineTag type={item.deadlineType} t={t} /></li>)}</ul>
+      <ul>{overdue.map((item) => <li key={item.id}>{stepLabel(item, locale)} · <StepDate step={item} locale={locale} today={today} /> <DeadlineTag type={item.deadlineType} t={t} /></li>)}</ul>
       <p>{t.overdueHelp}</p>
     </div>}
     <div className="graduate-now-head">
@@ -325,7 +333,7 @@ function CurrentTask({ route, fullRoute, today, locale, t, onShowPrep }: {
       {onShowPrep && <button type="button" onClick={onShowPrep}>{t.prep} →</button>}
     </div>
     {step ? <>
-      <h2>{step.label}</h2>
+      <h2>{stepLabel(step, locale)}</h2>
       <p className="graduate-now-date">
         <StepDate step={step} locale={locale} today={today} />
         <DeadlineTag type={step.deadlineType} t={t} />
@@ -350,7 +358,7 @@ function StepTimeline({ route, fullRoute, today, locale, t }: { route: GraduateC
           <p className="graduate-step-title">
             <span className="graduate-step-kind">{t.kinds[step.kind]}</span>
             {step.round && <span className="graduate-step-round">{step.round}</span>}
-            <strong>{step.label}</strong>
+            <strong>{stepLabel(step, locale)}</strong>
             <DeadlineTag type={step.deadlineType} t={t} />
             {step.optional && <span className="graduate-step-optional">{t.optional}</span>}
             {state !== "undated" && <span className="graduate-step-state" data-state={state}>{step.doneOn ? `${t.doneOn} ${step.doneOn}` : t.states[state]}</span>}
@@ -362,13 +370,13 @@ function StepTimeline({ route, fullRoute, today, locale, t }: { route: GraduateC
   </ol>;
 }
 
-function FeePanel({ route, fullRoute, t }: { route: GraduateCatalogRoute; fullRoute: GraduateRoute | null; t: Copy }) {
+function FeePanel({ route, fullRoute, degree, t }: { route: GraduateCatalogRoute; fullRoute: GraduateRoute | null; degree: string; t: Copy }) {
   const fees = route.fees;
   if (!fees) return null;
   const yen = (value: number) => `${value.toLocaleString("ja-JP")} ${t.yen}`;
   return <div className="graduate-fees">
     <dl>
-      <div><dt>{t.degree}</dt><dd>{route.degree}</dd></div>
+      <div><dt>{t.degree}</dt><dd>{degree}</dd></div>
       <div><dt>{t.duration}</dt><dd>{t.years(route.years)}</dd></div>
       <div><dt>{t.firstYear}</dt><dd>{yen(fees.firstYear)}</dd></div>
       <div><dt>{t.annual}</dt><dd>{route.years > 1 ? yen(fees.annual) : "—"}</dd></div>
@@ -392,7 +400,9 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
   const fullRoute = fullSchool?.routes.find((item) => item.id === route.id) ?? null;
   const sections = useMemo(() => detail.note && fullSchool ? graduateNoteSections(detail.note.content, fullSchool.routes.map((item) => item.label)) : null, [detail.note, fullSchool]);
   const routeSections = sections?.routes.get(route.label);
-  const officialSources = [sections?.school.get("官方资料"), routeSections?.get("官方资料")].filter(Boolean).join(" · ");
+  const officialSources = [sections?.school.get("官方资料"), routeSections?.get("官方资料")].filter(Boolean);
+  const degree = locale === "zh-CN" ? route.degreeZh ?? route.degree : route.degree;
+  const entry = locale === "zh-CN" ? route.entryZh ?? route.entry : route.entry;
   const difficulty = routeSections?.get("申请难度");
   const renewal = routeSections?.get("续签说明") ?? sections?.school.get("续签说明");
   const showLevel = !route.shortlisted || Boolean(school.level || fullSchool?.profile);
@@ -414,11 +424,11 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
     </div>
     <header className="graduate-hero">
       <div className="graduate-hero-title">
-        <small>{locale === "ja" ? school.name : `${school.nameZh} · ${school.name}`}</small>
+        <small>{locale === "ja" ? school.name : school.nameZh}</small>
         <h1 id="graduate-detail-title">{locale === "ja" ? route.label : route.labelZh}</h1>
-        <p>{locale === "ja" ? route.entry : `${route.label} · ${route.entry}`}</p>
+        <p>{entry}</p>
         <dl className="graduate-hero-facts">
-          <div><dt>{t.degree}</dt><dd>{route.degree}</dd></div>
+          <div><dt>{t.degree}</dt><dd>{degree}</dd></div>
           <div><dt>{t.duration}</dt><dd>{t.years(route.years)}</dd></div>
           {route.fees && <>
             <div><dt>{t.firstYear}</dt><dd>{graduateManYen(route.fees.firstYear)} {t.man}</dd></div>
@@ -431,9 +441,11 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
     {detail.loading && <p className="graduate-status" role="status">{t.detailLoading}</p>}
     {detail.error && <p className="graduate-status" role="alert">{t.detailFailed}<button type="button" onClick={detail.retry}>{t.retry}</button></p>}
     {parsed && !fullSchool && <p className="graduate-status" role="alert">{t.detailIssues}</p>}
-    {officialSources && <section className="graduate-official" aria-labelledby="graduate-official-title">
+    {officialSources.length > 0 && <section className="graduate-official" aria-labelledby="graduate-official-title">
       <h2 id="graduate-official-title">{t.officialSources}</h2>
-      <SectionMarkdown content={officialSources} onOpenWiki={onOpenWiki} />
+      <div className="graduate-official-links">
+        {officialSources.map((content) => <SectionMarkdown key={content} content={content} onOpenWiki={onOpenWiki} />)}
+      </div>
     </section>}
     {renewal && <section id="graduate-renewal" className="graduate-section graduate-renewal">
       <h2>{t.renewal}</h2>
@@ -478,7 +490,7 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
     </section>
     {showFees && <section id="graduate-fees" className="graduate-section">
       <h2>{t.fees}</h2>
-      <FeePanel route={route} fullRoute={fullRoute} t={t} />
+      <FeePanel route={route} fullRoute={fullRoute} degree={degree} t={t} />
       <SectionMarkdown content={routeSections?.get("学位与费用")} onOpenWiki={onOpenWiki} />
     </section>}
     {showExam && <section id="graduate-exam" className="graduate-section">
@@ -557,7 +569,8 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
   if (!page && catalog.error) return <div className="graduate-status-page" role="alert"><h1>{t.failed}</h1><p>{catalog.error}</p><button type="button" onClick={catalog.retry}>{t.retry}</button></div>;
   if (!page) return <div className="graduate-status-page" role="status">{t.loading}</div>;
 
-  const banner = catalog.error || page.syncState === "failed" ? t.syncFailed : page.syncState === "building" ? t.syncing : "";
+  const banner = catalog.error || page.syncState === "failed" ? t.syncFailed
+    : page.syncState === "building" ? (catalog.loading ? t.syncing : t.syncDelayed) : "";
   const notices = <>
     {banner && <div className="graduate-sync" role="status"><span>{banner}</span><button type="button" onClick={catalog.retry}>{t.retry}</button></div>}
     {page.issues.length > 0 && <div className="graduate-issues" role="alert">
@@ -567,7 +580,7 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
   </>;
 
   // 资料版本早于大学院投影时，「没有」只是索引还没建好：不能显示成空列表或「找不到学校」。
-  const notIndexed = !page.indexed && <div className="graduate-status-page" role="status"><h2>{page.syncState === "building" ? t.indexing : t.notIndexed}</h2><button type="button" onClick={catalog.retry}>{t.retry}</button></div>;
+  const notIndexed = !page.indexed && <div className="graduate-status-page" role="status"><h2>{page.syncState === "building" && catalog.loading ? t.indexing : t.notIndexed}</h2><button type="button" onClick={catalog.retry}>{t.retry}</button></div>;
 
   if (location.school) {
     if (notIndexed) return <section className="graduate-workspace" aria-label={t.module}>{notices}{notIndexed}</section>;

@@ -35,7 +35,7 @@ import { loadAppModule } from "./helpers/render-tsx.mjs";
 
 // 学校名一律虚构：仓库公开，本人在看哪些学校属于个人事实。
 const masterSteps = () => [
-  { id: "consult", kind: "prerequisite", label: "事前協議申込", due: "2026-11-30", deadline_type: "必着",
+  { id: "consult", kind: "prerequisite", label: "事前協議申込", label_zh: "联系导师确认报名资格", due: "2026-11-30", deadline_type: "必着",
     materials: [{ label: "事前協議申込書", url: "https://example.test/consult.pdf" }, { label: "研究計画書", url: "https://example.test/plan.pdf" }, { label: "履歴票" }] },
   { id: "homeroom", kind: "prerequisite", label: "向语言学校担任报备" },
   { id: "apply", kind: "application", label: "正式出願", start: "2027-01-08", due: "2027-01-15", deadline_type: "必着" },
@@ -238,14 +238,18 @@ test("学校详情首屏：当前要做的事带截止与必着，前置过期�
     onSelectRoute() {}, onBack() {}, onOpenSource() {}, onOpenWiki() {} };
   const html = renderToStaticMarkup(createElement(SchoolDetail, { ...props, today: "2026-11-13" }));
   assert.match(html, /当前要做的事/);
-  assert.match(html, /事前協議申込/);
+  assert.match(html, /联系导师确认报名资格/);
+  assert.match(html, /须送达/);
   assert.match(html, /11\/30（一）/);
   assert.match(html, /还剩 17 天/);
   assert.match(html, /备考资料 →/, "有备考时首屏就能跳到备考");
   for (const anchor of ["graduate-level", "graduate-apply", "graduate-fees", "graduate-exam", "graduate-sources"]) assert.match(html, new RegExp(`href="#${anchor}"`));
   assert.match(html, /情報学部偏差值 37\.5，属于「中下」一档，类比丙/);
   assert.match(html, /data-current="true"/, "对照图里高亮当前学校");
-  assert.ok(html.indexOf("出愿与材料") < html.indexOf("学位与费用") && html.indexOf("学位与费用") < html.indexOf("考试与备考") && html.indexOf("考试与备考") < html.indexOf(">出处<"));
+  assert.ok(html.indexOf("报名与材料") < html.indexOf("学位与费用") && html.indexOf("学位与费用") < html.indexOf("考试与备考") && html.indexOf("考试与备考") < html.indexOf(">出处<"));
+  const japanese = renderToStaticMarkup(createElement(SchoolDetail, { ...props, today: "2026-11-13", locale: "ja", t: GRADUATE_COPY.ja }));
+  assert.match(japanese, /事前協議申込/);
+  assert.doesNotMatch(japanese, /联系导师确认报名资格/);
   const late = renderToStaticMarkup(createElement(SchoolDetail, { ...props, today: "2026-12-01" }));
   assert.match(late, /前置期限已过，没有完成记录/);
   assert.match(late, /正式出願/);

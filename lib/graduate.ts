@@ -32,6 +32,7 @@ export type GraduateStep = {
   id: string;
   kind: GraduateStepKind;
   label: string;
+  labelZh?: string;
   round?: string;
   start?: string;
   due?: string;
@@ -51,8 +52,10 @@ export type GraduateRoute = {
   labelZh: string;
   track: GraduateTrack;
   degree: string;
+  degreeZh?: string;
   years: number;
   entry: string;
+  entryZh?: string;
   exams: string[];
   fees?: GraduateFees;
   shortlisted?: boolean;
@@ -87,8 +90,8 @@ export type GraduateReference = {
 };
 
 /** 目录只带比较和算期限要用的字段；材料链接、说明和出处随学校正文按需读取。 */
-export type GraduateCatalogStep = Pick<GraduateStep, "id" | "kind" | "label" | "round" | "start" | "due" | "on" | "deadlineType" | "optional" | "doneOn">;
-export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh" | "track" | "degree" | "years" | "entry" | "exams" | "shortlisted"> & {
+export type GraduateCatalogStep = Pick<GraduateStep, "id" | "kind" | "label" | "labelZh" | "round" | "start" | "due" | "on" | "deadlineType" | "optional" | "doneOn">;
+export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh" | "track" | "degree" | "degreeZh" | "years" | "entry" | "entryZh" | "exams" | "shortlisted"> & {
   fees?: Pick<GraduateFees, "firstYear" | "annual">;
   prepPath: string | null;
   steps: GraduateCatalogStep[];
@@ -179,6 +182,7 @@ function parseStep(value: unknown, where: string, issues: string[]): GraduateSte
   }
   return {
     id, kind, label, materials,
+    ...(text(source.label_zh) ? { labelZh: text(source.label_zh) } : {}),
     ...(text(source.round) ? { round: text(source.round) } : {}),
     ...(start ? { start } : {}), ...(due ? { due } : {}), ...(on ? { on } : {}),
     ...(deadlineType && GRADUATE_DEADLINE_TYPES.includes(deadlineType) ? { deadlineType } : {}),
@@ -258,6 +262,8 @@ function parseRoute(value: unknown, index: number, issues: string[]): GraduateRo
   const feesUrl = optionalUrl(fees?.url, `${where}.fees`, issues);
   return {
     id, label, labelZh: text(source.label_zh) || label, track, degree: text(source.degree), years, entry: text(source.entry), exams,
+    ...(text(source.degree_zh) ? { degreeZh: text(source.degree_zh) } : {}),
+    ...(text(source.entry_zh) ? { entryZh: text(source.entry_zh) } : {}),
     ...(firstYear !== null && annual !== null ? { fees: { firstYear, annual, basis: text(fees?.basis), ...(feesUrl ? { url: feesUrl } : {}) } } : {}),
     ...(shortlisted ? { shortlisted } : {}),
     ...(prep ? { prep } : {}), steps,
@@ -364,8 +370,8 @@ export function graduateDeviationRange(low: number, high: number) {
 }
 
 function catalogStep(step: GraduateStep): GraduateCatalogStep {
-  const { id, kind, label, round, start, due, on, deadlineType, optional, doneOn } = step;
-  return { id, kind, label, ...(round ? { round } : {}), ...(start ? { start } : {}), ...(due ? { due } : {}), ...(on ? { on } : {}),
+  const { id, kind, label, labelZh, round, start, due, on, deadlineType, optional, doneOn } = step;
+  return { id, kind, label, ...(labelZh ? { labelZh } : {}), ...(round ? { round } : {}), ...(start ? { start } : {}), ...(due ? { due } : {}), ...(on ? { on } : {}),
     ...(deadlineType ? { deadlineType } : {}), ...(optional ? { optional } : {}), ...(doneOn ? { doneOn } : {}) };
 }
 
@@ -412,6 +418,7 @@ export function buildGraduateCatalog(notes: Note[]): GraduateCatalog {
       const prepPath = resolvePrepPath(route.prep, notes);
       if (route.prep && !prepPath) issues.push({ path: note.path, message: `${route.id} の prep [[${route.prep}]] が備考ノートに解決できない` });
       routes.push({ id: route.id, label: route.label, labelZh: route.labelZh, track: route.track, degree: route.degree, years: route.years, entry: route.entry, exams: route.exams,
+        ...(route.degreeZh ? { degreeZh: route.degreeZh } : {}), ...(route.entryZh ? { entryZh: route.entryZh } : {}),
         ...(route.fees ? { fees: { firstYear: route.fees.firstYear, annual: route.fees.annual } } : {}),
         ...(route.shortlisted ? { shortlisted: true } : {}), prepPath, steps: route.steps.map(catalogStep) });
     }
