@@ -66,11 +66,13 @@ const prepNote = (path = "40_大学院/テスト工科大学_備考.md") => ({
   content: "# 备考\n\n## 2026 年度小论文真题\n\n600 字以上 800 字以内。\n",
 });
 
-test("候选表默认只列修士，按学校 sort 排序；全部时列出每条路线", () => {
-  const second = school({ path: "40_大学院/サンプル大学.md", id: "sample-u", sort: 2, routes: [route("sample-master", "master"), route("sample-first", "bachelor"), route("sample-second", "bachelor")] });
+test("东京筛选只列标为入选的修士，其他筛选保留学校和路线", () => {
+  const second = school({ path: "40_大学院/サンプル大学.md", id: "sample-u", sort: 2, routes: [route("sample-master", "master", { shortlist: "tokyo-social-2027", fees: undefined }), route("sample-first", "bachelor"), route("sample-second", "bachelor")] });
   const catalog = buildGraduateCatalog([second, school()]);
   assert.deepEqual(catalog.issues, []);
   assert.deepEqual(graduateCatalogEntries(catalog, "master").map(({ route }) => route.id), ["test-master", "sample-master"]);
+  assert.deepEqual(graduateCatalogEntries(catalog, "tokyo").map(({ route }) => route.id), ["sample-master"]);
+  assert.equal(catalog.schools[1].routes[0].fees, undefined);
   assert.equal(graduateCatalogEntries(catalog, "bachelor").length, 3);
   assert.equal(graduateCatalogEntries(catalog, "all").length, 5);
   assert.equal(catalog.schools[0].id, "test-tech", "sort 小的在前");
@@ -163,11 +165,11 @@ test("正文按路线标题切出小节，导语、学校口径和出处归学�
   assert.match(sections.routes.get("路线甲").get("出愿与材料"), /## 不是标题/);
 });
 
-test("稳定链接只写本区三个键：修士是默认值，外壳参数原样保留", () => {
-  assert.deepEqual(graduateLocationFromSearch(""), { track: "master", school: "", route: "" });
+test("稳定链接只写本区三个键：东京名单是默认值，外壳参数原样保留", () => {
+  assert.deepEqual(graduateLocationFromSearch(""), { track: "tokyo", school: "", route: "" });
   assert.deepEqual(graduateLocationFromSearch("?track=all&school=test-tech&route=test-master"), { track: "all", school: "test-tech", route: "test-master" });
-  assert.deepEqual(graduateLocationFromSearch("?track=phd&school=../x"), { track: "master", school: "", route: "" }, "认不出的值回到默认");
-  assert.equal(graduateSearch({ track: "master", school: "", route: "" }, "note=a.md&track=all").toString(), "note=a.md");
+  assert.deepEqual(graduateLocationFromSearch("?track=phd&school=../x"), { track: "tokyo", school: "", route: "" }, "认不出的值回到默认");
+  assert.equal(graduateSearch({ track: "tokyo", school: "", route: "" }, "note=a.md&track=all").toString(), "note=a.md");
   assert.equal(graduateSearch({ track: "bachelor", school: "test-tech", route: "test-bachelor" }).toString(), "track=bachelor&school=test-tech&route=test-bachelor");
   assert.equal(graduateSearch({ track: "all", school: "", route: "stale" }).toString(), "track=all", "没有学校时不留路线");
 });
@@ -210,16 +212,23 @@ test("发布快照：publish: false 的大学院资料不进正文、目录和�
   assert.deepEqual(catalog, { schemaVersion: 1, schools: [], reference: null, issues: [] });
 });
 
-test("候选表一行一条路线：学位、学制、两种费用、科目和下一道截止并排；过期前置手续标红", async () => {
+test("候选表只显示四列，换批次时同步切换截止日和放榜日", async () => {
   const { CandidateTable, GRADUATE_COPY } = await loadAppModule("app/graduate-view.tsx");
-  const catalog = buildGraduateCatalog([school({ level }), referenceNote()]);
-  const html = renderToStaticMarkup(createElement(CandidateTable, { entries: graduateCatalogEntries(catalog, "master"), reference: catalog.reference, track: "master", today: "2026-11-13", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} }));
-  assert.equal((html.match(/<tr data-track=/g) ?? []).length, 1);
+  const steps = [
+    ...masterSteps().map((step) => ({ ...step, round: "1期" })),
+    { id: "result-one", kind: "result", label: "第1期発表", round: "1期", on: "2027-03-08" },
+    { id: "apply-two", kind: "application", label: "第2期出願", round: "2期", due: "2027-02-15", deadline_type: "必着" },
+    { id: "result-two", kind: "result", label: "第2期発表", round: "2期", on: "2027-03-22" },
+  ];
+  const catalog = buildGraduateCatalog([school({ routes: [route("test-master", "master", { shortlist: "tokyo-social-2027", steps })] })]);
+  const props = { entries: graduateCatalogEntries(catalog, "tokyo"), track: "tokyo", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} };
+  const html = renderToStaticMarkup(createElement(CandidateTable, { ...props, today: "2026-11-13" }));
+  assert.equal((html.match(/<th scope="col"/g) ?? []).length, 4);
   assert.match(html, /href="\/graduate\?school=test-tech&amp;route=test-master"/);
-  for (const text of ["中下", "类比丙", "情報学部 37.5", "测试工科大学", "test-master 中文名", "修士（工学）", "2 年", "100.1", "179.0", "小論文", "11/30（一）", "必着", "事前協議申込", "还剩 17 天"]) assert.ok(html.includes(text), text);
-  const late = renderToStaticMarkup(createElement(CandidateTable, { entries: graduateCatalogEntries(catalog, "master"), reference: catalog.reference, track: "master", today: "2026-12-01", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} }));
-  assert.match(late, /前置期限已过：事前協議申込/);
-  assert.match(late, /1\/15（五）/);
+  for (const date of ["2026-11-30", "2027-03-08"]) assert.ok(html.includes(date), date);
+  const late = renderToStaticMarkup(createElement(CandidateTable, { ...props, today: "2026-12-01" }));
+  for (const date of ["2027-02-15", "2027-03-22"]) assert.ok(late.includes(date), date);
+  assert.doesNotMatch(late, /2027-03-08/);
 });
 
 test("学校详情首屏：当前要做的事带截止与必着，前置过期给出核对提示", async () => {

@@ -9,6 +9,7 @@ import { URL_CHANGE_EVENT, useInitialUrlSearch } from "./use-url-state";
 import { useUiLocale } from "./ui-locale";
 import { appViewHref } from "./app-route";
 import {
+  graduateApplicationDates,
   graduateBand,
   graduateCatalogEntries,
   graduateDeviationRange,
@@ -45,8 +46,8 @@ import type { UiLocale } from "@/lib/ui-locale";
 
 const COPY = {
   "zh-CN": {
-    module: "大学院", title: "候选学校", tracks: { master: "修士", bachelor: "本科", all: "全部" }, trackLabel: "路线类型",
-    columns: { route: "学校与路线", level: "学校层次", degree: "学位", years: "学制", firstYear: "首年费用", total: "预计总费用", exams: "考试科目", next: "下一道截止" },
+    module: "大学院", title: "候选学校", tracks: { tokyo: "东京社会人", master: "修士", bachelor: "本科", all: "全部" }, trackLabel: "路线类型",
+    columns: { school: "学校", program: "专业", deadline: "最早截止日", result: "放榜日" },
     level: {
       section: "学校层次", title: "学校层次怎么看", subtitle: "河合塾本科一般入试的偏差值（2027 年度预测）：越靠右越难考进。候选校画的是相关学部，细线是全校各学部的范围。",
       candidate: "候选", reference: "参照", focus: "相关学部", school: "全校各学部", deviation: "偏差值",
@@ -67,7 +68,7 @@ const COPY = {
     overdueTitle: "前置期限已过，没有完成记录", overdueHelp: "请核对这些前置手续是否已经办完；办完后在笔记该步骤加 done_on，提示就会消失。",
     materials: "要交的材料", method: "提交方式", openSource: "官方页面", sections: "本页内容",
     apply: "出愿与材料", fees: "学位与费用", exam: "考试与备考", sources: "出处", levelNav: "学校层次",
-    officialSources: "官方资料", difficulty: "申请难度",
+    officialSources: "官方资料", renewal: "留学续签说明", difficulty: "申请难度", conditionalDeadline: "如需资格审查",
     fit: "出愿资格与匹配", fitHint: "含 AI 判断，署名见正文",
     kinds: { prerequisite: "前置手续", application: "出愿", exam: "考试・面谈", result: "发表", enrollment: "入学手续" } satisfies Record<GraduateStepKind, string>,
     states: { done: "已完成", closed: "已过", open: "进行中", upcoming: "未开始", undated: "无校方日期" },
@@ -79,11 +80,11 @@ const COPY = {
     indicators: { ranking: "排名", deviation: "偏差值", employment: "就业" }, indicatorSource: "查看来源", checkedOn: "资料核对日", openNote: "打开学校原笔记",
     detailLoading: "正在读取学校资料…", detailFailed: "学校资料暂时无法读取", notFound: "没有找到这所学校或路线",
     detailIssues: "学校卷宗格式有误，以下只显示候选表中的精简信息。",
-    deadlineTypes: { "必着": "截止日当天必须送达", "消印有効": "截止日当天的邮戳有效", "期限内必着": "期限内必须送达" } satisfies Record<GraduateDeadlineType, string>,
+    deadlineTypes: { "必着": "截止日当天必须送达", "消印有効": "截止日当天的邮戳有效", "期限内必着": "期限内必须送达", "Web締切": "网上提交截止" } satisfies Record<GraduateDeadlineType, string>,
   },
   ja: {
-    module: "大学院", title: "候補校", tracks: { master: "修士", bachelor: "学部", all: "すべて" }, trackLabel: "ルートの種類",
-    columns: { route: "学校とルート", level: "大学のレベル", degree: "学位", years: "年限", firstYear: "初年度", total: "卒業までの概算", exams: "試験科目", next: "次の締切" },
+    module: "大学院", title: "候補校", tracks: { tokyo: "東京・社会人", master: "修士", bachelor: "学部", all: "すべて" }, trackLabel: "ルートの種類",
+    columns: { school: "学校", program: "専攻", deadline: "最初の締切日", result: "合格発表日" },
     level: {
       section: "大学のレベル", title: "大学のレベルの目安", subtitle: "河合塾の学部一般選抜ボーダー偏差値（2027年度予想）。右ほど入りにくい。候補校は関連学部、細線は全学部の範囲。",
       candidate: "候補", reference: "参照", focus: "関連学部", school: "全学部", deviation: "偏差値",
@@ -104,7 +105,7 @@ const COPY = {
     overdueTitle: "前提手続きの期限が過ぎ、完了記録がありません", overdueHelp: "手続きが済んでいるか確認してください。済んだらノートの該当ステップに done_on を書くと表示が消えます。",
     materials: "提出書類", method: "提出方法", openSource: "公式ページ", sections: "このページ",
     apply: "出願と書類", fees: "学位と学費", exam: "試験と対策", sources: "出典", levelNav: "大学のレベル",
-    officialSources: "公式資料", difficulty: "入試の難易度",
+    officialSources: "公式資料", renewal: "「留学」の在留期間更新", difficulty: "入試の難易度", conditionalDeadline: "資格審査が必要な場合",
     fit: "出願資格と適合", fitHint: "AI の判断を含む（署名は本文）",
     kinds: { prerequisite: "事前手続き", application: "出願", exam: "試験・面談", result: "発表", enrollment: "入学手続" } satisfies Record<GraduateStepKind, string>,
     states: { done: "完了", closed: "終了", open: "受付中", upcoming: "未開始", undated: "学校の期日なし" },
@@ -116,7 +117,7 @@ const COPY = {
     indicators: { ranking: "ランキング", deviation: "偏差値", employment: "就職" }, indicatorSource: "出典を見る", checkedOn: "資料の確認日", openNote: "学校ノートを開く",
     detailLoading: "学校の資料を読み込んでいます…", detailFailed: "学校の資料を読み込めませんでした", notFound: "この学校またはルートが見つかりません",
     detailIssues: "学校ノートの形式に誤りがあるため、一覧の簡易情報だけを表示しています。",
-    deadlineTypes: { "必着": "締切日までに到着していること", "消印有効": "締切日の消印まで有効", "期限内必着": "期限内に到着していること" } satisfies Record<GraduateDeadlineType, string>,
+    deadlineTypes: { "必着": "締切日までに到着していること", "消印有効": "締切日の消印まで有効", "期限内必着": "期限内に到着していること", "Web締切": "オンラインでの提出期限" } satisfies Record<GraduateDeadlineType, string>,
   },
 };
 /** 测试与页面共用同一份文言，断言不必另抄一遍。 */
@@ -173,23 +174,6 @@ function jstToday() {
 
 function DeadlineTag({ type, t }: { type?: GraduateDeadlineType; t: Copy }) {
   return type ? <span className="graduate-deadline-type" title={t.deadlineTypes[type]}>{type}</span> : null;
-}
-
-function DeadlineCell({ route, today, locale, t }: { route: GraduateCatalogRoute; today: string; locale: UiLocale; t: Copy }) {
-  const next = nextGraduateDeadline(route.steps, today);
-  const overdue = overdueGraduatePrerequisites(route.steps, today);
-  return <div className="graduate-next">
-    {next ? <>
-      <strong><time dateTime={next.due}>{graduateDateLabel(next.due!, locale, today)}</time><DeadlineTag type={next.deadlineType} t={t} /></strong>
-      <span>{next.label}</span>
-      <small data-urgent={graduateDaysUntil(next.due!, today) <= 7 || undefined}>{t.daysLeft(graduateDaysUntil(next.due!, today))}</small>
-    </> : <span className="graduate-muted">{t.noDeadline}</span>}
-    {overdue.length > 0 && <em className="graduate-overdue-flag">{t.overdue}：{overdue.map((step) => step.label).join("、")}</em>}
-  </div>;
-}
-
-function examShort(exam: string) {
-  return exam.replace(/[（(].*$/, "").trim() || exam;
 }
 
 const SCALE_MIN = 35, SCALE_MAX = 65;
@@ -259,50 +243,38 @@ export function LevelScale({ reference, schools, current, locale, t }: {
   </figure>;
 }
 
-function LevelCell({ school, reference }: { school: GraduateCatalogSchool; reference: GraduateReference | null }) {
-  if (!school.level) return <span className="graduate-muted">—</span>;
-  const band = reference ? graduateBand(reference.bands, school.level.focusHigh) : null;
-  return <div className="graduate-level-cell">
-    {band && <span className="graduate-level-band" data-band={band.label}>{band.label}</span>}
-    {band && <span>{band.analogy}</span>}
-    <small>{school.level.focus} {graduateDeviationRange(school.level.focusLow, school.level.focusHigh)}</small>
-  </div>;
-}
-
-export function CandidateTable({ entries, reference, track, today, locale, t, onOpen }: {
-  entries: GraduateCatalogEntry[]; reference: GraduateReference | null; track: GraduateTrackFilter; today: string; locale: UiLocale; t: Copy;
+export function CandidateTable({ entries, track, today, locale, t, onOpen }: {
+  entries: GraduateCatalogEntry[]; track: GraduateTrackFilter; today: string; locale: UiLocale; t: Copy;
   onOpen: (event: MouseEvent<HTMLElement>, entry: GraduateCatalogEntry) => void;
 }) {
+  const rows = entries.map((entry) => ({ entry, ...graduateApplicationDates(entry.route.steps, today) }));
+  if (track === "tokyo") rows.sort((left, right) => (left.deadline?.due ?? "9999").localeCompare(right.deadline?.due ?? "9999"));
   return <table className="graduate-table">
     <caption>{t.title}</caption>
     <thead><tr>
-      <th scope="col">{t.columns.route}</th><th scope="col">{t.columns.level}</th><th scope="col">{t.columns.degree}</th><th scope="col">{t.columns.years}</th>
-      <th scope="col" className="graduate-num">{t.columns.firstYear}</th><th scope="col" className="graduate-num">{t.columns.total}</th>
-      <th scope="col">{t.columns.exams}</th><th scope="col">{t.columns.next}</th>
+      <th scope="col">{t.columns.school}</th><th scope="col">{t.columns.program}</th>
+      <th scope="col">{t.columns.deadline}</th><th scope="col">{t.columns.result}</th>
     </tr></thead>
     <tbody>
-      {entries.map((entry) => {
+      {rows.map(({ entry, deadline, result }) => {
         const { school, route } = entry;
+        const conditional = deadline?.due && route.shortlisted ? route.steps.find((step) =>
+          step.optional && step.kind === "prerequisite" && step.round === deadline.round && step.due &&
+          step.due >= today && step.due < deadline.due!) : undefined;
+        const schoolName = locale === "ja" ? school.name : school.nameZh;
+        const program = locale === "ja" ? route.label : route.labelZh;
         const href = appViewHref("graduate", graduateSearch({ track, school: school.id, route: route.id }));
         return <tr key={route.id} data-track={route.track} onClick={(event) => {
-          // 行内的链接自己处理；点到空白处才走整行打开，按住修饰键时交给浏览器。
           if ((event.target as HTMLElement).closest("a")) return;
           onOpen(event, entry);
         }}>
-          <th scope="row">
-            <a href={href} onClick={(event) => onOpen(event, entry)}>
-              <span className="graduate-school-name">{locale === "ja" ? school.name : school.nameZh}</span>
-              <strong>{locale === "ja" ? route.label : route.labelZh}</strong>
-            </a>
-            <small>{locale === "ja" ? route.entry : route.label}</small>
-          </th>
-          <td><LevelCell school={school} reference={reference} /></td>
-          <td><span className={`graduate-track-badge ${route.track}`}>{t.tracks[route.track]}</span><span className="graduate-degree">{route.degree}</span></td>
-          <td className="graduate-years">{t.years(route.years)}</td>
-          <td className="graduate-num"><strong>{graduateManYen(route.fees.firstYear)}</strong><small>{t.man}</small></td>
-          <td className="graduate-num"><strong>{graduateManYen(graduateTotalFee(route))}</strong><small>{t.byYears(route.years)}</small></td>
-          <td><ul className="graduate-exam-chips">{route.exams.map((exam) => <li key={exam} title={exam}>{examShort(exam)}</li>)}</ul></td>
-          <td><DeadlineCell route={route} today={today} locale={locale} t={t} /></td>
+          <th scope="row">{schoolName}</th>
+          <td><a href={href} aria-label={`${schoolName} · ${program}`} onClick={(event) => onOpen(event, entry)}>{program}</a></td>
+          <td>
+            {deadline?.due ? <time dateTime={deadline.due}>{deadline.due.replaceAll("-", "/")}</time> : <span className="graduate-muted">{t.noDeadline}</span>}
+            {conditional?.due && <small className="graduate-conditional">{t.conditionalDeadline} <time dateTime={conditional.due}>{conditional.due.replaceAll("-", "/")}</time></small>}
+          </td>
+          <td>{result?.on ? <time dateTime={result.on}>{result.on.replaceAll("-", "/")}</time> : <span className="graduate-muted">—</span>}</td>
         </tr>;
       })}
     </tbody>
@@ -338,7 +310,7 @@ function CurrentTask({ route, fullRoute, today, locale, t, onShowPrep }: {
   route: GraduateCatalogRoute; fullRoute: GraduateRoute | null; today: string; locale: UiLocale; t: Copy; onShowPrep: (() => void) | null;
 }) {
   const overdue = overdueGraduatePrerequisites(route.steps, today);
-  const deadline = nextGraduateDeadline(route.steps, today);
+  const deadline = route.shortlisted ? graduateApplicationDates(route.steps, today).deadline : nextGraduateDeadline(route.steps, today);
   const step = deadline ?? nextGraduateEvent(route.steps, today);
   const full = step && fullRoute?.steps.find((item) => item.id === step.id);
   const days = step && (step.due ?? step.on) ? graduateDaysUntil((step.due ?? step.on)!, today) : null;
@@ -391,16 +363,18 @@ function StepTimeline({ route, fullRoute, today, locale, t }: { route: GraduateC
 }
 
 function FeePanel({ route, fullRoute, t }: { route: GraduateCatalogRoute; fullRoute: GraduateRoute | null; t: Copy }) {
+  const fees = route.fees;
+  if (!fees) return null;
   const yen = (value: number) => `${value.toLocaleString("ja-JP")} ${t.yen}`;
   return <div className="graduate-fees">
     <dl>
       <div><dt>{t.degree}</dt><dd>{route.degree}</dd></div>
       <div><dt>{t.duration}</dt><dd>{t.years(route.years)}</dd></div>
-      <div><dt>{t.firstYear}</dt><dd>{yen(route.fees.firstYear)}</dd></div>
-      <div><dt>{t.annual}</dt><dd>{route.years > 1 ? yen(route.fees.annual) : "—"}</dd></div>
-      <div className="graduate-fee-total"><dt>{t.total}</dt><dd><strong>{graduateManYen(graduateTotalFee(route))}</strong> {t.man}<small>{yen(graduateTotalFee(route))}</small></dd></div>
+      <div><dt>{t.firstYear}</dt><dd>{yen(fees.firstYear)}</dd></div>
+      <div><dt>{t.annual}</dt><dd>{route.years > 1 ? yen(fees.annual) : "—"}</dd></div>
+      <div className="graduate-fee-total"><dt>{t.total}</dt><dd><strong>{graduateManYen(graduateTotalFee({ years: route.years, fees }))}</strong> {t.man}<small>{yen(graduateTotalFee({ years: route.years, fees }))}</small></dd></div>
     </dl>
-    {fullRoute?.fees.basis && <p className="graduate-fee-basis"><b>{t.feeBasis}</b>{fullRoute.fees.basis}{fullRoute.fees.url && <> · <a href={fullRoute.fees.url} target="_blank" rel="noreferrer">{t.feeSource} ↗</a></>}</p>}
+    {fullRoute?.fees?.basis && <p className="graduate-fee-basis"><b>{t.feeBasis}</b>{fullRoute.fees.basis}{fullRoute.fees.url && <> · <a href={fullRoute.fees.url} target="_blank" rel="noreferrer">{t.feeSource} ↗</a></>}</p>}
   </div>;
 }
 
@@ -420,6 +394,10 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
   const routeSections = sections?.routes.get(route.label);
   const officialSources = [sections?.school.get("官方资料"), routeSections?.get("官方资料")].filter(Boolean).join(" · ");
   const difficulty = routeSections?.get("申请难度");
+  const renewal = routeSections?.get("续签说明") ?? sections?.school.get("续签说明");
+  const showLevel = !route.shortlisted || Boolean(school.level || fullSchool?.profile);
+  const showFees = Boolean(route.fees || routeSections?.get("学位与费用"));
+  const showExam = !route.shortlisted || Boolean(route.exams.length || route.prepPath || routeSections?.get("考试与备考"));
   const showPrep = route.prepPath ? () => {
     setPrepOpen(true);
     window.requestAnimationFrame?.(() => document.getElementById("graduate-exam")?.scrollIntoView({ block: "start" }));
@@ -442,8 +420,10 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
         <dl className="graduate-hero-facts">
           <div><dt>{t.degree}</dt><dd>{route.degree}</dd></div>
           <div><dt>{t.duration}</dt><dd>{t.years(route.years)}</dd></div>
-          <div><dt>{t.firstYear}</dt><dd>{graduateManYen(route.fees.firstYear)} {t.man}</dd></div>
-          <div><dt>{t.total}</dt><dd>{graduateManYen(graduateTotalFee(route))} {t.man}</dd></div>
+          {route.fees && <>
+            <div><dt>{t.firstYear}</dt><dd>{graduateManYen(route.fees.firstYear)} {t.man}</dd></div>
+            <div><dt>{t.total}</dt><dd>{graduateManYen(graduateTotalFee({ years: route.years, fees: route.fees }))} {t.man}</dd></div>
+          </>}
         </dl>
       </div>
       <CurrentTask route={route} fullRoute={fullRoute} today={today} locale={locale} t={t} onShowPrep={showPrep} />
@@ -455,15 +435,23 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
       <h2 id="graduate-official-title">{t.officialSources}</h2>
       <SectionMarkdown content={officialSources} onOpenWiki={onOpenWiki} />
     </section>}
+    {renewal && <section id="graduate-renewal" className="graduate-section graduate-renewal">
+      <h2>{t.renewal}</h2>
+      <SectionMarkdown content={renewal} onOpenWiki={onOpenWiki} />
+    </section>}
     <nav className="graduate-section-nav" aria-label={t.sections}>
       {difficulty && <a href="#graduate-difficulty">{t.difficulty}</a>}
-      <a href="#graduate-level">{t.levelNav}</a><a href="#graduate-apply">{t.apply}</a><a href="#graduate-fees">{t.fees}</a><a href="#graduate-exam">{t.exam}</a><a href="#graduate-sources">{t.sources}</a>
+      {showLevel && <a href="#graduate-level">{t.levelNav}</a>}
+      <a href="#graduate-apply">{t.apply}</a>
+      {showFees && <a href="#graduate-fees">{t.fees}</a>}
+      {showExam && <a href="#graduate-exam">{t.exam}</a>}
+      <a href="#graduate-sources">{t.sources}</a>
     </nav>
     {difficulty && <section id="graduate-difficulty" className="graduate-section">
       <h2>{t.difficulty}</h2>
       <SectionMarkdown content={difficulty} onOpenWiki={onOpenWiki} />
     </section>}
-    <section id="graduate-level" className="graduate-section">
+    {showLevel && <section id="graduate-level" className="graduate-section">
       <h2>{t.level.section}</h2>
       {fullSchool?.profile && <dl className="graduate-profile">
         <div><dt>{t.level.profileKind}</dt><dd>{fullSchool.profile.kind}</dd></div>
@@ -478,7 +466,7 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
         </p>;
       })() : <p className="graduate-muted">{t.level.none}</p>}
       {reference && <LevelScale reference={reference} schools={schools} current={school.id} locale={locale} t={t} />}
-    </section>
+    </section>}
     <section id="graduate-apply" className="graduate-section">
       <h2>{t.apply}</h2>
       <StepTimeline route={route} fullRoute={fullRoute} today={today} locale={locale} t={t} />
@@ -488,12 +476,12 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
       </details>}
       <SectionMarkdown content={routeSections?.get("出愿与材料")} onOpenWiki={onOpenWiki} />
     </section>
-    <section id="graduate-fees" className="graduate-section">
+    {showFees && <section id="graduate-fees" className="graduate-section">
       <h2>{t.fees}</h2>
       <FeePanel route={route} fullRoute={fullRoute} t={t} />
       <SectionMarkdown content={routeSections?.get("学位与费用")} onOpenWiki={onOpenWiki} />
-    </section>
-    <section id="graduate-exam" className="graduate-section">
+    </section>}
+    {showExam && <section id="graduate-exam" className="graduate-section">
       <h2>{t.exam}</h2>
       <ul className="graduate-exam-list" aria-label={t.exams}>{route.exams.map((exam) => <li key={exam}>{exam}</li>)}</ul>
       <SectionMarkdown content={routeSections?.get("考试与备考")} onOpenWiki={onOpenWiki} />
@@ -508,7 +496,7 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
           </div>}
         </> : <p className="graduate-muted">{t.noPrep}</p>}
       </div>
-    </section>
+    </section>}
     <section id="graduate-sources" className="graduate-section">
       <h2>{t.sources}</h2>
       {fullSchool && fullSchool.indicators.length > 0 && <dl className="graduate-indicators">
@@ -552,7 +540,7 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
   const entries = useMemo(() => page ? graduateCatalogEntries(page, location.track) : [], [page, location.track]);
   const counts = useMemo(() => Object.fromEntries(GRADUATE_TRACK_FILTERS.map((track) => [track, page ? graduateCatalogEntries(page, track).length : 0])) as Record<GraduateTrackFilter, number>, [page]);
   const school = location.school ? page?.schools.find((item) => item.id === location.school) ?? null : null;
-  const route = school ? school.routes.find((item) => item.id === location.route) ?? school.routes.find((item) => location.track === "all" || item.track === location.track) ?? school.routes[0] ?? null : null;
+  const route = school ? school.routes.find((item) => item.id === location.route) ?? school.routes.find((item) => location.track === "tokyo" ? item.shortlisted : location.track === "all" || item.track === location.track) ?? school.routes[0] ?? null : null;
 
   const openEntry = (event: MouseEvent<HTMLElement>, entry: GraduateCatalogEntry) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -593,7 +581,7 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
 
   return <section className="graduate-workspace" aria-label={t.module}>
     <header className="graduate-list-head">
-      <div><small>{t.module}</small><h1>{t.title}</h1></div>
+      <h1>{t.title}</h1>
       <div className="graduate-toolbar" role="group" aria-label={t.trackLabel}>
         {GRADUATE_TRACK_FILTERS.map((track) => <button type="button" key={track} aria-pressed={location.track === track} onClick={() => write({ track, school: "", route: "" }, "replace")}>
           {t.tracks[track]}<span>{counts[track]}</span>
@@ -602,10 +590,10 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
       <p className="graduate-today">JST {graduateDateLabel(today, locale)}{catalog.loading && <span className="graduate-refreshing" aria-hidden="true" />}</p>
     </header>
     {notices}
-    {notIndexed || (page.schools.length === 0 ? <div className="graduate-status-page"><h2>{t.empty}</h2><p>{t.emptyDetail}</p></div>
+    {notIndexed || (entries.length === 0 ? <div className="graduate-status-page"><h2>{t.empty}</h2><p>{t.emptyDetail}</p></div>
       : <>
-        <CandidateTable entries={entries} reference={page.reference ?? null} track={location.track} today={today} locale={locale} t={t} onOpen={openEntry} />
-        {page.reference && <section className="graduate-level-panel" aria-label={t.level.title}><LevelScale reference={page.reference} schools={page.schools} locale={locale} t={t} /></section>}
+        <CandidateTable entries={entries} track={location.track} today={today} locale={locale} t={t} onOpen={openEntry} />
+        {location.track !== "tokyo" && page.reference && <section className="graduate-level-panel" aria-label={t.level.title}><LevelScale reference={page.reference} schools={page.schools} locale={locale} t={t} /></section>}
       </>)}
   </section>;
 }

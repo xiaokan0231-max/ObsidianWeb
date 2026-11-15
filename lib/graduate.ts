@@ -14,9 +14,9 @@ export const GRADUATE_PREP_TYPE = "graduate-prep";
 export const GRADUATE_REFERENCE_TYPE = "graduate-reference";
 export const GRADUATE_RECORD_KIND = "graduate-catalog";
 export const GRADUATE_TRACKS = ["master", "bachelor"] as const;
-export const GRADUATE_TRACK_FILTERS = ["master", "bachelor", "all"] as const;
+export const GRADUATE_TRACK_FILTERS = ["tokyo", "master", "bachelor", "all"] as const;
 export const GRADUATE_STEP_KINDS = ["prerequisite", "application", "exam", "result", "enrollment"] as const;
-export const GRADUATE_DEADLINE_TYPES = ["必着", "消印有効", "期限内必着"] as const;
+export const GRADUATE_DEADLINE_TYPES = ["必着", "消印有効", "期限内必着", "Web締切"] as const;
 export const GRADUATE_INDICATOR_KINDS = ["ranking", "deviation", "employment"] as const;
 /** 正文里每条路线下的固定小节；页面按这几个名字取说明文字。 */
 export const GRADUATE_ROUTE_SECTIONS = ["出愿资格与匹配", "出愿与材料", "学位与费用", "考试与备考"] as const;
@@ -54,7 +54,8 @@ export type GraduateRoute = {
   years: number;
   entry: string;
   exams: string[];
-  fees: GraduateFees;
+  fees?: GraduateFees;
+  shortlisted?: boolean;
   /** 备考笔记的双链目标（不含方括号）；路径在投影阶段解析。 */
   prep?: string;
   steps: GraduateStep[];
@@ -87,8 +88,8 @@ export type GraduateReference = {
 
 /** 目录只带比较和算期限要用的字段；材料链接、说明和出处随学校正文按需读取。 */
 export type GraduateCatalogStep = Pick<GraduateStep, "id" | "kind" | "label" | "round" | "start" | "due" | "on" | "deadlineType" | "optional" | "doneOn">;
-export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh" | "track" | "degree" | "years" | "entry" | "exams"> & {
-  fees: Pick<GraduateFees, "firstYear" | "annual">;
+export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh" | "track" | "degree" | "years" | "entry" | "exams" | "shortlisted"> & {
+  fees?: Pick<GraduateFees, "firstYear" | "annual">;
   prepPath: string | null;
   steps: GraduateCatalogStep[];
 };
@@ -224,7 +225,8 @@ function parseProfile(value: unknown, issues: string[]): GraduateProfile | undef
 }
 
 function integerYen(value: unknown) {
-  const number = typeof value === "number" ? value : Number(text(value));
+  const raw = text(value);
+  const number = typeof value === "number" ? value : raw ? Number(raw) : NaN;
   return Number.isSafeInteger(number) && number >= 0 ? number : null;
 }
 
@@ -241,8 +243,9 @@ function parseRoute(value: unknown, index: number, issues: string[]): GraduateRo
   const fees = record(source.fees);
   const firstYear = integerYen(fees?.first_year), annual = integerYen(fees?.annual);
   // 合計は画面で計算する。円の整数でない値は「概算の手書き」と区別できなくなる。
-  if (firstYear === null) issues.push(`${where} の fees.first_year は円の整数`);
-  if (annual === null) issues.push(`${where} の fees.annual は円の整数`);
+  if (source.fees !== undefined && firstYear === null) issues.push(`${where} の fees.first_year は円の整数`);
+  if (source.fees !== undefined && annual === null) issues.push(`${where} の fees.annual は円の整数`);
+  const shortlisted = source.shortlist === "tokyo-social-2027" && track === "master";
   const exams = Array.isArray(source.exams) ? source.exams.map(text).filter(Boolean) : [];
   if (!Array.isArray(source.steps) || source.steps.length === 0) issues.push(`${where} に steps が無い`);
   const steps = (Array.isArray(source.steps) ? source.steps : []).map((step, stepIndex) => parseStep(step, `${where}.steps[${stepIndex}]`, issues)).filter((step): step is GraduateStep => Boolean(step));
@@ -255,7 +258,8 @@ function parseRoute(value: unknown, index: number, issues: string[]): GraduateRo
   const feesUrl = optionalUrl(fees?.url, `${where}.fees`, issues);
   return {
     id, label, labelZh: text(source.label_zh) || label, track, degree: text(source.degree), years, entry: text(source.entry), exams,
-    fees: { firstYear: firstYear ?? 0, annual: annual ?? 0, basis: text(fees?.basis), ...(feesUrl ? { url: feesUrl } : {}) },
+    ...(firstYear !== null && annual !== null ? { fees: { firstYear, annual, basis: text(fees?.basis), ...(feesUrl ? { url: feesUrl } : {}) } } : {}),
+    ...(shortlisted ? { shortlisted } : {}),
     ...(prep ? { prep } : {}), steps,
   };
 }
@@ -408,7 +412,8 @@ export function buildGraduateCatalog(notes: Note[]): GraduateCatalog {
       const prepPath = resolvePrepPath(route.prep, notes);
       if (route.prep && !prepPath) issues.push({ path: note.path, message: `${route.id} の prep [[${route.prep}]] が備考ノートに解決できない` });
       routes.push({ id: route.id, label: route.label, labelZh: route.labelZh, track: route.track, degree: route.degree, years: route.years, entry: route.entry, exams: route.exams,
-        fees: { firstYear: route.fees.firstYear, annual: route.fees.annual }, prepPath, steps: route.steps.map(catalogStep) });
+        ...(route.fees ? { fees: { firstYear: route.fees.firstYear, annual: route.fees.annual } } : {}),
+        ...(route.shortlisted ? { shortlisted: true } : {}), prepPath, steps: route.steps.map(catalogStep) });
     }
     schools.push({ path: school.path, id: school.id, name: school.name, nameZh: school.nameZh, sort: school.sort, checkedOn: school.checkedOn,
       ...(school.level ? { level: school.level } : {}), routes });
@@ -422,7 +427,7 @@ export function buildGraduateReadModelRecords(notes: Note[]): ReadModelRecord[] 
 }
 
 /** 毕业前预计合计：首年＋之后每年×剩余年数。正本只存整数日元，合计永远由这里算。 */
-export function graduateTotalFee(route: Pick<GraduateRoute, "years"> & { fees: Pick<GraduateFees, "firstYear" | "annual"> }) {
+export function graduateTotalFee(route: { years: number; fees: Pick<GraduateFees, "firstYear" | "annual"> }) {
   return route.fees.firstYear + route.fees.annual * Math.max(0, route.years - 1);
 }
 
@@ -470,9 +475,24 @@ export function graduateStepState(step: GraduateCatalogStep, today: string): Gra
 
 export type GraduateCatalogEntry = { school: GraduateCatalogSchool; route: GraduateCatalogRoute };
 
+/** 同一轮的截止与放榜配对。必需的预审错过后，改看下一轮；条件性审查留在详情。 */
+export function graduateApplicationDates(steps: readonly GraduateCatalogStep[], today: string) {
+  const required = steps.filter((step) => !step.optional);
+  const blockedRounds = new Set(overdueGraduatePrerequisites(required, today).map((step) => step.round));
+  const deadline = nextGraduateDeadline(required.filter((step) => !blockedRounds.has(step.round)), today);
+  const lastDeadline = required.filter((step) => step.kind === "application" && step.due)
+    .sort((left, right) => right.due!.localeCompare(left.due!))[0];
+  const result = deadline || lastDeadline
+    ? steps.find((step) => step.kind === "result" && step.on && step.round === (deadline ?? lastDeadline)?.round)
+    : steps.find((step) => step.kind === "result" && step.on);
+  return { deadline, result };
+}
+
 /** 候选表的行：按学校 sort，再按正本里路线的顺序。 */
 export function graduateCatalogEntries(catalog: Pick<GraduateCatalog, "schools">, track: GraduateTrackFilter): GraduateCatalogEntry[] {
-  return catalog.schools.flatMap((school) => school.routes.filter((route) => track === "all" || route.track === track).map((route) => ({ school, route })));
+  return catalog.schools.flatMap((school) => school.routes
+    .filter((route) => track === "tokyo" ? route.shortlisted : track === "all" || route.track === track)
+    .map((route) => ({ school, route })));
 }
 
 export type GraduateNoteSections = { school: Map<string, string>; routes: Map<string, Map<string, string>> };
@@ -513,12 +533,12 @@ export function graduateNoteSections(content: string, routeLabels: readonly stri
 
 export type GraduateLocation = { track: GraduateTrackFilter; school: string; route: string };
 
-/** 稳定链接：/graduate?track=…&school=…&route=…。修士是首页默认，不写进地址，链接保持最短。 */
+/** 东京社会人名单是首页默认；学校与路线链接继续按稳定 ID 定位。 */
 export function graduateLocationFromSearch(search: string): GraduateLocation {
   const params = new URLSearchParams(search);
   const track = params.get("track");
   return {
-    track: GRADUATE_TRACK_FILTERS.includes(track as GraduateTrackFilter) ? track as GraduateTrackFilter : "master",
+    track: GRADUATE_TRACK_FILTERS.includes(track as GraduateTrackFilter) ? track as GraduateTrackFilter : "tokyo",
     school: ID_PATTERN.test(params.get("school") ?? "") ? params.get("school")! : "",
     route: ID_PATTERN.test(params.get("route") ?? "") ? params.get("route")! : "",
   };
@@ -528,7 +548,7 @@ export function graduateLocationFromSearch(search: string): GraduateLocation {
 export function graduateSearch(location: GraduateLocation, current = "") {
   const params = new URLSearchParams(current);
   for (const key of ["track", "school", "route"]) params.delete(key);
-  if (location.track !== "master") params.set("track", location.track);
+  if (location.track !== "tokyo") params.set("track", location.track);
   if (location.school) params.set("school", location.school);
   if (location.school && location.route) params.set("route", location.route);
   return params;
