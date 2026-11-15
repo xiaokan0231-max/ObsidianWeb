@@ -106,6 +106,10 @@
 .graduate-materials a:hover { background: color-mix(in oklab, var(--green) 10%, var(--surface-raised-solid)); }
 .graduate-source-link { align-self: flex-start; color: var(--green); font-size: 12px; }
 
+.graduate-official { display: flex; align-items: baseline; gap: 14px; margin-bottom: 12px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised-solid); }
+.graduate-official h2 { flex-shrink: 0; margin: 0; font-size: 13px; font-weight: 650; }
+.graduate-official .graduate-md .markdown-document p { margin: 0; }
+
 .graduate-section-nav { position: sticky; top: var(--chrome-top, 64px); z-index: 5; display: flex; gap: 4px; margin-bottom: 12px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in oklab, var(--surface-raised-solid) 94%, transparent); backdrop-filter: blur(8px); }
 .graduate-section-nav a { padding: 6px 12px; border-radius: 5px; color: var(--text-secondary); text-decoration: none; font-size: 13px; }
 .graduate-section-nav a:hover { color: var(--ink); background: var(--surface-sunken); }

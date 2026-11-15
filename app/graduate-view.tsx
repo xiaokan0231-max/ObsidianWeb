@@ -67,6 +67,7 @@ const COPY = {
     overdueTitle: "前置期限已过，没有完成记录", overdueHelp: "请核对这些前置手续是否已经办完；办完后在笔记该步骤加 done_on，提示就会消失。",
     materials: "要交的材料", method: "提交方式", openSource: "官方页面", sections: "本页内容",
     apply: "出愿与材料", fees: "学位与费用", exam: "考试与备考", sources: "出处", levelNav: "学校层次",
+    officialSources: "官方资料", difficulty: "申请难度",
     fit: "出愿资格与匹配", fitHint: "含 AI 判断，署名见正文",
     kinds: { prerequisite: "前置手续", application: "出愿", exam: "考试・面谈", result: "发表", enrollment: "入学手续" } satisfies Record<GraduateStepKind, string>,
     states: { done: "已完成", closed: "已过", open: "进行中", upcoming: "未开始", undated: "无校方日期" },
@@ -103,6 +104,7 @@ const COPY = {
     overdueTitle: "前提手続きの期限が過ぎ、完了記録がありません", overdueHelp: "手続きが済んでいるか確認してください。済んだらノートの該当ステップに done_on を書くと表示が消えます。",
     materials: "提出書類", method: "提出方法", openSource: "公式ページ", sections: "このページ",
     apply: "出願と書類", fees: "学位と学費", exam: "試験と対策", sources: "出典", levelNav: "大学のレベル",
+    officialSources: "公式資料", difficulty: "入試の難易度",
     fit: "出願資格と適合", fitHint: "AI の判断を含む（署名は本文）",
     kinds: { prerequisite: "事前手続き", application: "出願", exam: "試験・面談", result: "発表", enrollment: "入学手続" } satisfies Record<GraduateStepKind, string>,
     states: { done: "完了", closed: "終了", open: "受付中", upcoming: "未開始", undated: "学校の期日なし" },
@@ -416,6 +418,8 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
   const fullRoute = fullSchool?.routes.find((item) => item.id === route.id) ?? null;
   const sections = useMemo(() => detail.note && fullSchool ? graduateNoteSections(detail.note.content, fullSchool.routes.map((item) => item.label)) : null, [detail.note, fullSchool]);
   const routeSections = sections?.routes.get(route.label);
+  const officialSources = [sections?.school.get("官方资料"), routeSections?.get("官方资料")].filter(Boolean).join(" · ");
+  const difficulty = routeSections?.get("申请难度");
   const showPrep = route.prepPath ? () => {
     setPrepOpen(true);
     window.requestAnimationFrame?.(() => document.getElementById("graduate-exam")?.scrollIntoView({ block: "start" }));
@@ -447,9 +451,18 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
     {detail.loading && <p className="graduate-status" role="status">{t.detailLoading}</p>}
     {detail.error && <p className="graduate-status" role="alert">{t.detailFailed}<button type="button" onClick={detail.retry}>{t.retry}</button></p>}
     {parsed && !fullSchool && <p className="graduate-status" role="alert">{t.detailIssues}</p>}
+    {officialSources && <section className="graduate-official" aria-labelledby="graduate-official-title">
+      <h2 id="graduate-official-title">{t.officialSources}</h2>
+      <SectionMarkdown content={officialSources} onOpenWiki={onOpenWiki} />
+    </section>}
     <nav className="graduate-section-nav" aria-label={t.sections}>
+      {difficulty && <a href="#graduate-difficulty">{t.difficulty}</a>}
       <a href="#graduate-level">{t.levelNav}</a><a href="#graduate-apply">{t.apply}</a><a href="#graduate-fees">{t.fees}</a><a href="#graduate-exam">{t.exam}</a><a href="#graduate-sources">{t.sources}</a>
     </nav>
+    {difficulty && <section id="graduate-difficulty" className="graduate-section">
+      <h2>{t.difficulty}</h2>
+      <SectionMarkdown content={difficulty} onOpenWiki={onOpenWiki} />
+    </section>}
     <section id="graduate-level" className="graduate-section">
       <h2>{t.level.section}</h2>
       {fullSchool?.profile && <dl className="graduate-profile">
