@@ -27,6 +27,7 @@ export const GRADUATE_ASSESSMENT_RUBRIC = [
 export const GRADUATE_STEP_KINDS = ["prerequisite", "application", "exam", "result", "enrollment"] as const;
 export const GRADUATE_DEADLINE_TYPES = ["必着", "消印有効", "期限内必着", "Web締切"] as const;
 export const GRADUATE_INDICATOR_KINDS = ["ranking", "deviation", "employment"] as const;
+const GRADUATE_INSTITUTION_KINDS = ["national", "public", "private"] as const;
 /** 正文里每条路线下的固定小节；页面按这几个名字取说明文字。 */
 export const GRADUATE_ROUTE_SECTIONS = ["出愿资格与匹配", "出愿与材料", "学位与费用", "考试与备考"] as const;
 
@@ -93,6 +94,12 @@ export type GraduateRoute = {
 export type GraduateIndicator = { kind: GraduateIndicatorKind; label: string; value: string; scope: string; url?: string };
 /** 学校是什么性质、多大、多老：帮助没有日本升学经验的人先建立概念。 */
 export type GraduateProfile = { kind: string; founded: string; size: string; url?: string };
+/** 名录证明设立性质；办学定位可另附认证或课程依据。 */
+export type GraduateInstitution = {
+  kind: typeof GRADUATE_INSTITUTION_KINDS[number];
+  registryUrl: string;
+  positioning?: { label: string; labelZh: string; evidence: string; evidenceZh: string; url: string };
+};
 /** 河合塾ボーダー偏差値：focus 是与路线最接近的学部，school 是全校各学部的范围。 */
 export type GraduateLevel = { focus: string; focusLow: number; focusHigh: number; schoolLow: number; schoolHigh: number; url?: string };
 export type GraduateSchool = {
@@ -105,12 +112,13 @@ export type GraduateSchool = {
   location: string;
   region?: string;
   profile?: GraduateProfile;
+  institution?: GraduateInstitution;
   level?: GraduateLevel;
   graduateOnly?: boolean;
   indicators: GraduateIndicator[];
   routes: GraduateRoute[];
 };
-export type GraduateBand = { min: number; label: string; analogy: string };
+export type GraduateBand = { min: number; label: string; labelJa?: string; analogy: string };
 export type GraduateAnchor = { name: string; note: string; low: number; high: number; url?: string };
 /** 层次对照：参照校的偏差值是事实，档位与国内批次的类比是署名的 AI 判断。 */
 export type GraduateReference = {
@@ -126,7 +134,7 @@ export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh
   prepPath: string | null;
   steps: GraduateCatalogStep[];
 };
-export type GraduateCatalogSchool = Pick<GraduateSchool, "path" | "id" | "name" | "nameZh" | "sort" | "checkedOn" | "location" | "region" | "level" | "graduateOnly"> & { routes: GraduateCatalogRoute[] };
+export type GraduateCatalogSchool = Pick<GraduateSchool, "path" | "id" | "name" | "nameZh" | "sort" | "checkedOn" | "location" | "region" | "institution" | "level" | "graduateOnly"> & { routes: GraduateCatalogRoute[] };
 export type GraduateIssue = { path: string; message: string };
 export type GraduateCatalog = { schemaVersion: 1; schools: GraduateCatalogSchool[]; reference: GraduateReference | null; issues: GraduateIssue[] };
 export type GraduateCatalogPage = GraduateCatalog & {
@@ -258,6 +266,29 @@ function parseProfile(value: unknown, issues: string[]): GraduateProfile | undef
   return { kind, founded, size, ...(url ? { url } : {}) };
 }
 
+function parseInstitution(value: unknown, issues: string[]): GraduateInstitution | undefined {
+  if (value === undefined) return undefined;
+  const source = record(value);
+  const kind = text(source?.kind) as GraduateInstitution["kind"];
+  const registryUrl = optionalUrl(source?.registry_url, "institution.registry", issues);
+  if (!GRADUATE_INSTITUTION_KINDS.includes(kind) || !registryUrl) {
+    issues.push("institution は kind（national / public / private）と registry_url が必須");
+    return undefined;
+  }
+  if (source?.positioning === undefined) return { kind, registryUrl };
+  const positioning = record(source.positioning);
+  const label = text(positioning?.label), evidence = text(positioning?.evidence);
+  const url = optionalUrl(positioning?.url, "institution.positioning", issues);
+  if (!label || !evidence || !url) {
+    issues.push("institution.positioning は label・evidence・url が必須");
+    return undefined;
+  }
+  return {
+    kind, registryUrl,
+    positioning: { label, labelZh: text(positioning?.label_zh) || label, evidence, evidenceZh: text(positioning?.evidence_zh) || evidence, url },
+  };
+}
+
 function integerYen(value: unknown) {
   const raw = text(value);
   const number = typeof value === "number" ? value : raw ? Number(raw) : NaN;
@@ -382,13 +413,15 @@ export function parseGraduateSchool(note: Note): { school: GraduateSchool | null
     routeIds.add(route.id);
   }
   const profile = parseProfile(frontmatter.profile, issues);
+  const institution = parseInstitution(frontmatter.institution, issues);
   const level = parseLevel(frontmatter.level, issues);
   const region = text(frontmatter.region);
   if (region && !ID_PATTERN.test(region)) issues.push("region は都道府県の英小文字・数字・ハイフンにする");
   const school: GraduateSchool = {
     path: note.path, id, name, nameZh: text(frontmatter.school_zh) || name,
     sort: Number.isFinite(sortValue) ? sortValue : 99, checkedOn: checkedOn ?? "", location: text(frontmatter.location),
-    ...(region ? { region } : {}), ...(profile ? { profile } : {}), ...(level ? { level } : {}), ...(frontmatter.graduate_only === true ? { graduateOnly: true } : {}), indicators, routes,
+    ...(region ? { region } : {}), ...(profile ? { profile } : {}), ...(institution ? { institution } : {}),
+    ...(level ? { level } : {}), ...(frontmatter.graduate_only === true ? { graduateOnly: true } : {}), indicators, routes,
   };
   return { school: issues.length ? null : school, issues };
 }
@@ -417,7 +450,8 @@ export function parseGraduateReference(note: Note): { reference: GraduateReferen
     const source = record(item);
     const min = deviation(source?.min, `bands[${index}].min`, issues), label = text(source?.label), analogy = text(source?.analogy);
     if (!label || !analogy) { issues.push(`bands[${index}] は label・analogy が必須`); continue; }
-    if (min !== null) bands.push({ min, label, analogy });
+    const labelJa = text(source?.label_ja);
+    if (min !== null) bands.push({ min, label, analogy, ...(labelJa ? { labelJa } : {}) });
   }
   if (!bands.length) issues.push("bands が無い");
   if (bands.some((band, index) => index > 0 && band.min >= bands[index - 1].min)) issues.push("bands は min の高い順に並べる");
@@ -443,6 +477,14 @@ export function parseGraduateReference(note: Note): { reference: GraduateReferen
 /** 偏差值落在哪一档：档位按 min 从高到低，取第一个不高于该值的。 */
 export function graduateBand(bands: readonly GraduateBand[], value: number) {
   return bands.find((band) => value >= band.min) ?? null;
+}
+
+export function graduateBandLabel(bands: readonly GraduateBand[], low: number, high: number, locale: "zh-CN" | "ja") {
+  const first = graduateBand(bands, low), last = graduateBand(bands, high);
+  if (!first || !last) return null;
+  const lowLabel = locale === "ja" ? first.labelJa ?? first.label : first.label;
+  const highLabel = locale === "ja" ? last.labelJa ?? last.label : last.label;
+  return first === last ? lowLabel : `${lowLabel}～${highLabel}`;
 }
 
 /** 河合塾把 37.4 以下统一显示成 35.0；页面照录数字，但说清它是「最低一档」。 */
@@ -513,7 +555,8 @@ export function buildGraduateCatalog(notes: Note[]): GraduateCatalog {
     }
     schools.push({ path: school.path, id: school.id, name: school.name, nameZh: school.nameZh, sort: school.sort, checkedOn: school.checkedOn, location: school.location,
       ...(school.region ? { region: school.region } : {}),
-      ...(school.level ? { level: school.level } : {}), ...(school.graduateOnly ? { graduateOnly: true } : {}), routes });
+      ...(school.institution ? { institution: school.institution } : {}), ...(school.level ? { level: school.level } : {}),
+      ...(school.graduateOnly ? { graduateOnly: true } : {}), routes });
   }
   schools.sort((left, right) => left.sort - right.sort || left.path.localeCompare(right.path));
   return { schemaVersion: 1, schools, reference, issues };

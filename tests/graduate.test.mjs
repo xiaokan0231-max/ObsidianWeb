@@ -56,6 +56,7 @@ const school = ({ path = "40_大学院/テスト工科大学.md", id = "test-tec
   content: content ?? `---\ntype: graduate-school\n---\n# テスト工科大学\n\n> 导语\n\n## 学校口径\n\n- 排名说明\n\n${routes.map((item) => `## ${item.label}\n\n### 出愿资格与匹配\n\n资格段落\n\n### 出愿与材料\n\n材料段落\n`).join("\n")}\n## 出处\n\n- [要项](https://example.test/guide.pdf)\n`,
 });
 const level = { focus: "情報学部", focus_low: 37.5, focus_high: 37.5, school_low: 35, school_high: 45, url: "https://example.test/border" };
+const institution = { kind: "private", registry_url: "https://example.test/registry" };
 const referenceNote = (frontmatter = {}) => ({
   path: "40_大学院/层次对照.md", stat: { ctime: 1, mtime: 1, size: 1 }, tags: [], content: "# 对照\n",
   frontmatter: { type: "graduate-reference", publish: false, checked_on: "2026-11-13", source_label: "测试偏差值", source_url: "https://example.test/rank", analogy_author: "Claude",
@@ -306,7 +307,7 @@ test("发布快照：publish: false 的大学院资料不进正文、目录和�
   assert.deepEqual(catalog, { schemaVersion: 1, schools: [], reference: null, issues: [] });
 });
 
-test("候选表显示学制费用和入试材料，换批次时同步切换截止日和放榜日", async () => {
+test("候选表显示学校参照档、办学性质和费用，换批次时同步切换截止日与放榜日", async () => {
   const { CandidateTable, GRADUATE_COPY } = await loadAppModule("app/graduate-view.tsx");
   const steps = [
     ...masterSteps().map((step) => ({ ...step, round: "1期" })),
@@ -314,13 +315,17 @@ test("候选表显示学制费用和入试材料，换批次时同步切换截�
     { id: "apply-two", kind: "application", label: "第2期出願", round: "2期", due: "2027-02-15", deadline_type: "必着" },
     { id: "result-two", kind: "result", label: "第2期発表", round: "2期", on: "2027-03-22" },
   ];
-  const catalog = buildGraduateCatalog([school({ routes: [route("test-master", "master", {
+  const catalog = buildGraduateCatalog([school({ level, institution, routes: [route("test-master", "master", {
     shortlist: "tokyo-social-2027", steps, exams_zh: ["专业笔试", "面试"], requirements_zh: "事先联系导师", assessment: assessment(),
-  })] })]);
-  const props = { entries: graduateCatalogEntries(catalog, "master", "tokyo"), track: "master", region: "tokyo", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} };
+  })] }), referenceNote()]);
+  const props = { entries: graduateCatalogEntries(catalog, "master", "tokyo"), reference: catalog.reference, track: "master", region: "tokyo", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} };
   const html = renderToStaticMarkup(createElement(CandidateTable, { ...props, today: "2026-11-13" }));
-  assert.equal((html.match(/<th scope="col"/g) ?? []).length, 6);
+  assert.equal((html.match(/<th scope="col"/g) ?? []).length, 7);
   assert.match(html, /学校与专业/);
+  assert.match(html, /学校水平/);
+  assert.match(html, /中下档/);
+  assert.match(html, /本科偏差值 37\.5/);
+  assert.match(html, /私立 · 文科省在册/);
   assert.match(html, /申请适合度与判断/);
   assert.match(html, /aria-label="申请适合度 79\/100"/);
   assert.match(html, /值得考虑/);
@@ -335,6 +340,27 @@ test("候选表显示学制费用和入试材料，换批次时同步切换截�
   const late = renderToStaticMarkup(createElement(CandidateTable, { ...props, today: "2026-12-01" }));
   for (const date of ["2027-02-15", "2027-03-22"]) assert.ok(late.includes(date), date);
   assert.doesNotMatch(late, /2027-03-08/);
+});
+
+test("无本科的学校在候选表和对照图显示办学定位，保持本科数据为空", async () => {
+  const { CandidateTable, LevelScale, GRADUATE_COPY } = await loadAppModule("app/graduate-view.tsx");
+  const positioning = {
+    label: "実務型大学院", label_zh: "实务型大学院", evidence: "分野別認証評価に適合", evidence_zh: "分野认证通过", url: "https://example.test/quality",
+  };
+  const verified = { ...institution, kind: "public", positioning };
+  const catalog = buildGraduateCatalog([school({ institution: verified, graduate_only: true }), referenceNote()]);
+  assert.deepEqual(catalog.issues, []);
+  assert.equal(catalog.schools[0].level, undefined);
+  const props = { reference: catalog.reference, locale: "zh-CN", t: GRADUATE_COPY["zh-CN"] };
+  const table = renderToStaticMarkup(createElement(CandidateTable, {
+    ...props, entries: graduateCatalogEntries(catalog, "master"), today: "2026-11-13", track: "master", onOpen() {},
+  }));
+  assert.match(table, /实务型大学院.*分野认证通过.*公立 · 文科省在册/);
+  assert.doesNotMatch(table, /本科偏差值/);
+  const scale = renderToStaticMarkup(createElement(LevelScale, { ...props, schools: catalog.schools }));
+  assert.match(scale, /https:\/\/example.test\/quality/);
+  assert.match(scale, /https:\/\/example.test\/registry/);
+  assert.ok(parseGraduateSchool(school({ institution: { ...verified, registry_url: "" } })).issues.some((issue) => issue.includes("registry_url")));
 });
 
 test("学校详情首屏：当前要做的事带截止与必着，前置过期给出核对提示", async () => {

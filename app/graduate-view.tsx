@@ -12,6 +12,7 @@ import {
   graduateApplicationDates,
   graduateAssessmentScore,
   graduateBand,
+  graduateBandLabel,
   graduateCatalogEntries,
   graduateDeviationRange,
   graduateDateLabel,
@@ -52,17 +53,21 @@ import type { UiLocale } from "@/lib/ui-locale";
 const COPY = {
   "zh-CN": {
     module: "大学院", title: "大学院申请", tracks: { master: "修士", bachelor: "本科", all: "全部" }, trackLabel: "学位类型",
-    columns: { school: "学校", program: "专业", schoolProgram: "学校与专业", assessment: "申请适合度与判断", cost: "学制与费用", admission: "入试与材料", deadline: "最早截止日", result: "放榜日" },
+    columns: { school: "学校", program: "专业", schoolProgram: "学校与专业", level: "学校水平", assessment: "申请适合度与判断", cost: "学制与费用", admission: "入试与材料", deadline: "最早截止日", result: "放榜日" },
     region: "地区", regions: { tokyo: "东京都", all: "全部地区" }, sort: "排序", sortFit: "适合度优先", sortDeadline: "截止日优先",
     assessment: { title: "对你申请的判断", score: "申请适合度", basis: "评分依据", meaning: "100 分制，表示准备优先级，不是录取概率。", context: "综合已确认的经历、语言准备、考试方式、申请条件和专业价值。条件未确认的路线会扣分，并单独标明；免笔试也不代表免专业问答。", strengths: "优势", risk: "门槛", missing: "尚未评估", author: "评估", recommendations: { priority: "优先准备", consider: "值得考虑", conditional: "有条件考虑", low: "暂不优先" } },
     filterEmpty: "这个筛选下暂无路线", filterEmptyHelp: "切换学位类型或选择全部地区，查看其他候选。",
     firstYearShort: "首年", totalShort: "全程约", materialsShort: "主要材料", levelLink: "学校层次对比",
     level: {
-      section: "学校层次", title: "学校层次怎么看", subtitle: "河合塾本科一般入试的偏差值（2027 年度预测）：越靠右越难考进。候选校画的是相关学部，细线是全校各学部的范围。",
+      section: "学校水平与依据", title: "学校层次怎么看", subtitle: "本科参照档采用河合塾 2027 年度相关学部的一般入试偏差值。细线是全校各学部的范围。",
       candidate: "候选", reference: "参照", focus: "相关学部", school: "全校各学部", deviation: "偏差值",
+      undergraduate: "本科参照", band: (name: string) => `${name}档`, undergraduateValue: (range: string) => `本科偏差值 ${range}`,
+      kind: { national: "国立", public: "公立", private: "私立" }, listed: "文科省在册", registry: "文科省全国大学名录",
+      guide: "参照档用来比较本科入试难度。学校设立性质以文科省名录为准，仅设大学院的学校可看专业认证和课程定位。",
       lowest: "35.0 是河合塾的最低一档，意思是「37.4 以下」。", analogyBy: (name: string) => `「约等于国内哪一档」是 ${name} 为建立概念做的粗略类比，日本没有批次线，不是官方换算。`,
       source: "数据来源", profileKind: "学校性质", founded: "创立", size: "规模", none: "这所学校还没有层次资料。",
       summary: (focus: string, range: string, band: string, analogy: string) => `${focus}偏差值 ${range}，属于「${band}」一档，${analogy}。`,
+      rangeSummary: (focus: string, range: string, band: string) => `${focus}偏差值 ${range}，本科参照为「${band}」。`,
       schoolRange: (range: string) => `全校各学部 ${range}`,
       graduateOnly: "仅设大学院，无本科偏差值", pending: "暂无可比的本科偏差值",
     },
@@ -95,17 +100,21 @@ const COPY = {
   },
   ja: {
     module: "大学院", title: "候補校", tracks: { master: "修士", bachelor: "学部", all: "すべて" }, trackLabel: "学位の種類",
-    columns: { school: "学校", program: "専攻", schoolProgram: "学校・専攻", assessment: "出願適合度と所見", cost: "年限と学費", admission: "試験と書類", deadline: "最初の締切日", result: "合格発表日" },
+    columns: { school: "学校", program: "専攻", schoolProgram: "学校・専攻", level: "大学の目安", assessment: "出願適合度と所見", cost: "年限と学費", admission: "試験と書類", deadline: "最初の締切日", result: "合格発表日" },
     region: "地域", regions: { tokyo: "東京都", all: "全地域" }, sort: "並び順", sortFit: "適合度順", sortDeadline: "締切順",
     assessment: { title: "出願に関する所見", score: "出願適合度", basis: "採点の基準", meaning: "100点満点。準備の優先順位であり、合格確率ではありません。", context: "確認できた経験・語学力・試験方式・出願条件・専攻の価値を総合評価。未確認の条件は減点し、別途明示します。筆記免除でも専門の口頭試問はあり得ます。", strengths: "強み", risk: "課題", missing: "未評価", author: "評価", recommendations: { priority: "優先して準備", consider: "検討候補", conditional: "条件確認が必要", low: "優先度は低い" } },
     filterEmpty: "この条件に合うルートはありません", filterEmptyHelp: "学位または地域の条件を変えてください。",
     firstYearShort: "初年度", totalShort: "総額目安", materialsShort: "主な書類", levelLink: "大学レベルの比較",
     level: {
-      section: "大学のレベル", title: "大学のレベルの目安", subtitle: "河合塾の学部一般選抜ボーダー偏差値（2027年度予想）。右ほど入りにくい。候補校は関連学部、細線は全学部の範囲。",
+      section: "大学の目安と根拠", title: "大学のレベルの目安", subtitle: "河合塾の2027年度学部一般選抜ボーダー偏差値。候補校は関連学部、細線は全学部の範囲。",
       candidate: "候補", reference: "参照", focus: "関連学部", school: "全学部", deviation: "偏差値",
+      undergraduate: "学部入試の目安", band: (name: string) => name, undergraduateValue: (range: string) => `学部偏差値 ${range}`,
+      kind: { national: "国立", public: "公立", private: "私立" }, listed: "文科省一覧掲載", registry: "文部科学省 全国大学一覧",
+      guide: "偏差値帯は学部入試難易度の目安です。設置区分は文部科学省の一覧で、大学院大学の特色は認証評価と教育内容で確認できます。",
       lowest: "35.0 は河合塾の最低帯で「37.4以下」を表します。", analogyBy: (name: string) => `中国の合格ライン区分との対応は ${name} による大まかな類比で、公式な換算ではありません。`,
       source: "出典", profileKind: "種別", founded: "設立", size: "規模", none: "この学校のレベル資料はまだありません。",
       summary: (focus: string, range: string, band: string, analogy: string) => `${focus}の偏差値は ${range}、「${band}」の帯（${analogy}）。`,
+      rangeSummary: (focus: string, range: string, band: string) => `${focus}の偏差値は ${range}、「${band}」の帯です。`,
       schoolRange: (range: string) => `全学部 ${range}`,
       graduateOnly: "大学院のみ。学部偏差値なし", pending: "比較できる学部偏差値なし",
     },
@@ -209,6 +218,13 @@ function scaleSpan(low: number, high: number) {
 
 type ScaleRow = { key: string; name: string; note: string; low: number; high: number; schoolLow?: number; schoolHigh?: number; candidate: boolean; current: boolean; url?: string };
 
+function schoolPositioning(school: GraduateCatalogSchool, locale: UiLocale) {
+  const positioning = school.institution?.positioning;
+  if (!positioning) return null;
+  return locale === "ja" ? { label: positioning.label, evidence: positioning.evidence, url: positioning.url }
+    : { label: positioning.labelZh, evidence: positioning.evidenceZh, url: positioning.url };
+}
+
 /** 候选校与参照校排在同一把偏差值尺上：数字和档位都直接写在行上，颜色只区分「候选／参照」。 */
 export function LevelScale({ reference, schools, current, locale, t }: {
   reference: GraduateReference; schools: GraduateCatalogSchool[]; current?: string; locale: UiLocale; t: Copy;
@@ -227,14 +243,13 @@ export function LevelScale({ reference, schools, current, locale, t }: {
       <div className="graduate-scale-row graduate-scale-head" role="row">
         <span role="columnheader" />
         <div className="graduate-scale-track" role="columnheader">
-          {zones.map(({ band, low, high }) => <span key={band.label} className="graduate-scale-zone" style={scaleSpan(low, high)}><b>{band.label}</b></span>)}
+          {zones.map(({ band, low, high }) => <span key={band.label} className="graduate-scale-zone" style={scaleSpan(low, high)}><b>{locale === "ja" ? band.labelJa ?? band.label : band.label}</b></span>)}
         </div>
         <span role="columnheader">{t.level.deviation}</span>
       </div>
       {rows.map((row) => {
         // 参照校跨好几档时写「中段～中上」，不能只按最高那个学部归档。
-        const band = graduateBand(reference.bands, row.high), lowBand = graduateBand(reference.bands, row.low);
-        const bandLabel = band && lowBand && lowBand.label !== band.label ? `${lowBand.label}～${band.label}` : band?.label ?? "";
+        const bandLabel = graduateBandLabel(reference.bands, row.low, row.high, locale);
         const range = graduateDeviationRange(row.low, row.high);
         return <div key={row.key} className="graduate-scale-row" role="row" data-candidate={row.candidate || undefined} data-current={row.current || undefined}>
           <span className="graduate-scale-name" role="rowheader">
@@ -257,21 +272,40 @@ export function LevelScale({ reference, schools, current, locale, t }: {
         <div className="graduate-scale-track">{ticks.map((tick) => <span key={tick} style={{ left: `${(tick - SCALE_MIN) / (SCALE_MAX - SCALE_MIN) * 100}%` }}>{tick}</span>)}</div>
         <span />
       </div>
-      {schools.filter((school) => !school.level).map((school) => <div key={school.id} className="graduate-scale-row graduate-scale-unrated" role="row" data-candidate="true" data-current={school.id === current || undefined}>
-        <span className="graduate-scale-name" role="rowheader"><strong>{locale === "ja" ? school.name : school.nameZh}</strong></span>
-        <span role="cell">{school.graduateOnly ? t.level.graduateOnly : t.level.pending}</span><span role="cell">—</span>
-      </div>)}
+      {schools.filter((school) => !school.level).map((school) => {
+        const positioning = schoolPositioning(school, locale);
+        return <div key={school.id} className="graduate-scale-row graduate-scale-unrated" role="row" data-candidate="true" data-current={school.id === current || undefined}>
+          <span className="graduate-scale-name" role="rowheader"><strong>{locale === "ja" ? school.name : school.nameZh}</strong></span>
+          <span role="cell">{positioning ? <>{positioning.label} · <a href={positioning.url} target="_blank" rel="noreferrer">{positioning.evidence} ↗</a></>
+            : school.graduateOnly ? t.level.graduateOnly : t.level.pending}</span>
+          <span role="cell">{school.institution ? <a href={school.institution.registryUrl} target="_blank" rel="noreferrer">{t.level.listed} ↗</a> : "—"}</span>
+        </div>;
+      })}
     </div>
     <dl className="graduate-scale-bands">
-      {reference.bands.map((band) => <div key={band.label}><dt>{band.label}<span>{band.min === SCALE_MIN ? "35.0" : `≥ ${band.min.toFixed(1)}`}</span></dt><dd>{band.analogy}</dd></div>)}
+      {reference.bands.map((band) => <div key={band.label}><dt>{locale === "ja" ? band.labelJa ?? band.label : band.label}<span>{band.min === SCALE_MIN ? "35.0" : `≥ ${band.min.toFixed(1)}`}</span></dt><dd>{band.analogy}</dd></div>)}
     </dl>
     <ul className="graduate-scale-notes">
+      <li>{t.level.guide}</li>
       <li>{t.level.lowest}</li>
       <li>{t.level.analogyBy(reference.analogyAuthor)}</li>
       {reference.notes.filter((note) => !note.includes("37.4") && !note.includes("类比")).map((note) => <li key={note}>{note}</li>)}
       <li>{t.level.source}：{reference.sourceUrl ? <a href={reference.sourceUrl} target="_blank" rel="noreferrer">{reference.sourceLabel} ↗</a> : reference.sourceLabel}（{reference.checkedOn}）</li>
     </ul>
   </figure>;
+}
+
+function SchoolLevelCell({ school, reference, locale, t }: { school: GraduateCatalogSchool; reference: GraduateReference | null; locale: UiLocale; t: Copy }) {
+  const { level, institution, graduateOnly } = school;
+  const positioning = schoolPositioning(school, locale);
+  const band = level && reference ? graduateBandLabel(reference.bands, level.focusLow, level.focusHigh, locale) : null;
+  const label = level ? t.level.undergraduate : graduateOnly ? t.level.graduateOnly : t.level.pending;
+  return <div className="graduate-school-level">
+    <strong>{band ? t.level.band(band) : (level ? label : positioning?.label ?? label)}</strong>
+    {level && <span title={level.focus}>{t.level.undergraduateValue(graduateDeviationRange(level.focusLow, level.focusHigh))}</span>}
+    {positioning && <span>{level ? positioning.label : positioning.evidence}</span>}
+    {institution && <small>{t.level.kind[institution.kind]} · {t.level.listed}</small>}
+  </div>;
 }
 
 function RouteCost({ route, t }: { route: GraduateCatalogRoute; t: Copy }) {
@@ -320,8 +354,8 @@ function AssessmentBasis({ t, locale, assessment }: { t: Copy; locale: UiLocale;
   </details>;
 }
 
-export function CandidateTable({ entries, track, region = "all", sort = "fit", today, locale, t, onOpen }: {
-  entries: GraduateCatalogEntry[]; track: GraduateTrackFilter; region?: GraduateRegionFilter; sort?: "fit" | "deadline"; today: string; locale: UiLocale; t: Copy;
+export function CandidateTable({ entries, reference, track, region = "all", sort = "fit", today, locale, t, onOpen }: {
+  entries: GraduateCatalogEntry[]; reference: GraduateReference | null; track: GraduateTrackFilter; region?: GraduateRegionFilter; sort?: "fit" | "deadline"; today: string; locale: UiLocale; t: Copy;
   onOpen: (event: MouseEvent<HTMLElement>, entry: GraduateCatalogEntry) => void;
 }) {
   const rows = sortGraduateEntries(entries, today, sort).map((entry) => ({ entry, ...graduateApplicationDates(entry.route.steps, today) }));
@@ -329,6 +363,7 @@ export function CandidateTable({ entries, track, region = "all", sort = "fit", t
     <caption>{t.title}</caption>
     <thead><tr>
       <th scope="col" className="graduate-col-school">{t.columns.schoolProgram}</th>
+      <th scope="col" className="graduate-col-level">{t.columns.level}</th>
       <th scope="col" className="graduate-col-assessment" aria-sort={sort === "fit" ? "descending" : undefined}>{t.columns.assessment}</th>
       <th scope="col" className="graduate-col-cost graduate-wide-column">{t.columns.cost}</th><th scope="col" className="graduate-col-admission graduate-wide-column">{t.columns.admission}</th>
       <th scope="col" className="graduate-col-date" aria-sort={sort === "deadline" ? "ascending" : undefined}>{t.columns.deadline}</th><th scope="col" className="graduate-col-date">{t.columns.result}</th>
@@ -351,6 +386,7 @@ export function CandidateTable({ entries, track, region = "all", sort = "fit", t
             {region === "all" && school.location && <small className="graduate-location">{school.location}</small>}
             <div className="graduate-compact-column"><RouteCost route={route} t={t} /><RouteAdmission route={route} locale={locale} t={t} /></div>
           </th>
+          <td><SchoolLevelCell school={school} reference={reference} locale={locale} t={t} /></td>
           <td><AssessmentSummary assessment={route.assessment} t={t} /></td>
           <td className="graduate-wide-column"><RouteCost route={route} t={t} /></td>
           <td className="graduate-wide-column"><RouteAdmission route={route} locale={locale} t={t} /></td>
@@ -481,7 +517,8 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
   const entry = locale === "zh-CN" ? route.entryZh ?? route.entry : route.entry;
   const difficulty = routeSections?.get("申请难度");
   const renewal = routeSections?.get("续签说明") ?? sections?.school.get("续签说明");
-  const showLevel = !route.shortlisted || Boolean(school.level || school.graduateOnly || fullSchool?.profile);
+  const positioning = schoolPositioning(school, locale);
+  const showLevel = !route.shortlisted || Boolean(school.level || school.institution || school.graduateOnly || fullSchool?.profile);
   const showFees = Boolean(route.fees || routeSections?.get("学位与费用"));
   const showExam = !route.shortlisted || Boolean(route.exams.length || route.prepPath || routeSections?.get("考试与备考"));
   const showPrep = route.prepPath ? () => {
@@ -549,16 +586,28 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
     </section>}
     {showLevel && <section id="graduate-level" className="graduate-section">
       <h2>{t.level.section}</h2>
+      {school.institution && <div className="graduate-institution-evidence">
+        <p><strong>{t.level.kind[school.institution.kind]}</strong><a href={school.institution.registryUrl} target="_blank" rel="noreferrer">{t.level.registry} ↗</a></p>
+        {positioning && <p><strong>{positioning.label}</strong><a href={positioning.url} target="_blank" rel="noreferrer">{positioning.evidence} ↗</a></p>}
+      </div>}
       {fullSchool?.profile && <dl className="graduate-profile">
         <div><dt>{t.level.profileKind}</dt><dd>{fullSchool.profile.kind}</dd></div>
         <div><dt>{t.level.founded}</dt><dd>{fullSchool.profile.founded}</dd></div>
         <div><dt>{t.level.size}</dt><dd>{fullSchool.profile.size}{fullSchool.profile.url && <> <a href={fullSchool.profile.url} target="_blank" rel="noreferrer">{t.indicatorSource} ↗</a></>}</dd></div>
       </dl>}
-      {school.level && reference ? (() => {
-        const band = graduateBand(reference.bands, school.level.focusHigh);
+      <SectionMarkdown content={sections?.school.get("学校水平依据")} onOpenWiki={onOpenWiki} />
+      {school.level ? (() => {
+        const { level } = school;
+        const range = graduateDeviationRange(level.focusLow, level.focusHigh);
+        const bands = reference?.bands ?? [];
+        const band = graduateBand(bands, level.focusLow);
+        const bandLabel = graduateBandLabel(bands, level.focusLow, level.focusHigh, locale);
+        let summary = `${level.focus} · ${t.level.undergraduateValue(range)}`;
+        if (bandLabel) summary = t.level.rangeSummary(level.focus, range, bandLabel);
+        if (band && bandLabel && band === graduateBand(bands, level.focusHigh)) summary = t.level.summary(level.focus, range, bandLabel, band.analogy);
         return <p className="graduate-level-summary">
-          {band && t.level.summary(school.level.focus, graduateDeviationRange(school.level.focusLow, school.level.focusHigh), band.label, band.analogy)}
-          <span>{t.level.schoolRange(graduateDeviationRange(school.level.schoolLow, school.level.schoolHigh))}{school.level.url && <> · <a href={school.level.url} target="_blank" rel="noreferrer">{t.indicatorSource} ↗</a></>}</span>
+          {summary}
+          <span>{t.level.schoolRange(graduateDeviationRange(level.schoolLow, level.schoolHigh))}{level.url && <> · <a href={level.url} target="_blank" rel="noreferrer">{t.indicatorSource} ↗</a></>}</span>
         </p>;
       })() : <p className="graduate-muted">{school.graduateOnly ? t.level.graduateOnly : t.level.none}</p>}
       {reference && <LevelScale reference={reference} schools={schools} current={school.id} locale={locale} t={t} />}
@@ -701,7 +750,7 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
     {notices}
     {notIndexed || (entries.length === 0 ? <div className="graduate-status-page"><h2>{page.schools.length ? t.filterEmpty : t.empty}</h2><p>{page.schools.length ? t.filterEmptyHelp : t.emptyDetail}</p></div>
       : <>
-        <CandidateTable entries={entries} track={location.track} region={location.region} sort={sort} today={today} locale={locale} t={t} onOpen={openEntry} />
+        <CandidateTable entries={entries} reference={page.reference} track={location.track} region={location.region} sort={sort} today={today} locale={locale} t={t} onOpen={openEntry} />
         {page.reference && <section id="graduate-level-compare" className="graduate-level-panel" aria-label={t.level.title}>
           <LevelScale reference={page.reference} schools={page.schools.filter((school) => entries.some((entry) => entry.school.id === school.id))} locale={locale} t={t} />
         </section>}
