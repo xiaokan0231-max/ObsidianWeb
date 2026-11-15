@@ -312,8 +312,8 @@ function RouteCost({ route, t }: { route: GraduateCatalogRoute; t: Copy }) {
   return <div className="graduate-route-cost">
     <strong>{t.years(route.years)}</strong>
     {route.fees && <>
-      <span>{t.firstYearShort} {graduateManYen(route.fees.firstYear)} {t.man}</span>
-      <span>{t.totalShort} {graduateManYen(graduateTotalFee({ years: route.years, fees: route.fees }))} {t.man}</span>
+      <span>{t.firstYearShort} <span className="graduate-cost-amount">{graduateManYen(route.fees.firstYear)} {t.man}</span></span>
+      <span>{t.totalShort} <span className="graduate-cost-amount">{graduateManYen(graduateTotalFee({ years: route.years, fees: route.fees }))} {t.man}</span></span>
     </>}
   </div>;
 }
@@ -336,8 +336,8 @@ function AssessmentSummary({ assessment, t }: { assessment?: GraduateCatalogAsse
       <strong className="graduate-recommendation">{t.assessment.recommendations[assessment.recommendation]}</strong>
     </div>
     <p className="graduate-assessment-summary">{assessment.summaryZh}</p>
-    <p><b>{t.assessment.strengths}</b>{assessment.strengthsZh}</p>
-    <p><b>{t.assessment.risk}</b>{assessment.riskZh}</p>
+    <p className="graduate-assessment-strengths"><b>{t.assessment.strengths}</b>{assessment.strengthsZh}</p>
+    <p className="graduate-assessment-risk"><b>{t.assessment.risk}</b>{assessment.riskZh}</p>
   </div>;
 }
 
@@ -366,7 +366,7 @@ export function CandidateTable({ entries, reference, track, region = "all", sort
       <th scope="col" className="graduate-col-level">{t.columns.level}</th>
       <th scope="col" className="graduate-col-assessment" aria-sort={sort === "fit" ? "descending" : undefined}>{t.columns.assessment}</th>
       <th scope="col" className="graduate-col-cost graduate-wide-column">{t.columns.cost}</th><th scope="col" className="graduate-col-admission graduate-wide-column">{t.columns.admission}</th>
-      <th scope="col" className="graduate-col-date" aria-sort={sort === "deadline" ? "ascending" : undefined}>{t.columns.deadline}</th><th scope="col" className="graduate-col-date">{t.columns.result}</th>
+      <th scope="col" className="graduate-col-date graduate-deadline-column" aria-sort={sort === "deadline" ? "ascending" : undefined}>{t.columns.deadline}</th><th scope="col" className="graduate-col-date graduate-result-column">{t.columns.result}</th>
     </tr></thead>
     <tbody>
       {rows.map(({ entry, deadline, result }) => {
@@ -390,11 +390,11 @@ export function CandidateTable({ entries, reference, track, region = "all", sort
           <td><AssessmentSummary assessment={route.assessment} t={t} /></td>
           <td className="graduate-wide-column"><RouteCost route={route} t={t} /></td>
           <td className="graduate-wide-column"><RouteAdmission route={route} locale={locale} t={t} /></td>
-          <td className="graduate-date-cell">
+          <td className="graduate-date-cell graduate-deadline-column">
             {deadline?.due ? <time dateTime={deadline.due}>{deadline.due.replaceAll("-", "/")}</time> : <span className="graduate-muted">{t.noDeadline}</span>}
             {conditional?.due && <small className="graduate-conditional">{t.conditionalDeadline} <time dateTime={conditional.due}>{conditional.due.replaceAll("-", "/")}</time></small>}
           </td>
-          <td className="graduate-date-cell">{result?.on ? <time dateTime={result.on}>{result.on.replaceAll("-", "/")}</time> : <span className="graduate-muted">—</span>}</td>
+          <td className="graduate-date-cell graduate-result-column">{result?.on ? <time dateTime={result.on}>{result.on.replaceAll("-", "/")}</time> : <span className="graduate-muted">—</span>}</td>
         </tr>;
       })}
     </tbody>

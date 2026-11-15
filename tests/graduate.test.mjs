@@ -331,8 +331,9 @@ test("候选表显示学校参照档、办学性质和费用，换批次时同�
   assert.match(html, /值得考虑/);
   assert.match(html, /须先获得导师同意/);
   assert.match(html, /aria-sort="descending"/);
-  assert.match(html, /首年 100\.1 万日元/);
-  assert.match(html, /全程约 179\.0 万日元/);
+  const renderedText = html.replace(/<[^>]+>/g, "");
+  assert.match(renderedText, /首年 100\.1 万日元/);
+  assert.match(renderedText, /全程约 179\.0 万日元/);
   assert.match(html, /专业笔试 · 面试/);
   assert.match(html, /主要材料 · 事先联系导师/);
   assert.match(html, /href="\/graduate\?school=test-tech&amp;route=test-master"/);
