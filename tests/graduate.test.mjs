@@ -212,7 +212,7 @@ test("发布快照：publish: false 的大学院资料不进正文、目录和�
   assert.deepEqual(catalog, { schemaVersion: 1, schools: [], reference: null, issues: [] });
 });
 
-test("候选表只显示四列，换批次时同步切换截止日和放榜日", async () => {
+test("候选表显示学制费用和入试材料，换批次时同步切换截止日和放榜日", async () => {
   const { CandidateTable, GRADUATE_COPY } = await loadAppModule("app/graduate-view.tsx");
   const steps = [
     ...masterSteps().map((step) => ({ ...step, round: "1期" })),
@@ -220,10 +220,16 @@ test("候选表只显示四列，换批次时同步切换截止日和放榜日",
     { id: "apply-two", kind: "application", label: "第2期出願", round: "2期", due: "2027-02-15", deadline_type: "必着" },
     { id: "result-two", kind: "result", label: "第2期発表", round: "2期", on: "2027-03-22" },
   ];
-  const catalog = buildGraduateCatalog([school({ routes: [route("test-master", "master", { shortlist: "tokyo-social-2027", steps })] })]);
+  const catalog = buildGraduateCatalog([school({ routes: [route("test-master", "master", {
+    shortlist: "tokyo-social-2027", steps, exams_zh: ["专业笔试", "面试"], requirements_zh: "事先联系导师",
+  })] })]);
   const props = { entries: graduateCatalogEntries(catalog, "tokyo"), track: "tokyo", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} };
   const html = renderToStaticMarkup(createElement(CandidateTable, { ...props, today: "2026-11-13" }));
-  assert.equal((html.match(/<th scope="col"/g) ?? []).length, 4);
+  assert.equal((html.match(/<th scope="col"/g) ?? []).length, 6);
+  assert.match(html, /首年 100\.1 万日元/);
+  assert.match(html, /全程约 179\.0 万日元/);
+  assert.match(html, /专业笔试 · 面试/);
+  assert.match(html, /主要材料 · 事先联系导师/);
   assert.match(html, /href="\/graduate\?school=test-tech&amp;route=test-master"/);
   for (const date of ["2026-11-30", "2027-03-08"]) assert.ok(html.includes(date), date);
   const late = renderToStaticMarkup(createElement(CandidateTable, { ...props, today: "2026-12-01" }));

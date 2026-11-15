@@ -57,6 +57,9 @@ export type GraduateRoute = {
   entry: string;
   entryZh?: string;
   exams: string[];
+  examsZh?: string[];
+  requirements?: string;
+  requirementsZh?: string;
   fees?: GraduateFees;
   shortlisted?: boolean;
   /** 备考笔记的双链目标（不含方括号）；路径在投影阶段解析。 */
@@ -78,6 +81,7 @@ export type GraduateSchool = {
   location: string;
   profile?: GraduateProfile;
   level?: GraduateLevel;
+  graduateOnly?: boolean;
   indicators: GraduateIndicator[];
   routes: GraduateRoute[];
 };
@@ -91,12 +95,12 @@ export type GraduateReference = {
 
 /** 目录只带比较和算期限要用的字段；材料链接、说明和出处随学校正文按需读取。 */
 export type GraduateCatalogStep = Pick<GraduateStep, "id" | "kind" | "label" | "labelZh" | "round" | "start" | "due" | "on" | "deadlineType" | "optional" | "doneOn">;
-export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh" | "track" | "degree" | "degreeZh" | "years" | "entry" | "entryZh" | "exams" | "shortlisted"> & {
+export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh" | "track" | "degree" | "degreeZh" | "years" | "entry" | "entryZh" | "exams" | "examsZh" | "requirements" | "requirementsZh" | "shortlisted"> & {
   fees?: Pick<GraduateFees, "firstYear" | "annual">;
   prepPath: string | null;
   steps: GraduateCatalogStep[];
 };
-export type GraduateCatalogSchool = Pick<GraduateSchool, "path" | "id" | "name" | "nameZh" | "sort" | "checkedOn" | "level"> & { routes: GraduateCatalogRoute[] };
+export type GraduateCatalogSchool = Pick<GraduateSchool, "path" | "id" | "name" | "nameZh" | "sort" | "checkedOn" | "level" | "graduateOnly"> & { routes: GraduateCatalogRoute[] };
 export type GraduateIssue = { path: string; message: string };
 export type GraduateCatalog = { schemaVersion: 1; schools: GraduateCatalogSchool[]; reference: GraduateReference | null; issues: GraduateIssue[] };
 export type GraduateCatalogPage = GraduateCatalog & {
@@ -251,6 +255,8 @@ function parseRoute(value: unknown, index: number, issues: string[]): GraduateRo
   if (source.fees !== undefined && annual === null) issues.push(`${where} の fees.annual は円の整数`);
   const shortlisted = source.shortlist === "tokyo-social-2027" && track === "master";
   const exams = Array.isArray(source.exams) ? source.exams.map(text).filter(Boolean) : [];
+  const examsZh = Array.isArray(source.exams_zh) ? source.exams_zh.map(text).filter(Boolean) : [];
+  const requirements = text(source.requirements), requirementsZh = text(source.requirements_zh);
   if (!Array.isArray(source.steps) || source.steps.length === 0) issues.push(`${where} に steps が無い`);
   const steps = (Array.isArray(source.steps) ? source.steps : []).map((step, stepIndex) => parseStep(step, `${where}.steps[${stepIndex}]`, issues)).filter((step): step is GraduateStep => Boolean(step));
   const seen = new Set<string>();
@@ -262,6 +268,7 @@ function parseRoute(value: unknown, index: number, issues: string[]): GraduateRo
   const feesUrl = optionalUrl(fees?.url, `${where}.fees`, issues);
   return {
     id, label, labelZh: text(source.label_zh) || label, track, degree: text(source.degree), years, entry: text(source.entry), exams,
+    ...(examsZh.length ? { examsZh } : {}), ...(requirements ? { requirements } : {}), ...(requirementsZh ? { requirementsZh } : {}),
     ...(text(source.degree_zh) ? { degreeZh: text(source.degree_zh) } : {}),
     ...(text(source.entry_zh) ? { entryZh: text(source.entry_zh) } : {}),
     ...(firstYear !== null && annual !== null ? { fees: { firstYear, annual, basis: text(fees?.basis), ...(feesUrl ? { url: feesUrl } : {}) } } : {}),
@@ -307,7 +314,7 @@ export function parseGraduateSchool(note: Note): { school: GraduateSchool | null
   const school: GraduateSchool = {
     path: note.path, id, name, nameZh: text(frontmatter.school_zh) || name,
     sort: Number.isFinite(sortValue) ? sortValue : 99, checkedOn: checkedOn ?? "", location: text(frontmatter.location),
-    ...(profile ? { profile } : {}), ...(level ? { level } : {}), indicators, routes,
+    ...(profile ? { profile } : {}), ...(level ? { level } : {}), ...(frontmatter.graduate_only === true ? { graduateOnly: true } : {}), indicators, routes,
   };
   return { school: issues.length ? null : school, issues };
 }
@@ -418,12 +425,14 @@ export function buildGraduateCatalog(notes: Note[]): GraduateCatalog {
       const prepPath = resolvePrepPath(route.prep, notes);
       if (route.prep && !prepPath) issues.push({ path: note.path, message: `${route.id} の prep [[${route.prep}]] が備考ノートに解決できない` });
       routes.push({ id: route.id, label: route.label, labelZh: route.labelZh, track: route.track, degree: route.degree, years: route.years, entry: route.entry, exams: route.exams,
+        ...(route.examsZh?.length ? { examsZh: route.examsZh } : {}),
+        ...(route.requirements ? { requirements: route.requirements } : {}), ...(route.requirementsZh ? { requirementsZh: route.requirementsZh } : {}),
         ...(route.degreeZh ? { degreeZh: route.degreeZh } : {}), ...(route.entryZh ? { entryZh: route.entryZh } : {}),
         ...(route.fees ? { fees: { firstYear: route.fees.firstYear, annual: route.fees.annual } } : {}),
         ...(route.shortlisted ? { shortlisted: true } : {}), prepPath, steps: route.steps.map(catalogStep) });
     }
     schools.push({ path: school.path, id: school.id, name: school.name, nameZh: school.nameZh, sort: school.sort, checkedOn: school.checkedOn,
-      ...(school.level ? { level: school.level } : {}), routes });
+      ...(school.level ? { level: school.level } : {}), ...(school.graduateOnly ? { graduateOnly: true } : {}), routes });
   }
   schools.sort((left, right) => left.sort - right.sort || left.path.localeCompare(right.path));
   return { schemaVersion: 1, schools, reference, issues };

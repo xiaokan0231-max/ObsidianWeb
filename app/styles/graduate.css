@@ -31,12 +31,15 @@
 .graduate-muted { color: var(--muted); }
 
 /* ── 候选表 ─────────────────────────────────────────── */
+.graduate-table-wrap { container-type: inline-size; }
 .graduate-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--surface-raised-solid); text-align: left; }
 .graduate-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .graduate-table thead th { padding: 10px 14px; color: var(--text-secondary); background: color-mix(in oklab, var(--green) 9%, var(--surface-raised-solid)); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.graduate-table thead th:nth-child(1) { width: 28%; }
-.graduate-table thead th:nth-child(n+3) { width: 20%; }
-.graduate-table tbody th, .graduate-table tbody td { padding: 11px 14px; vertical-align: middle; border-bottom: 1px solid var(--line); font-weight: 400; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.graduate-table thead th:nth-child(1) { width: 18%; }
+.graduate-table thead th:nth-child(2) { width: 18%; }
+.graduate-table thead th:nth-child(3) { width: 16%; }
+.graduate-table thead th:nth-child(n+5) { width: 12%; }
+.graduate-table tbody th, .graduate-table tbody td { padding: 11px 14px; vertical-align: top; border-bottom: 1px solid var(--line); font-weight: 400; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
 .graduate-table tbody tr:last-child > * { border-bottom: 0; }
 .graduate-table tbody tr { cursor: pointer; transition: background-color var(--dur-fast, 120ms) ease; }
 .graduate-table tbody tr:hover > * { background: color-mix(in oklab, var(--green) 6%, var(--surface-raised-solid)); }
@@ -44,6 +47,26 @@
 .graduate-table a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--green); text-underline-offset: 3px; }
 .graduate-table a:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 2px; }
 .graduate-table time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.graduate-route-cost, .graduate-route-admission { display: grid; gap: 2px; }
+.graduate-route-cost { font-variant-numeric: tabular-nums; font-weight: 400; }
+.graduate-route-cost > span, .graduate-route-admission > small { color: var(--text-secondary); }
+.graduate-route-cost strong { font-weight: 600; }
+.graduate-compact-column { display: none; }
+
+@container (max-width: 900px) {
+  .graduate-table thead th:nth-child(1) { width: 24%; }
+  .graduate-table thead th:nth-child(2) { width: auto; }
+  .graduate-table thead th:nth-child(n+5) { width: 17%; }
+  .graduate-table thead th, .graduate-table tbody th, .graduate-table tbody td { padding-inline: 10px; }
+  .graduate-wide-column { display: none; }
+  .graduate-compact-column { display: block; margin-top: 5px; font-size: 11.5px; }
+}
+
+@container (max-width: 520px) {
+  .graduate-table thead th, .graduate-table tbody th, .graduate-table tbody td { padding-inline: 6px; }
+  .graduate-table time { font-size: 11px; }
+  .graduate-table thead th:nth-child(n+5) { width: 19%; }
+}
 .graduate-conditional { display: block; margin-top: 2px; color: var(--text-secondary); font-size: 11.5px; }
 .graduate-track-badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; line-height: 1.6; font-weight: 600; color: var(--green); background: color-mix(in oklab, var(--green) 12%, transparent); }
 .graduate-track-badge.bachelor { color: var(--orange); background: color-mix(in oklab, var(--orange) 12%, transparent); }
@@ -168,13 +191,14 @@
 .graduate-workspace { --graduate-mark: #3a9e72; --graduate-context: #4f5d56; }
 :root[data-theme="light"] .graduate-workspace { --graduate-mark: #16825a; --graduate-context: #b0b7b2; }
 
-.graduate-level-panel { margin-top: 14px; padding: 16px 20px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-raised-solid); }
+.graduate-level-jump { color: var(--green); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.graduate-level-panel { margin-top: 14px; padding: 16px 20px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-raised-solid); scroll-margin-top: 76px; }
 .graduate-scale { margin: 0; }
 .graduate-scale figcaption { display: flex; flex-direction: column; gap: 3px; margin-bottom: 12px; }
 .graduate-scale figcaption strong { font-size: 15px; font-weight: 650; }
 .graduate-scale figcaption span { color: var(--text-secondary); font-size: 12.5px; line-height: 1.65; }
 .graduate-scale-grid { display: flex; flex-direction: column; }
-.graduate-scale-row { display: grid; grid-template-columns: 210px minmax(0, 1fr) 112px; align-items: center; gap: 14px; min-height: 34px; }
+.graduate-scale-row { display: grid; grid-template-columns: clamp(132px, 29%, 250px) minmax(0, 1fr) 112px; align-items: center; gap: 14px; min-height: 34px; }
 .graduate-scale-row + .graduate-scale-row { border-top: 1px solid var(--line-soft, var(--line)); }
 .graduate-scale-head, .graduate-scale-axis { border-top: 0 !important; min-height: 22px; }
 .graduate-scale-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
@@ -196,6 +220,9 @@
 .graduate-scale-value { display: flex; flex-direction: column; line-height: 1.3; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .graduate-scale-value strong { font-size: 13px; font-weight: 650; color: var(--ink); }
 .graduate-scale-value small { color: var(--muted); font-size: 11px; }
+.graduate-scale-value a { color: inherit; text-decoration: underline; text-decoration-color: var(--green); text-underline-offset: 3px; }
+.graduate-scale-unrated .graduate-scale-name strong { white-space: normal; }
+.graduate-scale-unrated > [role="cell"] { color: var(--text-secondary); font-size: 12px; }
 .graduate-scale-head > span:last-child { color: var(--muted); font-size: 11px; }
 .graduate-scale-axis .graduate-scale-track span { position: absolute; transform: translateX(-50%); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .graduate-scale-axis .graduate-scale-track span:first-child { transform: none; }
