@@ -86,6 +86,10 @@
 .graduate-school-level { display: grid; gap: 3px; line-height: 1.45; }
 .graduate-school-level strong { font-size: .9375rem; font-weight: 650; }
 .graduate-school-level span, .graduate-school-level small { color: var(--text-secondary); font-size: var(--graduate-meta-size); font-variant-numeric: tabular-nums; }
+.graduate-world-rank { width: fit-content; color: var(--green); font-size: var(--graduate-label-size); text-decoration: underline; text-underline-offset: 3px; font-variant-numeric: tabular-nums; }
+.graduate-world-rank b { font-size: .9375rem; font-weight: 700; white-space: nowrap; }
+.graduate-world-rank-missing { color: var(--text-secondary); font-size: var(--graduate-meta-size); }
+.graduate-world-rank-detail { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; margin: 0 0 12px; color: var(--text-secondary); font-size: var(--graduate-label-size); }
 .graduate-assessment { --graduate-recommendation-color: var(--text-secondary); display: grid; gap: 3px; }
 .graduate-assessment[data-recommendation="priority"] { --graduate-recommendation-color: var(--success); }
 .graduate-assessment[data-recommendation="consider"] { --graduate-recommendation-color: var(--info); }

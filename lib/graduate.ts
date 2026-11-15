@@ -102,6 +102,8 @@ export type GraduateInstitution = {
 };
 /** 河合塾ボーダー偏差値：focus 是与路线最接近的学部，school 是全校各学部的范围。 */
 export type GraduateLevel = { focus: string; focusLow: number; focusHigh: number; schoolLow: number; schoolHigh: number; url?: string };
+/** 世界总榜的发布机构、版次和原始名次写法，保留并列及区间。 */
+export type GraduateWorldRank = { system: "QS" | "THE"; edition: number; rank: string; url: string };
 export type GraduateSchool = {
   path: string;
   id: string;
@@ -114,6 +116,7 @@ export type GraduateSchool = {
   profile?: GraduateProfile;
   institution?: GraduateInstitution;
   level?: GraduateLevel;
+  worldRankings?: GraduateWorldRank[];
   graduateOnly?: boolean;
   indicators: GraduateIndicator[];
   routes: GraduateRoute[];
@@ -134,7 +137,7 @@ export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh
   prepPath: string | null;
   steps: GraduateCatalogStep[];
 };
-export type GraduateCatalogSchool = Pick<GraduateSchool, "path" | "id" | "name" | "nameZh" | "sort" | "checkedOn" | "location" | "region" | "institution" | "level" | "graduateOnly"> & { routes: GraduateCatalogRoute[] };
+export type GraduateCatalogSchool = Pick<GraduateSchool, "path" | "id" | "name" | "nameZh" | "sort" | "checkedOn" | "location" | "region" | "institution" | "level" | "worldRankings" | "graduateOnly"> & { routes: GraduateCatalogRoute[] };
 export type GraduateIssue = { path: string; message: string };
 export type GraduateCatalog = { schemaVersion: 1; schools: GraduateCatalogSchool[]; reference: GraduateReference | null; issues: GraduateIssue[] };
 export type GraduateCatalogPage = GraduateCatalog & {
@@ -255,6 +258,29 @@ function parseLevel(value: unknown, issues: string[]): GraduateLevel | undefined
   if (focusLow < schoolLow || focusHigh > schoolHigh) issues.push("level.focus の範囲が school の範囲を超えている");
   const url = optionalUrl(source.url, "level", issues);
   return { focus, focusLow, focusHigh, schoolLow, schoolHigh, ...(url ? { url } : {}) };
+}
+
+function parseWorldRankings(value: unknown, issues: string[]): GraduateWorldRank[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) { issues.push("world_rankings は配列にする"); return undefined; }
+  const rankings: GraduateWorldRank[] = [];
+  for (const [index, item] of value.entries()) {
+    const source = record(item), where = `world_rankings[${index}]`;
+    const system = text(source?.system), edition = Number(text(source?.edition)), rank = text(source?.rank);
+    const url = optionalUrl(source?.url, where, issues);
+    if ((system !== "QS" && system !== "THE") || !Number.isInteger(edition) || edition < 2004 || edition > 9999
+      || !/^(?:=?[1-9]\d*|[1-9]\d*[-–][1-9]\d*|[1-9]\d*\+)$/.test(rank) || !url) {
+      issues.push(`${where} は system（QS / THE）・版の西暦 edition・総合順位 rank（=201、851–900、1401+ など）・出典 url が必須`);
+      continue;
+    }
+    if (rankings.some((entry) => entry.system === system)) {
+      issues.push(`${where} の system「${system}」が重複`);
+      continue;
+    }
+    rankings.push({ system, edition, rank, url });
+  }
+  // 同じ一覧では QS を優先し、QS に載っていない学校は THE の順位を示す。
+  return rankings.length ? rankings.sort((left, right) => left.system.localeCompare(right.system)) : undefined;
 }
 
 function parseProfile(value: unknown, issues: string[]): GraduateProfile | undefined {
@@ -415,13 +441,15 @@ export function parseGraduateSchool(note: Note): { school: GraduateSchool | null
   const profile = parseProfile(frontmatter.profile, issues);
   const institution = parseInstitution(frontmatter.institution, issues);
   const level = parseLevel(frontmatter.level, issues);
+  const worldRankings = parseWorldRankings(frontmatter.world_rankings, issues);
   const region = text(frontmatter.region);
   if (region && !ID_PATTERN.test(region)) issues.push("region は都道府県の英小文字・数字・ハイフンにする");
   const school: GraduateSchool = {
     path: note.path, id, name, nameZh: text(frontmatter.school_zh) || name,
     sort: Number.isFinite(sortValue) ? sortValue : 99, checkedOn: checkedOn ?? "", location: text(frontmatter.location),
     ...(region ? { region } : {}), ...(profile ? { profile } : {}), ...(institution ? { institution } : {}),
-    ...(level ? { level } : {}), ...(frontmatter.graduate_only === true ? { graduateOnly: true } : {}), indicators, routes,
+    ...(level ? { level } : {}), ...(worldRankings ? { worldRankings } : {}),
+    ...(frontmatter.graduate_only === true ? { graduateOnly: true } : {}), indicators, routes,
   };
   return { school: issues.length ? null : school, issues };
 }
@@ -556,6 +584,7 @@ export function buildGraduateCatalog(notes: Note[]): GraduateCatalog {
     schools.push({ path: school.path, id: school.id, name: school.name, nameZh: school.nameZh, sort: school.sort, checkedOn: school.checkedOn, location: school.location,
       ...(school.region ? { region: school.region } : {}),
       ...(school.institution ? { institution: school.institution } : {}), ...(school.level ? { level: school.level } : {}),
+      ...(school.worldRankings ? { worldRankings: school.worldRankings } : {}),
       ...(school.graduateOnly ? { graduateOnly: true } : {}), routes });
   }
   schools.sort((left, right) => left.sort - right.sort || left.path.localeCompare(right.path));

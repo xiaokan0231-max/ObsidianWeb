@@ -364,6 +364,24 @@ test("无本科的学校在候选表和对照图显示办学定位，保持本�
   assert.ok(parseGraduateSchool(school({ institution: { ...verified, registry_url: "" } })).issues.some((issue) => issue.includes("registry_url")));
 });
 
+test("候选表优先显示 QS 世界总榜，只有 THE 时保留榜名和版次", async () => {
+  const { CandidateTable, GRADUATE_COPY } = await loadAppModule("app/graduate-view.tsx");
+  const qs = { system: "QS", edition: 2027, rank: "=201", url: "https://example.test/qs" };
+  const the = { system: "THE", edition: 2027, rank: "851–900", url: "https://example.test/the" };
+  const build = (world_rankings) => buildGraduateCatalog([school({ world_rankings })]);
+  const catalog = build([the, qs]);
+  assert.deepEqual(catalog.issues, []);
+  assert.deepEqual(catalog.schools[0].worldRankings, [qs, the]);
+  const renderTable = (data) => renderToStaticMarkup(createElement(CandidateTable, {
+    entries: graduateCatalogEntries(data, "master"), reference: null, today: "2026-11-13",
+    track: "master", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {},
+  }));
+  assert.match(renderTable(catalog), /href="https:\/\/example\.test\/qs"[^>]+>QS 2027 世界总榜 <b>=201<\/b>/);
+  assert.match(renderTable(build([the])), /THE 2027 世界总榜 <b>851–900<\/b>/);
+  assert.match(renderTable(build()), /世界排名未查到/);
+  assert.ok(build([{ ...qs, rank: "东亚 =360" }]).issues.some(({ message }) => message.includes("world_rankings[0]")));
+});
+
 test("学校详情首屏：当前要做的事带截止与必着，前置过期给出核对提示", async () => {
   const { SchoolDetail, GRADUATE_COPY } = await loadAppModule("app/graduate-view.tsx");
   const catalog = buildGraduateCatalog([school({ level, routes: [route("test-master", "master", { prep: "[[テスト工科大学_備考]]" })] }), prepNote(), referenceNote()]);
