@@ -14,7 +14,16 @@ export const GRADUATE_PREP_TYPE = "graduate-prep";
 export const GRADUATE_REFERENCE_TYPE = "graduate-reference";
 export const GRADUATE_RECORD_KIND = "graduate-catalog";
 export const GRADUATE_TRACKS = ["master", "bachelor"] as const;
-export const GRADUATE_TRACK_FILTERS = ["tokyo", "master", "bachelor", "all"] as const;
+export const GRADUATE_TRACK_FILTERS = ["master", "bachelor", "all"] as const;
+export const GRADUATE_REGION_FILTERS = ["tokyo", "all"] as const;
+export const GRADUATE_ASSESSMENT_RECOMMENDATIONS = ["priority", "consider", "conditional", "low"] as const;
+/** 权重表达申请适合度，不代表学校排名或录取概率。合计由分项计算，避免两份数字失配。 */
+export const GRADUATE_ASSESSMENT_RUBRIC = [
+  { key: "exam", max: 40, labelZh: "考试与语言可准备性", labelJa: "試験・言語の準備しやすさ" },
+  { key: "fit", max: 30, labelZh: "经历与研究方向匹配", labelJa: "経歴と研究分野の適合" },
+  { key: "readiness", max: 20, labelZh: "申请条件与时间可落实性", labelJa: "出願条件・日程の実現性" },
+  { key: "value", max: 10, labelZh: "学校与专业吸引力", labelJa: "大学・専攻の魅力" },
+] as const;
 export const GRADUATE_STEP_KINDS = ["prerequisite", "application", "exam", "result", "enrollment"] as const;
 export const GRADUATE_DEADLINE_TYPES = ["必着", "消印有効", "期限内必着", "Web締切"] as const;
 export const GRADUATE_INDICATOR_KINDS = ["ranking", "deviation", "employment"] as const;
@@ -23,6 +32,9 @@ export const GRADUATE_ROUTE_SECTIONS = ["出愿资格与匹配", "出愿与材�
 
 export type GraduateTrack = typeof GRADUATE_TRACKS[number];
 export type GraduateTrackFilter = typeof GRADUATE_TRACK_FILTERS[number];
+export type GraduateRegionFilter = typeof GRADUATE_REGION_FILTERS[number];
+export type GraduateAssessmentRecommendation = typeof GRADUATE_ASSESSMENT_RECOMMENDATIONS[number];
+export type GraduateAssessmentScores = Record<typeof GRADUATE_ASSESSMENT_RUBRIC[number]["key"], number>;
 export type GraduateStepKind = typeof GRADUATE_STEP_KINDS[number];
 export type GraduateDeadlineType = typeof GRADUATE_DEADLINE_TYPES[number];
 export type GraduateIndicatorKind = typeof GRADUATE_INDICATOR_KINDS[number];
@@ -46,6 +58,17 @@ export type GraduateStep = {
   materials: GraduateLink[];
 };
 export type GraduateFees = { firstYear: number; annual: number; basis: string; url?: string };
+export type GraduateAssessment = {
+  author: string;
+  assessedOn: string;
+  scores: GraduateAssessmentScores;
+  recommendation: GraduateAssessmentRecommendation;
+  summaryZh: string;
+  strengthsZh: string;
+  riskZh: string;
+  sources: GraduateLink[];
+};
+export type GraduateCatalogAssessment = Omit<GraduateAssessment, "sources">;
 export type GraduateRoute = {
   id: string;
   label: string;
@@ -62,6 +85,7 @@ export type GraduateRoute = {
   requirementsZh?: string;
   fees?: GraduateFees;
   shortlisted?: boolean;
+  assessment?: GraduateAssessment;
   /** 备考笔记的双链目标（不含方括号）；路径在投影阶段解析。 */
   prep?: string;
   steps: GraduateStep[];
@@ -79,6 +103,7 @@ export type GraduateSchool = {
   sort: number;
   checkedOn: string;
   location: string;
+  region?: string;
   profile?: GraduateProfile;
   level?: GraduateLevel;
   graduateOnly?: boolean;
@@ -97,10 +122,11 @@ export type GraduateReference = {
 export type GraduateCatalogStep = Pick<GraduateStep, "id" | "kind" | "label" | "labelZh" | "round" | "start" | "due" | "on" | "deadlineType" | "optional" | "doneOn">;
 export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh" | "track" | "degree" | "degreeZh" | "years" | "entry" | "entryZh" | "exams" | "examsZh" | "requirements" | "requirementsZh" | "shortlisted"> & {
   fees?: Pick<GraduateFees, "firstYear" | "annual">;
+  assessment?: GraduateCatalogAssessment;
   prepPath: string | null;
   steps: GraduateCatalogStep[];
 };
-export type GraduateCatalogSchool = Pick<GraduateSchool, "path" | "id" | "name" | "nameZh" | "sort" | "checkedOn" | "level" | "graduateOnly"> & { routes: GraduateCatalogRoute[] };
+export type GraduateCatalogSchool = Pick<GraduateSchool, "path" | "id" | "name" | "nameZh" | "sort" | "checkedOn" | "location" | "region" | "level" | "graduateOnly"> & { routes: GraduateCatalogRoute[] };
 export type GraduateIssue = { path: string; message: string };
 export type GraduateCatalog = { schemaVersion: 1; schools: GraduateCatalogSchool[]; reference: GraduateReference | null; issues: GraduateIssue[] };
 export type GraduateCatalogPage = GraduateCatalog & {
@@ -238,6 +264,50 @@ function integerYen(value: unknown) {
   return Number.isSafeInteger(number) && number >= 0 ? number : null;
 }
 
+/** 缺失或越界的分项不折算成零分，避免把坏资料显示成有效的推荐分数。 */
+export function graduateAssessmentScore(assessment: Pick<GraduateCatalogAssessment, "scores"> | null | undefined): number | null {
+  if (!assessment?.scores) return null;
+  let total = 0;
+  for (const item of GRADUATE_ASSESSMENT_RUBRIC) {
+    const value = assessment.scores[item.key];
+    if (!Number.isSafeInteger(value) || value < 0 || value > item.max) return null;
+    total += value;
+  }
+  return total;
+}
+
+function parseAssessment(value: unknown, where: string, issues: string[]): GraduateAssessment | undefined {
+  if (value === undefined) return undefined;
+  const at = `${where}.assessment`, source = record(value);
+  if (!source) { issues.push(`${at} は署名・分項・判断を持つ対象にする`); return undefined; }
+  const errors: string[] = [];
+  const author = text(source.author), assessedOn = graduateDate(source.assessed_on);
+  if (!author || author === "AI") errors.push(`${at}.author に判断を書いた具体名を書く`);
+  if (!assessedOn) errors.push(`${at}.assessed_on は "YYYY-MM-DD" の実在日付にする`);
+  const rawScores = record(source.scores), scores = {} as GraduateAssessmentScores;
+  for (const item of GRADUATE_ASSESSMENT_RUBRIC) {
+    const score = rawScores?.[item.key];
+    if (typeof score !== "number" || !Number.isSafeInteger(score) || score < 0 || score > item.max) {
+      errors.push(`${at}.scores.${item.key} は 0〜${item.max} の整数にする`);
+    } else scores[item.key] = score;
+  }
+  const recommendation = text(source.recommendation) as GraduateAssessmentRecommendation;
+  if (!GRADUATE_ASSESSMENT_RECOMMENDATIONS.includes(recommendation)) errors.push(`${at}.recommendation は ${GRADUATE_ASSESSMENT_RECOMMENDATIONS.join(" / ")} のいずれか`);
+  const summaryZh = text(source.summary_zh), strengthsZh = text(source.strengths_zh), riskZh = text(source.risk_zh);
+  for (const [field, content] of [["summary_zh", summaryZh], ["strengths_zh", strengthsZh], ["risk_zh", riskZh]]) {
+    if (!content) errors.push(`${at}.${field} が無い`);
+  }
+  const sources: GraduateLink[] = [];
+  if (source.sources !== undefined && !Array.isArray(source.sources)) errors.push(`${at}.sources は配列にする`);
+  for (const [index, item] of (Array.isArray(source.sources) ? source.sources : []).entries()) {
+    const link = record(item), label = text(link?.label), url = optionalUrl(link?.url, `${at}.sources[${index}]`, errors);
+    if (!label || !url) errors.push(`${at}.sources[${index}] は label・url が必須`);
+    else sources.push({ label, url });
+  }
+  issues.push(...errors);
+  return errors.length ? undefined : { author, assessedOn: assessedOn!, scores, recommendation, summaryZh, strengthsZh, riskZh, sources };
+}
+
 function parseRoute(value: unknown, index: number, issues: string[]): GraduateRoute | null {
   const source = record(value);
   const where = `routes[${index}]`;
@@ -266,6 +336,7 @@ function parseRoute(value: unknown, index: number, issues: string[]): GraduateRo
   }
   const prep = wikiTarget(source.prep);
   const feesUrl = optionalUrl(fees?.url, `${where}.fees`, issues);
+  const assessment = parseAssessment(source.assessment, where, issues);
   return {
     id, label, labelZh: text(source.label_zh) || label, track, degree: text(source.degree), years, entry: text(source.entry), exams,
     ...(examsZh.length ? { examsZh } : {}), ...(requirements ? { requirements } : {}), ...(requirementsZh ? { requirementsZh } : {}),
@@ -273,6 +344,7 @@ function parseRoute(value: unknown, index: number, issues: string[]): GraduateRo
     ...(text(source.entry_zh) ? { entryZh: text(source.entry_zh) } : {}),
     ...(firstYear !== null && annual !== null ? { fees: { firstYear, annual, basis: text(fees?.basis), ...(feesUrl ? { url: feesUrl } : {}) } } : {}),
     ...(shortlisted ? { shortlisted } : {}),
+    ...(assessment ? { assessment } : {}),
     ...(prep ? { prep } : {}), steps,
   };
 }
@@ -311,10 +383,12 @@ export function parseGraduateSchool(note: Note): { school: GraduateSchool | null
   }
   const profile = parseProfile(frontmatter.profile, issues);
   const level = parseLevel(frontmatter.level, issues);
+  const region = text(frontmatter.region);
+  if (region && !ID_PATTERN.test(region)) issues.push("region は都道府県の英小文字・数字・ハイフンにする");
   const school: GraduateSchool = {
     path: note.path, id, name, nameZh: text(frontmatter.school_zh) || name,
     sort: Number.isFinite(sortValue) ? sortValue : 99, checkedOn: checkedOn ?? "", location: text(frontmatter.location),
-    ...(profile ? { profile } : {}), ...(level ? { level } : {}), ...(frontmatter.graduate_only === true ? { graduateOnly: true } : {}), indicators, routes,
+    ...(region ? { region } : {}), ...(profile ? { profile } : {}), ...(level ? { level } : {}), ...(frontmatter.graduate_only === true ? { graduateOnly: true } : {}), indicators, routes,
   };
   return { school: issues.length ? null : school, issues };
 }
@@ -382,6 +456,11 @@ function catalogStep(step: GraduateStep): GraduateCatalogStep {
     ...(deadlineType ? { deadlineType } : {}), ...(optional ? { optional } : {}), ...(doneOn ? { doneOn } : {}) };
 }
 
+function catalogAssessment(assessment: GraduateAssessment): GraduateCatalogAssessment {
+  const { author, assessedOn, scores, recommendation, summaryZh, strengthsZh, riskZh } = assessment;
+  return { author, assessedOn, scores, recommendation, summaryZh, strengthsZh, riskZh };
+}
+
 function resolvePrepPath(target: string | undefined, notes: Note[]) {
   if (!target) return null;
   const key = target.replace(/\.md$/i, "");
@@ -429,9 +508,11 @@ export function buildGraduateCatalog(notes: Note[]): GraduateCatalog {
         ...(route.requirements ? { requirements: route.requirements } : {}), ...(route.requirementsZh ? { requirementsZh: route.requirementsZh } : {}),
         ...(route.degreeZh ? { degreeZh: route.degreeZh } : {}), ...(route.entryZh ? { entryZh: route.entryZh } : {}),
         ...(route.fees ? { fees: { firstYear: route.fees.firstYear, annual: route.fees.annual } } : {}),
+        ...(route.assessment ? { assessment: catalogAssessment(route.assessment) } : {}),
         ...(route.shortlisted ? { shortlisted: true } : {}), prepPath, steps: route.steps.map(catalogStep) });
     }
-    schools.push({ path: school.path, id: school.id, name: school.name, nameZh: school.nameZh, sort: school.sort, checkedOn: school.checkedOn,
+    schools.push({ path: school.path, id: school.id, name: school.name, nameZh: school.nameZh, sort: school.sort, checkedOn: school.checkedOn, location: school.location,
+      ...(school.region ? { region: school.region } : {}),
       ...(school.level ? { level: school.level } : {}), ...(school.graduateOnly ? { graduateOnly: true } : {}), routes });
   }
   schools.sort((left, right) => left.sort - right.sort || left.path.localeCompare(right.path));
@@ -505,10 +586,26 @@ export function graduateApplicationDates(steps: readonly GraduateCatalogStep[], 
 }
 
 /** 候选表的行：按学校 sort，再按正本里路线的顺序。 */
-export function graduateCatalogEntries(catalog: Pick<GraduateCatalog, "schools">, track: GraduateTrackFilter): GraduateCatalogEntry[] {
+export function graduateCatalogEntries(catalog: Pick<GraduateCatalog, "schools">, track: GraduateTrackFilter | "tokyo", region: GraduateRegionFilter = "all"): GraduateCatalogEntry[] {
+  const degree = track === "tokyo" ? "master" : track;
+  const area = track === "tokyo" ? "tokyo" : region;
   return catalog.schools.flatMap((school) => school.routes
-    .filter((route) => track === "tokyo" ? route.shortlisted : track === "all" || route.track === track)
+    .filter((route) => (degree === "all" || route.track === degree)
+      && (area === "all" || (school.region === "tokyo" && (route.track !== "master" || route.shortlisted))))
     .map((route) => ({ school, route })));
+}
+
+export type GraduateSort = "fit" | "deadline";
+
+/** 不改写正本顺序；没有判断的路线排在评分之后，同分时先显示要尽早办理的路线。 */
+export function sortGraduateEntries(entries: readonly GraduateCatalogEntry[], today: string, sort: GraduateSort = "fit"): GraduateCatalogEntry[] {
+  const ranked = entries.map((entry) => ({
+    entry,
+    score: graduateAssessmentScore(entry.route.assessment) ?? -1,
+    deadline: graduateApplicationDates(entry.route.steps, today).deadline?.due ?? "9999-12-31",
+  }));
+  ranked.sort((left, right) => (sort === "fit" ? right.score - left.score : 0) || left.deadline.localeCompare(right.deadline));
+  return ranked.map(({ entry }) => entry);
 }
 
 export type GraduateNoteSections = { school: Map<string, string>; routes: Map<string, Map<string, string>> };
@@ -547,24 +644,31 @@ export function graduateNoteSections(content: string, routeLabels: readonly stri
   return { school, routes };
 }
 
-export type GraduateLocation = { track: GraduateTrackFilter; school: string; route: string };
+export type GraduateLocation = { track: GraduateTrackFilter; region: GraduateRegionFilter; school: string; route: string };
 
-/** 东京社会人名单是首页默认；学校与路线链接继续按稳定 ID 定位。 */
+/** 学位与地区分别筛选；旧东京标签仍回到原名单，旧「全部」链接不被默认地区收窄。 */
 export function graduateLocationFromSearch(search: string): GraduateLocation {
   const params = new URLSearchParams(search);
-  const track = params.get("track");
+  const rawTrack = params.get("track"), rawRegion = params.get("region");
+  const validTrack = GRADUATE_TRACK_FILTERS.includes(rawTrack as GraduateTrackFilter);
+  const track = validTrack ? rawTrack as GraduateTrackFilter : "master";
+  const region = GRADUATE_REGION_FILTERS.includes(rawRegion as GraduateRegionFilter)
+    ? rawRegion as GraduateRegionFilter : validTrack ? "all" : "tokyo";
   return {
-    track: GRADUATE_TRACK_FILTERS.includes(track as GraduateTrackFilter) ? track as GraduateTrackFilter : "tokyo",
+    track, region: rawTrack === "tokyo" ? "tokyo" : region,
     school: ID_PATTERN.test(params.get("school") ?? "") ? params.get("school")! : "",
     route: ID_PATTERN.test(params.get("route") ?? "") ? params.get("route")! : "",
   };
 }
 
-/** 只改本区的三个键，外壳的 note 等参数原样保留（关原笔记时要回到同一位置）。 */
+/** 只改本区筛选与定位键，外壳的 note 等参数原样保留（关原笔记时要回到同一位置）。 */
 export function graduateSearch(location: GraduateLocation, current = "") {
   const params = new URLSearchParams(current);
-  for (const key of ["track", "school", "route"]) params.delete(key);
-  if (location.track !== "tokyo") params.set("track", location.track);
+  for (const key of ["track", "region", "school", "route"]) params.delete(key);
+  if (location.track !== "master" || location.region !== "tokyo") {
+    params.set("track", location.track);
+    params.set("region", location.region);
+  }
   if (location.school) params.set("school", location.school);
   if (location.school && location.route) params.set("route", location.route);
   return params;

@@ -2,9 +2,9 @@
  * 大学院专区。沿用资料页的纸面、绿色强调和正文阅读器（.markdown-document），只为本区补布局。
  * 候选表一行一条路线，日期横向比较，官方资料在路线详情显示。
  */
-.graduate-workspace { width: 100%; max-width: 1240px; margin-inline: auto; }
+.graduate-workspace { width: 100%; max-width: 1480px; margin-inline: auto; }
 
-.graduate-list-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 14px; }
+.graduate-list-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 8px; }
 .graduate-list-head h1 { margin: 2px 0 0; font-size: 26px; line-height: 1.35; font-weight: 650; }
 .graduate-today { margin: 0 0 4px auto; display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .graduate-refreshing { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: graduate-pulse 1.1s ease-in-out infinite; }
@@ -16,6 +16,18 @@
 .graduate-toolbar button:hover { color: var(--ink); background: var(--surface-sunken); }
 .graduate-toolbar button[aria-pressed="true"] { color: var(--on-fill, #fff); background: var(--green); font-weight: 600; }
 .graduate-toolbar button[aria-pressed="true"] span { color: inherit; opacity: .8; }
+.graduate-select { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.graduate-select select { min-height: 34px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.graduate-workspace :is(button, select, summary, a):focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.graduate-list-context { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 12px; color: var(--text-secondary); font-size: 12px; }
+.graduate-list-context > .graduate-level-jump { margin-left: auto; }
+.graduate-list-context .graduate-assessment-basis[open] { order: 1; flex-basis: 100%; }
+.graduate-assessment-basis { font-size: 12px; color: var(--text-secondary); }
+.graduate-assessment-basis summary { color: var(--green); cursor: pointer; width: fit-content; }
+.graduate-assessment-basis p { margin: 6px 0; max-width: 75ch; line-height: 1.65; }
+.graduate-assessment-basis dl { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 8px 0; }
+.graduate-assessment-basis dl > div { display: flex; gap: 8px; }
+.graduate-assessment-basis dd { margin: 0; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .graduate-sync, .graduate-issues { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 9px 14px; border: 1px solid var(--warning-line, var(--line)); border-radius: 7px; background: var(--warning-wash-soft, var(--surface-sunken)); color: var(--warning-strong, var(--ink)); font-size: 12.5px; }
 .graduate-sync button, .graduate-status button, .graduate-status-page button { margin-left: auto; padding: 4px 10px; border: 1px solid currentColor; border-radius: 5px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
@@ -34,38 +46,60 @@
 .graduate-table-wrap { container-type: inline-size; }
 .graduate-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--surface-raised-solid); text-align: left; }
 .graduate-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.graduate-table thead th { padding: 10px 14px; color: var(--text-secondary); background: color-mix(in oklab, var(--green) 9%, var(--surface-raised-solid)); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.graduate-table thead th:nth-child(1) { width: 18%; }
-.graduate-table thead th:nth-child(2) { width: 18%; }
-.graduate-table thead th:nth-child(3) { width: 16%; }
-.graduate-table thead th:nth-child(n+5) { width: 12%; }
-.graduate-table tbody th, .graduate-table tbody td { padding: 11px 14px; vertical-align: top; border-bottom: 1px solid var(--line); font-weight: 400; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.graduate-table thead th { padding: 10px 12px; color: var(--text-secondary); background: color-mix(in oklab, var(--green) 9%, var(--surface-raised-solid)); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 600; }
+.graduate-table .graduate-col-school { width: 19%; }
+.graduate-table .graduate-col-assessment { width: 29%; }
+.graduate-table .graduate-col-cost { width: 12%; }
+.graduate-table .graduate-col-admission { width: 18%; }
+.graduate-table .graduate-col-date { width: 11%; }
+.graduate-table tbody th, .graduate-table tbody td { padding: 12px; vertical-align: top; border-bottom: 1px solid var(--line); font-weight: 400; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
 .graduate-table tbody tr:last-child > * { border-bottom: 0; }
 .graduate-table tbody tr { cursor: pointer; transition: background-color var(--dur-fast, 120ms) ease; }
 .graduate-table tbody tr:hover > * { background: color-mix(in oklab, var(--green) 6%, var(--surface-raised-solid)); }
 .graduate-table tbody th { font-weight: 650; }
+.graduate-program { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 12px; font-weight: 400; }
+.graduate-location { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; font-weight: 400; }
 .graduate-table a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--green); text-underline-offset: 3px; }
 .graduate-table a:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 2px; }
 .graduate-table time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.graduate-table .graduate-date-cell { font-size: 12px; }
+.graduate-assessment { display: grid; gap: 4px; }
+.graduate-assessment-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.graduate-score { display: inline-flex; align-items: baseline; gap: 3px; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1; }
+.graduate-score strong { font-size: 24px; font-weight: 650; }
+.graduate-score > span { font-size: 11px; color: var(--muted); }
+.graduate-recommendation { color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.graduate-assessment[data-recommendation="priority"] .graduate-recommendation { color: var(--green); }
+.graduate-assessment[data-recommendation="conditional"] .graduate-recommendation { color: var(--warning-strong, var(--orange)); }
+.graduate-assessment p { margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+.graduate-assessment .graduate-assessment-summary { color: var(--ink); }
+.graduate-assessment p b { margin-right: 6px; font-weight: 600; }
+.graduate-assessment-detail .graduate-assessment { max-width: 75ch; }
+.graduate-assessment-detail .graduate-assessment-basis { margin-top: 12px; }
+.graduate-assessment-sources { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 8px 0 0; font-size: 12px; }
+.graduate-assessment-sources a { color: var(--green); }
 .graduate-route-cost, .graduate-route-admission { display: grid; gap: 2px; }
 .graduate-route-cost { font-variant-numeric: tabular-nums; font-weight: 400; }
 .graduate-route-cost > span, .graduate-route-admission > small { color: var(--text-secondary); }
 .graduate-route-cost strong { font-weight: 600; }
 .graduate-compact-column { display: none; }
 
-@container (max-width: 900px) {
-  .graduate-table thead th:nth-child(1) { width: 24%; }
-  .graduate-table thead th:nth-child(2) { width: auto; }
-  .graduate-table thead th:nth-child(n+5) { width: 17%; }
+/* 侧栏或窄桌面窗口压缩表格时，把费用和考试并回学校格，保留完整判断与日期。 */
+@container (max-width: 1050px) {
+  .graduate-table .graduate-col-school { width: 29%; }
+  .graduate-table .graduate-col-assessment { width: 41%; }
+  .graduate-table .graduate-col-date { width: 15%; }
   .graduate-table thead th, .graduate-table tbody th, .graduate-table tbody td { padding-inline: 10px; }
   .graduate-wide-column { display: none; }
-  .graduate-compact-column { display: block; margin-top: 5px; font-size: 11.5px; }
+  .graduate-compact-column { display: grid; gap: 8px; margin-top: 8px; font-size: 12px; }
+  .graduate-compact-column .graduate-route-cost { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+  .graduate-compact-column .graduate-route-cost > span:last-child { flex-basis: 100%; }
 }
 
 @container (max-width: 520px) {
   .graduate-table thead th, .graduate-table tbody th, .graduate-table tbody td { padding-inline: 6px; }
   .graduate-table time { font-size: 11px; }
-  .graduate-table thead th:nth-child(n+5) { width: 19%; }
+  .graduate-table .graduate-col-date { width: 19%; }
 }
 .graduate-conditional { display: block; margin-top: 2px; color: var(--text-secondary); font-size: 11.5px; }
 .graduate-track-badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; line-height: 1.6; font-weight: 600; color: var(--green); background: color-mix(in oklab, var(--green) 12%, transparent); }

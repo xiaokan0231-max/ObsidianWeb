@@ -9,6 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   buildGraduateCatalog,
   buildGraduateReadModelRecords,
+  graduateAssessmentScore,
   graduateCatalogEntries,
   graduateBand,
   graduateDateLabel,
@@ -19,12 +20,14 @@ import {
   graduateSearch,
   graduateStepState,
   graduateTotalFee,
+  GRADUATE_ASSESSMENT_RUBRIC,
   GRADUATE_RECORD_KIND,
   nextGraduateDeadline,
   nextGraduateEvent,
   overdueGraduatePrerequisites,
   parseGraduateReference,
   parseGraduateSchool,
+  sortGraduateEntries,
 } from "../lib/graduate.ts";
 import { includePublishedNote } from "../lib/vault-boundary.mjs";
 import { buildApplicationReadModel } from "../scripts/read-model-source.mjs";
@@ -49,7 +52,7 @@ const route = (id, track, overrides = {}) => ({
 const school = ({ path = "40_大学院/テスト工科大学.md", id = "test-tech", sort = 1, routes = [route("test-master", "master"), route("test-bachelor", "bachelor")], content, ...frontmatter } = {}) => ({
   path, stat: { ctime: 1, mtime: 1, size: 1 }, tags: [],
   frontmatter: { type: "graduate-school", schema_version: 1, publish: false, school_id: id, school: "テスト工科大学", school_zh: "测试工科大学",
-    sort, checked_on: "2026-11-13", indicators: [{ kind: "ranking", label: "テストランキング2025", value: "201+", scope: "2025年発表・大学全体", url: "https://example.test/rank" }], routes, ...frontmatter },
+    sort, region: "tokyo", location: "東京都・テスト校舎", checked_on: "2026-11-13", indicators: [{ kind: "ranking", label: "テストランキング2025", value: "201+", scope: "2025年発表・大学全体", url: "https://example.test/rank" }], routes, ...frontmatter },
   content: content ?? `---\ntype: graduate-school\n---\n# テスト工科大学\n\n> 导语\n\n## 学校口径\n\n- 排名说明\n\n${routes.map((item) => `## ${item.label}\n\n### 出愿资格与匹配\n\n资格段落\n\n### 出愿与材料\n\n材料段落\n`).join("\n")}\n## 出处\n\n- [要项](https://example.test/guide.pdf)\n`,
 });
 const level = { focus: "情報学部", focus_low: 37.5, focus_high: 37.5, school_low: 35, school_high: 45, url: "https://example.test/border" };
@@ -64,6 +67,11 @@ const prepNote = (path = "40_大学院/テスト工科大学_備考.md") => ({
   path, stat: { ctime: 1, mtime: 1, size: 1 }, tags: [],
   frontmatter: { type: "graduate-prep", publish: false, route: "test-master", source_note: "[[テスト工科大学]]" },
   content: "# 备考\n\n## 2026 年度小论文真题\n\n600 字以上 800 字以内。\n",
+});
+const assessment = (overrides = {}) => ({
+  author: "Codex", assessed_on: "2026-11-15", scores: { exam: 30, fit: 24, readiness: 18, value: 7 }, recommendation: "consider",
+  summary_zh: "值得申请，需先确定研究方向", strengths_zh: "既有项目经验可以支持研究计划", risk_zh: "须先获得导师同意",
+  sources: [{ label: "测试募集要项", url: "https://example.test/admission.pdf" }], ...overrides,
 });
 
 test("东京筛选只列标为入选的修士，其他筛选保留学校和路线", () => {
@@ -80,6 +88,83 @@ test("东京筛选只列标为入选的修士，其他筛选保留学校和路�
   const step = catalog.schools[0].routes[0].steps[0];
   assert.equal("materials" in step, false);
   assert.equal("basis" in catalog.schools[0].routes[0].fees, false);
+});
+
+test("地区独立于学位筛选，东京修士仍须满足原名单标记", () => {
+  const tokyo = school({ routes: [route("test-listed", "master", { shortlist: "tokyo-social-2027" }), route("test-unlisted", "master"), route("test-bachelor", "bachelor")] });
+  const outside = school({ id: "outside-u", path: "40_大学院/郊外テスト大学.md", region: "kanagawa", routes: [route("outside-master", "master", { shortlist: "tokyo-social-2027" })] });
+  const catalog = buildGraduateCatalog([tokyo, outside]);
+  assert.deepEqual(graduateCatalogEntries(catalog, "master", "tokyo").map(({ route }) => route.id), ["test-listed"]);
+  assert.deepEqual(graduateCatalogEntries(catalog, "all", "tokyo").map(({ route }) => route.id), ["test-listed", "test-bachelor"]);
+  assert.deepEqual(graduateCatalogEntries(catalog, "bachelor", "tokyo").map(({ route }) => route.id), ["test-bachelor"]);
+  assert.equal(graduateCatalogEntries(catalog, "master", "all").length, 3);
+  assert.equal(graduateCatalogEntries(catalog, "all", "all").length, 4);
+  assert.equal(catalog.schools.find((item) => item.id === "outside-u").region, "kanagawa");
+  assert.equal(catalog.schools.find((item) => item.id === "test-tech").location, "東京都・テスト校舎");
+});
+
+test("适合度由分项合成，目录保留判断与署名，出处随详情读取", () => {
+  const note = school({ routes: [route("test-master", "master", { assessment: assessment() })] });
+  const full = parseGraduateSchool(note);
+  assert.deepEqual(full.issues, []);
+  const parsed = full.school.routes[0].assessment;
+  assert.equal(graduateAssessmentScore(parsed), 79);
+  assert.equal(GRADUATE_ASSESSMENT_RUBRIC.reduce((sum, part) => sum + part.max, 0), 100);
+  assert.equal(parsed.assessedOn, "2026-11-15");
+  assert.deepEqual(parsed.sources, assessment().sources);
+  const catalog = buildGraduateCatalog([note]);
+  const compact = catalog.schools[0].routes[0].assessment;
+  assert.equal(graduateAssessmentScore(compact), 79);
+  assert.equal(compact.author, "Codex");
+  assert.equal(compact.summaryZh, assessment().summary_zh);
+  assert.equal(compact.riskZh, assessment().risk_zh);
+  assert.equal("sources" in compact, false);
+  assert.equal("score" in compact, false, "总分不另存一份");
+  assert.equal(parseGraduateSchool(school()).school.routes[0].assessment, undefined, "旧笔记未评分仍可读取");
+  assert.equal(graduateAssessmentScore(undefined), null, "未评分不能冒充零分");
+});
+
+test("适合度缺分项、超范围、非整数或没有判断依据时拒收", () => {
+  const invalid = [
+    { scores: { exam: 41, fit: 30, readiness: 20, value: 10 } },
+    { scores: { exam: 40, fit: 31, readiness: 20, value: 10 } },
+    { scores: { exam: 40, fit: 30, readiness: 21, value: 10 } },
+    { scores: { exam: 40, fit: 30, readiness: 20, value: 11 } },
+    { scores: { exam: -1, fit: 30, readiness: 20, value: 10 } },
+    { scores: { exam: 25.5, fit: 30, readiness: 20, value: 10 } },
+    { scores: { exam: 40, fit: 30, value: 10 } },
+    { assessed_on: "2026-02-30" }, { author: "AI" }, { recommendation: "guaranteed" },
+    { summary_zh: "" }, { strengths_zh: "" }, { risk_zh: "" },
+    { sources: [{ label: "没有可靠地址", url: "javascript:alert(1)" }] },
+  ];
+  for (const fields of invalid) {
+    const note = school({ routes: [route("test-master", "master", { assessment: assessment(fields) })] });
+    const parsed = parseGraduateSchool(note);
+    assert.equal(parsed.school, null, JSON.stringify(fields));
+    assert.ok(parsed.issues.some((issue) => issue.includes("assessment")));
+    assert.equal(buildGraduateCatalog([note]).schools.length, 0);
+    if (fields.scores) assert.equal(graduateAssessmentScore({ scores: fields.scores }), null);
+  }
+});
+
+test("适合度排序先高分再近期截止，未知分数靠后，期限排序独立且不改原数组", () => {
+  const application = (due) => due ? [{ id: "apply", kind: "application", label: "出願", due, deadline_type: "必着" }] : [];
+  const scored = (id, scores, due) => route(id, "master", { assessment: assessment({ scores }), steps: application(due) });
+  const high = { exam: 40, fit: 25, readiness: 20, value: 5 };
+  const catalog = buildGraduateCatalog([school({ routes: [
+    route("unknown", "master", { steps: application("2026-11-16") }),
+    scored("zero", { exam: 0, fit: 0, readiness: 0, value: 0 }, "2026-11-17"),
+    scored("high-later", high, "2026-12-01"),
+    scored("high-sooner", high, "2026-11-25"),
+    scored("high-same", high, "2026-11-25"),
+  ] })]);
+  const entries = graduateCatalogEntries(catalog, "all");
+  const before = entries.map(({ route }) => route.id);
+  assert.deepEqual(sortGraduateEntries(entries, "2026-11-15").map(({ route }) => route.id), ["high-sooner", "high-same", "high-later", "zero", "unknown"]);
+  assert.deepEqual(sortGraduateEntries(entries, "2026-11-15", "deadline").map(({ route }) => route.id), ["unknown", "zero", "high-sooner", "high-same", "high-later"]);
+  assert.deepEqual(entries.map(({ route }) => route.id), before);
+  const closed = { ...entries[0], route: { ...entries[0].route, steps: [] } };
+  assert.equal(sortGraduateEntries([closed, entries[1]], "2026-11-15", "deadline").at(-1), closed, "没有可办截止日的排末尾");
 });
 
 test("学费只存整数日元，毕业前合计由首年加之后每年算出", () => {
@@ -165,13 +250,22 @@ test("正文按路线标题切出小节，导语、学校口径和出处归学�
   assert.match(sections.routes.get("路线甲").get("出愿与材料"), /## 不是标题/);
 });
 
-test("稳定链接只写本区三个键：东京名单是默认值，外壳参数原样保留", () => {
-  assert.deepEqual(graduateLocationFromSearch(""), { track: "tokyo", school: "", route: "" });
-  assert.deepEqual(graduateLocationFromSearch("?track=all&school=test-tech&route=test-master"), { track: "all", school: "test-tech", route: "test-master" });
-  assert.deepEqual(graduateLocationFromSearch("?track=phd&school=../x"), { track: "tokyo", school: "", route: "" }, "认不出的值回到默认");
-  assert.equal(graduateSearch({ track: "tokyo", school: "", route: "" }, "note=a.md&track=all").toString(), "note=a.md");
-  assert.equal(graduateSearch({ track: "bachelor", school: "test-tech", route: "test-bachelor" }).toString(), "track=bachelor&school=test-tech&route=test-bachelor");
-  assert.equal(graduateSearch({ track: "all", school: "", route: "stale" }).toString(), "track=all", "没有学校时不留路线");
+test("稳定链接区分学位与地区：旧东京和全部链接保留原有范围", () => {
+  assert.deepEqual(graduateLocationFromSearch(""), { track: "master", region: "tokyo", school: "", route: "" });
+  assert.deepEqual(graduateLocationFromSearch("?track=tokyo"), { track: "master", region: "tokyo", school: "", route: "" });
+  assert.deepEqual(graduateLocationFromSearch("?track=all&school=test-tech&route=test-master"), { track: "all", region: "all", school: "test-tech", route: "test-master" });
+  assert.deepEqual(graduateLocationFromSearch("?track=phd&school=../x"), { track: "master", region: "tokyo", school: "", route: "" }, "认不出的值回到默认");
+  assert.equal(graduateLocationFromSearch("?track=master").region, "all", "旧修士链接保留东京以外的学校");
+  assert.equal(graduateLocationFromSearch("?track=bachelor&region=tokyo").region, "tokyo");
+  assert.equal(graduateSearch({ track: "master", region: "tokyo", school: "", route: "" }, "note=a.md&track=all&region=all").toString(), "note=a.md");
+  assert.equal(graduateSearch({ track: "bachelor", region: "all", school: "test-tech", route: "test-bachelor" }).toString(), "track=bachelor&region=all&school=test-tech&route=test-bachelor");
+  assert.equal(graduateSearch({ track: "all", region: "all", school: "", route: "stale" }).toString(), "track=all&region=all", "没有学校时不留路线");
+  for (const track of ["master", "bachelor", "all"]) {
+    for (const region of ["tokyo", "all"]) {
+      const location = { track, region, school: "test-tech", route: "test-master" };
+      assert.deepEqual(graduateLocationFromSearch(graduateSearch(location).toString()), location);
+    }
+  }
 });
 
 test("日期标签带星期，同一年省略年份；不按本机时区换算", () => {
@@ -221,11 +315,17 @@ test("候选表显示学制费用和入试材料，换批次时同步切换截�
     { id: "result-two", kind: "result", label: "第2期発表", round: "2期", on: "2027-03-22" },
   ];
   const catalog = buildGraduateCatalog([school({ routes: [route("test-master", "master", {
-    shortlist: "tokyo-social-2027", steps, exams_zh: ["专业笔试", "面试"], requirements_zh: "事先联系导师",
+    shortlist: "tokyo-social-2027", steps, exams_zh: ["专业笔试", "面试"], requirements_zh: "事先联系导师", assessment: assessment(),
   })] })]);
-  const props = { entries: graduateCatalogEntries(catalog, "tokyo"), track: "tokyo", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} };
+  const props = { entries: graduateCatalogEntries(catalog, "master", "tokyo"), track: "master", region: "tokyo", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {} };
   const html = renderToStaticMarkup(createElement(CandidateTable, { ...props, today: "2026-11-13" }));
   assert.equal((html.match(/<th scope="col"/g) ?? []).length, 6);
+  assert.match(html, /学校与专业/);
+  assert.match(html, /申请适合度与判断/);
+  assert.match(html, /aria-label="申请适合度 79\/100"/);
+  assert.match(html, /值得考虑/);
+  assert.match(html, /须先获得导师同意/);
+  assert.match(html, /aria-sort="descending"/);
   assert.match(html, /首年 100\.1 万日元/);
   assert.match(html, /全程约 179\.0 万日元/);
   assert.match(html, /专业笔试 · 面试/);
