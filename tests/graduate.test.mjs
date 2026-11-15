@@ -364,7 +364,7 @@ test("无本科的学校在候选表和对照图显示办学定位，保持本�
   assert.ok(parseGraduateSchool(school({ institution: { ...verified, registry_url: "" } })).issues.some((issue) => issue.includes("registry_url")));
 });
 
-test("候选表优先显示 QS 世界总榜，只有 THE 时保留榜名和版次", async () => {
+test("候选表分别显示 QS 和 THE 总榜名次、未上榜和 Reporter", async () => {
   const { CandidateTable, GRADUATE_COPY } = await loadAppModule("app/graduate-view.tsx");
   const qs = { system: "QS", edition: 2027, rank: "=201", url: "https://example.test/qs" };
   const the = { system: "THE", edition: 2027, rank: "851–900", url: "https://example.test/the" };
@@ -376,10 +376,38 @@ test("候选表优先显示 QS 世界总榜，只有 THE 时保留榜名和版�
     entries: graduateCatalogEntries(data, "master"), reference: null, today: "2026-11-13",
     track: "master", locale: "zh-CN", t: GRADUATE_COPY["zh-CN"], onOpen() {},
   }));
-  assert.match(renderTable(catalog), /href="https:\/\/example\.test\/qs"[^>]+>QS 2027 世界总榜 <b>=201<\/b>/);
-  assert.match(renderTable(build([the])), /THE 2027 世界总榜 <b>851–900<\/b>/);
+  const html = renderTable(catalog);
+  assert.match(html, /aria-label="QS 2027 世界总榜 =201"[^>]+href="https:\/\/example\.test\/qs"[^>]+>QS 2027 <b>=201<\/b>/);
+  assert.match(html, /aria-label="THE 2027 世界总榜 851–900"[^>]+>THE 2027 <b>851–900<\/b>/);
+  const audited = renderTable(build([
+    { system: "QS", edition: 2027, status: "unlisted", url: qs.url },
+    { system: "THE", edition: 2027, status: "reporter", url: the.url },
+  ]));
+  assert.match(audited, /QS 2027 <b>未上榜<\/b>/);
+  assert.match(audited, /THE 2027 <b>仅报送数据<\/b>/);
   assert.match(renderTable(build()), /世界排名未查到/);
   assert.ok(build([{ ...qs, rank: "东亚 =360" }]).issues.some(({ message }) => message.includes("world_rankings[0]")));
+});
+
+test("QS 按数字和官方区间排序，THE 名次不参与，归档路线不进入列表", () => {
+  const ranked = (id, sort, rank, routes) => school({
+    id, path: `40_大学院/${id}.md`, sort, routes,
+    world_rankings: rank
+      ? [{ system: "QS", edition: 2027, rank, url: "https://example.test/qs" }]
+      : [{ system: "THE", edition: 2027, rank: "101", url: "https://example.test/the" }],
+  });
+  const catalog = buildGraduateCatalog([
+    ranked("test-the", 1, null, [route("the-only", "master")]),
+    ranked("test-plus", 2, "1401+", [route("plus", "master")]),
+    ranked("test-range", 3, "851–900", [route("range", "master")]),
+    ranked("test-tied", 4, "=201", [route("tied", "master"), route("archived", "master", { archived: true, shortlist: "tokyo-social-2027" })]),
+    ranked("test-same", 5, "851–900", [route("same", "master"), route("same-second", "master")]),
+  ]);
+  assert.deepEqual(catalog.issues, []);
+  const entries = graduateCatalogEntries(catalog, "all");
+  assert.deepEqual(sortGraduateEntries(entries, "2026-11-15", "qs").map(({ route }) => route.id),
+    ["tied", "range", "same", "same-second", "plus", "the-only"]);
+  assert.equal(catalog.schools[3].routes[1].archived, true);
 });
 
 test("学校详情首屏：当前要做的事带截止与必着，前置过期给出核对提示", async () => {

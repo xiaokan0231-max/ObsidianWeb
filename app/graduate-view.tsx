@@ -20,6 +20,7 @@ import {
   graduateLocationFromSearch,
   graduateManYen,
   graduateNoteSections,
+  graduateQsRank,
   graduateSearch,
   graduateStepState,
   graduateTotalFee,
@@ -42,6 +43,7 @@ import {
   type GraduateRegionFilter,
   type GraduateRoute,
   type GraduateSchool,
+  type GraduateSort,
   type GraduateStep,
   type GraduateStepKind,
   type GraduateTrackFilter,
@@ -56,6 +58,8 @@ const COPY = {
     module: "大学院", title: "大学院申请", tracks: { master: "修士", bachelor: "本科", all: "全部" }, trackLabel: "学位类型",
     columns: { school: "学校", program: "专业", schoolProgram: "学校与专业", level: "学校水平", assessment: "申请适合度与判断", cost: "学制与费用", admission: "入试与材料", deadline: "最早截止日", result: "放榜日" },
     region: "地区", regions: { tokyo: "东京都", all: "全部地区" }, sort: "排序", sortFit: "适合度优先", sortDeadline: "截止日优先",
+    sortQs: "QS 排名优先", qsOrder: "按 QS 世界总榜从高到低，同档相邻。无 QS 名次的学校按适合度排在后面。",
+    archivedRoute: "这条路线已移出当前申请名单。",
     assessment: { title: "对你申请的判断", score: "申请适合度", basis: "评分依据", meaning: "100 分制，表示准备优先级，不是录取概率。", context: "综合已确认的经历、语言准备、考试方式、申请条件和专业价值。条件未确认的路线会扣分，并单独标明；免笔试也不代表免专业问答。", strengths: "优势", risk: "门槛", missing: "尚未评估", author: "评估", recommendations: { priority: "优先准备", consider: "值得考虑", conditional: "有条件考虑", low: "暂不优先" } },
     filterEmpty: "这个筛选下暂无路线", filterEmptyHelp: "切换学位类型或选择全部地区，查看其他候选。",
     firstYearShort: "首年", totalShort: "全程约", materialsShort: "主要材料", levelLink: "学校层次对比",
@@ -64,6 +68,8 @@ const COPY = {
       candidate: "候选", reference: "参照", focus: "相关学部", school: "全校各学部", deviation: "偏差值",
       undergraduate: "本科参照", band: (name: string) => `${name}档`, undergraduateValue: (range: string) => `本科偏差值 ${range}`,
       worldRank: (system: string, edition: number) => `${system} ${edition} 世界总榜`, worldMissing: "世界排名未查到",
+      unlisted: "未上榜", reporter: "仅报送数据", reporterHint: "Reporter 指学校向 THE 报送了数据，未获世界总榜名次。",
+      audit: "QS 与 THE 核对", auditCount: (count: number) => `已核对 ${count} 所学校`,
       rankingScope: "世界总榜评价大学整体。学科榜评价学校在相应学科的表现。",
       kind: { national: "国立", public: "公立", private: "私立" }, listed: "文科省在册", registry: "文科省全国大学名录",
       guide: "参照档用来比较本科入试难度。学校设立性质以文科省名录为准，仅设大学院的学校可看专业认证和课程定位。",
@@ -105,6 +111,8 @@ const COPY = {
     module: "大学院", title: "候補校", tracks: { master: "修士", bachelor: "学部", all: "すべて" }, trackLabel: "学位の種類",
     columns: { school: "学校", program: "専攻", schoolProgram: "学校・専攻", level: "大学の目安", assessment: "出願適合度と所見", cost: "年限と学費", admission: "試験と書類", deadline: "最初の締切日", result: "合格発表日" },
     region: "地域", regions: { tokyo: "東京都", all: "全地域" }, sort: "並び順", sortFit: "適合度順", sortDeadline: "締切順",
+    sortQs: "QS世界総合順位順", qsOrder: "QS世界総合の上位から表示。同じ順位帯は隣接し、順位なしは適合度順で末尾に表示します。",
+    archivedRoute: "このルートは現在の出願候補から外れています。",
     assessment: { title: "出願に関する所見", score: "出願適合度", basis: "採点の基準", meaning: "100点満点。準備の優先順位であり、合格確率ではありません。", context: "確認できた経験・語学力・試験方式・出願条件・専攻の価値を総合評価。未確認の条件は減点し、別途明示します。筆記免除でも専門の口頭試問はあり得ます。", strengths: "強み", risk: "課題", missing: "未評価", author: "評価", recommendations: { priority: "優先して準備", consider: "検討候補", conditional: "条件確認が必要", low: "優先度は低い" } },
     filterEmpty: "この条件に合うルートはありません", filterEmptyHelp: "学位または地域の条件を変えてください。",
     firstYearShort: "初年度", totalShort: "総額目安", materialsShort: "主な書類", levelLink: "大学レベルの比較",
@@ -113,6 +121,8 @@ const COPY = {
       candidate: "候補", reference: "参照", focus: "関連学部", school: "全学部", deviation: "偏差値",
       undergraduate: "学部入試の目安", band: (name: string) => name, undergraduateValue: (range: string) => `学部偏差値 ${range}`,
       worldRank: (system: string, edition: number) => `${system} ${edition} 世界総合`, worldMissing: "世界総合の順位未確認",
+      unlisted: "掲載なし", reporter: "データ提供のみ", reporterHint: "Reporter は THE にデータを提出し、世界総合順位が付かなかった大学です。",
+      audit: "QS・THEの確認結果", auditCount: (count: number) => `${count} 校を確認済み`,
       rankingScope: "総合は大学全体の評価です。分野別ランキングは各分野の実績を評価します。",
       kind: { national: "国立", public: "公立", private: "私立" }, listed: "文科省一覧掲載", registry: "文部科学省 全国大学一覧",
       guide: "偏差値帯は学部入試難易度の目安です。設置区分は文部科学省の一覧で、大学院大学の特色は認証評価と教育内容で確認できます。",
@@ -223,11 +233,31 @@ function scaleSpan(low: number, high: number) {
 
 type ScaleRow = { key: string; name: string; note: string; low: number; high: number; schoolLow?: number; schoolHigh?: number; candidate: boolean; current: boolean; url?: string; worldRank?: GraduateWorldRank };
 
-function SchoolWorldRank({ rank, t }: { rank?: GraduateWorldRank; t: Copy }) {
+function SchoolWorldRank({ rank, t, compact = false }: { rank?: GraduateWorldRank; t: Copy; compact?: boolean }) {
   if (!rank) return <small className="graduate-world-rank-missing">{t.level.worldMissing}</small>;
-  return <a className="graduate-world-rank" href={rank.url} target="_blank" rel="noreferrer">
-    {t.level.worldRank(rank.system, rank.edition)} <b>{rank.rank}</b>
+  const label = t.level.worldRank(rank.system, rank.edition);
+  const value = rank.rank ?? t.level[rank.status];
+  return <a className="graduate-world-rank" data-status={rank.status} aria-label={`${label} ${value}`}
+    title={rank.status === "reporter" ? t.level.reporterHint : label} href={rank.url} target="_blank" rel="noreferrer">
+    {compact ? `${rank.system} ${rank.edition}` : label} <b>{value}</b>
   </a>;
+}
+
+function WorldRankingTable({ schools, locale, t }: { schools: GraduateCatalogSchool[]; locale: UiLocale; t: Copy }) {
+  const ranked = [...schools].sort((left, right) => graduateQsRank(left) - graduateQsRank(right) || left.sort - right.sort);
+  return <section id="graduate-world-compare" className="graduate-level-panel graduate-world-compare" aria-labelledby="graduate-world-title">
+    <h2 id="graduate-world-title">{t.level.audit}</h2>
+    <p>{t.level.auditCount(ranked.length)} · {t.level.reporterHint}</p>
+    <table>
+      <thead><tr><th scope="col">{t.columns.school}</th><th scope="col" aria-sort="ascending">QS</th><th scope="col">THE</th></tr></thead>
+      <tbody>{ranked.map((school) => <tr key={school.id}>
+        <th scope="row">{locale === "ja" ? school.name : school.nameZh}</th>
+        {(["QS", "THE"] as const).map((system) => <td key={system}>
+          <SchoolWorldRank rank={school.worldRankings?.find((rank) => rank.system === system)} t={t} />
+        </td>)}
+      </tr>)}</tbody>
+    </table>
+  </section>;
 }
 
 function schoolPositioning(school: GraduateCatalogSchool, locale: UiLocale) {
@@ -245,7 +275,7 @@ export function LevelScale({ reference, schools, current, locale, t }: {
   const rows: ScaleRow[] = [
     ...reference.anchors.filter((anchor) => !candidateNames.has(anchor.name)).map((anchor) => ({ key: `anchor:${anchor.name}`, name: anchor.name, note: anchor.note, low: anchor.low, high: anchor.high, candidate: false, current: false, url: anchor.url })),
     ...schools.filter((school) => school.level).map((school) => ({ key: `school:${school.id}`, name: locale === "ja" ? school.name : school.nameZh, note: school.level!.focus,
-      low: school.level!.focusLow, high: school.level!.focusHigh, schoolLow: school.level!.schoolLow, schoolHigh: school.level!.schoolHigh, candidate: true, current: school.id === current, url: school.level!.url, worldRank: school.worldRankings?.[0] })),
+      low: school.level!.focusLow, high: school.level!.focusHigh, schoolLow: school.level!.schoolLow, schoolHigh: school.level!.schoolHigh, candidate: true, current: school.id === current, url: school.level!.url, worldRank: school.worldRankings?.find((item) => item.rank) })),
   ].sort((left, right) => right.high - left.high || right.low - left.low || Number(left.candidate) - Number(right.candidate));
   const zones = reference.bands.map((band, index) => ({ band, low: band.min, high: index === 0 ? SCALE_MAX - 2.5 : reference.bands[index - 1].min - 2.5 }));
   const ticks = [35, 40, 45, 50, 55, 60, 65];
@@ -287,10 +317,11 @@ export function LevelScale({ reference, schools, current, locale, t }: {
       </div>
       {schools.filter((school) => !school.level).map((school) => {
         const positioning = schoolPositioning(school, locale);
+        const worldRank = school.worldRankings?.find((item) => item.rank);
         return <div key={school.id} className="graduate-scale-row graduate-scale-unrated" role="row" data-candidate="true" data-current={school.id === current || undefined}>
           <span className="graduate-scale-name" role="rowheader">
             <strong>{locale === "ja" ? school.name : school.nameZh}</strong>
-            {school.worldRankings?.[0] && <SchoolWorldRank rank={school.worldRankings[0]} t={t} />}
+            {worldRank && <SchoolWorldRank rank={worldRank} t={t} />}
           </span>
           <span role="cell">{positioning ? <>{positioning.label} · <a href={positioning.url} target="_blank" rel="noreferrer">{positioning.evidence} ↗</a></>
             : school.graduateOnly ? t.level.graduateOnly : t.level.pending}</span>
@@ -312,14 +343,14 @@ export function LevelScale({ reference, schools, current, locale, t }: {
 }
 
 function SchoolLevelCell({ school, reference, locale, t }: { school: GraduateCatalogSchool; reference: GraduateReference | null; locale: UiLocale; t: Copy }) {
-  const { level, institution, graduateOnly } = school;
-  const worldRank = school.worldRankings?.[0];
+  const { level, institution, graduateOnly, worldRankings } = school;
   const positioning = schoolPositioning(school, locale);
   const band = level && reference ? graduateBandLabel(reference.bands, level.focusLow, level.focusHigh, locale) : null;
   const label = band ? t.level.band(band) : level ? t.level.undergraduate
-    : positioning?.label ?? (graduateOnly ? t.level.graduateOnly : worldRank ? null : t.level.pending);
+    : positioning?.label ?? (graduateOnly ? t.level.graduateOnly : worldRankings?.some((item) => item.rank) ? null : t.level.pending);
   return <div className="graduate-school-level">
-    <SchoolWorldRank rank={worldRank} t={t} />
+    {worldRankings?.length ? worldRankings.map((rank) => <SchoolWorldRank key={rank.system} rank={rank} t={t} compact />)
+      : <SchoolWorldRank t={t} />}
     {label && <strong>{label}</strong>}
     {level && <span title={level.focus}>{t.level.undergraduateValue(graduateDeviationRange(level.focusLow, level.focusHigh))}</span>}
     {positioning && <span>{level ? positioning.label : positioning.evidence}</span>}
@@ -384,7 +415,7 @@ function AssessmentBasis({ t, locale, assessment }: { t: Copy; locale: UiLocale;
 }
 
 export function CandidateTable({ entries, reference, track, region = "all", sort = "fit", today, locale, t, onOpen }: {
-  entries: GraduateCatalogEntry[]; reference: GraduateReference | null; track: GraduateTrackFilter; region?: GraduateRegionFilter; sort?: "fit" | "deadline"; today: string; locale: UiLocale; t: Copy;
+  entries: GraduateCatalogEntry[]; reference: GraduateReference | null; track: GraduateTrackFilter; region?: GraduateRegionFilter; sort?: GraduateSort; today: string; locale: UiLocale; t: Copy;
   onOpen: (event: MouseEvent<HTMLElement>, entry: GraduateCatalogEntry) => void;
 }) {
   const rows = sortGraduateEntries(entries, today, sort).map((entry) => ({ entry, ...graduateApplicationDates(entry.route.steps, today) }));
@@ -392,7 +423,7 @@ export function CandidateTable({ entries, reference, track, region = "all", sort
     <caption>{t.title}</caption>
     <thead><tr>
       <th scope="col" className="graduate-col-school">{t.columns.schoolProgram}</th>
-      <th scope="col" className="graduate-col-level">{t.columns.level}</th>
+      <th scope="col" className="graduate-col-level" aria-sort={sort === "qs" ? "ascending" : undefined}>{t.columns.level}</th>
       <th scope="col" className="graduate-col-assessment" aria-sort={sort === "fit" ? "descending" : undefined}>{t.columns.assessment}</th>
       <th scope="col" className="graduate-col-cost graduate-wide-column">{t.columns.cost}</th><th scope="col" className="graduate-col-admission graduate-wide-column">{t.columns.admission}</th>
       <th scope="col" className="graduate-col-date graduate-deadline-column" aria-sort={sort === "deadline" ? "ascending" : undefined}>{t.columns.deadline}</th><th scope="col" className="graduate-col-date graduate-result-column">{t.columns.result}</th>
@@ -560,11 +591,12 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
     <div className="graduate-detail-bar">
       <button type="button" className="graduate-back" onClick={onBack}>← {t.back}</button>
       <nav aria-label={t.routes} className="graduate-route-tabs">
-        {school.routes.map((item) => <button type="button" key={item.id} aria-pressed={item.id === route.id} onClick={() => onSelectRoute(item.id)}>
+        {school.routes.filter((item) => !item.archived || item.id === route.id).map((item) => <button type="button" key={item.id} aria-pressed={item.id === route.id} onClick={() => onSelectRoute(item.id)}>
           <span className={`graduate-track-badge ${item.track}`}>{t.tracks[item.track]}</span>{locale === "ja" ? item.label : item.labelZh}
         </button>)}
       </nav>
     </div>
+    {route.archived && <p className="graduate-sync" role="status">{t.archivedRoute}</p>}
     <header className="graduate-hero">
       <div className="graduate-hero-title">
         <small>{locale === "ja" ? school.name : school.nameZh}</small>
@@ -646,7 +678,7 @@ export function SchoolDetail({ school, route, schools, reference, revision, toda
           <span>{t.level.schoolRange(graduateDeviationRange(level.schoolLow, level.schoolHigh))}{level.url && <> · <a href={level.url} target="_blank" rel="noreferrer">{t.indicatorSource} ↗</a></>}</span>
         </p>;
       })() : school.graduateOnly && <p className="graduate-muted">{t.level.graduateOnly}</p>}
-      {reference && <LevelScale reference={reference} schools={schools} current={school.id} locale={locale} t={t} />}
+      {reference && <LevelScale reference={reference} schools={schools.filter((item) => item.id === school.id || item.routes.some((option) => !option.archived))} current={school.id} locale={locale} t={t} />}
     </section>}
     <section id="graduate-apply" className="graduate-section">
       <h2>{t.apply}</h2>
@@ -693,7 +725,7 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
   const t = COPY[locale];
   const initialSearch = useInitialUrlSearch();
   const [location, setLocation] = useState<GraduateLocation>(() => graduateLocationFromSearch(initialSearch));
-  const [sort, setSort] = useState<"fit" | "deadline">("fit");
+  const [sort, setSort] = useState<GraduateSort>("fit");
   const catalog = useGraduateCatalog(refreshVersion);
   const page = catalog.page;
   const today = page?.today ?? jstToday();
@@ -717,7 +749,8 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
   const entries = useMemo(() => page ? graduateCatalogEntries(page, location.track, location.region) : [], [page, location.track, location.region]);
   const counts = useMemo(() => Object.fromEntries(GRADUATE_TRACK_FILTERS.map((track) => [track, page ? graduateCatalogEntries(page, track, location.region).length : 0])) as Record<GraduateTrackFilter, number>, [page, location.region]);
   const school = location.school ? page?.schools.find((item) => item.id === location.school) ?? null : null;
-  const route = school ? school.routes.find((item) => item.id === location.route) ?? entries.find((entry) => entry.school.id === school.id)?.route ?? school.routes[0] ?? null : null;
+  const route = school ? school.routes.find((item) => item.id === location.route)
+    ?? entries.find((entry) => entry.school.id === school.id)?.route ?? school.routes.find((item) => !item.archived) ?? null : null;
 
   const openEntry = (event: MouseEvent<HTMLElement>, entry: GraduateCatalogEntry) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -736,6 +769,7 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
 
   const banner = catalog.error || page.syncState === "failed" ? t.syncFailed
     : page.syncState === "building" ? (catalog.loading ? t.syncing : t.syncDelayed) : "";
+  const auditedSchools = page.schools.filter((item) => item.worldRankings?.length);
   const notices = <>
     {banner && <div className="graduate-sync" role="status"><span>{banner}</span><button type="button" onClick={catalog.retry}>{t.retry}</button></div>}
     {page.issues.length > 0 && <div className="graduate-issues" role="alert">
@@ -768,23 +802,25 @@ export default function GraduateView({ revision: refreshVersion, onOpenSource, o
       <label className="graduate-select">{t.region}<select value={location.region} onChange={(event) => write({ ...location, region: event.target.value as GraduateRegionFilter, school: "", route: "" }, "replace")}>
         <option value="tokyo">{t.regions.tokyo}</option><option value="all">{t.regions.all}</option>
       </select></label>
-      <label className="graduate-select">{t.sort}<select value={sort} onChange={(event) => setSort(event.target.value as "fit" | "deadline")}>
-        <option value="fit">{t.sortFit}</option><option value="deadline">{t.sortDeadline}</option>
+      <label className="graduate-select">{t.sort}<select value={sort} onChange={(event) => setSort(event.target.value as GraduateSort)}>
+        <option value="fit">{t.sortFit}</option><option value="deadline">{t.sortDeadline}</option><option value="qs">{t.sortQs}</option>
       </select></label>
     </header>
     <div className="graduate-list-context">
-      <span>{t.assessment.meaning}</span>
+      <span>{sort === "qs" ? t.qsOrder : t.assessment.meaning}</span>
       <AssessmentBasis t={t} locale={locale} />
       <p className="graduate-today">JST {graduateDateLabel(today, locale)}{catalog.loading && <span className="graduate-refreshing" aria-hidden="true" />}</p>
+      {!notIndexed && auditedSchools.length > 0 && <a className="graduate-level-jump" href="#graduate-world-compare">{t.level.audit}</a>}
       {page.reference && entries.length > 0 && <a className="graduate-level-jump" href="#graduate-level-compare">{t.levelLink}</a>}
     </div>
     {notices}
-    {notIndexed || (entries.length === 0 ? <div className="graduate-status-page"><h2>{page.schools.length ? t.filterEmpty : t.empty}</h2><p>{page.schools.length ? t.filterEmptyHelp : t.emptyDetail}</p></div>
-      : <>
-        <CandidateTable entries={entries} reference={page.reference} track={location.track} region={location.region} sort={sort} today={today} locale={locale} t={t} onOpen={openEntry} />
-        {page.reference && <section id="graduate-level-compare" className="graduate-level-panel" aria-label={t.level.title}>
+    {notIndexed || <>
+        {entries.length === 0 ? <div className="graduate-status-page"><h2>{page.schools.length ? t.filterEmpty : t.empty}</h2><p>{page.schools.length ? t.filterEmptyHelp : t.emptyDetail}</p></div>
+          : <CandidateTable entries={entries} reference={page.reference} track={location.track} region={location.region} sort={sort} today={today} locale={locale} t={t} onOpen={openEntry} />}
+        {auditedSchools.length > 0 && <WorldRankingTable schools={auditedSchools} locale={locale} t={t} />}
+        {page.reference && entries.length > 0 && <section id="graduate-level-compare" className="graduate-level-panel" aria-label={t.level.title}>
           <LevelScale reference={page.reference} schools={page.schools.filter((school) => entries.some((entry) => entry.school.id === school.id))} locale={locale} t={t} />
         </section>}
-      </>)}
+      </>}
   </section>;
 }

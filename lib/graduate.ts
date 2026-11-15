@@ -86,6 +86,7 @@ export type GraduateRoute = {
   requirementsZh?: string;
   fees?: GraduateFees;
   shortlisted?: boolean;
+  archived?: boolean;
   assessment?: GraduateAssessment;
   /** 备考笔记的双链目标（不含方括号）；路径在投影阶段解析。 */
   prep?: string;
@@ -103,7 +104,9 @@ export type GraduateInstitution = {
 /** 河合塾ボーダー偏差値：focus 是与路线最接近的学部，school 是全校各学部的范围。 */
 export type GraduateLevel = { focus: string; focusLow: number; focusHigh: number; schoolLow: number; schoolHigh: number; url?: string };
 /** 世界总榜的发布机构、版次和原始名次写法，保留并列及区间。 */
-export type GraduateWorldRank = { system: "QS" | "THE"; edition: number; rank: string; url: string };
+export type GraduateWorldRank = { system: "QS" | "THE"; edition: number; url: string } & (
+  { rank: string; status?: never } | { rank?: never; status: "unlisted" | "reporter" }
+);
 export type GraduateSchool = {
   path: string;
   id: string;
@@ -131,7 +134,7 @@ export type GraduateReference = {
 
 /** 目录只带比较和算期限要用的字段；材料链接、说明和出处随学校正文按需读取。 */
 export type GraduateCatalogStep = Pick<GraduateStep, "id" | "kind" | "label" | "labelZh" | "round" | "start" | "due" | "on" | "deadlineType" | "optional" | "doneOn">;
-export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh" | "track" | "degree" | "degreeZh" | "years" | "entry" | "entryZh" | "exams" | "examsZh" | "requirements" | "requirementsZh" | "shortlisted"> & {
+export type GraduateCatalogRoute = Pick<GraduateRoute, "id" | "label" | "labelZh" | "track" | "degree" | "degreeZh" | "years" | "entry" | "entryZh" | "exams" | "examsZh" | "requirements" | "requirementsZh" | "shortlisted" | "archived"> & {
   fees?: Pick<GraduateFees, "firstYear" | "annual">;
   assessment?: GraduateCatalogAssessment;
   prepPath: string | null;
@@ -267,19 +270,25 @@ function parseWorldRankings(value: unknown, issues: string[]): GraduateWorldRank
   for (const [index, item] of value.entries()) {
     const source = record(item), where = `world_rankings[${index}]`;
     const system = text(source?.system), edition = Number(text(source?.edition)), rank = text(source?.rank);
+    const status = text(source?.status);
     const url = optionalUrl(source?.url, where, issues);
-    if ((system !== "QS" && system !== "THE") || !Number.isInteger(edition) || edition < 2004 || edition > 9999
-      || !/^(?:=?[1-9]\d*|[1-9]\d*[-–][1-9]\d*|[1-9]\d*\+)$/.test(rank) || !url) {
-      issues.push(`${where} は system（QS / THE）・版の西暦 edition・総合順位 rank（=201、851–900、1401+ など）・出典 url が必須`);
+    if ((system !== "QS" && system !== "THE") || !Number.isInteger(edition) || edition < 2004 || edition > 9999 || !url) {
+      issues.push(`${where} は system（QS / THE）・版の西暦 edition・出典 url が必須`);
       continue;
     }
     if (rankings.some((entry) => entry.system === system)) {
       issues.push(`${where} の system「${system}」が重複`);
       continue;
     }
-    rankings.push({ system, edition, rank, url });
+    const meta = { system, edition, url } as const;
+    if (!status && /^(?:=?[1-9]\d*|[1-9]\d*[-–][1-9]\d*|[1-9]\d*\+)$/.test(rank)) {
+      rankings.push({ ...meta, rank });
+    } else if (!rank && (status === "unlisted" || (system === "THE" && status === "reporter"))) {
+      rankings.push({ ...meta, status });
+    } else {
+      issues.push(`${where} は総合順位 rank（=201、851–900、1401+ など）または status（unlisted / THE の reporter）を指定`);
+    }
   }
-  // 同じ一覧では QS を優先し、QS に載っていない学校は THE の順位を示す。
   return rankings.length ? rankings.sort((left, right) => left.system.localeCompare(right.system)) : undefined;
 }
 
@@ -380,7 +389,8 @@ function parseRoute(value: unknown, index: number, issues: string[]): GraduateRo
   // 合計は画面で計算する。円の整数でない値は「概算の手書き」と区別できなくなる。
   if (source.fees !== undefined && firstYear === null) issues.push(`${where} の fees.first_year は円の整数`);
   if (source.fees !== undefined && annual === null) issues.push(`${where} の fees.annual は円の整数`);
-  const shortlisted = source.shortlist === "tokyo-social-2027" && track === "master";
+  const archived = source.archived === true || source.archived === "true";
+  const shortlisted = !archived && source.shortlist === "tokyo-social-2027" && track === "master";
   const exams = Array.isArray(source.exams) ? source.exams.map(text).filter(Boolean) : [];
   const examsZh = Array.isArray(source.exams_zh) ? source.exams_zh.map(text).filter(Boolean) : [];
   const requirements = text(source.requirements), requirementsZh = text(source.requirements_zh);
@@ -401,6 +411,7 @@ function parseRoute(value: unknown, index: number, issues: string[]): GraduateRo
     ...(text(source.entry_zh) ? { entryZh: text(source.entry_zh) } : {}),
     ...(firstYear !== null && annual !== null ? { fees: { firstYear, annual, basis: text(fees?.basis), ...(feesUrl ? { url: feesUrl } : {}) } } : {}),
     ...(shortlisted ? { shortlisted } : {}),
+    ...(archived ? { archived } : {}),
     ...(assessment ? { assessment } : {}),
     ...(prep ? { prep } : {}), steps,
   };
@@ -579,7 +590,8 @@ export function buildGraduateCatalog(notes: Note[]): GraduateCatalog {
         ...(route.degreeZh ? { degreeZh: route.degreeZh } : {}), ...(route.entryZh ? { entryZh: route.entryZh } : {}),
         ...(route.fees ? { fees: { firstYear: route.fees.firstYear, annual: route.fees.annual } } : {}),
         ...(route.assessment ? { assessment: catalogAssessment(route.assessment) } : {}),
-        ...(route.shortlisted ? { shortlisted: true } : {}), prepPath, steps: route.steps.map(catalogStep) });
+        ...(route.shortlisted ? { shortlisted: true } : {}), ...(route.archived ? { archived: true } : {}),
+        prepPath, steps: route.steps.map(catalogStep) });
     }
     schools.push({ path: school.path, id: school.id, name: school.name, nameZh: school.nameZh, sort: school.sort, checkedOn: school.checkedOn, location: school.location,
       ...(school.region ? { region: school.region } : {}),
@@ -662,12 +674,18 @@ export function graduateCatalogEntries(catalog: Pick<GraduateCatalog, "schools">
   const degree = track === "tokyo" ? "master" : track;
   const area = track === "tokyo" ? "tokyo" : region;
   return catalog.schools.flatMap((school) => school.routes
-    .filter((route) => (degree === "all" || route.track === degree)
+    .filter((route) => !route.archived && (degree === "all" || route.track === degree)
       && (area === "all" || (school.region === "tokyo" && (route.track !== "master" || route.shortlisted))))
     .map((route) => ({ school, route })));
 }
 
-export type GraduateSort = "fit" | "deadline";
+export type GraduateSort = "fit" | "deadline" | "qs";
+
+export function graduateQsRank(school: GraduateCatalogSchool) {
+  const rank = school.worldRankings?.find((item) => item.system === "QS")?.rank;
+  // 并列、区间及尾档按官方写出的起始名次排序。
+  return rank ? Number.parseInt(rank.replace(/^=/, ""), 10) : Number.POSITIVE_INFINITY;
+}
 
 /** 不改写正本顺序；没有判断的路线排在评分之后，同分时先显示要尽早办理的路线。 */
 export function sortGraduateEntries(entries: readonly GraduateCatalogEntry[], today: string, sort: GraduateSort = "fit"): GraduateCatalogEntry[] {
@@ -675,8 +693,19 @@ export function sortGraduateEntries(entries: readonly GraduateCatalogEntry[], to
     entry,
     score: graduateAssessmentScore(entry.route.assessment) ?? -1,
     deadline: graduateApplicationDates(entry.route.steps, today).deadline?.due ?? "9999-12-31",
+    qs: sort === "qs" ? graduateQsRank(entry.school) : Number.POSITIVE_INFINITY,
   }));
-  ranked.sort((left, right) => (sort === "fit" ? right.score - left.score : 0) || left.deadline.localeCompare(right.deadline));
+  ranked.sort((left, right) => {
+    if (sort === "qs") {
+      if (left.qs !== right.qs) return left.qs - right.qs;
+      if (Number.isFinite(left.qs)) {
+        const a = left.entry.school, b = right.entry.school;
+        const schoolOrder = a.sort - b.sort || a.id.localeCompare(b.id);
+        if (schoolOrder) return schoolOrder;
+      }
+    }
+    return (sort === "deadline" ? 0 : right.score - left.score) || left.deadline.localeCompare(right.deadline);
+  });
   return ranked.map(({ entry }) => entry);
 }
 
