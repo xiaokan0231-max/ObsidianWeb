@@ -98,7 +98,7 @@ function buttons(html) {
 function tabs(html) {
   return buttons(html).filter((button) => /\brole="tab"/.test(button.attrs));
 }
-function assertTabs(html, selected, labels = ["面试故事", "外部评价", "面谈锦囊"]) {
+function assertTabs(html, selected, labels = ["面试故事", "外部评价", "面试原稿"]) {
   const actual = tabs(html);
   assert.equal(actual.length, 3, "主导航始终只有三个 tab");
   for (const [index, id] of ["story", "reviews", "kit"].entries()) {
@@ -181,7 +181,7 @@ test("完整岗位与面试分析有明确入口，正文保留分析和收尾�
   assert.doesNotMatch(overview, /<details\b[^>]*>[\s\S]*岗位分析正文独有[\s\S]*<\/details>/);
 });
 
-test("外部评价独立显示传入内容，不混公司故事、纵览或锦囊正文", async () => {
+test("外部评价独立显示传入内容，不混公司故事、纵览或原稿正文", async () => {
   const html = await render("?prepTab=reviews");
   assertTabs(html, "reviews");
   const body = panel(html);
@@ -192,7 +192,7 @@ test("外部评价独立显示传入内容，不混公司故事、纵览或锦�
   assert.doesNotMatch(panel(empty), /公司故事正文独有|本轮纵览正文独有|动机正文独有/);
 });
 
-test("面谈锦囊连续展示三节和跨轮资料，问题深链接保持全部内容并标出当前位置", async () => {
+test("面试原稿连续展示三节和跨轮资料，问题深链接保持全部内容并标出当前位置", async () => {
   const html = await render("?prepTab=kit&kitSection=questions");
   assertTabs(html, "kit");
   assertKitBody(panel(html));
@@ -211,7 +211,7 @@ test("旧公司和纵览深链接都归入面试故事，保留原先入口的�
   }
 });
 
-test("旧动机、逆質問、研究深链接都归入锦囊，并保留各自聚焦章节", async () => {
+test("旧动机、逆質問、研究深链接都归入面试原稿，并保留各自聚焦章节", async () => {
   for (const [legacy, label] of [["motivation", "志望動機"], ["questions", "逆質問"], ["resources", "研究资料"]]) {
     const html = await render(`?prepTab=${legacy}`);
     assertTabs(html, "kit");
@@ -229,7 +229,7 @@ test("临场备用保留为二级入口，不生成第四个主 tab", async () =
 
 test("日语三个主标签本地化，准备稿原始正文保持原语言", async () => {
   const html = await render("?prepTab=kit&kitSection=questions", {}, "ja");
-  assertTabs(html, "kit", ["面接ストーリー", "外部評価", "面接ツール"]);
+  assertTabs(html, "kit", ["面接ストーリー", "外部評価", "面接原稿"]);
   assertKitBody(panel(html));
   assert.match(html, /株式会社テスト/);
 });

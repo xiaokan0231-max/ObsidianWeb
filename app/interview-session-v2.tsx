@@ -37,7 +37,7 @@ const V2_COPY_JA: Record<string, string> = {
   "{n} 天前": "{n}日前",
   "面试故事": "面接ストーリー",
   "外部评价": "外部評価",
-  "面谈锦囊": "面接ツール",
+  "面试原稿": "面接原稿",
   "本轮岗位与面试分析": "今回のポジションと面接の分析",
   "完整岗位与面试分析": "ポジションと面接の分析を読む",
   "岗位": "職種",
@@ -98,7 +98,7 @@ function SlidingIndicator({ selector, watch, className }: { selector: string; wa
 const MAIN_SECTIONS: { id: PrimaryTab; section: SectionId; navLabel: string }[] = [
   { id: "story", section: "company", navLabel: "面试故事" },
   { id: "reviews", section: "reviews", navLabel: "外部评价" },
-  { id: "kit", section: "motivation", navLabel: "面谈锦囊" },
+  { id: "kit", section: "motivation", navLabel: "面试原稿" },
 ];
 function primaryTab(section: SectionId): PrimaryTab {
   return section === "company" || section === "overview" ? "story" : section === "reviews" ? "reviews" : "kit";
