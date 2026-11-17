@@ -42,7 +42,7 @@ test("面试短链只读当前版本的明确别名，未同步完成时重试�
       },
     },
   } });
-  const get = (desiredSlug) => GET(new Request("https://example.test/i/test-first-round?next=https://example.net"), { params: Promise.resolve({ slug: desiredSlug }) });
+  const get = (desiredSlug, query = "?next=https://example.net") => GET(new Request(`https://example.test/i/test-first-round${query}`), { params: Promise.resolve({ slug: desiredSlug }) });
   const authorized = await get(slug);
   assert.equal(authorized.status, 307);
   assert.equal(authorized.headers.get("Cache-Control"), "private, no-store");
@@ -67,4 +67,14 @@ test("面试短链只读当前版本的明确别名，未同步完成时重试�
   assert.equal(building.headers.get("Retry-After"), "1");
   assert.equal(building.headers.get("Location"), null);
   assert.equal(reads.length, 2);
+
+  syncState = "ready";
+  const questions = await get(slug, "?kitSection=anticipated&prepTab=backup&prep=other.md&next=https://example.net");
+  assert.equal(questions.status, 307);
+  const questionsLocation = new URL(questions.headers.get("Location"), "https://example.test");
+  assert.equal(questionsLocation.pathname, "/interview");
+  assert.deepEqual([...questionsLocation.searchParams], [["prep", canonical.path], ["prepTab", "kit"], ["kitSection", "anticipated"]]);
+
+  const unrecognized = await get(slug, "?kitSection=resources");
+  assert.equal(unrecognized.headers.get("Location"), authorized.headers.get("Location"));
 });

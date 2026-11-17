@@ -56,14 +56,14 @@ export type PrepSection = {
 
 export { PREP_V2_REPLAY_COMPARISON_TITLE, PREP_V2_SECTIONS };
 export type PrepVersion = 1 | 2;
-export type PrepV2SectionId = "overview" | "motivation" | "questions" | "resources" | "backup";
+export type PrepV2SectionId = typeof PREP_V2_SECTIONS[number]["id"];
 
 const prepV2JapaneseTitles: Partial<Record<PrepV2SectionId, string>> = {
   overview: "面接の概要と対策", resources: "調査資料", backup: "当日の補助資料",
 };
 
 function prepV2SectionSpec(title: string) {
-  return PREP_V2_SECTIONS.find((item) => item.title === title || prepV2JapaneseTitles[item.id] === title);
+  return PREP_V2_SECTIONS.find((item) => item.title === title || item.aliases?.includes(title) || prepV2JapaneseTitles[item.id] === title);
 }
 
 export function getPrepV2Section(sections: PrepSection[], id: PrepV2SectionId): PrepSection | null {

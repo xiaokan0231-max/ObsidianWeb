@@ -20,7 +20,7 @@ import "./styles/interview-prep-tabs.css";
 
 type SectionId = typeof PREP_V2_SECTIONS[number]["id"] | "company" | "reviews";
 type PrimaryTab = "story" | "reviews" | "kit";
-const KIT_SECTIONS = ["motivation", "questions", "resources"] as const;
+const KIT_SECTIONS = ["motivation", "anticipated", "questions", "resources"] as const;
 type KitSection = typeof KIT_SECTIONS[number];
 
 // 这一轮新加的文案；共用菜单词表（lib/ui-menu-labels）照旧兜底。
@@ -38,6 +38,7 @@ const V2_COPY_JA: Record<string, string> = {
   "面试故事": "面接ストーリー",
   "外部评价": "外部評価",
   "面试原稿": "面接原稿",
+  "想定问题集": "想定質問集",
   "本轮岗位与面试分析": "今回のポジションと面接の分析",
   "完整岗位与面试分析": "ポジションと面接の分析を読む",
   "岗位": "職種",
@@ -161,8 +162,12 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   // 一句台词都没有时不出入口：点进去只剩一句空提示，等于白跑一趟。
   const hasStageLines = stageSections.some((item) => item.blocks.some((block) => block.kind === "say"));
   // 普通入口先读岗位和公司，临场卡由本人打开。已有章节链接与对照样稿仍落在指定正文。
-  const [active, setActive] = useState<SectionId>(() => tabFromUrl() ?? (doc.replayOf ? "overview" : "company"));
-  const [visibleKitSection, setVisibleKitSection] = useState<KitSection>(() => KIT_SECTIONS.some((id) => id === active) ? active as KitSection : "motivation");
+  const kitSections = useMemo(() => KIT_SECTIONS.filter((id) =>
+    id !== "anticipated" || getPrepV2Section(doc.sections, id)?.blocks.length), [doc.sections]);
+  const [requestedSection, setActive] = useState<SectionId>(() => tabFromUrl() ?? (doc.replayOf ? "overview" : "company"));
+  const active = requestedSection === "anticipated" && !kitSections.includes("anticipated") ? "motivation" : requestedSection;
+  const [focusedKitSection, setVisibleKitSection] = useState<KitSection>(() => kitSections.some((id) => id === active) ? active as KitSection : "motivation");
+  const visibleKitSection = kitSections.includes(focusedKitSection) ? focusedKitSection : "motivation";
   // section：当前章节的专注阅读；stage：临场卡。
   const [reading, setReading] = useState<"section" | "stage" | null>(null);
   const [chatOpen, setChatOpen] = useState<boolean | null>(null);
@@ -231,7 +236,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
       window.scrollTo({ top: Math.max(0, top), behavior: "instant" });
     }
   }, [active, doc.note.path]);
-  // 三节连续阅读时，侧栏必须跟随眼前的章节，不能继续显示上一节的出处。
+  // 连续阅读时侧栏跟随眼前的章节。
   useEffect(() => {
     if (!inKit) return;
     const sections = [...(mainRef.current?.querySelectorAll<HTMLElement>(".v2-kit-section") ?? [])];
@@ -244,7 +249,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
     update();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => { cancelAnimationFrame(frame); window.removeEventListener("scroll", onScroll); };
-  }, [inKit, doc.note.path]);
+  }, [inKit, doc.note.path, kitSections]);
   useEffect(() => {
     const elements = [...(mainRef.current?.querySelectorAll<HTMLElement>(`h3[id^="${prefix}-"]`) ?? [])];
     const update = () => {
@@ -312,7 +317,9 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
     <header className="v2-section-head"><h2 id="v2-overview-heading">{t("本轮岗位与面试分析")}</h2><button type="button" onClick={() => { savePosition(); setReading("section"); }}>{t("专注阅读")}</button></header>
     {overview.blocks.length ? <Blocks blocks={overview.blocks} refs={refs} idPrefix="session-v2-overview" /> : <p className="v2-empty">{menu("本轮没有需要补充的内容，可从回答库打开共用话术。")}</p>}
   </section>;
-  const readingTitle = primary === "story" ? t("本轮岗位与面试分析") : section?.title ?? t("临场备用");
+  const readingTitle = primary === "story" ? t("本轮岗位与面试分析")
+    : readingSectionId === "anticipated" ? t("想定问题集")
+    : section?.title ?? t("临场备用");
 
   return <div className="session-v2" lang={japaneseContent ? "ja" : undefined} onCopy={copySelectionWithoutRuby}>
     <header className="v2-header" ref={headerRef}>
@@ -372,9 +379,12 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
         {active === "backup" ? <><header className="v2-section-head"><h2 id="v2-section-title">{section?.title ?? t("临场备用")}</h2><button type="button" onClick={() => { savePosition(); setReading("section"); }}>{t("专注阅读")}</button></header>
           {blocks.length ? <Blocks blocks={blocks} refs={refs} idPrefix={prefix} /> : <p className="v2-empty">{menu("本轮没有需要补充的内容，可从回答库打开共用话术。")}</p>}
           <div className="v2-library"><button type="button" onClick={() => refs.onOpenCard("p01")}>{t("回答库")}</button><button type="button" onClick={() => refs.onOpenWiki("自己紹介_音読台本")}>{t("自我介绍")}</button><button type="button" onClick={() => refs.onOpenWiki("当日フレーズ集")}>{t("当日短语")}</button><button type="button" onClick={() => refs.onOpenWiki("NG集_禁句と口癖")}>{t("表达提醒")}</button></div>
-        </> : <><nav className="v2-kit-jumps" aria-label={t("本章目录")}>{KIT_SECTIONS.map((id) => <button type="button" key={id} aria-current={visibleKitSection === id ? "location" : undefined} onClick={() => switchSection(id)}>{t(getPrepV2Section(doc.sections, id)?.title ?? id)}</button>)}</nav>
-          {KIT_SECTIONS.map((id) => { const item = getPrepV2Section(doc.sections, id); return <section className="v2-kit-section" id={`v2-kit-${id}`} key={id}>
-            <header className="v2-section-head"><h2>{item?.title ?? t(id)}</h2><button type="button" onClick={() => { switchSection(id); setReading("section"); }}>{t("专注阅读")}</button></header>
+        </> : <><nav className="v2-kit-jumps" aria-label={t("本章目录")}>{kitSections.map((id) => <button type="button" key={id} aria-current={visibleKitSection === id ? "location" : undefined} onClick={() => switchSection(id)}>{t(id === "anticipated" ? "想定问题集" : getPrepV2Section(doc.sections, id)?.title ?? id)}</button>)}</nav>
+          {kitSections.map((id) => {
+            const item = getPrepV2Section(doc.sections, id);
+            const title = id === "anticipated" ? t("想定问题集") : item?.title ?? t(id);
+            return <section className="v2-kit-section" id={`v2-kit-${id}`} key={id}>
+            <header className="v2-section-head"><h2>{title}</h2><button type="button" onClick={() => { switchSection(id); setReading("section"); }}>{t("专注阅读")}</button></header>
             {item?.blocks.length ? <Blocks blocks={item.blocks} refs={refs} idPrefix={`session-v2-${id}`} /> : <p className="v2-empty">{menu("本轮没有需要补充的内容，可从回答库打开共用话术。")}</p>}
             {id === "resources" && sources.some((source) => !doc.externalLinks.some((current) => current.href === source.href)) && <section className="v2-carried-sources"><h3>{menu("前轮沿用资料 · 截至本轮")}</h3><p>{menu("本轮新增资料见上文；以下来源保留前轮的阅读范围。")}</p>{sourceList(sources.filter((source) => !doc.externalLinks.some((current) => current.href === source.href)))}</section>}
           </section>; })}

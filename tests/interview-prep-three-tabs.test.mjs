@@ -200,6 +200,25 @@ test("面试原稿连续展示三节和跨轮资料，问题深链接保持全�
   assert.doesNotMatch(panel(html), /公司故事正文独有|外部评价正文独有|本轮纵览正文独有/);
 });
 
+test("本轮有想定问题时显示题集与回答，旧稿访问同一深链接时回到志望動機", async () => {
+  const url = "?prepTab=kit&kitSection=anticipated";
+  for (const [locale, label] of [["zh-CN", "想定问题集"], ["ja", "想定質問集"]]) {
+    const withQuestions = parseInterviewPrepDoc({ ...note,
+      content: content.replace("## 逆質問", `## ${label}\n\n### どのような機能を担当しましたか\n\n回答例です。\n\n## 逆質問`),
+    }, []);
+    assert.ok(withQuestions);
+    const html = await render(url, { doc: withQuestions }, locale);
+    assertKitFocus(html, label);
+    const body = panel(html);
+    assert.match(body, new RegExp(`id="v2-kit-anticipated"[\\s\\S]*?<h2>${label}</h2>[\\s\\S]*?どのような機能を担当しましたか[\\s\\S]*?回答例です。`));
+    assert.ok(body.indexOf('id="v2-kit-motivation"') < body.indexOf('id="v2-kit-anticipated"'));
+    assert.ok(body.indexOf('id="v2-kit-anticipated"') < body.indexOf('id="v2-kit-questions"'));
+  }
+  const withoutQuestions = await render(url);
+  assertKitFocus(withoutQuestions, "志望動機");
+  assert.doesNotMatch(panel(withoutQuestions), /v2-kit-anticipated|想定问题集/);
+});
+
 test("旧公司和纵览深链接都归入面试故事，保留原先入口的阅读顺序", async () => {
   for (const legacy of ["company", "overview"]) {
     const html = await render(`?prepTab=${legacy}`);

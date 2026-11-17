@@ -4,7 +4,7 @@ import { readModelFailure, readModelRuntime, ReadModelError } from "../../read-m
 
 const headers = { "Cache-Control": "private, no-store" };
 
-export async function GET(_request: Request, { params }: { params: Promise<{ slug: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const notFound = () => Response.json({ error: "找不到这条面试链接" }, { status: 404, headers });
   if (!isInterviewShareSlug(slug)) return notFound();
@@ -14,7 +14,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
     if (syncState !== "ready") throw new ReadModelError("资料索引正在同步，请稍候", 503, syncState === "building");
     const target = await model.readRecord<InterviewShare>(revision, INTERVIEW_RECORDS.share, slug);
     if (typeof target?.prepPath !== "string" || !target.prepPath.endsWith(".md")) return notFound();
-    const location = appViewHref("session", new URLSearchParams({ prep: target.prepPath }));
+    const query = new URLSearchParams({ prep: target.prepPath });
+    if (new URL(request.url).searchParams.get("kitSection") === "anticipated") {
+      query.set("prepTab", "kit");
+      query.set("kitSection", "anticipated");
+    }
+    const location = appViewHref("session", query);
     return new Response(null, { status: 307, headers: { ...headers, Location: location } });
   } catch (error) {
     return readModelFailure(error);

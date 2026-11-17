@@ -241,6 +241,9 @@ test("v2 志望動機入口限制到选中稿的 H2，保留注音和独立追�
 
 test("v2 校验五节、2至3句台词与同节根拠，不再要求旧版速查", () => {
   assert.deepEqual(interviewPrepStructureIssues(BODY, 2), []);
+  const anticipated = `${BODY}\n## 想定質問集\n回答例です。\n`;
+  assert.deepEqual(interviewPrepStructureIssues(anticipated, 2), []);
+  assert.match(interviewPrepStructureIssues(`${anticipated}\n## 想定问题集\n重复`, 2).join("\n"), /想定问题集.*当前 2 个/);
   assert.deepEqual(companyMotivationIssues(BODY, 2), []);
   assert.match(interviewPrepStructureIssues(BODY.replace("## 临场备用", "## 额外章节"), 2).join("\n"), /临场备用|额外章节/);
   assert.match(interviewPrepStructureIssues(`${BODY}\n## 研究资料\n重复`, 2).join("\n"), /当前 2 个/);
