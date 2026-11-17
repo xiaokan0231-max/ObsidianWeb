@@ -61,7 +61,7 @@ function privateResponse(response) {
 test("生产入口先检查密码，页面、资料接口、原始静态、图片和留言均不能绕过", async () => {
   const h = await harness({ deny: true, assetStatus: 200, projected: true });
   const requests = [
-    ["/"], ["/training/reading"], ["/api/note?path=20_%E6%B1%82%E8%81%B7%2F%E5%8E%9F%E7%A8%BF.md"],
+    ["/"], ["/training/reading"], ["/i/test-first-round"], ["/api/note?path=20_%E6%B1%82%E8%81%B7%2F%E5%8E%9F%E7%A8%BF.md"],
     ["/api/vault"], ["/api/calendar"], ["/api/read-model/library"], ["/api/read-model/search?q=test"],
     ["/_published-vault/manifest.json"], ["/_published-vault/0123456789abcdef01234567.json.gz"],
     ["/_published-vault/0123456789abcdef01234567.json.br", "HEAD"], ["/assets/client.js"], ["/assets/theme.css"],

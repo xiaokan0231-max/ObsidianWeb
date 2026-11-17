@@ -21,8 +21,14 @@ import { selectionNoticesForSession, type SelectionNotice } from "./selection-no
 export const INTERVIEW_RECORDS = {
   catalog: "interview-catalog", context: "interview-context", review: "interview-review",
   block: "interview-review-block", section: "interview-review-section", practice: "interview-practice",
-  company: "interview-company",
+  company: "interview-company", share: "interview-share",
 } as const;
+
+export function isInterviewShareSlug(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 32 && value === value.trim() && /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value);
+}
+
+export type InterviewShare = { prepPath: string };
 
 /** 目录引用不能加入完整正文缓存；它没有 content，也不冒充 Note。 */
 export type InterviewSourceRef = {
@@ -238,6 +244,7 @@ export function buildInterviewReadModelRecords(notes: Note[], options: { today?:
     put(INTERVIEW_RECORDS.context, context.note.path, { kind: "interview-context", source: sourceRef(context.note),
       contextPath: context.note.path, paths: [...new Set(companyPaths(context, notes))] } satisfies InterviewContext);
   }
+  const sharePaths = new Map<string, string | null>();
   for (const doc of docs) {
     const context = docContexts.get(doc.note.path) ?? null;
     const paths = new Set(companyPaths(context, notes));
@@ -249,6 +256,12 @@ export function buildInterviewReadModelRecords(notes: Note[], options: { today?:
     const japanese = doc.prepVersion === 2 && variants ? projectJapaneseInterviewPage(doc.note, context, variants, notes) : undefined;
     put(INTERVIEW_RECORDS.context, doc.note.path, japanese ? { ...projection, japanese } : projection);
     if (replay) put(INTERVIEW_RECORDS.context, replay.note.path, { ...projection, source: sourceRef(replay.note) });
+    const slug = doc.note.frontmatter.share_slug;
+    // 一条短链只指向明确的原稿；重复别名不按日期或公司猜测场次。
+    if (isInterviewShareSlug(slug)) sharePaths.set(slug, sharePaths.has(slug) ? null : doc.note.path);
+  }
+  for (const [slug, path] of sharePaths) {
+    if (path) put(INTERVIEW_RECORDS.share, slug, { prepPath: path } satisfies InterviewShare);
   }
 
   const joined = joinReviewNotes(notes);
