@@ -11,6 +11,7 @@ import { loadAppModule } from "./helpers/render-tsx.mjs";
 import { buildCalendarReadModelRecords } from "../lib/calendar-query-model.ts";
 import { resolveIndexedInterviewTarget } from "../lib/interview-read-model-target.ts";
 import { buildCompanyOverviews, COMPANY_FIT_DIMENSIONS } from "../lib/company-overview.ts";
+import { applyInterviewPageTranslation, INTERVIEW_PAGE_TRANSLATION_TYPE } from "../lib/interview-page-translation.ts";
 
 const today = "2026-10-29";
 const note = (path, frontmatter, content = "") => ({ path, frontmatter, content, tags: [], stat: { ctime: 0, mtime: 1, size: content.length } });
@@ -110,6 +111,52 @@ test("轮次目录保留接触顺序，旧轮与未定的新轮不按日期字�
   const { preps } = record(records, INTERVIEW_RECORDS.catalog, "root");
   assert.equal(preps.find((item) => item.path === old.path).sessionSequence, 0);
   assert.equal(preps.find((item) => item.path === pending.path).sessionSequence, 1);
+});
+
+test("日文准备资料绑定完整场次路径，翻译公司展示文字而不改正本身份或证据地址", () => {
+  const dossier = note(`${root}/企业资料.md`, { type: "company", company: "株式会社テスト", company_profile: {
+    version: 1, updated_on: today, facts: [{ id: "business", label: "业务", value: "系统开发", as_of: today,
+      scope: "公司官网", sources: [{ label: "公司介绍", url: "https://example.com/company" }] }], reviews: [],
+  } });
+  const owner = note(`${root}/案件.md`, { type: "job-case", company: "株式会社テスト", case_id: "translated-interview", company_dossier: `[[${dossier.path}]]` });
+  const canonical = note(`${root}/第一轮.md`, { type: "interview-prep", prep_version: 2, date: today,
+    company: "株式会社テスト", case: `[[${owner.path}]]`, format: "现场", session_order: 1 }, "# 本轮准备");
+  const later = note(`${root}/第二轮.md`, { ...canonical.frontmatter, date: "2026-10-30", session_order: 2 }, "# 下一轮准备");
+  const replay = note(`${root}/第一轮对照.md`, { type: "interview-prep-replay", prep_version: 2,
+    replay_of: `[[${canonical.path}]]` }, "# 对照稿");
+  const asset = note(`${root}/朗読資料.md`, { type: "material" }, "# 朗読資料\n## 台本\n台本の内容");
+  const variant = (path, source, translated_frontmatter, body) => note(`${root}/${path}.md`, {
+    type: INTERVIEW_PAGE_TRANSLATION_TYPE, language: "ja", translation_for: canonical.path,
+    translation_source: source.path, translated_frontmatter,
+  }, body);
+  const translation = variant("第一回_日本語", canonical,
+    { date: "2026-01-01", case: "[[失敗]]", type: "todo", format: "対面" },
+    `---\nfoo: bar\n---\n# 面接準備\n![[${asset.path}#台本]]`);
+  const translatedDossier = variant("企業資料_日本語", dossier, { company_profile: {
+    updated_on: "2026-01-01", facts: [{ id: "unrelated", label: "事業", value: "システム開発", scope: "公式サイト",
+      sources: [{ label: "企業情報", url: "https://example.net/redirect" }] }],
+  } }, "# 企業資料");
+  const rendered = applyInterviewPageTranslation(canonical, translation);
+  assert.equal(rendered.path, canonical.path);
+  assert.equal(rendered.frontmatter.type, "interview-prep");
+  assert.equal(rendered.frontmatter.date, today);
+  assert.equal(rendered.frontmatter.case, canonical.frontmatter.case);
+  assert.equal(rendered.frontmatter.format, "対面");
+  assert.match(rendered.content, /^# 面接準備/);
+  assert.equal(applyInterviewPageTranslation(later, translation), null);
+
+  const records = buildInterviewReadModelRecords([dossier, owner, canonical, later, replay, asset, translation, translatedDossier], { today });
+  const first = record(records, INTERVIEW_RECORDS.context, canonical.path);
+  assert.equal(first.japanese.prepPath, translation.path);
+  assert.deepEqual(new Set(first.japanese.paths), new Set([asset.path, translatedDossier.path]));
+  assert.ok(!first.paths.includes(translation.path));
+  assert.equal(first.japanese.company.profile.facts[0].label, "事業");
+  assert.equal(first.japanese.company.profile.facts[0].value, "システム開発");
+  assert.equal(first.japanese.company.profile.facts[0].id, "business");
+  assert.equal(first.japanese.company.profile.facts[0].sources[0].url, "https://example.com/company");
+  assert.equal(record(records, INTERVIEW_RECORDS.company, owner.path).profile.facts[0].value, "系统开发");
+  for (const source of [owner, later, replay]) assert.equal(record(records, INTERVIEW_RECORDS.context, source.path)?.japanese, undefined);
+  assert.deepEqual(record(records, INTERVIEW_RECORDS.catalog, "root").preps.map(({ path }) => path), [later.path, canonical.path]);
 });
 
 test("公司总结和六维评价使用完整资料验证后的投影，证据正文不为存在校验而整批下载", async () => {

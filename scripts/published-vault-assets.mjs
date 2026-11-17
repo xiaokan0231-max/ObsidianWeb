@@ -7,6 +7,7 @@ import { noteInVaultScope } from "../lib/vault-scope.ts";
 import { includePublishedNote } from "../lib/vault-boundary.mjs";
 import { withPublishedReadingSources } from "../lib/language-reading-list.ts";
 import { buildCalendarSnapshot } from "../lib/server/calendar-snapshot.ts";
+import { applyInterviewPageTranslation, INTERVIEW_PAGE_TRANSLATION_TYPE, interviewPageTranslationTarget } from "../lib/interview-page-translation.ts";
 import { copyRetainedReadModelAssets, garbageCollectReadModelAssets, writeReadModelAssets } from "./read-model-published.mjs";
 
 const compressBrotli = promisify(brotliCompress);
@@ -18,9 +19,19 @@ const digest = (data) => createHash("sha256").update(data).digest("hex").slice(0
 
 /** 保留完整笔记；把聚合和压缩移到发布时，访客首次读取只需传输静态响应。 */
 export async function writePublishedVaultAssets(notes, directory, publishedAt = new Date().toISOString(), previousDirectory = directory) {
-  const excludedPaths = new Set(notes.filter(note => !includePublishedNote(note)).map(note => note.path));
+  const localNotes = notes;
   notes = notes.filter(includePublishedNote);
+  const candidates = new Map(notes.map(note => [note.path, note]));
+  // 正本撤回时，同轮译文和历史索引也一起撤回，防止通过翻译读取仅本机资料。
+  notes = notes.filter(note => {
+    if (note.frontmatter?.type !== INTERVIEW_PAGE_TRANSLATION_TYPE) return true;
+    const target = interviewPageTranslationTarget(note);
+    if (!target || candidates.get(target.prepPath)?.frontmatter?.type !== "interview-prep") return false;
+    const source = candidates.get(target.sourcePath);
+    return source && applyInterviewPageTranslation(source, note);
+  });
   const publishedPaths = new Set(notes.map(note => note.path));
+  const excludedPaths = new Set(localNotes.filter(note => !publishedPaths.has(note.path)).map(note => note.path));
   notes = notes.map(note => withPublishedReadingSources(note, publishedPaths));
   const scopes = Object.fromEntries(SCOPES.map((scope) => [scope, []]));
   const chunks = {};

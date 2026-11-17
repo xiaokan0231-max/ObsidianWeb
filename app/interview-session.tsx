@@ -12,6 +12,7 @@ import {
   findInterviewPrepReplay,
   groupPrepSections,
   INTERVIEW_PREP_REPLAY_TYPE,
+  parseInterviewPrepDoc,
   prepBlockText,
   prepInlineText,
   prepSectionNumber,
@@ -63,7 +64,8 @@ import { menuLabel } from "@/lib/ui-menu-labels";
 import { useUiLocale } from "./ui-locale";
 import type { InterviewCatalog } from "@/lib/interview-read-model";
 import type { InterviewTrends } from "@/lib/interview-trends.mjs";
-import type { InterviewSelection } from "./use-interview-context";
+import type { InterviewSelection, JapaneseInterviewPage } from "./use-interview-context";
+import { applyInterviewPageTranslation } from "@/lib/interview-page-translation";
 import { loadInterviewPickerGroups } from "./interview-catalog-options";
 
 /** `?prep=` 直接指向对照样稿时，返回它的原稿笔记名：页面选中原稿并打开对照视图，刷新也停在样稿上。 */
@@ -96,6 +98,18 @@ const LEGACY_SESSION_MENU_JA: Record<string, string> = {
   "打开横向对照 →": "面談の比較を開く →",
   "打开案件正本": "応募案件の元記録を開く",
   "打开面谈记录": "面談記録を開く",
+  "问题理解": "質問の理解",
+  "覆盖完整度": "回答の網羅性",
+  "直接性": "回答の明確さ",
+  "证据可信度": "根拠の信頼性",
+  "风险控制": "リスクへの対応",
+  "复合问题漏答": "複数の質問への答え漏れ",
+  "不先说结论": "結論を後回しにする",
+  "主动暴露负面信息": "聞かれていない弱点を先に話す",
+  "证据偏弱": "説明の根拠が弱い",
+  "表述过于绝对": "断定しすぎる",
+  "角色期待错位": "期待される役割とのずれ",
+  "数字口径混乱": "数字の定義が混在する",
 };
 
 function useLegacySessionMenu() {
@@ -1130,9 +1144,11 @@ function InterviewSession({
   chatRevision,
   onRemoteSelect,
   companyContexts,
+  japanese,
 }: {
   notes: Note[];
   companyContexts?: CompanyOverview[];
+  japanese?: JapaneseInterviewPage;
   onOpen: (note: Note) => void;
   onOpenWiki: (target: string, section?: string) => void;
   onOpenCard: (cardId: string) => void;
@@ -1157,6 +1173,7 @@ function InterviewSession({
 }) {
   const menu = useInterviewMenu();
   const ui = useLegacySessionMenu();
+  const { locale } = useUiLocale();
   const docs = useMemo(() => findInterviewPrepDocs(notes), [notes]);
   const series = useMemo(() => groupInterviewPrepDocs(docs), [docs]);
   const digest = useMemo(() => catalog ? remoteDigest ?? null : buildDigest(notes), [notes, catalog, remoteDigest]);
@@ -1188,6 +1205,12 @@ function InterviewSession({
   const [viewReplay, setViewReplay] = useState(() => replayTargetOf(notes, initialPath) !== "");
   const showingReplay = viewReplay && replay !== null;
   const context = selected ? docContexts.get(selected.note.path) ?? null : contexts.find((item) => item.note.path === selection.contextPath) ?? null;
+  const localized = useMemo(() => {
+    if (locale !== "ja" || showingReplay || !selected || selected.prepVersion !== 2 || japanese?.sourcePath !== selected.note.path) return null;
+    const note = applyInterviewPageTranslation(selected.note, japanese.prep);
+    const doc = note ? parseInterviewPrepDoc(note, japanese.dependencies) : null;
+    return doc ? { doc, source: japanese.prep.path, company: japanese.company } : null;
+  }, [locale, showingReplay, selected, japanese]);
   // 头部「准备稿 N 轮」说的是这个案件／面谈名下的全部轮次——日历判定本场无稿时它们仍然存在，只是不借来当本场的稿。
   const contextRounds = useMemo(() => (context ? docs.filter((doc) => docContexts.get(doc.note.path)?.key === context.key) : []), [context, docs, docContexts]);
   // 面谈 todo 自己没写日時时，头部借同 case_id 案件的 next_event_at——日历就是这么合并的，两处不能一个有日期一个「未定」。
@@ -1315,7 +1338,7 @@ function InterviewSession({
         <span>{menu("本轮提醒")}</span>
         {digest.weakestDimension && (
           <em>
-            {menu("五维最弱 ")}<b>{REVIEW_DIMENSION_META[digest.weakestDimension].label}</b>
+            {menu("五维最弱 ")}<b>{localized ? ui(REVIEW_DIMENSION_META[digest.weakestDimension].label) : REVIEW_DIMENSION_META[digest.weakestDimension].label}</b>
             {" "}{menu("平均 ")}{digest.dimensionAverages[digest.weakestDimension]}
           </em>
         )}
@@ -1325,7 +1348,7 @@ function InterviewSession({
           {digest.tags.filter((tag) => tag.repeated).slice(0, 3).map((tag) => (
             <li key={tag.tag} className={tag.inLatest ? "hot" : ""}>
               {tag.inLatest && <i aria-hidden="true" />}
-              {tag.label}
+              {localized ? ui(tag.label) : tag.label}
             </li>
           ))}
         </ul>
@@ -1339,7 +1362,7 @@ function InterviewSession({
         <ul>
           {digest.tags.filter((tag) => tag.repeated).map((tag) => (
             <li key={tag.tag} className={tag.inLatest ? "hot" : ""}>
-              <strong>{tag.label}</strong>
+            <strong>{localized ? ui(tag.label) : tag.label}</strong>
               <span>{tag.interviews} / {digest.interviews.length}{menu(" 场 · ")}{tag.occurrences}{menu(" 问")}</span>
               {tag.inLatest && <i>{menu("最近一场仍出现")}</i>}
             </li>
@@ -1351,17 +1374,22 @@ function InterviewSession({
 
   // 对照样稿一律是 v2：原稿是旧版时也用新版页面显示样稿，页头的切换回到原稿的旧版布局。
   if (selected && (selected.prepVersion === 2 || showingReplay)) {
-    const shown = showingReplay && replay ? replay : selected;
+    const shown = showingReplay && replay ? replay : localized?.doc ?? selected;
+    const displayContext = localized ? localized.company : context;
     const shownSources = shown === selected ? externalLinks : mergePrepExternalLinks(sourceDocs.map((doc) => doc === selected ? shown : doc));
     const jobCase = shown.replayOf ? null : context?.kind === "case" ? context.note : linkedCase;
-    const companyEvidence = shown.replayOf ? [] : [...(context?.summary?.sources ?? []), ...(context?.profile?.facts.flatMap((fact) => fact.sources) ?? [])];
+    const companyEvidence = shown.replayOf ? [] : [...(displayContext?.summary?.sources ?? []), ...(displayContext?.profile?.facts.flatMap((fact) => fact.sources) ?? [])];
+    const openAsset = (asset: SharedAssetTarget) => onOpenAsset(localized && asset.scope === "round" && asset.note === shown.note.path
+      ? { ...asset, note: localized.source } : asset);
+    const openWiki = (target: string, section?: string) => onOpenWiki(localized && target.replace(/\.md$/, "") === shown.note.path.replace(/\.md$/, "")
+      ? localized.source : target, section);
     return <><InterviewSessionV2 key={shown.note.path} doc={shown} series={series} selectedSeries={selectedSeries}
-      sources={shownSources} today={today} onSelect={selectDoc} onOpen={onOpen} onOpenWiki={onOpenWiki}
+      sources={shownSources} today={today} onSelect={selectDoc} onOpen={onOpen} onOpenWiki={openWiki}
       openingSources={prepOpeningSources(shownSources, getString(jobCase?.frontmatter.url), companyEvidence, shown.externalLinks)} jobCase={jobCase}
       chatRevision={chatRevision}
-      onOpenCard={onOpenCard} onOpenAsset={onOpenAsset}
-      companyOverview={(onOpenReviews) => <CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} view="story" onOpenReviews={onOpenReviews} />}
-      externalReviews={<CompanyOverviewContent context={context} historical={historicalCompany} onOpenWiki={onOpenWiki} view="reviews" />}
+      onOpenCard={onOpenCard} onOpenAsset={openAsset} japaneseContent={!!localized}
+      companyOverview={(onOpenReviews) => <CompanyOverviewContent context={displayContext} historical={historicalCompany} onOpenWiki={onOpenWiki} view="story" onOpenReviews={onOpenReviews} />}
+      externalReviews={<CompanyOverviewContent context={displayContext} historical={historicalCompany} onOpenWiki={onOpenWiki} view="reviews" japaneseParaphrase={!!localized} />}
       contextPicker={contextPicker} companyAction={companyAction} briefing={digestBand} /></>;
   }
 

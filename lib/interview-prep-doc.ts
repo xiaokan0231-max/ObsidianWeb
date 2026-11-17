@@ -58,9 +58,16 @@ export { PREP_V2_REPLAY_COMPARISON_TITLE, PREP_V2_SECTIONS };
 export type PrepVersion = 1 | 2;
 export type PrepV2SectionId = "overview" | "motivation" | "questions" | "resources" | "backup";
 
+const prepV2JapaneseTitles: Partial<Record<PrepV2SectionId, string>> = {
+  overview: "面接の概要と対策", resources: "調査資料", backup: "当日の補助資料",
+};
+
+function prepV2SectionSpec(title: string) {
+  return PREP_V2_SECTIONS.find((item) => item.title === title || prepV2JapaneseTitles[item.id] === title);
+}
+
 export function getPrepV2Section(sections: PrepSection[], id: PrepV2SectionId): PrepSection | null {
-  const spec = PREP_V2_SECTIONS.find((item) => item.id === id);
-  return sections.find((section) => section.title === spec?.title) ?? null;
+  return sections.find((section) => prepV2SectionSpec(section.title)?.id === id) ?? null;
 }
 
 export type PrepSectionGroup = {
@@ -820,7 +827,7 @@ export function parseInterviewPrepDoc(note: Note, notes: Note[]): InterviewPrepD
     const start = (match.index ?? 0) + match[0].length;
     const end = matches[index + 1]?.index ?? expanded.length;
     const heading = match[1].trim();
-    const spec = prepVersion === 2 ? PREP_V2_SECTIONS.find((item) => item.title === heading) : null;
+    const spec = prepVersion === 2 ? prepV2SectionSpec(heading) : null;
     sections.push({
       id: spec ? `prep-v2-${spec.id}` : `prep-sec-${index}`,
       title: heading,

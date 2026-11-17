@@ -129,12 +129,13 @@ function tabFromUrl(): SectionId | null {
   return value && (value === "company" || value === "reviews" || value === "backup" || PREP_V2_SECTIONS.some((section) => section.id === value)) ? value as SectionId : null;
 }
 
-export default function InterviewSessionV2({ doc, series, selectedSeries, sources, openingSources, jobCase, today, onSelect, onOpen, onOpenWiki, onOpenCard, onOpenAsset, companyOverview, externalReviews, contextPicker, companyAction, briefing, chatRevision }: {
+export default function InterviewSessionV2({ doc, series, selectedSeries, sources, openingSources, jobCase, today, onSelect, onOpen, onOpenWiki, onOpenCard, onOpenAsset, companyOverview, externalReviews, contextPicker, companyAction, briefing, chatRevision, japaneseContent = false }: {
   companyOverview: ReactNode | ((onOpenReviews: () => void) => ReactNode);
   externalReviews?: ReactNode;
   /** v1 の「本轮提醒」（復盤から出た弱点）。纵览の頭に出す——skill が既定で v2 を出す今、ここに無いと復盤の沈殿が次の面接に届かない。 */
   briefing?: ReactNode;
   chatRevision?: string;
+  japaneseContent?: boolean;
   contextPicker: ReactNode;
   companyAction: ReactNode;
   doc: InterviewPrepDoc;
@@ -313,7 +314,7 @@ export default function InterviewSessionV2({ doc, series, selectedSeries, source
   </section>;
   const readingTitle = primary === "story" ? t("本轮岗位与面试分析") : section?.title ?? t("临场备用");
 
-  return <div className="session-v2" onCopy={copySelectionWithoutRuby}>
+  return <div className="session-v2" lang={japaneseContent ? "ja" : undefined} onCopy={copySelectionWithoutRuby}>
     <header className="v2-header" ref={headerRef}>
       <div className="v2-heading">
         <p className="v2-kicker">{t("面试准备")} <span>{doc.round || menu("轮次未定")}</span>

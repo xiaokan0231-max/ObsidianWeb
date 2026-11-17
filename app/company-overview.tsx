@@ -111,7 +111,7 @@ function ReviewSynthesis({ synthesis, compact = false, onOpenWiki }: { synthesis
   </section>;
 }
 
-function Reviews({ reviews, onOpenWiki, compact = false }: { reviews: CompanyReview[]; onOpenWiki: (target: string) => void; compact?: boolean }) {
+function Reviews({ reviews, onOpenWiki, compact = false, japaneseParaphrase = false }: { reviews: CompanyReview[]; onOpenWiki: (target: string) => void; compact?: boolean; japaneseParaphrase?: boolean }) {
   const t = useCompanyCopy();
   if (!reviews.length) return <p className="co-muted">{t("未调查 · 尚未收录可核对的外部评价。")}</p>;
   return <div className={`co-reviews${compact ? " compact" : ""}`}>{reviews.map((review, index) => {
@@ -122,7 +122,7 @@ function Reviews({ reviews, onOpenWiki, compact = false }: { reviews: CompanyRev
         <div className="co-review-evidence">{insight.evidence.map((evidence, evidenceIndex) => <div className="co-review-excerpt" key={`${evidence.url}:${evidenceIndex}`}>
           <p className="co-review-attribution"><span>{evidence.role}</span><time dateTime={evidence.publishedOn}>{evidence.publishedOn}</time><a href={evidence.url} target="_blank" rel="noopener noreferrer" aria-label={t("阅读{role}于{date}发布的评论原文", { role: evidence.role, date: evidence.publishedOn })}>{t("原文 ↗")}</a></p>
           {evidence.quote && <blockquote lang="ja" cite={evidence.url}>{evidence.quote}</blockquote>}
-          <p className="co-review-paraphrase"><span>{t("中文释义")}</span>{evidence.paraphrase}</p>
+          <p className="co-review-paraphrase"><span>{japaneseParaphrase ? "要旨" : t("中文释义")}</span>{evidence.paraphrase}</p>
         </div>)}</div>
       </div>
     </section>);
@@ -139,7 +139,7 @@ function Reviews({ reviews, onOpenWiki, compact = false }: { reviews: CompanyRev
 
 export type CompanyOverviewView = "full" | "story" | "reviews";
 
-export default function CompanyOverviewContent({ context, onOpenWiki, historical = false, view = "full", onOpenReviews }: { context: CompanyOverview | null; onOpenWiki: (target: string) => void; historical?: boolean; view?: CompanyOverviewView; onOpenReviews?: () => void }) {
+export default function CompanyOverviewContent({ context, onOpenWiki, historical = false, view = "full", onOpenReviews, japaneseParaphrase = false }: { context: CompanyOverview | null; onOpenWiki: (target: string) => void; historical?: boolean; view?: CompanyOverviewView; onOpenReviews?: () => void; japaneseParaphrase?: boolean }) {
   const t = useCompanyCopy();
   const prefix = useId().replaceAll(":", "");
   const assessment = context?.assessment;
@@ -153,7 +153,7 @@ export default function CompanyOverviewContent({ context, onOpenWiki, historical
   const facts = [...companyFacts, ...roleFacts];
   const factGrid = (items: CompanyFact[]) => <dl className="co-fact-grid">{items.map((fact, index) => <div key={`${fact.id}:${index}`}><dt>{t(fact.label)}</dt><dd><Fact fact={fact} onOpenWiki={onOpenWiki} /></dd></div>)}</dl>;
   const renderParagraph = (paragraph: NonNullable<typeof companySummary>["paragraphs"][number], index: number) => <p key={index}><Inlines nodes={paragraph} refs={{ onOpenWiki: (target, section) => onOpenWiki(section ? `${target}#${section}` : target) }} /></p>;
-  const externalSection = <section className="co-external" id={`${prefix}-reviews`} aria-labelledby={`${prefix}-reviews-title`}><header className="co-section-header">{view === "full" && <span>03</span>}<h2 id={`${prefix}-reviews-title`} tabIndex={-1}>{t("外部评价")}</h2><p>{t("员工的经历 · 对本次面谈的启示")}</p></header><ReviewSynthesis synthesis={profile?.reviewSynthesis} onOpenWiki={onOpenWiki} /><Reviews reviews={profile?.reviews ?? []} onOpenWiki={onOpenWiki} /></section>;
+  const externalSection = <section className="co-external" id={`${prefix}-reviews`} aria-labelledby={`${prefix}-reviews-title`}><header className="co-section-header">{view === "full" && <span>03</span>}<h2 id={`${prefix}-reviews-title`} tabIndex={-1}>{t("外部评价")}</h2><p>{t("员工的经历 · 对本次面谈的启示")}</p></header><ReviewSynthesis synthesis={profile?.reviewSynthesis} onOpenWiki={onOpenWiki} /><Reviews reviews={profile?.reviews ?? []} onOpenWiki={onOpenWiki} japaneseParaphrase={japaneseParaphrase} /></section>;
   // 独立评价页不带岗位结论与公司故事，来源和统计仍由同一份正本组件展示。
   if (view === "reviews") return <div className="company-overview co-view-reviews">{externalSection}</div>;
   const reviewsAction = onOpenReviews ? <button type="button" onClick={onOpenReviews}>{t("查看外部评价 →")}</button> : <a href={`#${prefix}-reviews`} onClick={(event) => {

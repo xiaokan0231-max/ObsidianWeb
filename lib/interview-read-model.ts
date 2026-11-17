@@ -3,6 +3,7 @@ import { buildCompanyCompareCandidates, companyComparePreset } from "./company-c
 import { buildContextPickerGroups, type ContextPickerGroup } from "./context-picker.ts";
 import { findInterviewPrepDocs, findInterviewPrepReplay, prepWikiTarget } from "./interview-prep-doc.ts";
 import { groupInterviewPrepDocs, selectRelevantInterviewPrepDoc } from "./interview-prep-index.ts";
+import { applyInterviewPageTranslation, interviewPageTranslationTarget } from "./interview-page-translation.ts";
 import { buildCardCoverage, buildInterviewTrends, reviewTrendEntry, type InterviewTrends } from "./interview-trends.mjs";
 import { interviewSessionOwner, resolveInterviewOutcomes, type InterviewOutcome } from "./interview-outcome.ts";
 import { getString, getTitle, getType, stripNonLinkRegions, type Frontmatter, type Note } from "./notes.ts";
@@ -58,6 +59,7 @@ export type InterviewContext = {
   kind: "interview-context"; source: InterviewSourceRef; contextPath: string | null;
   /** 只取本轮原稿、对照稿、明确的公司材料及实际嵌入依赖。 */
   paths: string[];
+  japanese?: { prepPath: string; paths: string[]; company: InterviewCompanyProjection | null };
 };
 /** 公司图景在完整资料上验证；证据只保留引用，不能为了验证存在而下载所有证据正文。 */
 export type InterviewCompanyProjection = Omit<CompanyOverview, "kind" | "note" | "dossier" | "summary" | "assessment"> & {
@@ -165,6 +167,43 @@ function companyPaths(context: ReturnType<typeof buildCompanyOverviews>[number] 
   return paths;
 }
 
+function indexInterviewPageTranslations(notes: Note[]) {
+  const byPrep = new Map<string, Map<string, Note | null>>();
+  for (const note of notes) {
+    const target = interviewPageTranslationTarget(note);
+    if (!target) continue;
+    const bySource = byPrep.get(target.prepPath) ?? new Map<string, Note | null>();
+    // 同一正本只能有一份同语言正文；有冲突时沿用原稿，避免随机取一份。
+    bySource.set(target.sourcePath, bySource.has(target.sourcePath) ? null : note);
+    byPrep.set(target.prepPath, bySource);
+  }
+  return byPrep;
+}
+
+function projectJapaneseInterviewPage(
+  canonicalPrep: Note, context: CompanyOverview | null, variants: ReadonlyMap<string, Note | null>, notes: Note[],
+): InterviewContext["japanese"] {
+  const prep = variants.get(canonicalPrep.path);
+  if (!prep || !applyInterviewPageTranslation(canonicalPrep, prep)) return undefined;
+  const paths = new Set<string>();
+  embeddedDependencies(prep, notes, paths);
+  paths.delete(prep.path);
+  const companySources = new Set(companyPaths(context, notes));
+  const overlays = new Map<string, Note>();
+  for (const source of notes) {
+    if (!companySources.has(source.path)) continue;
+    const variant = variants.get(source.path);
+    const translated = variant ? applyInterviewPageTranslation(source, variant) : null;
+    if (!variant || !translated) continue;
+    overlays.set(source.path, translated);
+    paths.add(variant.path);
+  }
+  // 公司解析要核对证据引用；用完整的同版资料，仅替换这一轮明确关联的正文。
+  const company = context && overlays.size ? buildCompanyOverviews(notes.map(note => overlays.get(note.path) ?? note))
+    .find(candidate => candidate.note.path === context.note.path) ?? null : null;
+  return { prepPath: prep.path, paths: [...paths], company: company ? projectInterviewCompany(company) : null };
+}
+
 /** 所有昂贵解析只在同步／发布时执行，查询阶段直接读取同一版本的投影。 */
 export function buildInterviewReadModelRecords(notes: Note[], options: { today?: string } = {}): ReadModelRecord[] {
   const today = options.today ?? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -172,6 +211,7 @@ export function buildInterviewReadModelRecords(notes: Note[], options: { today?:
   const put = (kind: string, key: string, value: unknown) => records.push({ kind, key, value });
   const contexts = buildCompanyOverviews(notes);
   const docs = findInterviewPrepDocs(notes);
+  const translations = indexInterviewPageTranslations(notes);
   const series = groupInterviewPrepDocs(docs);
   const docContexts = new Map(docs.map((doc) => [doc.note.path, resolveCompanyOverviewFrom(contexts, notes, doc.note)]));
   const pickerGroups = buildContextPickerGroups({ contexts, docs, series, docContexts, today });
@@ -205,7 +245,9 @@ export function buildInterviewReadModelRecords(notes: Note[], options: { today?:
     const replay = findInterviewPrepReplay(notes, doc);
     if (replay) embeddedDependencies(replay.note, notes, paths);
     const projection: InterviewContext = { kind: "interview-context", source: sourceRef(doc.note), contextPath: context?.note.path ?? null, paths: [...paths] };
-    put(INTERVIEW_RECORDS.context, doc.note.path, projection);
+    const variants = translations.get(doc.note.path);
+    const japanese = doc.prepVersion === 2 && variants ? projectJapaneseInterviewPage(doc.note, context, variants, notes) : undefined;
+    put(INTERVIEW_RECORDS.context, doc.note.path, japanese ? { ...projection, japanese } : projection);
     if (replay) put(INTERVIEW_RECORDS.context, replay.note.path, { ...projection, source: sourceRef(replay.note) });
   }
 

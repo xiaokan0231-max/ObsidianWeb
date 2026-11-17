@@ -1712,6 +1712,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
               {view === "session" && interviewScopeReady && (!calendarInterview || (interviewScopeReady && calendarInterview.view === view && (calendarInterview.path || calendarCompanyContext))) && (
                 <InterviewSession
                   companyContexts={interviewRead.companyContexts}
+                  japanese={interviewRead.japanese}
                   key={interviewRouteVersion}
                   catalog={interviewRead.catalog}
                   remoteDigest={interviewRead.digest}

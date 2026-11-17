@@ -91,6 +91,24 @@ test("不发布笔记只留本地，正文、压缩响应和新旧查询索引�
   assert.equal(privateNote.content, "PRIVATE-INTERVIEW-CONTENT");
 });
 
+test("准备稿撤回时，同场日文译稿不会留在正文或旧索引中", async t => {
+  const previous = await mkdtemp(join(tmpdir(), "published-translation-old-"));
+  const directory = await mkdtemp(join(tmpdir(), "published-translation-new-"));
+  t.after(() => Promise.all([previous, directory].map(path => rm(path, { recursive: true, force: true }))));
+  const prep = makeNote("準備.md", "interview-prep", "# 準備");
+  const company = makeNote("会社.md", "company", "# 会社");
+  const translation = makeNote("翻訳.md", "interview-page-translation", "# 訳\nTRANSLATED-CONTENT");
+  Object.assign(translation.frontmatter, { language: "ja", translation_for: prep.path, translation_source: company.path });
+  const old = await writePublishedVaultAssets([...notes, prep, company, translation], previous, publishedAt);
+  assert.ok(old.manifest.chunks[translation.path]);
+  const privatePrep = { ...prep, frontmatter: { ...prep.frontmatter, publish: false } };
+  const { manifest } = await writePublishedVaultAssets([...notes, privatePrep, company, translation], directory, publishedAt, previous);
+  assert.equal(manifest.chunks[translation.path], undefined);
+  assert.ok(manifest.readModels.every(model => model.revision !== old.manifest.readModel.revision));
+  const bodyIndex = JSON.parse(await readFile(join(directory, manifest.readModel.bodyIndexFile), "utf8"));
+  assert.equal(bodyIndex[translation.path], undefined);
+});
+
 test("公开学习短摘不公开私有原稿，正文与聚合响应一致标记不可打开的出处", async t => {
   const directory = await mkdtemp(join(tmpdir(), "published-reading-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

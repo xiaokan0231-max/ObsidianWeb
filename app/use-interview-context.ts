@@ -10,6 +10,7 @@ import type { InterviewTrends } from "@/lib/interview-trends.mjs";
 import type { CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { ReadModelFetchError } from "./read-model-resource";
 import type { CompanyOverview } from "@/lib/company-overview";
+import { applyInterviewPageTranslation, interviewPageTranslationTarget } from "@/lib/interview-page-translation";
 
 export type InterviewView = "session" | "prep" | "review" | "insights" | "practice";
 export type InterviewSelection = { sourcePath?: string; contextPath?: string; company?: string; paths?: string[]; overviewOnly?: boolean; calendar?: CalendarInterviewTarget };
@@ -23,7 +24,8 @@ export type InterviewRemoteReview = {
   loadSection: (section: "quality" | "advisory", retry?: boolean) => Promise<void>;
   loadQualityBlock: (id: string, retry?: boolean) => Promise<void>;
 };
-type State = { notes: Note[]; companyContexts?: CompanyOverview[]; catalog: InterviewCatalog | null; digest: InterviewTrends | null; target: CalendarInterviewTarget | null; revision: string; fetchedAt: number | null; syncState: "ready" | "building" | "failed"; ready: boolean; loading: boolean; error: string; sourcePath: string; contextPath: string; review: InterviewRemoteReview | null };
+export type JapaneseInterviewPage = { sourcePath: string; prep: Note; dependencies: Note[]; company: CompanyOverview | null };
+type State = { notes: Note[]; companyContexts?: CompanyOverview[]; japanese?: JapaneseInterviewPage; catalog: InterviewCatalog | null; digest: InterviewTrends | null; target: CalendarInterviewTarget | null; revision: string; fetchedAt: number | null; syncState: "ready" | "building" | "failed"; ready: boolean; loading: boolean; error: string; sourcePath: string; contextPath: string; review: InterviewRemoteReview | null };
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 /** 正文、目录、分块各有独立缓存，迟到的 A 场请求不能覆盖刚选中的 B 场。 */
@@ -215,7 +217,15 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
       ]);
       if (contexts.some((item) => item.revision !== revision)) throw new Error("资料版本不一致，请刷新重试");
       const paths = [...new Set(contexts.flatMap((item) => item.context.paths))];
-      let notes = await Promise.all(paths.map((path) => fullNote(path, revision, signal)));
+      // 单场译稿随已选场次读取，切换语言时沿用同版资料和当前页签。
+      const translation = view === "session" ? contexts.find((item) => item.context.source.path === sourcePath)?.context.japanese : undefined;
+      const localizedNotes = translation ? Promise.all([...new Set([translation.prepPath, ...translation.paths])]
+        .map((path) => fullNote(path, revision, signal))).catch((error: unknown) => {
+          if (signal.aborted || (error instanceof ReadModelFetchError && error.status === 409)) throw error;
+          return null;
+        }) : Promise.resolve(null);
+      const [baseNotes, variants] = await Promise.all([Promise.all(paths.map((path) => fullNote(path, revision, signal))), localizedNotes]);
+      let notes = baseNotes;
       for (const [path, written] of writtenNotes) {
         if (payload.syncState !== "building" && revision !== written.revision) { writtenNotes.delete(path); continue; }
         if (sourcePath !== written.sourcePath && view !== "practice") continue;
@@ -227,6 +237,24 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
         if (!company) throw new Error("本场公司材料版本不完整，请重新读取");
         return [company.note.path, company] as const;
       })).values()] : undefined;
+      let japanese: JapaneseInterviewPage | undefined;
+      if (translation && variants) {
+        const prep = variants.find((note) => note.path === translation.prepPath);
+        if (prep && interviewPageTranslationTarget(prep)?.prepPath === sourcePath) {
+          const localized = new Map(notes.map((note) => [note.path, note]));
+          for (const variant of variants) {
+            const target = interviewPageTranslationTarget(variant);
+            if (!target) { localized.set(variant.path, variant); continue; }
+            if (target.prepPath !== sourcePath || target.sourcePath === sourcePath) continue;
+            const canonical = localized.get(target.sourcePath);
+            const translated = canonical && applyInterviewPageTranslation(canonical, variant);
+            if (translated) localized.set(canonical.path, translated);
+          }
+          const dependencies = [...localized.values()];
+          japanese = { sourcePath, prep, dependencies,
+            company: translation.company ? hydrateInterviewCompany(translation.company, dependencies) : null };
+        }
+      }
       let review: InterviewRemoteReview | null = null;
       if (view === "review" && sourcePath) {
         const payload = await json<{ revision: string; review: InterviewReviewProjection }>(endpoint("review", revision, { path: sourcePath }), signal);
@@ -255,7 +283,7 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
       }
       if (id === generation) {
         if (revision !== state.revision) expiredReviewReads.clear();
-        publish({ notes, companyContexts, catalog, digest: trendPayload.digest, target, revision, fetchedAt: Date.now(), syncState: payload.syncState ?? "ready", ready: true, loading: false, error: "", sourcePath,
+        publish({ notes, companyContexts, japanese, catalog, digest: trendPayload.digest, target, revision, fetchedAt: Date.now(), syncState: payload.syncState ?? "ready", ready: true, loading: false, error: "", sourcePath,
           contextPath: contexts[0]?.context.contextPath ?? "", review });
       }
       if (id === generation && payload.syncState === "building" && Date.now() < pollDeadline) pollTimer = setTimeout(() => {
