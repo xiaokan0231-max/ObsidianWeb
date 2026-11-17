@@ -3,6 +3,7 @@
   --calendar-amber: var(--gold);
   --calendar-cyan: var(--teal);
   --calendar-violet: var(--violet);
+  --calendar-holiday-wash: color-mix(in oklab, var(--danger) 11%, var(--surface-raised-solid));
   --calendar-edge: color-mix(in oklab, var(--calendar-cyan) 18%, var(--line));
   --calendar-glint: color-mix(in oklab, var(--highlight) 18%, transparent);
   --calendar-lift-shadow: 0 6px 18px color-mix(in oklab, var(--shadow-color) 13%, transparent);
@@ -133,6 +134,30 @@
 .calendar-view .cw-day-head.today.selected {
   box-shadow: inset 0 3px 0 var(--calendar-amber), inset 1px 0 0 var(--calendar-cyan), inset -1px 0 0 var(--calendar-cyan);
 }
+
+/* 底色覆盖周末及过去态，也保留今天与选中态的描边。周格整点线仍画在底色上。 */
+.calendar-view .calendar-grid .calendar-day.holiday { background: var(--calendar-holiday-wash); }
+.calendar-view :is(.cw-day-head, .cw-allday-cell, .cw-col).holiday { background-color: var(--calendar-holiday-wash); }
+
+.calendar-day.holiday .calendar-day-number { justify-content: flex-start; gap: 4px; }
+.calendar-day-number .calendar-holiday-name + span { margin-inline-start: auto; white-space: nowrap; }
+.calendar-view .calendar-holiday-name {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.calendar-view :is(.calendar-holiday-detail, .calendar-holiday-coverage) {
+  color: var(--danger);
+  font-size: 12px;
+}
+.calendar-holiday-detail { margin: 0 0 6px; }
+.calendar-holiday-coverage { margin: 0; padding: 6px 18px; }
 
 /* 卡片只在原状态底色上加高光，不给成功、等待或结束换色。 */
 .calendar-view .calendar-event,

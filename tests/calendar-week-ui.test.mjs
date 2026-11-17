@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { japaneseHolidayYears } from "../lib/japanese-holidays.ts";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
 /*
@@ -129,6 +130,33 @@ test("不带 calview 时仍是月格，分段控件停在「月」", () => {
   assert.match(html, /class="calendar-event upcoming kind-event status-active conflict"/);
   assert.match(html, /aria-pressed="true">月<\/button><button type="button" aria-pressed="false">周<\/button>/);
   assert.doesNotMatch(html, /calendar-week-view|cw-block/);
+});
+
+test("日本祝日只标记日期，保留同日真实安排", () => {
+  const html = render(zh, { events: [event("D", { date: "2026-08-11" })] });
+  assert.match(html, /class="cw-day-head holiday" data-day="2026-08-11"/);
+  assert.match(html, /aria-label="[^"]*日本祝日 山の日 · 查看当日详情"/);
+  assert.match(html, /class="calendar-holiday-name" lang="ja" title="山の日">山の日<\/span>/);
+  assert.match(html, /class="cw-col holiday" data-day="2026-08-11"/);
+  assert.doesNotMatch(html, /cw-allday|calendar-holiday-coverage/);
+  assert.equal(blocks(html).length, 1);
+
+  const monthly = render(month, { events: [] });
+  assert.match(monthly, /class="calendar-day holiday"[^>]*data-day="2026-08-11"/);
+  assert.doesNotMatch(monthly, /class="calendar-event /);
+});
+
+test("使用内閣府公布的补休和国民休日，未公布的周提示数据范围", async () => {
+  const september = await load("?month=2026-09");
+  const html = render(september, { today: "2026-09-01", events: [] });
+  assert.match(html, /class="calendar-day holiday"[^>]*data-day="2026-09-22"[\s\S]*?日本祝日 休日/);
+  const spring = await load("?calview=week&calweek=2027-03-22");
+  assert.match(render(spring, { events: [] }), /class="cw-col holiday" data-day="2027-03-22"/);
+
+  const future = await load(`?calview=week&calweek=${Number(japaneseHolidayYears.last) + 1}-02-01`);
+  const outside = render(future, { events: [] });
+  assert.match(outside, /calendar-holiday-coverage/);
+  assert.doesNotMatch(outside, /class="calendar-holiday-name"/);
 });
 
 test("周视图沿用同一个打开回调与键盘守卫，不在渲染期取当前时刻", async () => {

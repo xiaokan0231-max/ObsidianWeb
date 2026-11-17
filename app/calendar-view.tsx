@@ -17,6 +17,7 @@ import { enumCodec, useInitialUrlSearch, useUrlState, type UrlStateCodec } from 
 import { isTypingTarget } from "@/lib/keyboard";
 import { prefersReducedMotion } from "@/lib/motion";
 import { calendarMonthDays } from "@/lib/calendar-month";
+import { japaneseHolidayName, japaneseHolidayYears } from "@/lib/japanese-holidays";
 import { buildCalendarWeek, calendarWeekDays, calendarWeekRangeLabel, calendarWeekStart, jstClock, minutesLabel, stepWeekSelection } from "@/lib/calendar-week";
 import { buildAiApplicationDays, summarizeAiApplicationDays } from "@/lib/calendar-applications";
 import { calendarConflicts } from "@/lib/calendar-conflicts";
@@ -53,6 +54,8 @@ const calendarZh = {
   previousMonth: "上一个月",
   nextMonth: "下一个月",
   today: "今天",
+  holiday: "日本祝日",
+  holidayCoverage: (first: string, last: string) => `日本祝日数据覆盖 ${first}–${last} 年`,
   weekdays: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
   rounds: "面试轮次",
   roundHelp: "面试轮次说明",
@@ -117,7 +120,7 @@ const calendarZh = {
   associationConflicts: (count: number) => `关联冲突 ${count} 场`,
   associationExplanation: "这些记录存在明确的关联冲突，需要核对来源后才能判断进展；不计为本人待办。",
   statMonthAi: "本月 AI 代投",
-  selectDay: (label: string) => `${label} · 查看当日详情`,
+  selectDay: (label: string, holiday?: string) => `${label}${holiday ? ` · 日本祝日 ${holiday}` : ""} · 查看当日详情`,
   dayDetail: (label: string) => `${label} · 当日`,
   dayEmpty: "这一天没有已确认的安排。",
   closeDay: "收起当日详情",
@@ -193,6 +196,8 @@ const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
     focusTone: (label) => `「${label}」の予定だけを強調（もう一度押すと解除）`,
     pending: "実施予定", offer: "内定獲得",
     previousMonth: "前の月", nextMonth: "次の月", today: "今日",
+    holiday: "日本の祝日・休日",
+    holidayCoverage: (first, last) => `日本の祝日・休日データは ${first}〜${last} 年分`,
     weekdays: ["月", "火", "水", "木", "金", "土", "日"],
     rounds: "面接の段階", roundHelp: "面接の段階の説明",
     roundLegend: "面接の段階：0 はカジュアル面談、1、2、3 などの数字は正式な面接回数、終は最終面接、エはエージェント面談、疑問符は段階未確認",
@@ -212,7 +217,7 @@ const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
     historicalScopeExplanation: "現在の案件の状態を読み取れず、その回の結果や関連付けを個別に説明する必要がある実施済みの予定だけを表示します。現在の案件に関連付いた予定は現在の状態で表示し、ここには含めません。分母は実施済みの全予定で、表示中の月や週には限定しません。", historicalEmpty: "状態の補足説明が必要な過去の予定はありません。", historicalOpen: "現在の状態がない過去の予定と元の記録を見る", historicalClose: "過去の状態説明を閉じる",
     historicalRejected: "当該回は不採用", historicalPassed: "当該回は通過", historicalMeetingCompleted: "面談実施済み", historicalResult: "当時の結果は記録済み", historicalMissing: "過去の関連先が不明", historicalUnrecorded: "後続の記載なし", associationConflicts: (count) => `関連付けの矛盾 ${count} 件`, associationExplanation: "明記された関連付けに矛盾があり、進捗の判断には元の記録の確認が必要です。本人の TODO には数えません。",
     statMonthAi: "今月のAI代行応募",
-    selectDay: (label) => `${label} · この日の詳細を見る`, dayDetail: (label) => `${label} · この日`,
+    selectDay: (label, holiday) => `${label}${holiday ? ` · 祝日・休日 ${holiday}` : ""} · この日の詳細を見る`, dayDetail: (label) => `${label} · この日`,
     dayEmpty: "この日に確定した予定はありません。", closeDay: "この日の詳細を閉じる",
     aiApplications: "AI代行応募", aiShort: "代行", aiApplicationsToday: "今日のAI代行応募", applicationCompanyUnit: "社",
     applicationCompanyShort: "社",
@@ -554,9 +559,11 @@ function CalendarView({
   const displayedHistoricalTotal = pulseSummary?.historicalTotal ?? recent.length;
   const selectedEvents = selectedDay ? eventsByDate.get(selectedDay) ?? [] : [];
   const selectedApplications = selectedDay && selectedDay !== today ? applicationsByDate.get(selectedDay) : undefined;
+  const selectedHoliday = selectedDay ? japaneseHolidayName(selectedDay) : undefined;
 
   const rangeFrom = calView === "week" ? weekStart : days[0].key;
   const rangeTo = calView === "week" ? shiftCalendarDay(weekStart, 6) : days.at(-1)!.key;
+  const outsideHolidayCoverage = rangeFrom.slice(0, 4) < japaneseHolidayYears.first || rangeTo.slice(0, 4) > japaneseHolidayYears.last;
   const onRangeChange = projection?.onRangeChange;
   useEffect(() => { if (onRangeChange) void onRangeChange({ from: rangeFrom, to: rangeTo, month: overviewMonth }); }, [onRangeChange, rangeFrom, rangeTo, overviewMonth]);
   const loadHistory = projection?.loadHistory;
@@ -825,6 +832,7 @@ function CalendarView({
             </ul>
             </details>
           </div>
+          {outsideHolidayCoverage && <p className="calendar-holiday-coverage">{copy.holidayCoverage(japaneseHolidayYears.first, japaneseHolidayYears.last)}</p>}
           {calView === "week" ? (
             <WeekBoard
               key={weekStart}
@@ -865,9 +873,10 @@ function CalendarView({
                     {week.map((day) => {
                       const dayEvents = eventsByDate.get(day.key) ?? [];
                       const applications = applicationsByDate.get(day.key);
+                      const holiday = japaneseHolidayName(day.key);
                       const isToday = day.key === today;
                       const className = ["calendar-day", !day.inMonth && "outside", isToday && "today",
-                        day.key < today && "past", day.weekend && "weekend", selectedDay === day.key && "selected"].filter(Boolean).join(" ");
+                        day.key < today && "past", day.weekend && "weekend", selectedDay === day.key && "selected", holiday && "holiday"].filter(Boolean).join(" ");
                       return (
                         <div className={className} key={day.key} role="gridcell" data-day={day.key} aria-current={isToday ? "date" : undefined}>
                           <div className="calendar-day-number">
@@ -875,11 +884,12 @@ function CalendarView({
                               type="button"
                               className="calendar-day-select"
                               aria-pressed={selectedDay === day.key}
-                              aria-label={copy.selectDay(dayLabel(day.key))}
+                              aria-label={copy.selectDay(dayLabel(day.key), holiday)}
                               onClick={() => selectedDay === day.key ? setSelectedDay("") : selectDay(day.key)}
                             >
                               <time dateTime={day.key}>{day.date.getDate()}</time>
                             </button>
+                            {holiday && <HolidayName name={holiday} />}
                             {isToday && <span>{copy.today}</span>}
                           </div>
                           <div className="calendar-day-events">
@@ -959,6 +969,7 @@ function CalendarView({
               onInterview={onInterview}
               action={<button type="button" className="calendar-day-close" onClick={() => setSelectedDay("")} aria-label={copy.closeDay}>×</button>}
             >
+              {selectedHoliday && <p className="calendar-holiday-detail">{copy.holiday} · <span lang="ja">{selectedHoliday}</span></p>}
               {selectedApplications && <CalendarApplicationTrigger day={selectedApplications} expanded={applicationDate === selectedApplications.date} onOpen={openApplications} className="calendar-application-open"
                 label={copy.applicationDayLabel(selectedApplications.date, selectedApplications.companyCount, selectedApplications.positionCount)}>{copy.aiApplications} · {selectedApplications.companyCount}{copy.applicationCompanyShort} · {copy.applicationPositionCount(selectedApplications.positionCount)} →</CalendarApplicationTrigger>}
             </AgendaGroup>
@@ -1034,6 +1045,10 @@ function CalendarView({
   );
 }
 
+function HolidayName({ name }: { name: string }) {
+  return <span className="calendar-holiday-name" lang="ja" title={name}>{name}</span>;
+}
+
 /** 日历卡片只显示公司简称，完整名称保留在按钮提示和读屏说明中。 */
 function compactCompany(name: string) {
   const trimmed = name.trim();
@@ -1080,6 +1095,7 @@ function WeekBoard({
   onInterview: (event: CalendarEvent, view?: CalendarInterviewTarget["view"]) => void;
 }) {
   const week = useMemo(() => buildCalendarWeek(weekStart, events), [weekStart, events]);
+  const days = week.days.map((day) => ({ ...day, holiday: japaneseHolidayName(day.date) }));
   const { start, end } = week.range;
   const total = end - start;
   const hours = Array.from({ length: total / 60 }, (_, index) => start + index * 60);
@@ -1134,17 +1150,17 @@ function WeekBoard({
     >
       <div className="cw-head">
         <span className="cw-corner" aria-hidden="true">JST</span>
-        {week.days.map((day, index) => {
+        {days.map((day, index) => {
           const applications = applicationsByDate.get(day.date);
           const className = ["cw-day-head", day.date === today && "today", day.date < today && "past",
-            index >= 5 && "weekend", selectedDay === day.date && "selected"].filter(Boolean).join(" ");
+            index >= 5 && "weekend", selectedDay === day.date && "selected", day.holiday && "holiday"].filter(Boolean).join(" ");
           return (
             <div className={className} key={day.date} data-day={day.date} aria-current={day.date === today ? "date" : undefined}>
               <button
                 type="button"
                 className="cw-day-select"
                 aria-pressed={selectedDay === day.date}
-                aria-label={copy.selectDay(dayLabel(day.date))}
+                aria-label={copy.selectDay(dayLabel(day.date), day.holiday)}
                 // 方向键与 Enter 由日历统一监听（见 onCalendarKey），这里只负责告诉读屏与悬停提示。
                 aria-keyshortcuts="ArrowLeft ArrowRight Enter"
                 title={copy.weekKeys}
@@ -1153,6 +1169,7 @@ function WeekBoard({
                 <span className="cw-weekday">{copy.weekdays[index]}</span>
                 <time dateTime={day.date}>{Number(day.date.slice(8))}</time>
               </button>
+              {day.holiday && <HolidayName name={day.holiday} />}
               {applications && (
                 <CalendarApplicationTrigger day={applications} expanded={applicationDate === applications.date} onOpen={onShowApplications} className="cw-ai"
                   label={copy.applicationDayLabel(day.date, applications.companyCount, applications.positionCount)}>
@@ -1166,8 +1183,8 @@ function WeekBoard({
       {hasAllDay && (
         <div className="cw-allday">
           <span className="cw-gutter-label" title={copy.allDayHint}>{copy.allDay}</span>
-          {week.days.map((day) => (
-            <div className={`cw-allday-cell${day.date === today ? " today" : ""}${selectedDay === day.date ? " selected" : ""}`} key={day.date}>
+          {days.map((day) => (
+            <div className={["cw-allday-cell", day.date === today && "today", selectedDay === day.date && "selected", day.holiday && "holiday"].filter(Boolean).join(" ")} key={day.date}>
               {day.allDay.map((event) => eventButton(event, "cw-chip"))}
             </div>
           ))}
@@ -1178,9 +1195,9 @@ function WeekBoard({
           {hours.map((minutes) => <span key={minutes}>{minutesLabel(minutes)}</span>)}
           <span className="cw-time-end">{minutesLabel(end)}</span>
         </div>
-        {week.days.map((day, index) => (
+        {days.map((day, index) => (
           <div
-            className={["cw-col", day.date === today && "today", index >= 5 && "weekend", selectedDay === day.date && "selected"].filter(Boolean).join(" ")}
+            className={["cw-col", day.date === today && "today", index >= 5 && "weekend", selectedDay === day.date && "selected", day.holiday && "holiday"].filter(Boolean).join(" ")}
             key={day.date}
             data-day={day.date}
           >
