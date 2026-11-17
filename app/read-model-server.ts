@@ -5,13 +5,16 @@ import { fetchSealedPublishedAsset, publishedAssetSecrets } from "@/lib/server/s
 
 type PublishedIndex = { revision?: string; manifestFile: string; batches: string[]; bodyIndexFile: string };
 type PublishedRoot = { publishedAt: string; readModel: PublishedIndex; readModels?: PublishedIndex[] };
-type PublishedPolicy = { root: PublishedRoot; indexes: PublishedIndex[]; asset<T>(file: string): Promise<T>; digest: string };
+type PublishedPolicyData = { root: PublishedRoot; indexes: PublishedIndex[]; digest: string };
+type PublishedPolicy = PublishedPolicyData & { asset<T>(file: string): Promise<T> };
+type PublishedSourceData = { manifest: ReadModelManifest; bodies?: Record<string, string> };
 type Source = { manifest: ReadModelManifest; publishedAt: string; batch(index: number): Promise<ReadModelBatch>; note(path: string): Promise<Note | null> };
 type Model = ReturnType<typeof createReadModel>;
 const models = new WeakMap<D1Database, Model>();
 const flights = new WeakMap<Model, Map<string, Promise<void>>>();
-const publishedPolicies = new WeakMap<Fetcher, { secret: string | undefined; pending: Promise<PublishedPolicy> }>();
-const publishedSources = new WeakMap<Fetcher, Map<string, Promise<Source>>>();
+// Workers 的 I/O Promise 属于创建它的请求，跨请求只复用已经解析的资料。
+const publishedPolicies = new WeakMap<Fetcher, { secret: string; data?: PublishedPolicyData }>();
+const publishedSources = new WeakMap<Fetcher, Map<string, PublishedSourceData>>();
 const assetName = /^[a-f0-9]{24}\.json(?:\.gz)?$/;
 
 export class ReadModelError extends Error {
@@ -38,30 +41,30 @@ export async function publishedReadModelPolicy(fresh = false): Promise<Published
   if (!assets) throw new ReadModelError("发布资料索引不可用");
   const secrets = publishedAssetSecrets(env as { SITE_ASSET_SECRET?: string; SITE_ASSET_SECRET_NEXT?: string });
   const secret = secrets.join(":");
-  const previous = publishedPolicies.get(assets);
-  if (!fresh && previous && previous.secret === secret) return previous.pending;
-  const pending = (async () => {
-    async function asset<T>(file: string): Promise<T> {
-      if (file !== "manifest.json" && !assetName.test(file)) throw new ReadModelError("发布索引路径无效");
-      const response = await fetchSealedPublishedAsset(assets!, new Request(`http://localhost/_published-vault/${file}`), secrets);
-      if (!response.ok) throw new ReadModelError("发布资料尚未准备完成");
-      if (file.endsWith(".gz")) {
-        if (!response.body) throw new ReadModelError("发布资料内容不完整");
-        return new Response(response.body.pipeThrough(new DecompressionStream("gzip"))).json() as Promise<T>;
-      }
-      return response.json() as Promise<T>;
+  async function asset<T>(file: string): Promise<T> {
+    if (file !== "manifest.json" && !assetName.test(file)) throw new ReadModelError("发布索引路径无效");
+    const response = await fetchSealedPublishedAsset(assets!, new Request(`http://localhost/_published-vault/${file}`), secrets);
+    if (!response.ok) throw new ReadModelError("发布资料尚未准备完成");
+    if (file.endsWith(".gz")) {
+      if (!response.body) throw new ReadModelError("发布资料内容不完整");
+      return new Response(response.body.pipeThrough(new DecompressionStream("gzip"))).json() as Promise<T>;
     }
-    const root = await asset<PublishedRoot>("manifest.json");
-    if (!root.readModel?.revision || !Array.isArray(root.readModel.batches)) throw new ReadModelError("此发布版本尚未包含资料索引");
-    const indexes = [root.readModel, ...(root.readModels ?? [])].filter((item, index, all) =>
-      item?.revision && all.findIndex(other => other?.revision === item.revision) === index);
-    if (indexes.some(item => !assetName.test(item.manifestFile) || !assetName.test(item.bodyIndexFile)
-      || !Array.isArray(item.batches) || item.batches.some(file => !assetName.test(file)))) throw new ReadModelError("发布资料清单无效");
-    return { root, indexes, asset, digest: await readModelHash(JSON.stringify(root)) };
-  })();
-  publishedPolicies.set(assets, { secret, pending });
-  try { return await pending; }
-  catch (error) { if (publishedPolicies.get(assets)?.pending === pending) publishedPolicies.delete(assets); throw error; }
+    return response.json() as Promise<T>;
+  }
+  const previous = publishedPolicies.get(assets);
+  if (!fresh && previous?.secret === secret && previous.data) return { ...previous.data, asset };
+  // 强制刷新先清掉旧值，旧请求即使晚到也不能再把它填回。
+  const slot = !fresh && previous?.secret === secret ? previous : { secret };
+  if (slot !== previous) publishedPolicies.set(assets, slot);
+  const root = await asset<PublishedRoot>("manifest.json");
+  if (!root.readModel?.revision || !Array.isArray(root.readModel.batches)) throw new ReadModelError("此发布版本尚未包含资料索引");
+  const indexes = [root.readModel, ...(root.readModels ?? [])].filter((item, index, all) =>
+    item?.revision && all.findIndex(other => other?.revision === item.revision) === index);
+  if (indexes.some(item => !assetName.test(item.manifestFile) || !assetName.test(item.bodyIndexFile)
+    || !Array.isArray(item.batches) || item.batches.some(file => !assetName.test(file)))) throw new ReadModelError("发布资料清单无效");
+  const data = { root, indexes, digest: await readModelHash(JSON.stringify(root)) };
+  slot.data = data;
+  return { ...data, asset };
 }
 
 async function source(requestedRevision?: string, baseRevision?: string, selectedPolicy?: PublishedPolicy): Promise<Source> {
@@ -80,25 +83,23 @@ async function source(requestedRevision?: string, baseRevision?: string, selecte
   let cached = publishedSources.get(assets);
   if (!cached) { cached = new Map(); publishedSources.set(assets, cached); }
   const cacheKey = `${policy.digest}:${index.revision}`;
-  const previous = cached.get(cacheKey);
-  if (previous) return previous;
-  const pending = (async (): Promise<Source> => {
+  let data = cached.get(cacheKey);
+  if (!data) {
     const manifest = await policy.asset<ReadModelManifest>(index.manifestFile);
     if (manifest.revision !== index.revision || manifest.batchCount !== index.batches.length) throw new ReadModelError("发布资料版本不一致");
-    let bodyIndex: Promise<Record<string, string>> | undefined;
-    return { manifest, publishedAt: policy.root.publishedAt,
-      batch: (position) => policy.asset(index.batches[position]),
-      note: async (path) => {
-        bodyIndex ??= policy.asset<Record<string, string>>(index.bodyIndexFile).catch((error) => { bodyIndex = undefined; throw error; });
-        const bodies = await bodyIndex;
-        return bodies[path] ? policy.asset<Note>(bodies[path]) : null;
-      },
-    };
-  })().catch((error) => { cached!.delete(cacheKey); throw error; });
-  // 同一部署的资源不可变；仅缓存小清单，正文和批次仍按需读取。
-  cached.set(cacheKey, pending);
-  while (cached.size > 4) cached.delete(cached.keys().next().value!);
-  return pending;
+    data = cached.get(cacheKey) ?? { manifest };
+    cached.set(cacheKey, data);
+    while (cached.size > 4) cached.delete(cached.keys().next().value!);
+  }
+  const snapshot = data;
+  return { manifest: snapshot.manifest, publishedAt: policy.root.publishedAt,
+    batch: (position) => policy.asset(index.batches[position]),
+    note: async (path) => {
+      const bodies = snapshot.bodies ?? await policy.asset<Record<string, string>>(index.bodyIndexFile);
+      snapshot.bodies = bodies;
+      return bodies[path] ? policy.asset<Note>(bodies[path]) : null;
+    },
+  };
 }
 
 async function model() {
@@ -134,20 +135,26 @@ async function warmSource(store: Model, input: Source, limit: number) {
   const revision = input.manifest.revision;
   const existing = await store.status(revision);
   if (existing?.state === "ready") return { ...existing, publishedAt: input.publishedAt };
+  const importBatches = async () => {
+    await store.begin(input.manifest);
+    // 完成数量不能作为续传位置；乱序批次可能在中间留下缺口。
+    for (let count = 0; count < Math.max(1, Math.min(limit, 2)); count++) {
+      const index = await store.firstMissingBatch(revision);
+      if (index >= input.manifest.batchCount) break;
+      await store.importBatch(revision, await input.batch(index), index);
+    }
+    if (await store.firstMissingBatch(revision) >= input.manifest.batchCount) await store.finish(revision);
+  };
+  // 线上并发由 D1 的索引批次回执去重，不借用其他请求的 I/O。
+  if (process.env.OBSIDIAN_DATA_SOURCE === "published") {
+    await importBatches();
+    return { ...(await store.status(revision))!, publishedAt: input.publishedAt };
+  }
   let running = flights.get(store);
   if (!running) { running = new Map(); flights.set(store, running); }
   let pending = running.get(revision);
   if (!pending) {
-    pending = (async () => {
-      await store.begin(input.manifest);
-      // 完成数量不能作为续传位置；乱序批次可能在中间留下缺口。
-      for (let count = 0; count < Math.max(1, Math.min(limit, 2)); count++) {
-        const index = await store.firstMissingBatch(revision);
-        if (index >= input.manifest.batchCount) break;
-        await store.importBatch(revision, await input.batch(index), index);
-      }
-      if (await store.firstMissingBatch(revision) >= input.manifest.batchCount) await store.finish(revision);
-    })().finally(() => { running.delete(revision); });
+    pending = importBatches().finally(() => { running.delete(revision); });
     running.set(revision, pending);
   }
   await pending;

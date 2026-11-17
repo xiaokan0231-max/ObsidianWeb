@@ -5,9 +5,9 @@ import type { CalendarSnapshot } from "../calendar-snapshot.ts";
 
 type RecordReader = { readRecord<T>(revision: string, kind: string, key: string): Promise<T | null> };
 export class InterviewRevisionError extends Error { readonly status = 409; }
-const catalogs = new WeakMap<RecordReader, Map<string, Promise<InterviewCatalog>>>();
+const catalogs = new WeakMap<RecordReader, Map<string, InterviewCatalog>>();
 
-function catalogFor(model: RecordReader, revision: string) {
+async function catalogFor(model: RecordReader, revision: string) {
   let versions = catalogs.get(model);
   if (!versions) { versions = new Map(); catalogs.set(model, versions); }
   const existing = versions.get(revision);
@@ -15,18 +15,12 @@ function catalogFor(model: RecordReader, revision: string) {
     versions.delete(revision); versions.set(revision, existing);
     return existing;
   }
-  const cache = versions;
-  const pending = model.readRecord<InterviewCatalog>(revision, INTERVIEW_RECORDS.catalog, "root").then((catalog) => {
-    if (!catalog || catalog.kind !== "interview-catalog") throw new InterviewRevisionError("这版资料已更新或尚未同步完成，请刷新后重试");
-    return catalog;
-  }).catch((error) => {
-    if (cache.get(revision) === pending) cache.delete(revision);
-    throw error;
-  });
-  cache.set(revision, pending);
-  // 资料版本由运行时验证是否仍然可用；这里只复用不可变目录，避免每题重复解码大目录。
-  while (cache.size > 3) cache.delete(cache.keys().next().value!);
-  return pending;
+  const catalog = await model.readRecord<InterviewCatalog>(revision, INTERVIEW_RECORDS.catalog, "root");
+  if (!catalog || catalog.kind !== "interview-catalog") throw new InterviewRevisionError("这版资料已更新或尚未同步完成，请刷新后重试");
+  // 只复用不可变目录。另一个请求的 D1 Promise 可能随着该请求结束而中断。
+  versions.set(revision, catalog);
+  while (versions.size > 3) versions.delete(versions.keys().next().value!);
+  return catalog;
 }
 
 /** 先验证整版目录可用，再读取其中的记录；不能把未完成同步显示成空列表。 */

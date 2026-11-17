@@ -12,18 +12,17 @@ export type PublishedVault = {
   readModels?: PublishedReadModel[];
 };
 
-// 同一部署里的资源不可变；合并并发读取，避免每次切页重复解析全库。
+// 同一部署的清单不可变；跨请求复用解析结果，各请求自行完成首次读取。
 export function createPublishedVaultReader(load: () => Promise<unknown>, loadNotes: (file: string) => Promise<ObsidianNote[]>) {
-  let pending: Promise<PublishedVault> | undefined;
-  function snapshot() {
-    pending ??= load().then((value) => {
-      const data = value as PublishedVault;
-      if (data?.schemaVersion !== 2 || !Array.isArray(data.scopes?.all) || !data.chunks || !data.publishedAt) {
-        throw new Error("云端内容格式无效，请重新发布");
-      }
-      return data;
-    }).catch((error) => { pending = undefined; throw error; });
-    return pending;
+  let resolved: PublishedVault | undefined;
+  async function snapshot() {
+    if (resolved) return resolved;
+    const data = await load() as PublishedVault;
+    if (data?.schemaVersion !== 2 || !Array.isArray(data.scopes?.all) || !data.chunks || !data.publishedAt) {
+      throw new Error("云端内容格式无效，请重新发布");
+    }
+    resolved = data;
+    return data;
   }
   return {
     async readAll(scope: VaultScope = "all") {

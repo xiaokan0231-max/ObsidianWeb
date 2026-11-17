@@ -12,8 +12,9 @@ test("published reads use a single cloud snapshot with no local service", async 
   const [all, one] = await Promise.all([reader.readAll(), reader.readNote(note.path)]);
   assert.deepEqual(all, [note]);
   assert.deepEqual(one, note);
-  assert.equal(calls, 1);
+  assert.equal(calls, 2, "冷读请求不会共享另一个请求的未完成 I/O");
   assert.deepEqual(await reader.readAll("jobs"), []);
+  assert.equal(calls, 2, "后续请求复用同一份解析完成的快照");
   await assert.rejects(reader.readNote("不存在.md"), /returned 404/);
 });
 test("failed or invalid snapshots retry rather than caching an empty result", async () => {
