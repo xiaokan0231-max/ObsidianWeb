@@ -71,6 +71,19 @@ test("真实确认取代本轮候选，过去的其他轮次保留", () => {
   }
 });
 
+test("面试中的案件保留一面历史，并显示待确认的二面", () => {
+  const caseA = owner({ status: "面接中（一次通過）" });
+  const historical = prep({ date: "2026-11-06", time: "11:00", session_status: "completed" });
+  const preparing = prep({ round: "二次面接" }, "测试/二次面接准备.md");
+  const events = buildCalendarEvents([caseA, historical, preparing], now);
+  assert.deepEqual(events.map(({ date, label, tentative, prepPath }) => [date, label, tentative, prepPath]), [
+    ["2026-11-06", "第一次面试", undefined, historical.path],
+    ["2026-11-12", "第二次面试", true, preparing.path],
+  ]);
+  const rejected = owner({ status: "不採用" });
+  assert.equal(buildCalendarEvents([rejected, historical, preparing], now).length, 1);
+});
+
 test("逾期候选仍可通过索引打开准备稿，待确认日期不算已约定、发生或冲突", () => {
   const caseA = owner({ status_updated: "2026-11-01", next_event_candidates: ["2026-11-08 10:00", "2026-11-09 10:00"] });
   const preparing = prep();

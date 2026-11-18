@@ -751,8 +751,10 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
   }
   const tentativeEvents: CalendarEvent[] = [];
   for (const note of notes) {
-    if (getType(note) !== JOB_CASE_TYPE || scheduledCases.has(note.path) ||
-      normalizeJobStatus(getString(note.frontmatter.status)) !== "書類通過") continue;
+    if (getType(note) !== JOB_CASE_TYPE || scheduledCases.has(note.path)) continue;
+    // 书类通过与面试中的案件都可能在等待下一轮的时间确认。
+    const status = normalizeJobStatus(getString(note.frontmatter.status));
+    if (status !== "書類通過" && status !== "面接中") continue;
     const start = earliestCalendarCandidate(note.frontmatter.next_event_candidates);
     const context = contexts.get(note.path);
     if (!start || !context || context.invalid) continue;
