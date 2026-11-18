@@ -268,6 +268,7 @@ export function buildInterviewReadModelRecords(notes: Note[], options: { today?:
   const reviews = new Map(joined.map((item) => [item.key, item.deepReviewNote ? cachedQuality(item.deepReviewNote) : null]));
   const outcomes = resolveInterviewOutcomes(notes);
   const visual = joined.map((item) => ({ key: item.key, company: item.company, date: item.date, round: item.round,
+    sessionKind: getString(item.note.frontmatter.session_kind),
     review: reviews.get(item.key), reassessment: reassessment(notes, item.key) }));
   const reviewIndex: InterviewReviewSummary[] = [];
   for (const item of joined) {

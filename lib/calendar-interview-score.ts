@@ -38,6 +38,7 @@ function scoreLabel(overall: number | null, local: unknown[]): CalendarInterview
 
 /** 场次解析已经核过日期、轮次、案件和时刻；评分再按完整整理稿路径取正本。 */
 export function calendarInterviewScore(event: CalendarEvent, target: CalendarInterviewTarget | undefined, notes: Note[]): CalendarInterviewScore | null {
+  if (getString(event.note.frontmatter.session_kind) === "interview-coaching") return null;
   if (!isInterviewEvent(event) || target?.view !== "review" || !target.path) return null;
   const reports = notes.filter(note => getType(note) === "ai-report"
     && note.frontmatter.report_kind === "interview-reassessment" && note.frontmatter.report_role === "session"

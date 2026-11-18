@@ -21,7 +21,7 @@ import {
   type SignalOutcomeComparison,
 } from "@/lib/interview-outcome";
 import { JAPAN_SIGNAL_KEYS, JAPAN_SIGNAL_META, JAPAN_SIGNAL_VERDICT_SHORT } from "@/lib/japan-interview-signals.mjs";
-import type { Note } from "@/lib/notes";
+import { getString, type Note } from "@/lib/notes";
 import { joinReviewNotes } from "@/lib/review-join";
 import { parseInterviewAnswerReview, type InterviewAnswerReview } from "@/lib/review-deep";
 import "./styles/interview-japan-signals.css";
@@ -224,14 +224,14 @@ export function SignalOutcomeTable({ comparison, onSelect, t = identity }: {
   </section>;
 }
 
-type ReviewedInterview = { key: string; company: string; date: string; round: string; review?: InterviewAnswerReview | null };
+type ReviewedInterview = { key: string; company: string; date: string; round: string; sessionKind?: string; review?: InterviewAnswerReview | null };
 
 /**
  * 复盘页与横向对照页共用的场次集合：有回答品质复盘的场次，与 vault:stats 的生成笔记同一口径。
  * key 是整理稿路径——选考结果也按整理稿路径解析。
  */
 export function signalOutcomeComparison(interviews: ReviewedInterview[], outcomes: Map<string, InterviewOutcome>): SignalOutcomeComparison {
-  return buildSignalOutcomeComparison(interviews.filter((item) => item.review).map((item) => ({
+  return buildSignalOutcomeComparison(interviews.filter((item) => item.review && item.sessionKind !== "interview-coaching").map((item) => ({
     key: item.key,
     company: item.company,
     date: item.date,
@@ -248,6 +248,7 @@ export function signalOutcomeFromNotes(notes: Note[]): SignalOutcomeComparison {
     company: joined.company,
     date: joined.date,
     round: joined.round,
+    sessionKind: getString(joined.note.frontmatter.session_kind),
     review: joined.deepReviewNote ? parseInterviewAnswerReview(joined.deepReviewNote.content) : null,
   })), resolveInterviewOutcomes(notes));
 }

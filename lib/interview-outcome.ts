@@ -147,6 +147,7 @@ export function resolveInterviewOutcomes(notes: Note[]): Map<string, InterviewOu
   const groups = new Map<string, Session[]>();
   const owners = new Map<string, Note>();
   for (const note of [...studies, ...preps]) {
+    if (getString(note.frontmatter.session_kind) === "interview-coaching") continue;
     const owner = interviewSessionOwner(note, notes);
     if (!owner) continue;
     const key = ownerKey(owner);
@@ -156,6 +157,10 @@ export function resolveInterviewOutcomes(notes: Note[]): Map<string, InterviewOu
   const outcomes = new Map<string, InterviewOutcome>();
   for (const note of studies) {
     const current = session(note);
+    if (getString(note.frontmatter.session_kind) === "interview-coaching") {
+      outcomes.set(note.path, { kind: "not_applicable", label: INTERVIEW_OUTCOME_LABELS.not_applicable, detail: "老师辅导不属于企业选考", source: "none" });
+      continue;
+    }
     if (interviewRound(current.round) === "agent") {
       outcomes.set(note.path, { kind: "not_applicable", label: INTERVIEW_OUTCOME_LABELS.not_applicable, detail: "中介面谈不是企业选考", source: "none" });
       continue;

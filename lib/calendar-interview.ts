@@ -306,8 +306,10 @@ export function resolveCalendarInterviewDestinations(event: Commitment, notes: N
     return { session: calendarInterviewTarget(event, "session", event.prepPath || null), review: null };
   }
   const materials = calendarInterviewMaterials(event, notes);
+  const completedCoaching = getString(event.note.frontmatter.session_kind) === "interview-coaching" &&
+    (["transcript", "review", "transcript-study"].includes(getType(event.note)) || getString(event.note.frontmatter.session_status) === "completed");
   return {
-    session: calendarInterviewTarget(event, "session", materials.prep?.path ?? null),
+    session: completedCoaching ? null : calendarInterviewTarget(event, "session", materials.prep?.path ?? null),
     review: calendarInterviewTarget(event, "review", materials.review?.path ?? null),
   };
 }

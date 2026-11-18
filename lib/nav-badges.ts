@@ -49,6 +49,7 @@ export function todayAppointmentCount(
   let count = 0;
   for (const event of events) {
     if (event.kind !== "event" || event.tentative || event.date !== today) continue;
+    if (getString(event.note.frontmatter.session_kind) === "interview-coaching") continue;
     if (isClosed(event)) continue;
     count += 1;
   }

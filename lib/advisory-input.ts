@@ -68,6 +68,9 @@ export function buildAdvisoryInput(notes: Note[], sourcePath: string) {
     company: getString(source.frontmatter.company),
     date: getString(source.frontmatter.date),
     round: getString(source.frontmatter.round),
+    ...(getString(source.frontmatter.session_kind) === "interview-coaching" ? {
+      sessionContext: "这是与老师的面试辅导和模拟问答，不是企业选考。面代表老师；评价老师建议和本人回答的互动，不推断招聘方判断、岗位或结果。原文为ASR，整理稿为主要话题节选。",
+    } : {}),
     ...(source.frontmatter.reconstruction !== undefined || source.frontmatter.verbatim !== undefined ? {
       provenance: { reconstruction: source.frontmatter.reconstruction ?? null, verbatim: source.frontmatter.verbatim ?? null,
         boundary: "记忆重构只支持主题与本人记忆的分析，不作逐字原话、语速或措辞证据。" },

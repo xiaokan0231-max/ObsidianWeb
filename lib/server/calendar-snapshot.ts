@@ -11,7 +11,7 @@ import { selectionCaseCount } from "../nav-badges.ts";
 import { getTitle, getType, type Note } from "../notes.ts";
 
 const FIELDS = [
-  "type", "company", "case_id", "status", "next_action", "round", "action", "audience",
+  "type", "company", "case_id", "status", "next_action", "round", "session_kind", "session_status", "action", "audience",
   "applied_on", "application_actor", "application_agent", "formal_application_status", "waiting_for",
   "action_owner", "action_kind", "action_next_owner", "action_reviewed_at", "action_reason", "action_source",
   "due", "due_text", "expires_at", "focus", "focus_until", "suggested_due", "action_resolved_at",

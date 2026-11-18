@@ -11,7 +11,7 @@ export type CalendarProgressCode =
   | "rejected" | "paused" | "offer" | "meeting-closed" | "scheduled" | "tentative"
   | "waiting-case" | "active-self" | "active-case" | "meeting-waiting" | "unrecorded"
   | "historical-unlinked" | "association-missing" | "association-conflict" | "meeting-unrecorded"
-  | "recorded-rejected" | "recorded-passed" | "recorded-meeting-completed" | "historical-result";
+  | "recorded-rejected" | "recorded-passed" | "recorded-meeting-completed" | "historical-result" | "coaching-completed";
 
 export type CalendarProgress = {
   tone: "active" | "waiting" | "closed" | "paused" | "unknown" | "neutral";
@@ -60,6 +60,11 @@ export function calendarProgress(
   if (event.tentative) return {
     tone: "neutral", code: "tentative", label: "待确认", detail: "日历显示已提出的最早候选，具体日程等待对方确认。",
     occurred: false,
+  };
+  if (getString(event.note.frontmatter.session_kind) === "interview-coaching" &&
+    (["transcript", "review", "transcript-study"].includes(getType(event.note)) || getString(event.note.frontmatter.session_status) === "completed")) return {
+    tone: "neutral", code: "coaching-completed", label: "辅导已完成",
+    detail: "这是与老师的辅导记录，不属于企业选考；具体时刻以原始记录为准。", occurred: true,
   };
   let ownerSource = event.note;
   let ownerEventCaseId = event.caseId;

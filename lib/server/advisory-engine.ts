@@ -1,5 +1,5 @@
 import type { Note } from "../notes.ts";
-import { getType } from "../notes.ts";
+import { getString, getType } from "../notes.ts";
 import {
   ADVISORY_STATE_PATH, INSIGHTS_FEEDBACK_PATH, INSIGHTS_PATH,
   advisoryFingerprint, advisoryValidationContext, buildAdvisoryInput, crossInterviewInput,
@@ -114,7 +114,10 @@ export function createAdvisoryEngine(deps: Dependencies) {
         ...(failure?.fingerprint === fingerprint && status !== "ready" ? { lastError: failure.message } : {}),
       };
     }));
-    const ready = inputs.filter((input) => coverage.find((entry) => entry.sourcePath === input.source.path)?.status === "ready");
+    const coachingPaths = new Set(inputs.filter((input) => getString(input.source.frontmatter.session_kind) === "interview-coaching").map((input) => input.source.path));
+    const employerCoverage = coverage.filter((entry) => !coachingPaths.has(entry.sourcePath));
+    const ready = inputs.filter((input) => !coachingPaths.has(input.source.path) &&
+      coverage.find((entry) => entry.sourcePath === input.source.path)?.status === "ready");
     const usedContextPaths = new Set(ready.flatMap((input) => {
       const advisory = input.review!.advisory!;
       return [...advisory.contextPaths, ...advisory.observations.flatMap((item) => item.contextPaths),
@@ -141,15 +144,15 @@ export function createAdvisoryEngine(deps: Dependencies) {
     const insightsStatus = ready.length < 2 ? "blocked" : !report ? "missing" : report.sourceFingerprint === fingerprint ? "ready" : "stale";
     const failure = failures[INSIGHTS_PATH];
     const error = failure?.fingerprint === fingerprint && insightsStatus !== "ready" ? failure.message : null;
-    const pending = coverage.some((entry) => ["missing", "stale"].includes(entry.status) && !entry.lastError) ||
+    const pending = employerCoverage.some((entry) => ["missing", "stale"].includes(entry.status) && !entry.lastError) ||
       (["missing", "stale"].includes(insightsStatus) && !error);
-    return { notes, inputs, ready, coverage, payload, fingerprint, report, insightsStatus, pending, error };
+    return { notes, inputs, ready, coverage, employerCoverage, payload, fingerprint, report, insightsStatus, pending, error };
   }
 
   async function state() {
     const current = await collect();
     return {
-      report: current.report, coverage: current.coverage, pending: current.pending,
+      report: current.report, coverage: current.employerCoverage, pending: current.pending,
       insightsStatus: current.insightsStatus, error: current.error,
       active: [...active.values()][0] ?? null,
     };
@@ -232,12 +235,12 @@ export function createAdvisoryEngine(deps: Dependencies) {
     if (options.refreshSources) {
       if (options.force) {
         // 一次明确重试解除本批次的失败冻结，不需要用户逐场点击。
-        for (const entry of current.coverage.filter((item) => item.lastError && item.status !== "blocked")) {
+        for (const entry of current.employerCoverage.filter((item) => item.lastError && item.status !== "blocked")) {
           await recordFailure(entry.sourcePath, null);
         }
         await recordFailure(INSIGHTS_PATH, null);
       }
-      const next = current.coverage.find((entry) => ["missing", "stale"].includes(entry.status) && (!entry.lastError || options.force));
+      const next = current.employerCoverage.find((entry) => ["missing", "stale"].includes(entry.status) && (!entry.lastError || options.force));
       if (next) {
         try {
           await generateSource(next.sourcePath, Boolean(options.force));

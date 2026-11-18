@@ -402,6 +402,8 @@ export function renderInterviewAnswerReview(
     company: string;
     date: string;
     round: string;
+    sessionKind?: string;
+    publish?: boolean;
     sourceName: string;
     /** 批注ノートが実在する時だけ渡す。無いのにリンクを書くと vault:check が壊れリンクとして弾く。 */
     annotationName: string | null;
@@ -476,7 +478,7 @@ type: interview-answer-review
 company: ${meta.company}
 date: ${meta.date}
 round: ${meta.round}
-source_note: "[[${meta.sourceName}]]"
+${meta.sessionKind ? `session_kind: ${JSON.stringify(meta.sessionKind)}\n` : ""}${meta.publish === false ? "publish: false\n" : ""}source_note: "[[${meta.sourceName}]]"
 ${meta.annotationName ? `annotation_note: "[[${meta.annotationName}]]"\n` : ""}${meta.feedbackName ? `feedback_note: "[[${meta.feedbackName}]]"\n` : ""}generated_at: ${review.generatedAt}
 model: ${review.model}
 layer: ai-derived

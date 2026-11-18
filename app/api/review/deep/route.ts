@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     const rawPath = rawRef ? `${rawRef.includes("/") ? rawRef : `${notePath.slice(0, notePath.lastIndexOf("/"))}/${rawRef}`}${rawRef.endsWith(".md") ? "" : ".md"}` : null;
     const safeRawPath = rawPath?.startsWith("20_求職/") && !rawPath.includes("..") ? rawPath : null;
     const original = safeRawPath ? await readNoteOrNull(safeRawPath) : null;
-    const materialScopeLimit = text(original?.frontmatter.type) === "transcript"
+    const materialScopeLimit = text(source.frontmatter.session_kind) !== "interview-coaching" && text(original?.frontmatter.type) === "transcript"
       && !["memory", "partial", "limited", "unavailable"].includes(text(source.frontmatter.assessment_scope)) ? "full_available_text" : "limited";
 
     const feedbackNote = await readNoteOrNull(feedbackPath);
@@ -122,6 +122,9 @@ export async function POST(request: Request) {
       analysisBoundary: {
         exclude: "逐句语法评分、转录质量评分",
         include: "问题理解、子问覆盖、相关性、完整性、面试策略风险、改善回答、整场日本面试信号",
+        ...(text(source.frontmatter.session_kind) === "interview-coaching" ? {
+          context: "这是老师辅导和模拟问答，面是老师而非招聘方。重点评价训练与老师建议的适用边界，不推断企业判断、意向或选考结果；本人向老师坦诚分享不视作向企业主动暴露。整理稿为ASR节选，此次只做文字分析，不对这场辅导评分：evaluation.materialScope=limited、scoringEligible=false，五个维度均为level=not_assessed、baseScore=null、deductions=[]，理由说明这是辅导节选；各题的评价和建议仍需完整写出。只按原::判断现场用语，句末或措辞因ASR不可靠时不推断语法或敬体。与老师告别不等于模拟企业面试的收尾；若没有专门模拟企业收尾，请将japanSignals.closing评为insufficient_material，不捏造现场表态。",
+        } : {}),
       },
     });
     const generatedAt = new Date().toISOString();
@@ -171,6 +174,8 @@ export async function POST(request: Request) {
           company: text(source.frontmatter.company),
           date: text(source.frontmatter.date),
           round: text(source.frontmatter.round),
+          sessionKind: text(source.frontmatter.session_kind),
+          publish: source.frontmatter.publish === false ? false : undefined,
           sourceName: basename(notePath),
           annotationName: annotationContent === null ? null : basename(annotationPath),
           feedbackName: feedbackExists ? basename(feedbackPath) : null,

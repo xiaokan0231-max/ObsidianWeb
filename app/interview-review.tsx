@@ -377,14 +377,17 @@ function InterviewReview({
   const docs = useMemo(() => remoteReview ? [projectReview(remoteReview)] : catalog ? [] : buildDocs(notes), [notes, catalog, remoteReview]);
   // 雷达的「历史平均」描边：与 vault 的 面接傾向_横断 同一套平均算法，只是去掉了本场。
   const trendEntries = useMemo(
-    () => docs.map((item) => ({ key: item.key, company: item.company, date: item.date, round: item.round, review: item.deepReview, reassessment: findInterviewReassessment(notes, item.key) })),
-    [docs, notes],
+    () => docs.map((item) => ({ key: item.key, company: item.company, date: item.date, round: item.round,
+      sessionKind: getString(item.note?.frontmatter.session_kind ?? remoteReview?.projection.frontmatter.session_kind),
+      review: item.deepReview, reassessment: findInterviewReassessment(notes, item.key) })),
+    [docs, notes, remoteReview],
   );
   // 选考结果按整理稿路径解析（job-case → 面谈 TODO），详情页的信号区块与一覧的对照表共用。
   const outcomes = useMemo(() => remoteReview ? new Map(remoteReview.projection.outcome ? [[remoteReview.projection.source.path, remoteReview.projection.outcome]] : []) : catalog ? new Map() : resolveInterviewOutcomes(notes), [notes, remoteReview, catalog]);
   const signalOutcome = useMemo(() => signalOutcomeComparison(docs.map((item) => ({
-    key: item.key, company: item.company, date: item.date, round: item.round, review: item.deepReview,
-  })), outcomes), [docs, outcomes]);
+    key: item.key, company: item.company, date: item.date, round: item.round,
+    sessionKind: getString(item.note?.frontmatter.session_kind ?? remoteReview?.projection.frontmatter.session_kind), review: item.deepReview,
+  })), outcomes), [docs, outcomes, remoteReview]);
   const { locale } = useUiLocale();
   const signalsT = useMemo(() => signalsCopy(locale), [locale]);
 
@@ -950,6 +953,9 @@ function InterviewReview({
   const patternEntries = [...doc.stats.patterns.entries()].sort(
     (left, right) => right[1].learner + right[1].uncertain - (left[1].learner + left[1].uncertain),
   );
+  const frontmatter = doc.note?.frontmatter ?? remoteReview?.projection.frontmatter;
+  const isCoaching = getString(frontmatter?.session_kind) === "interview-coaching";
+  const coachingReviewPath = getString(frontmatter?.coaching_review).trim();
 
   return (
     <div className="review-view rv-reader-page">
@@ -963,8 +969,9 @@ function InterviewReview({
           <span>{doc.round} · {doc.date}{doc.result ? ` · ${doc.result}` : ""}</span>
           {(
             <span className="rv-title-links">
-              <ReviewCompanyAnalysis notes={notes} companyContexts={companyContexts} revision={revision} source={doc.note ?? undefined} sourcePath={doc.key} contextPath={remoteReview?.projection.contextPath} company={doc.company} filter={filter} pattern={patternParam} />
-              {onOpenSession && (
+              {!isCoaching && <ReviewCompanyAnalysis notes={notes} companyContexts={companyContexts} revision={revision} source={doc.note ?? undefined} sourcePath={doc.key} contextPath={remoteReview?.projection.contextPath} company={doc.company} filter={filter} pattern={patternParam} />}
+              {isCoaching && coachingReviewPath && onOpenSource && <button type="button" onClick={() => onOpenSource(coachingReviewPath)}>{locale === "ja" ? "個人レビュー ↗" : "个人复盘 ↗"}</button>}
+              {!isCoaching && onOpenSession && (
                 <button
                   type="button"
                   onClick={() => onOpenSession({ company: doc.company, date: doc.date, round: doc.round, notePath: doc.key })}
@@ -977,6 +984,9 @@ function InterviewReview({
 
       </header>
 
+      {isCoaching && <p className="rv-message">{locale === "ja"
+        ? "先生との面接練習です。全文の自動文字起こしを保存し、ここでは主要な発言を抜粋しています。原音は未確認です。"
+        : "这是与老师的面试辅导。已保存完整自动转写；此处摘录主要对话，尚未核对原音。"}</p>}
       <SelectionNoticePanel key={doc.key} notices={doc.note ? selectionNoticesForSession(doc.note, notes) : remoteReview?.projection.notices ?? []} locale={locale}
         rejected={outcomes.get(doc.key)?.kind === "rejected"}
         onOpenNote={onOpenNote ? path => { const note = notes.find(item => item.path === path); if (note) onOpenNote(note); } : undefined} />
@@ -991,7 +1001,7 @@ function InterviewReview({
             if (value === "source" && mode === "novel") switchMode("study");
             window.requestAnimationFrame(() => restoreWindowScroll(panelScrollTops.current[value] ?? 0));
           }}>{t(label)}</button>)}
-        <button type="button" className="rv-cross-link" onClick={() => onOpenInsights()}>{t("公司对比 ↗")}</button>
+        {!isCoaching && <button type="button" className="rv-cross-link" onClick={() => onOpenInsights()}>{t("公司对比 ↗")}</button>}
       </nav>
       <div className="rv-reader-tools" hidden={panel !== "source"}>
         <span>{t("阅读模式")}</span>
@@ -2206,7 +2216,7 @@ function ReviewIndex({
   const t = useReviewCopy();
   const { locale } = useUiLocale();
   const group = useSyncExternalStore(subscribeMode, readIndexGroup, () => "company" as IndexGroup);
-  const hasNewScoring = trendEntries.some((entry) => entry.reassessment ? (entry.reassessment as Note).frontmatter?.evaluation_mode === "scored_evidence" : String(entry.review?.evaluationMode) === "scored_evidence");
+  const hasNewScoring = trendEntries.some((entry) => entry.sessionKind !== "interview-coaching" && (entry.reassessment ? (entry.reassessment as Note).frontmatter?.evaluation_mode === "scored_evidence" : String(entry.review?.evaluationMode) === "scored_evidence"));
   const scorePoints = useMemo(() => hasNewScoring ? reviewScoreTimeline(trendEntries) : [], [trendEntries, hasNewScoring]);
   const historicalScorePoints = useMemo(() => reviewScoreTimeline(trendEntries.filter((entry) => String(entry.review?.evaluationMode) !== "scored_evidence").map((entry) => ({ ...entry, reassessment: null }))), [trendEntries]);
   const [selectedTrend, setSelectedTrend] = useState<AnswerStrategyTag | null>(null);

@@ -146,6 +146,8 @@ const calendarZh = {
   nextWeek: "下一周",
   thisWeek: "本周",
   allDay: "全天",
+  unknownTime: "时间未记载",
+  coachingCompleted: "辅导已完成",
   allDayHint: "未写具体时刻，不占时间段",
   weekGrid: (range: string) => `${range} · 周视图（日本时间）`,
   weekKeys: "← → 逐日选择 · [ ] 翻周 · T 回到今天 · Enter 打开当日第一场",
@@ -153,7 +155,7 @@ const calendarZh = {
 type CalendarCopy = typeof calendarZh;
 
 // buildCalendarEvents 的固定兜底词；轮次类 label 交给 interviewRoundLabelJa，其余未知写法原样显示。
-const EVENT_LABEL_JA = new Map([["招聘说明会", "採用説明会"], ["面试", "面接"], ["面谈", "面談"]]);
+const EVENT_LABEL_JA = new Map([["招聘说明会", "採用説明会"], ["面试", "面接"], ["面谈", "面談"], ["模拟面谈", "模擬面談"]]);
 
 function japaneseEventLabel(label: string) {
   // 只换逐字等于中文正本轮次词的 label：轮次解析会把「カジュアル面談（原文）」这类带补充的原文也认成轮次，
@@ -169,6 +171,7 @@ function japaneseProgressDetail(progress: CalendarProgress) {
     case "paused": return `この案件は保留中で、当面は進めません。${progress.reason ? `記録された理由：${progress.reason}。` : ""}`;
     case "offer": return "この案件は内定と記録されています。";
     case "meeting-closed": return "この面談の後続は終了と明記されています。";
+    case "coaching-completed": return "先生との面接練習は実施済みです。企業の選考ではありません。";
     case "scheduled": return "確定済みの予定で、まだ完了の記録はありません。";
     case "tentative": return "提示した最も早い候補日時です。面接日時は調整中です。";
     case "waiting-case": return `予定は過ぎ、この案件は${WAITING_FOR_JA[progress.waitingFor ?? ""] ?? "相手"}からの返信待ちです${waitingNote}。`;
@@ -230,7 +233,7 @@ const CALENDAR_COPY: Record<UiLocale, CalendarCopy> = {
     calendarGuide: "凡例",
     viewSwitch: "カレンダーの表示", viewMonth: "月", viewWeek: "週",
     previousWeek: "前の週", nextWeek: "次の週", thisWeek: "今週",
-    allDay: "終日", allDayHint: "時刻の記載がなく、時間帯を占めません",
+    allDay: "終日", unknownTime: "時刻未記録", coachingCompleted: "面接練習済み", allDayHint: "時刻の記載がなく、時間帯を占めません",
     weekGrid: (range) => `${range} · 週表示（日本時間）`,
     weekKeys: "← → 日を選択 · [ ] 週を移動 · T 今日に戻る · Enter その日の最初の予定を開く",
   },
@@ -258,6 +261,7 @@ type CalendarBadge = NonNullable<ReturnType<typeof calendarRoundBadge>> | {
 };
 
 function eventRoundBadge(event: CalendarEvent, copy: CalendarCopy): CalendarBadge | null {
+  if (event.note.frontmatter.session_kind === "interview-coaching") return null;
   if (!isInterviewEvent(event)) return null;
   const round = calendarRoundBadge(event.label);
   if (round) return {
@@ -313,6 +317,7 @@ function RoundHelp({ copy }: { copy: CalendarCopy }) {
 }
 
 function progressLabel(progress: CalendarProgress, copy: CalendarCopy) {
+  if (progress.code === "coaching-completed") return copy.coachingCompleted;
   const historical = { "recorded-rejected": copy.historicalRejected, "recorded-passed": copy.historicalPassed, "recorded-meeting-completed": copy.historicalMeetingCompleted, "historical-result": copy.historicalResult, "association-missing": copy.historicalMissing, "meeting-unrecorded": copy.historicalUnrecorded, unrecorded: copy.historicalUnrecorded };
   if (progress.code in historical) return historical[progress.code as keyof typeof historical];
   return progress.code === "scheduled" ? copy.pending : progress.code === "offer" ? copy.offer : copy.progress[progress.code === "tentative" ? "tentative" : progress.tone];
@@ -917,7 +922,7 @@ function CalendarView({
                                   </span>
                                   <strong>{compactCompany(event.company)}</strong>
                                   <span className="calendar-month-signals">
-                                    <CalendarOriginBadge origin={originByEvent.get(event.id)} compact locale={locale} className="calendar-origin-label" />
+                                    {event.note.frontmatter.session_kind !== "interview-coaching" && <CalendarOriginBadge origin={originByEvent.get(event.id)} compact locale={locale} className="calendar-origin-label" />}
                                     <InterviewScoreBadge score={scoreByEvent.get(event.id)} copy={copy} compact />
                                     <CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact />
                                   </span>
@@ -1129,6 +1134,7 @@ function WeekBoard({
             {!event.time && <span className="cw-block-time">{copy.allDay}</span>}
             <span className="calendar-tentative-label">{copy.progress.tentative}</span>
           </> : <>
+            {!event.time && <span className="cw-block-time">{copy.unknownTime}</span>}
             {round && <RoundBadge round={round} />}
             <span className="cw-block-stage">{eventStage(event, round, copy)}</span>
           </>}
@@ -1136,7 +1142,7 @@ function WeekBoard({
         </span>
         <span className="cw-block-title"><strong className="cw-block-company">{compactCompany(event.company)}</strong>{!scoreInMeta && score}{short && <CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact />}</span>
         {!short && <span className="cw-rating-footer"><CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} compact /></span>}
-        <CalendarOriginBadge origin={originByEvent.get(event.id)} compact />
+        {event.note.frontmatter.session_kind !== "interview-coaching" && <CalendarOriginBadge origin={originByEvent.get(event.id)} compact />}
       </button><CalendarInterviewLinks targets={interviewDestinations.get(event.id)} compact onNavigate={(view) => onInterview(event, view)} /></div>
     );
   };
@@ -1302,7 +1308,7 @@ function AgendaGroup({
                 </span>
                 <span className="calendar-status-dot" aria-hidden="true" />
               </button>
-              <div className="agenda-signals calendar-card-footer"><CalendarOriginBadge origin={originByEvent.get(event.id)} locale={locale} /><CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} /></div>
+              <div className="agenda-signals calendar-card-footer">{event.note.frontmatter.session_kind !== "interview-coaching" && <CalendarOriginBadge origin={originByEvent.get(event.id)} locale={locale} />}<CalendarCompanyRatingBadge rating={companyRatingByEvent.get(event.id)} /></div>
               {detailed && (
                 <p className="agenda-progress-detail">
                   <b>{progressLabel(progress, copy)}</b>{copy.progressDetail(progress)}

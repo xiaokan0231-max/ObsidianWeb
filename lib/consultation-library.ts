@@ -226,7 +226,7 @@ function isEnterpriseSession(source: SourceSession, notes: Note[]) {
     ["round", "meeting_kind", "session_kind", "purpose", "category"].map(field => getString(note.frontmatter[field])));
   if (labels.some(label => interviewRound(label) === "agent")) return false;
   // 只排除明确的非选考场次语义，不能因企业名、平台来源或结果未知删除真实面试。
-  return !labels.some(label => /説明会|说明会|セミナー|\bseminar\b|ユーザーサクセス|選考ではない|非選考|企業選考の対象外|媒体の担当面談|平台服务|非企业面试|^(?:platform-support|career-support|career-consultation)$/i.test(label));
+  return !labels.some(label => /説明会|说明会|セミナー|\bseminar\b|ユーザーサクセス|選考ではない|非選考|企業選考の対象外|媒体の担当面談|平台服务|非企业面试|^(?:platform-support|career-support|career-consultation|interview-coaching)$/i.test(label));
 }
 
 function isAgentSession(source: SourceSession, notes: Note[]) {

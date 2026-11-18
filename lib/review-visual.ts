@@ -19,6 +19,7 @@ export type ReviewVisualEntry = {
   company: string;
   date: string;
   round: string;
+  sessionKind?: string;
   review?: InterviewAnswerReview | null;
   result?: string;
   reassessment?: { frontmatter: Record<string, unknown> } | Record<string, unknown> | null;
@@ -26,6 +27,7 @@ export type ReviewVisualEntry = {
 
 /** 列表、轮次与详情入口共用同一来源选择，未评估绝不补成0或100。 */
 export function reviewDisplayScore(entry: ReviewVisualEntry): { score: number | null; label: string; historicalScore: number | null } {
+  if (entry.sessionKind === "interview-coaching") return { score: null, label: "证据评价 · 无总分", historicalScore: null };
   const scores = interviewEvidenceScores(entry);
   if (scores.scored) return { score: scores.overall, label: scores.overall === null ? "局部评分 · 无总分" : "新版有据评分", historicalScore: scores.historical };
   if (scores.reassessed || entry.review?.evaluationMode === "evidence") return { score: null, label: "证据评价 · 无总分", historicalScore: scores.historical };
@@ -44,6 +46,7 @@ export function historicalDimensionAverages(
   excludeKey: string,
 ): DimensionAverages | null {
   const selected = entries.find((entry) => entry.key === excludeKey);
+  if (selected?.sessionKind === "interview-coaching") return null;
   const currentScoring = selected ? interviewEvidenceScores(selected).scored : entries.some((entry) => interviewEvidenceScores(entry).scored);
   const others = entries.filter((entry) => entry.key !== excludeKey && (entry.reassessment || entry.review?.dimensions) && (entry.reassessment || entry.review?.evaluationMode !== "evidence") && interviewEvidenceScores(entry).scored === currentScoring);
   if (others.length === 0) return null;
@@ -67,6 +70,7 @@ export type ReviewScorePoint = {
 
 /** 回答分の推移：深度復盤のある場だけ、古い順。同日は key で安定させる（再描画で点が入れ替わらない）。 */
 export function reviewScoreTimeline(entries: ReviewVisualEntry[]): ReviewScorePoint[] {
+  entries = entries.filter((entry) => entry.sessionKind !== "interview-coaching");
   const currentScoring = entries.some((entry) => interviewEvidenceScores(entry).scored);
   return entries.flatMap((entry) => {
     const scores = interviewEvidenceScores(entry);

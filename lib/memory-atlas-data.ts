@@ -696,7 +696,9 @@ export function buildCalendarEvents(notes: Note[], now = new Date()): CalendarEv
     if (type === "interview-prep" || type === "review" || type === "transcript") {
       if (type === "interview-prep" && !eligiblePrep(note)) continue;
       const stage = getString(note.frontmatter.round) || getString(note.frontmatter.kind) || getTitle(note);
-      const label = detectEventLabel(stage);
+      // 老师辅导是已发生的真实面谈，但不能显示成企业招聘轮次。
+      const label = getString(note.frontmatter.session_kind) === "interview-coaching"
+        ? "模拟面谈" : detectEventLabel(stage);
       // review 还用于邮件审阅、跟进结果，日期不一定是场次日期。必须明确记载面试／面谈。
       if (!label && type !== "interview-prep") continue;
       const time = interviewNoteTime(note, date);
