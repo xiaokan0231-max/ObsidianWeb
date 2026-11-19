@@ -47,30 +47,86 @@
   margin-left: auto;
 }
 
-.calendar-comparison-toolbar { display: inline-flex; flex-shrink: 0; align-items: center; gap: 3px; }
-.calendar-comparison-open, .calendar-comparison-selection > summary {
-  display: inline-flex;
+.calendar-comparison-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 5px;
-  min-height: 33px;
-  padding: 0 8px;
-  border: 1px solid var(--line-strong);
+  gap: 6px 12px;
+  margin: 0 0 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-cool);
   border-radius: var(--radius-control);
-  background: var(--surface-raised-solid);
-  color: var(--ink);
+  background: var(--surface);
+}
+.calendar-comparison-toolbar:has(.calendar-comparison-items) {
+  position: sticky;
+  top: var(--chrome-top, 64px);
+  z-index: 9;
+}
+.calendar-comparison-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 8px; }
+.calendar-comparison-summary h3 { margin: 0; color: var(--ink); font-size: 14px; font-weight: 650; }
+.calendar-comparison-summary > span { color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.calendar-comparison-hint { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
+.calendar-comparison-controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; white-space: nowrap; }
+.calendar-comparison-open {
+  min-height: 33px;
+  padding: 5px 11px;
+  border: 1px solid var(--interactive);
+  border-radius: var(--radius-control);
+  background: var(--interactive);
+  color: var(--on-fill);
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 650;
   white-space: nowrap;
   cursor: pointer;
 }
-.calendar-comparison-open > span { font-variant-numeric: tabular-nums; }
-.calendar-comparison-open:enabled { border-color: var(--interactive); color: var(--interactive); }
-.calendar-comparison-open:disabled { color: var(--text-secondary); cursor: default; }
-.calendar-comparison-open:enabled:hover, .calendar-comparison-selection > summary:hover { background: var(--surface-lift); }
-.calendar-comparison-selection { position: relative; }
-.calendar-comparison-selection > summary { list-style: none; padding-inline: 5px; }
-.calendar-comparison-selection > summary::-webkit-details-marker { display: none; }
-.calendar-comparison-menu, .calendar-comparison-items {
+.calendar-comparison-open:enabled:hover { filter: brightness(1.08); }
+.calendar-comparison-open:disabled {
+  border-color: var(--line-cool);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  cursor: default;
+}
+.calendar-comparison-clear, .calendar-comparison-items li > button {
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.calendar-comparison-clear:hover, .calendar-comparison-items li > button:hover { color: var(--ink); background: var(--surface-lift); }
+.calendar-comparison-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.calendar-comparison-items li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(260px, 100%);
+  padding: 3px 5px 3px 8px;
+  border: 1px solid var(--line-cool);
+  border-radius: 7px;
+  background: var(--surface-raised-solid);
+}
+.calendar-comparison-items li > span { min-width: 0; overflow-wrap: anywhere; }
+.calendar-comparison-items strong { display: block; color: var(--ink); font-size: 13px; line-height: 1.4; }
+.calendar-comparison-items small { display: block; color: var(--text-secondary); font-size: 12px; line-height: 1.35; }
+.calendar-comparison-items li > button { flex: 0 0 auto; white-space: nowrap; }
+.calendar-comparison-menu {
+  position: fixed;
+  width: 196px;
+  max-width: calc(100vw - 16px);
   z-index: calc(var(--z-drawer, 60) - 2);
   padding: 5px;
   border: 1px solid var(--line-strong);
@@ -79,8 +135,8 @@
   color: var(--ink);
   box-shadow: 0 8px 22px color-mix(in oklab, var(--shadow-color) 20%, transparent);
 }
-.calendar-comparison-menu { position: fixed; width: 196px; max-width: calc(100vw - 16px); }
-.calendar-comparison-menu button, .calendar-comparison-items button {
+.calendar-comparison-menu button {
+  width: 100%;
   min-height: 30px;
   padding: 4px 7px;
   border: 0;
@@ -89,22 +145,15 @@
   color: var(--ink);
   font: inherit;
   font-size: 13px;
+  text-align: start;
   cursor: pointer;
 }
-.calendar-comparison-menu button { width: 100%; text-align: start; }
 .calendar-comparison-menu button[aria-disabled="true"] { color: var(--text-secondary); cursor: default; }
-.calendar-comparison-menu button:not([aria-disabled="true"]):hover, .calendar-comparison-items button:hover { background: var(--surface-lift); }
-.calendar-comparison-menu button:focus-visible, .calendar-comparison-toolbar :is(button, summary):focus-visible {
+.calendar-comparison-menu button:not([aria-disabled="true"]):hover { background: var(--surface-lift); }
+.calendar-comparison-menu button:focus-visible, .calendar-comparison-toolbar button:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
-.calendar-comparison-items { position: absolute; inset-block-start: calc(100% + 6px); inset-inline-end: 0; width: min(300px, 75vw); padding: 8px; }
-.calendar-comparison-items ul { display: grid; gap: 6px; max-height: 270px; margin: 0; padding: 0; overflow: auto; list-style: none; }
-.calendar-comparison-items li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
-.calendar-comparison-items strong { display: block; color: var(--ink); font-size: 13px; }
-.calendar-comparison-items small { display: block; color: var(--text-secondary); font-size: 12px; }
-.calendar-comparison-items li > button { flex: 0 0 auto; white-space: nowrap; }
-.calendar-comparison-items > button { margin-top: 4px; color: var(--text-secondary); }
 .calendar-view .calendar-comparison-action { flex: 0 0 auto; min-height: 28px; padding: 4px; border: 0; border-radius: 4px; background: transparent; color: var(--interactive); font: inherit; font-size: 11px; white-space: nowrap; }
 .calendar-view .calendar-comparison-action:enabled:hover { background: var(--surface-lift); }
 .calendar-view .calendar-comparison-action:disabled { color: var(--text-secondary); }

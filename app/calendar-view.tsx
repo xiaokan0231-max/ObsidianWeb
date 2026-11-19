@@ -801,6 +801,8 @@ function CalendarView({
         <summary>{copy.associationConflicts(associationConflicts.length)}</summary><p>{copy.associationExplanation}</p>
         <CalendarRecordExplanationList events={associationConflicts} progressByEvent={progressByEvent} interviewTargets={interviewTargets} interviewDestinations={interviewDestinations} copy={copy} onOpen={openSource} onInterview={onInterview} />
       </details>}
+      {onComparisonToggle && onComparisonClear && onComparisonOpen && <CalendarComparisonToolbar
+        selection={comparisonSelection} onToggle={onComparisonToggle} onClear={onComparisonClear} onOpen={onComparisonOpen} />}
       <div className="calendar-layout">
         <div className="calendar-board">
           <div className="calendar-toolbar">
@@ -811,8 +813,6 @@ function CalendarView({
               <small className="calendar-timezone">{copy.timezone}</small>
             </h2>
             <div className="calendar-tools">
-              {onComparisonToggle && onComparisonClear && onComparisonOpen && <CalendarComparisonToolbar
-                selection={comparisonSelection} onToggle={onComparisonToggle} onClear={onComparisonClear} onOpen={onComparisonOpen} />}
               <div className="cw-switch" role="group" aria-label={copy.viewSwitch}>
                 {([["month", copy.viewMonth], ["week", copy.viewWeek]] as const).map(([mode, label]) => (
                   <button type="button" key={mode} aria-pressed={calView === mode} onClick={() => switchView(mode)}>{label}</button>

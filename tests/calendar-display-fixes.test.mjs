@@ -237,6 +237,36 @@ test("代投入口只在面板开着时屏蔽翻页键；关闭后焦点留在�
   assert.equal(press("]", insidePanel), false);
 });
 
+test("日历直接显示已选比较项，同公司的不同岗位各自可见，选满两项即可开始", async () => {
+  const company = "株式会社テスト";
+  const targets = [
+    { path: "20_求職/テスト/数据岗位.md", company, role: "数据岗位" },
+    { path: "20_求職/テスト/后端岗位.md", company, role: "后端岗位" },
+  ];
+  for (const count of [0, 1, 2]) {
+    const calendar = render(zh, {
+      comparisonSelection: targets.slice(0, count), onComparisonToggle() {}, onComparisonClear() {}, onComparisonOpen() {},
+    });
+    const html = section(calendar, 'class="calendar-comparison-toolbar"');
+    const plainText = html.replace(/<[^>]+>/g, "");
+    const start = html.match(/<button\b[^>]*class="[^"\n]*\bcalendar-comparison-open\b[^"\n]*"[^>]*>[\s\S]*?<\/button>/)?.[0];
+    assert.ok(start, "开始入口应始终可见");
+    assert.match(start, /开始比较/);
+    assert.equal(/\sdisabled(?:="")?(?:\s|>)/.test(start), count < 2);
+    assert.match(html, new RegExp(`role="status">已选\\s*${count}\\s*项`));
+    assert.doesNotMatch(html, /<details\b/);
+    if (count === 0) continue;
+    assert.match(html, /<ul\b/);
+    if (count === 1) assert.match(plainText, /再加入\s*1\s*项/);
+    else assert.match(plainText, /清空/);
+    assert.equal((html.match(/<li\b/g) ?? []).length, count);
+    for (const { role } of targets.slice(0, count)) {
+      assert.ok(plainText.includes(role));
+      assert.ok([...html.matchAll(/aria-label="([^"]+)"/g)].some(([, label]) => label.includes(company) && label.includes(role) && label.includes("移出对比")));
+    }
+  }
+});
+
 // ── 7. 日文界面的轮次说明 ──
 test("轮次说明有日文名，读不出轮次的 label 交给调用方兜底", () => {
   const expected = [

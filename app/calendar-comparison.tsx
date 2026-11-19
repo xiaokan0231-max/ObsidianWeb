@@ -8,17 +8,17 @@ import { useUiLocale } from "./ui-locale";
 
 const COPY = {
   "zh-CN": {
-    add: "加入对比", remove: "移出对比", open: "企业对比",
-    manage: "管理已选公司", clear: "清空", menu: "企业对比操作",
-    selectHint: "右击面试场次或从日程详情加入对比",
-    minimum: "至少选择两项", maximum: "已选满 8 项，可先移出一项",
+    add: "加入对比", remove: "移出对比", heading: "企业对比", open: "开始比较",
+    removeShort: "移出", clear: "清空", menu: "企业对比操作",
+    selectHint: "右击面试场次或从日程详情加入，选两项即可比较。",
+    minimum: "再加入 1 项", maximum: "已选满 8 项，可先移出一项",
     count: (count: number) => `已选 ${count} 项`,
   },
   ja: {
-    add: "比較に追加", remove: "比較から外す", open: "企業比較",
-    manage: "選択した企業を管理", clear: "クリア", menu: "企業比較の操作",
-    selectHint: "面接の予定を右クリックするか、予定の詳細から比較に追加",
-    minimum: "2件以上を選択してください", maximum: "上限の8件に達しました",
+    add: "比較に追加", remove: "比較から外す", heading: "企業比較", open: "比較を開始",
+    removeShort: "外す", clear: "クリア", menu: "企業比較の操作",
+    selectHint: "面接の予定を右クリックするか、日程の詳細から追加。2件から比較できます。",
+    minimum: "あと1件追加", maximum: "上限の8件に達しました",
     count: (count: number) => `${count}件を選択中`,
   },
 } as const;
@@ -135,23 +135,22 @@ export function CalendarComparisonToolbar({ selection, onToggle, onClear, onOpen
 }) {
   const { locale } = useUiLocale();
   const copy = COPY[locale];
-  const details = useRef<HTMLDetailsElement>(null);
-  return <div className="calendar-comparison-toolbar">
-    <button type="button" className="calendar-comparison-open" disabled={selection.length < 2}
-      title={selection.length === 0 ? copy.selectHint : selection.length === 1 ? copy.minimum : undefined} onClick={onOpen}>
-      {copy.open} <span aria-live="polite">{selection.length}</span>
-    </button>
-    {selection.length > 0 && <details ref={details} className="calendar-comparison-selection">
-      <summary title={copy.manage} aria-label={`${copy.manage} · ${copy.count(selection.length)}`}>
-        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
-      </summary>
-      <div className="calendar-comparison-items">
-        <ul>{selection.map((item) => <li key={item.path}>
-          <span><strong>{item.company}</strong>{item.role && <small>{item.role}</small>}</span>
-          <button type="button" aria-label={`${item.company} · ${copy.remove}`} onClick={() => onToggle(item)}>{copy.remove}</button>
-        </li>)}</ul>
-        <button type="button" onClick={() => { if (details.current) details.current.open = false; onClear(); }}>{copy.clear}</button>
-      </div>
-    </details>}
-  </div>;
+  return <section className="calendar-comparison-toolbar" aria-labelledby="calendar-comparison-heading">
+    <div className="calendar-comparison-summary">
+      <h3 id="calendar-comparison-heading">{copy.heading}</h3>
+      <span role="status">{copy.count(selection.length)}</span>
+    </div>
+    {selection.length ? <ul className="calendar-comparison-items">
+      {selection.map((item) => <li key={item.path}>
+        <span><strong>{item.company}</strong>{item.role && <small>{item.role}</small>}</span>
+        <button type="button" aria-label={[copy.remove, item.company, item.role].filter(Boolean).join(" · ")}
+          onClick={() => onToggle(item)}>{copy.removeShort}</button>
+      </li>)}
+    </ul> : <p className="calendar-comparison-hint">{copy.selectHint}</p>}
+    <div className="calendar-comparison-controls">
+      {selection.length === 1 && <span className="calendar-comparison-hint">{copy.minimum}</span>}
+      {selection.length >= 2 && <button type="button" className="calendar-comparison-clear" onClick={onClear}>{copy.clear}</button>}
+      <button type="button" className="calendar-comparison-open" disabled={selection.length < 2} onClick={onOpen}>{copy.open}</button>
+    </div>
+  </section>;
 }
