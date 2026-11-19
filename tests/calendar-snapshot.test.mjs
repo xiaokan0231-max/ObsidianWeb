@@ -64,3 +64,18 @@ test("申请同 ID 的归属冲突和已过期待办不能在摘要中变成确�
       comparableApplications(buildAiApplicationDays(notes, today)));
   }
 });
+
+test("日历对比保留同公司不同岗位的正本，关联冲突时不生成对比入口", () => {
+  const first = { ...owner, frontmatter: { ...owner.frontmatter, position: "基盤開発" } };
+  const second = note("別案件.md", { type: "job-case", company: "株式会社テスト", case_id: "test-second", status: "書類通過",
+    position: "業務開発", next_event_at: "2026-10-30 15:00", next_event_label: "一次面接" });
+  const model = calendarModelFromSnapshot(buildCalendarSnapshot([first, prep, second]), "2026-10-29");
+  assert.deepEqual(model.events.map((event) => model.comparisonTargets.get(event.id)), [
+    { path: first.path, company: "株式会社テスト", role: "基盤開発" },
+    { path: second.path, company: "株式会社テスト", role: "業務開発" },
+  ]);
+
+  const conflicting = { ...first, path: "重複.md" };
+  const ambiguous = calendarModelFromSnapshot(buildCalendarSnapshot([first, conflicting, prep]), "2026-10-29");
+  assert.equal(ambiguous.comparisonTargets.size, 0);
+});

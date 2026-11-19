@@ -47,6 +47,69 @@
   margin-left: auto;
 }
 
+.calendar-comparison-toolbar { display: inline-flex; flex-shrink: 0; align-items: center; gap: 3px; }
+.calendar-comparison-open, .calendar-comparison-selection > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 33px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised-solid);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.calendar-comparison-open > span { font-variant-numeric: tabular-nums; }
+.calendar-comparison-open:enabled { border-color: var(--interactive); color: var(--interactive); }
+.calendar-comparison-open:disabled { color: var(--text-secondary); cursor: default; }
+.calendar-comparison-open:enabled:hover, .calendar-comparison-selection > summary:hover { background: var(--surface-lift); }
+.calendar-comparison-selection { position: relative; }
+.calendar-comparison-selection > summary { list-style: none; padding-inline: 5px; }
+.calendar-comparison-selection > summary::-webkit-details-marker { display: none; }
+.calendar-comparison-menu, .calendar-comparison-items {
+  z-index: calc(var(--z-drawer, 60) - 2);
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-raised-solid);
+  color: var(--ink);
+  box-shadow: 0 8px 22px color-mix(in oklab, var(--shadow-color) 20%, transparent);
+}
+.calendar-comparison-menu { position: fixed; width: 196px; max-width: calc(100vw - 16px); }
+.calendar-comparison-menu button, .calendar-comparison-items button {
+  min-height: 30px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.calendar-comparison-menu button { width: 100%; text-align: start; }
+.calendar-comparison-menu button[aria-disabled="true"] { color: var(--text-secondary); cursor: default; }
+.calendar-comparison-menu button:not([aria-disabled="true"]):hover, .calendar-comparison-items button:hover { background: var(--surface-lift); }
+.calendar-comparison-menu button:focus-visible, .calendar-comparison-toolbar :is(button, summary):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.calendar-comparison-items { position: absolute; inset-block-start: calc(100% + 6px); inset-inline-end: 0; width: min(300px, 75vw); padding: 8px; }
+.calendar-comparison-items ul { display: grid; gap: 6px; max-height: 270px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.calendar-comparison-items li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+.calendar-comparison-items strong { display: block; color: var(--ink); font-size: 13px; }
+.calendar-comparison-items small { display: block; color: var(--text-secondary); font-size: 12px; }
+.calendar-comparison-items li > button { flex: 0 0 auto; white-space: nowrap; }
+.calendar-comparison-items > button { margin-top: 4px; color: var(--text-secondary); }
+.calendar-view .calendar-comparison-action { flex: 0 0 auto; min-height: 28px; padding: 4px; border: 0; border-radius: 4px; background: transparent; color: var(--interactive); font: inherit; font-size: 11px; white-space: nowrap; }
+.calendar-view .calendar-comparison-action:enabled:hover { background: var(--surface-lift); }
+.calendar-view .calendar-comparison-action:disabled { color: var(--text-secondary); }
+.calendar-view :is(.calendar-event, .cw-block, .cw-chip, .agenda-main)[data-compared] { box-shadow: inset 0 0 0 1px var(--interactive); }
+
 .calendar-actions button,
 .calendar-weekday,
 .calendar-day-number time,

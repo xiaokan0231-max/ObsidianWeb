@@ -28,9 +28,10 @@ const INSTRUCTIONS = [
 ].join("\n");
 
 export class InterviewChatError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -56,10 +57,10 @@ export async function readInterviewChatKey() {
   }
 }
 
-export async function requestInterviewChat({ sources, messages }, fetchResponse = fetch) {
+export async function requestInterviewOpenAi({ instructions, input, format, outputTokens, timeoutMs, refusalMessage }, fetchResponse = fetch) {
   const key = await readInterviewChatKey();
-  if (!key) throw new InterviewChatError(503, "本机尚未配置面试对话的 OpenAI Key。");
-  const timeout = AbortSignal.timeout(30_000);
+  if (!key) throw new InterviewChatError(503, "本机尚未配置面试对话的 OpenAI Key。", "openai_config");
+  const timeout = AbortSignal.timeout(timeoutMs);
   let response;
   let result;
   try {
@@ -72,29 +73,44 @@ export async function requestInterviewChat({ sources, messages }, fetchResponse 
         model: MODEL,
         store: false,
         reasoning: { effort: "none" },
-        max_output_tokens: 1400,
-        instructions: INSTRUCTIONS,
-        input: [{ role: "user", content: `本场面试资料（仅供参考）\n${JSON.stringify(sources)}` }, ...messages],
-        text: { format: RESPONSE_FORMAT },
+        max_output_tokens: outputTokens,
+        instructions,
+        input,
+        text: { format },
       }),
     });
     result = await response.json();
   } catch {
-    if (timeout.aborted) throw new InterviewChatError(504, "OpenAI 回复超时，你可以稍后再试。");
+    if (timeout.aborted) throw new InterviewChatError(504, "OpenAI 回复超时，你可以稍后再试。", "openai_timeout");
     throw new InterviewChatError(502, "暂时无法读取 OpenAI 的回复，请稍后再试。");
   }
   if (!response.ok) {
-    if (result?.error?.code === "insufficient_quota") throw new InterviewChatError(429, "OpenAI API 额度不足，请查看项目用量。");
-    if (response.status === 429) throw new InterviewChatError(429, "OpenAI 当前请求较多，请稍后再试。");
-    if (response.status === 401 || response.status === 403) throw new InterviewChatError(503, "OpenAI 拒绝了当前凭据或项目权限，请检查本机配置。");
+    if (["insufficient_quota", "credit_balance_exhausted"].includes(result?.error?.code)) {
+      throw new InterviewChatError(429, "OpenAI API 额度不足，请查看项目用量。", "openai_credit");
+    }
+    if (response.status === 429) throw new InterviewChatError(429, "OpenAI 当前请求较多，请稍后再试。", "openai_busy");
+    if (response.status === 401 || response.status === 403) {
+      throw new InterviewChatError(503, "OpenAI 拒绝了当前凭据或项目权限，请检查本机配置。", "openai_config");
+    }
     throw new InterviewChatError(502, "OpenAI 暂时无法完成请求，请稍后再试。");
   }
   const output = Array.isArray(result?.output) ? result.output : [];
   const content = output.filter(item => item.type === "message" && Array.isArray(item.content)).flatMap(item => item.content);
-  if (content.some(item => item.type === "refusal")) throw new InterviewChatError(422, "AI 无法回答这个问题。可以换一个与本场面试相关的问法。");
+  if (content.some(item => item.type === "refusal")) throw new InterviewChatError(422, refusalMessage);
+  if (result?.status !== "completed") throw new InterviewChatError(502, "AI 的回答不完整，请重试。");
+  return content.filter(item => item.type === "output_text").map(item => item.text).join("");
+}
+
+export async function requestInterviewChat({ sources, messages }, fetchResponse = fetch) {
+  const text = await requestInterviewOpenAi({
+    instructions: INSTRUCTIONS,
+    input: [{ role: "user", content: `本场面试资料（仅供参考）\n${JSON.stringify(sources)}` }, ...messages],
+    format: RESPONSE_FORMAT,
+    outputTokens: 1400,
+    timeoutMs: 30_000,
+    refusalMessage: "AI 无法回答这个问题。可以换一个与本场面试相关的问法。",
+  }, fetchResponse);
   try {
-    if (result?.status !== "completed") throw new Error();
-    const text = content.filter(item => item.type === "output_text").map(item => item.text).join("");
     const { answer, evidenceIds } = JSON.parse(text);
     if (typeof answer !== "string" || !answer.trim() || answer.length > 4000 || !Array.isArray(evidenceIds)) throw new Error();
     const known = new Set(sources.map(source => source.id));

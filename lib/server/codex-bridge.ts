@@ -79,6 +79,24 @@ export async function interviewChatBridge<T>(init: RequestInit): Promise<T> {
   }
 }
 
+export async function companyComparisonBridge<T>(body: unknown): Promise<T> {
+  try {
+    const response = await bridgeRequest("/company-comparison", {
+      method: "POST", body: JSON.stringify(body), signal: AbortSignal.timeout(55_000),
+    });
+    const result = (await response.json()) as T & { error?: string; code?: string };
+    if (!response.ok) {
+      if (![422, 429, 502, 503, 504].includes(response.status)) throw new Error();
+      throw Object.assign(new RequestRejectedError(result.error || "本机 AI 分析暂时不可用。", response.status),
+        { code: result.code });
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof RequestRejectedError) throw error;
+    throw Object.assign(new RequestRejectedError("本机 AI 服务尚未连接，请确认本机开发服务已启动。", 503), { code: "openai_config" });
+  }
+}
+
 export async function getCodexRuntime(): Promise<CodexRuntimeStatus> {
   try {
     return (await bridgeFetch("/status", { method: "GET" })) as CodexRuntimeStatus;

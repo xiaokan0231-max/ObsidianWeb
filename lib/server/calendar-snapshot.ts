@@ -1,6 +1,6 @@
 import { buildCalendarCompanyRatings } from "../calendar-company-rating.ts";
 import { buildCalendarEventOrigins } from "../calendar-event-origin.ts";
-import { resolveCalendarInterview, resolveCalendarInterviewDestinations } from "../calendar-interview.ts";
+import { isInterviewEvent, resolveCalendarInterview, resolveCalendarInterviewDestinations } from "../calendar-interview.ts";
 import { calendarInterviewScore } from "../calendar-interview-score.ts";
 import { calendarProgress } from "../calendar-progress.ts";
 import type { CalendarSnapshot } from "../calendar-snapshot.ts";
@@ -42,6 +42,7 @@ export function buildCalendarSnapshot(notes: Note[]): CalendarSnapshot {
   const upcomingRatings = buildCalendarCompanyRatings(upcoming, notes, upcomingTargets, companyContexts);
   const pastRatings = buildCalendarCompanyRatings(past, notes, pastTargets, companyContexts);
   const origins = buildCalendarEventOrigins(events, notes);
+  const companiesByPath = new Map(companyContexts.map((context) => [context.note.path, context]));
   const phaseData = (event: CalendarEvent, phase: "upcoming" | "past") => {
     const target = (phase === "past" ? pastTargets : upcomingTargets).get(event.id);
     return {
@@ -53,13 +54,20 @@ export function buildCalendarSnapshot(notes: Note[]): CalendarSnapshot {
   };
   return {
     schemaVersion: 1,
-    events: events.map((event, index) => ({
-      event: { ...event, note: calendarReference(event.note) },
-      upcoming: phaseData(upcoming[index], "upcoming"),
-      past: phaseData(past[index], "past"),
-      destinations: resolveCalendarInterviewDestinations(event, notes),
-      origin: origins.get(event.id)!,
-    })),
+    events: events.map((event, index) => {
+      const origin = origins.get(event.id)!;
+      // 来源投影已经核对案件号和显式关系。只用同一条正本路径，不能凭公司名关联岗位。
+      const company = isInterviewEvent(event) && event.note.frontmatter.session_kind !== "interview-coaching"
+        ? companiesByPath.get(origin.sourcePath) : undefined;
+      return {
+        event: { ...event, note: calendarReference(event.note) },
+        upcoming: phaseData(upcoming[index], "upcoming"),
+        past: phaseData(past[index], "past"),
+        destinations: resolveCalendarInterviewDestinations(event, notes),
+        origin,
+        ...(company && { comparison: { path: company.note.path, company: company.company, role: company.title } }),
+      };
+    }),
     applicationNotes: notes.filter((note) => ["job-case", "todo"].includes(getType(note))).map((note) => {
       const reference = calendarReference(note);
       if (getType(note) === "job-case") reference.frontmatter.position = jobPosition(note);

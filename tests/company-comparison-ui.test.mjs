@@ -63,6 +63,35 @@ test("内嵌选择器和对比表正常参与页面，不生成弹框语义或�
   assert.match(board, /<table/);
 });
 
+test("本机两项比较可进入 AI 分析，单项或远端页面不发起分析", async () => {
+  const { default: CompanyComparison } = await loadAppModule("app/company-comparison.tsx");
+  const catalog = buildInterviewReadModelRecords(notes, { today }).find(({ kind }) => kind === INTERVIEW_RECORDS.catalog).value;
+  const props = { notes, today, ...callbacks, catalog: { ...catalog, revision: "test-revision" }, companyContexts: buildCompanyOverviews(notes) };
+  const local = render(CompanyComparison, { ...props, analysisAvailable: true });
+  assert.match(local, /<button type="button" class="cc-analysis-trigger" title=[^>]+>AI 分析<\/button>/);
+  assert.match(local, /aria-pressed="false">AI 分析<\/button>/);
+  const single = render(CompanyComparison, { ...props, analysisAvailable: true, comparisonPaths: [first.owner.path] });
+  assert.match(single, /class="cc-analysis-trigger" disabled/);
+  assert.doesNotMatch(render(CompanyComparison, props), /cc-analysis-trigger|>AI 分析<\/button>/);
+});
+
+test("AI 比较并排呈现优势、取舍和追问，证据显示原始来源链接", async () => {
+  const { CompanyAiAnalysisPanel } = await loadAppModule("app/company-ai-analysis.tsx");
+  const left = { path: first.owner.path, label: "测试甲", role: "数据平台", advantages: [{ text: "可了解自有产品", evidenceIds: ["C1-F1"] }],
+    tradeoffs: [], unknowns: ["团队分工待确认"], questions: ["该岗位可负责哪些产品能力？"] };
+  const result = {
+    companies: [left, { ...left, path: second.owner.path, label: "测试乙", advantages: [], tradeoffs: [{ text: "交付范围取决于项目", evidenceIds: [] }] }],
+    differences: [{ text: "产品与项目交付方式有差异", evidenceIds: ["C1-F1"] }],
+    evidence: [{ id: "C1-F1", path: left.path, label: "业务", value: "开发自有产品", asOf: today, scope: "单体",
+      sourceLabels: ["公司概要"], sources: [{ label: "公司概要", url: "https://example.com/company" }] }],
+  };
+  const html = render(CompanyAiAnalysisPanel, { ready: true, analysis: { result, loading: false, error: null } });
+  assert.match(html, /最值得比较的差异[\s\S]*产品与项目交付方式有差异/);
+  assert.match(html, /测试甲[\s\S]*测试乙[\s\S]*优势[\s\S]*短板与取舍[\s\S]*面试追问/);
+  assert.match(html, /可了解自有产品[\s\S]*href="https:\/\/example.com\/company"/);
+  assert.match(html, /交付范围取决于项目/);
+});
+
 test("加载期间不解析空资料中的路径，资料齐备后仍保留链接明确指定的一家公司", async () => {
   let reads = 0;
   const location = { pathname: "/interview/compare", hash: "" };

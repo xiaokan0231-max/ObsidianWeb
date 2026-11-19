@@ -14,6 +14,7 @@ import { URL_CHANGE_EVENT } from "./use-url-state";
 import type { InterviewCatalog, InterviewCompareSummary } from "@/lib/interview-read-model";
 import ScopeLoading from "./scope-loading";
 import { loadInterviewComparisons } from "./interview-catalog-options";
+import { CompanyAiAnalysisPanel, useCompanyAiAnalysis } from "./company-ai-analysis";
 
 type CompanyComparisonProps = {
   notes: Note[];
@@ -26,6 +27,7 @@ type CompanyComparisonProps = {
   comparisonPaths?: string[];
   onSelect?: (paths: string[]) => void;
   onRetry?: () => void;
+  analysisAvailable?: boolean;
 };
 
 const quickGroups = [
@@ -35,12 +37,14 @@ const quickGroups = [
   { id: "jobtalk", label: "転職会議 高分" },
 ] as const;
 
-function ComparisonToolbar({ count, choosing, onToggle, groups, onPick }: {
+function ComparisonToolbar({ count, choosing, onToggle, groups, onPick, onAnalyze, analyzeDisabled }: {
   count: number;
   choosing: boolean;
   onToggle: () => void;
   groups: Record<CompanyComparePreset, string[]>;
   onPick: (paths: string[]) => void;
+  onAnalyze?: () => void;
+  analyzeDisabled?: boolean;
 }) {
   const t = useCompanyCopy();
   return <header className="cc-page-header">
@@ -61,6 +65,8 @@ function ComparisonToolbar({ count, choosing, onToggle, groups, onPick }: {
           {t(label)} · {t("{count} 项", { count: groups[id].length })}
         </option>)}
       </select>
+      {onAnalyze && <button type="button" className="cc-analysis-trigger" disabled={analyzeDisabled}
+        title={t("发送所选公司的公开来源事实给 OpenAI，现场生成对比。")} onClick={onAnalyze}>{t("AI 分析")}</button>}
     </div>
   </header>;
 }
@@ -120,7 +126,7 @@ export default function CompanyComparison(props: CompanyComparisonProps) {
     : props.catalog ? <ProjectedCompanyComparison {...props} catalog={props.catalog} /> : <CompanyComparisonReady {...props} />;
 }
 
-function ProjectedCompanyComparison({ notes, today, catalog, comparisonPaths, loading, onSelect, onRetry, onOpenCompany, onOpenWiki, companyContexts }: CompanyComparisonProps & { catalog: InterviewCatalog }) {
+function ProjectedCompanyComparison({ notes, today, catalog, comparisonPaths, loading, onSelect, onRetry, onOpenCompany, onOpenWiki, companyContexts, analysisAvailable }: CompanyComparisonProps & { catalog: InterviewCatalog }) {
   const t = useCompanyCopy();
   const selection = comparisonPaths ?? catalog.compareDefaults;
   const [choosingOverride, setChoosing] = useState<boolean | null>(null);
@@ -130,6 +136,7 @@ function ProjectedCompanyComparison({ notes, today, catalog, comparisonPaths, lo
   const [sort, setSort] = useState("relevance");
   const [loadedOptions, setLoadedOptions] = useState<{ revision: string; items: InterviewCompareSummary[] } | null>(null);
   const [optionsError, setOptionsError] = useState("");
+  const [analysisOpen, setAnalysisOpen] = useState(false);
   const options = loadedOptions && loadedOptions.revision === catalog.revision ? loadedOptions.items : catalog.comparisons;
   const optionsReady = options.length >= (catalog.comparisonTotal ?? catalog.comparisons.length);
   const loadOptions = useCallback(async () => {
@@ -151,6 +158,13 @@ function ProjectedCompanyComparison({ notes, today, catalog, comparisonPaths, lo
   }, [choosing, optionsReady, catalog.revision]);
   const contexts = useMemo(() => companyContexts ?? buildCompanyOverviews(notes), [notes, companyContexts]);
   const selected = selection.flatMap((path) => { const context = contexts.find((item) => item.note.path === path); return context ? [context] : []; });
+  const analysisReady = Boolean(analysisAvailable && catalog.revision && !loading && selection.length >= 2 && selected.length === selection.length);
+  const analysis = useCompanyAiAnalysis(catalog.revision, selection, analysisReady);
+  const startAnalysis = () => {
+    setChoosing(false);
+    setAnalysisOpen(true);
+    if (!analysis.result && analysis.error !== "stale_revision") void analysis.generate();
+  };
   const selectedSet = new Set(selection);
   const full = selection.length >= COMPANY_COMPARE_LIMIT;
   const select = (paths: string[]) => {
@@ -182,6 +196,7 @@ function ProjectedCompanyComparison({ notes, today, catalog, comparisonPaths, lo
   });
   return <div className="company-comparison-page">
     <ComparisonToolbar count={selection.length} choosing={choosing} groups={catalog.comparePresets}
+      onAnalyze={analysisAvailable ? startAnalysis : undefined} analyzeDisabled={!analysisReady || analysis.loading}
       onToggle={() => setChoosing(!choosing)} onPick={(paths) => {
         select(paths);
         setChoosing(paths.length < 2);
@@ -204,7 +219,9 @@ function ProjectedCompanyComparison({ notes, today, catalog, comparisonPaths, lo
       <footer className="co-selector-footer"><div className="co-selected-chips">{selection.map((path) => <button key={path} type="button" onClick={() => select(selection.filter((item) => item !== path))}>{options.find((item) => item.path === path)?.shortName} ×</button>)}</div>
         <div className="co-selector-submit"><span>{selection.length} / {COMPANY_COMPARE_LIMIT}</span><button type="button" onClick={() => select([])}>{t("清空")}</button><button type="button" disabled={selection.length < 2} onClick={() => setChoosing(false)}>{t("开始对比 ")}→</button></div></footer>
     </section>}
-    {selection.length >= 2 ? selected.length === selection.length ? <CompanyCompare embedded contexts={selected} notes={notes} today={today} projectedCandidates={candidates} onClose={() => {}} onDetail={onOpenCompany} onRemove={(path) => select(selection.filter((item) => item !== path))} onOpenWiki={onOpenWiki} />
+    {selection.length >= 2 ? selected.length === selection.length ? <CompanyCompare embedded contexts={selected} notes={notes} today={today} projectedCandidates={candidates} onClose={() => {}} onDetail={onOpenCompany} onRemove={(path) => select(selection.filter((item) => item !== path))} onOpenWiki={onOpenWiki}
+      analysisTab={analysisAvailable ? { active: analysisOpen, disabled: !analysisReady && !analysisOpen, onToggle: setAnalysisOpen,
+        content: <CompanyAiAnalysisPanel analysis={analysis} ready={analysisReady} onReload={onRetry} /> } : undefined} />
       : loading ? <ScopeLoading label={t("公司对比")} /> : <section className="cc-empty" role="alert"><p>{t("对比资料读取失败。")}</p>{onRetry && <button type="button" onClick={onRetry}>{t("重试")}</button>}</section> : <section className="cc-empty"><h2>{selection.length ? t("再选一家，就能看出差异") : t("从几家感兴趣的公司开始")}</h2></section>}
   </div>;
 }

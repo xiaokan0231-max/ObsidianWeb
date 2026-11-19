@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { type Note } from "@/lib/notes";
-import type { CalendarModel } from "@/lib/calendar-snapshot";
+import type { CalendarComparisonTarget, CalendarModel } from "@/lib/calendar-snapshot";
 import type { CalendarPulseSummary } from "@/lib/calendar-pulse-summary";
 import type { CalendarDaySummary } from "@/lib/calendar-query-model";
 import type { CalendarProjection } from "./use-calendar-projection";
@@ -25,6 +25,7 @@ import { isInterviewEvent, resolveCalendarInterviewDestinations, type CalendarIn
 import { buildCalendarCompanyRatings, type CalendarCompanyRating } from "@/lib/calendar-company-rating";
 import { CalendarCompanyRatingBadge } from "./calendar-company-rating";
 import { CalendarInterviewLinks } from "./calendar-interview-links";
+import { CalendarComparisonToolbar, useCalendarComparison, type CalendarComparisonActions } from "./calendar-comparison";
 import { calendarInterviewScore, type CalendarInterviewScore } from "@/lib/calendar-interview-score";
 import { calendarProgress, isCalendarHistoricalProgress, type CalendarProgress } from "@/lib/calendar-progress";
 import { buildCalendarSummary, calendarDayOffset, isCalendarLiveEvent, shiftCalendarDay } from "@/lib/calendar-summary";
@@ -392,6 +393,10 @@ function CalendarView({
   initialSummary,
   projection,
   onOpenPath,
+  comparisonSelection = [],
+  onComparisonToggle,
+  onComparisonClear,
+  onComparisonOpen,
 }: {
   events: CalendarEvent[];
   notes: Note[];
@@ -405,11 +410,16 @@ function CalendarView({
   initialSummary?: CalendarPulseSummary | null;
   projection?: CalendarProjection;
   onOpenPath?: (path: string, revision?: string) => void;
+  comparisonSelection?: CalendarComparisonTarget[];
+  onComparisonToggle?: (target: CalendarComparisonTarget) => void;
+  onComparisonClear?: () => void;
+  onComparisonOpen?: () => void;
   /** 「今日」は殻が持つ。memo 越しなので中で求めると日付を跨いでも昨日のままになる。 */
   today: string;
 }) {
   const { locale } = useUiLocale();
   const copy = CALENDAR_COPY[locale];
+  const comparison = useCalendarComparison(model?.comparisonTargets, comparisonSelection, onComparisonToggle);
   const openSource = (note: Note) => projection && onOpenPath ? onOpenPath(note.path, projection.revision) : onOpen(note);
   const sectionRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -801,6 +811,8 @@ function CalendarView({
               <small className="calendar-timezone">{copy.timezone}</small>
             </h2>
             <div className="calendar-tools">
+              {onComparisonToggle && onComparisonClear && onComparisonOpen && <CalendarComparisonToolbar
+                selection={comparisonSelection} onToggle={onComparisonToggle} onClear={onComparisonClear} onOpen={onComparisonOpen} />}
               <div className="cw-switch" role="group" aria-label={copy.viewSwitch}>
                 {([["month", copy.viewMonth], ["week", copy.viewWeek]] as const).map(([mode, label]) => (
                   <button type="button" key={mode} aria-pressed={calView === mode} onClick={() => switchView(mode)}>{label}</button>
@@ -863,6 +875,7 @@ function CalendarView({
               applicationDate={applicationDate}
               onOpenEvent={openEvent}
               onInterview={onInterview}
+              comparison={comparison}
             />
           ) : (
           <div className="calendar-grid-scroll">
@@ -912,6 +925,7 @@ function CalendarView({
                                   onClick={() => openEvent(event)}
                                   title={actionLabel}
                                   aria-label={actionLabel}
+                                  {...comparison.eventProps(event.id)}
                                 >
                                   <span className="calendar-event-heading">
                                     {event.time ? <time className="calendar-event-time" dateTime={`${event.date}T${event.time}+09:00`}>{event.time}</time> : <span className="calendar-event-stage">{event.tentative ? copy.allDay : stage}</span>}
@@ -972,6 +986,7 @@ function CalendarView({
               companyRatingByEvent={companyRatingByEvent}
               interviewDestinations={interviewDestinations}
               onInterview={onInterview}
+              comparison={comparison}
               action={<button type="button" className="calendar-day-close" onClick={() => setSelectedDay("")} aria-label={copy.closeDay}>×</button>}
             >
               {selectedHoliday && <p className="calendar-holiday-detail">{copy.holiday} · <span lang="ja">{selectedHoliday}</span></p>}
@@ -995,6 +1010,7 @@ function CalendarView({
             interviewDestinations={interviewDestinations}
             nextEventId={summary.next?.event.id}
             onInterview={onInterview}
+            comparison={comparison}
           />
           {upcomingLater.length > 0 && (
             <AgendaGroup
@@ -1013,6 +1029,7 @@ function CalendarView({
               interviewDestinations={interviewDestinations}
               nextEventId={summary.next?.event.id}
               onInterview={onInterview}
+              comparison={comparison}
             />
           )}
           <details className="calendar-history" open={recentOpen} onToggle={(event) => { const open = event.currentTarget.open; setRecentOpen(open); if (open && projection && !projection.recent.loaded) void projection.loadRecent(); }}>
@@ -1036,6 +1053,7 @@ function CalendarView({
               companyRatingByEvent={companyRatingByEvent}
               interviewDestinations={interviewDestinations}
               onInterview={onInterview}
+              comparison={comparison}
             />
             {projection?.recent.loading && <p role="status">{locale === "ja" ? "最近の予定を読み込み中…" : "正在读取最近记录…"}</p>}
             {projection?.recent.error && <div role="alert"><p>{locale === "ja" ? "最近の予定を読み込めませんでした。" : "最近记录读取失败。"}</p><button type="button" onClick={() => void projection.loadRecent()}>{locale === "ja" ? "再試行" : "重试"}</button></div>}
@@ -1043,6 +1061,7 @@ function CalendarView({
           </details>
         </aside>
       </div>
+      {comparison.popup}
       {applicationDate && <CalendarApplicationPanel key={applicationDate} date={applicationDate} day={projection ? projection.applications.date === applicationDate ? projection.applications.day ?? undefined : undefined : fullApplicationDays.find((day) => day.date === applicationDate)} fetchedAt={projection ? projection.applications.fetchedAt : fetchedAt}
         summary={applicationsByDate.get(applicationDate)} loading={projection ? projection.applications.date !== applicationDate || projection.applications.loading : false} error={projection?.applications.date === applicationDate ? projection.applications.error : ""} onRetry={projection ? () => void projection.loadApplications(applicationDate) : undefined}
         onClose={closeApplications} onOpen={openSource} onOpenCompany={onOpenCompany} />}
@@ -1074,7 +1093,7 @@ function eventStage(event: CalendarEvent, round: CalendarBadge | null, copy: Cal
  */
 function WeekBoard({
   weekStart, dir, label, events, today, nowClock, selectedDay, progressByEvent, conflicts,
-  interviewTargets, scoreByEvent, originByEvent, companyRatingByEvent, interviewDestinations, onInterview, applicationsByDate, copy, dayLabel, onSelectDay, onShowApplications, applicationDate, onOpenEvent,
+  interviewTargets, scoreByEvent, originByEvent, companyRatingByEvent, interviewDestinations, onInterview, applicationsByDate, copy, dayLabel, onSelectDay, onShowApplications, applicationDate, onOpenEvent, comparison,
 }: {
   weekStart: string;
   dir: "prev" | "next" | "";
@@ -1098,6 +1117,7 @@ function WeekBoard({
   applicationDate: string;
   onOpenEvent: (event: CalendarEvent) => void;
   onInterview: (event: CalendarEvent, view?: CalendarInterviewTarget["view"]) => void;
+  comparison: CalendarComparisonActions;
 }) {
   const week = useMemo(() => buildCalendarWeek(weekStart, events), [weekStart, events]);
   const days = week.days.map((day) => ({ ...day, holiday: japaneseHolidayName(day.date) }));
@@ -1127,6 +1147,7 @@ function WeekBoard({
         title={actionLabel}
         aria-label={actionLabel}
         data-ranged={event.time && event.endTime ? "" : undefined}
+        {...comparison.eventProps(event.id)}
       >
         <span className="cw-block-meta">
           {event.time && <time className="cw-block-time" dateTime={`${event.date}T${event.time}+09:00`}>{scoreInMeta || short ? event.time : calendarEventTime(event)}</time>}
@@ -1242,6 +1263,7 @@ function AgendaGroup({
   interviewDestinations,
   nextEventId,
   onInterview,
+  comparison,
 }: {
   title: string;
   empty: string;
@@ -1263,6 +1285,7 @@ function AgendaGroup({
   interviewDestinations: ReadonlyMap<string, CalendarInterviewDestinations>;
   nextEventId?: string;
   onInterview: (event: CalendarEvent, view?: CalendarInterviewTarget["view"]) => void;
+  comparison: CalendarComparisonActions;
 }) {
   const { locale } = useUiLocale();
   const copy = CALENDAR_COPY[locale];
@@ -1287,6 +1310,7 @@ function AgendaGroup({
                 onClick={() => target ? onInterview(event) : onOpen(event.note)}
                 title={actionLabel}
                 aria-label={actionLabel}
+                {...comparison.eventProps(event.id)}
               >
                 <time className="agenda-date" dateTime={event.date}>
                   <span>{monthFormatter.format(new Date(`${event.date}T00:00:00+09:00`))}</span>
@@ -1325,6 +1349,7 @@ function AgendaGroup({
                     {copy.sourceShort}
                   </button>
                 )}
+                {comparison.eventAction(event.id)}
               </div>
             </div>
           );

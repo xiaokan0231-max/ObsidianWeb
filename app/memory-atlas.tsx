@@ -18,6 +18,7 @@ import { isComposingKey, isTypingTarget } from "@/lib/keyboard";
 import type { JobsInitialFilters } from "./jobs-view";
 import CalendarView from "./calendar-view";
 import CalendarInterviewState from "./calendar-interview-state";
+import { toggleCalendarComparison } from "./calendar-comparison";
 import SearchPalette, { type PaletteAction } from "./search-palette";
 import {
   appViewFromPathname,
@@ -49,6 +50,7 @@ import { updateCompanyComparisonSearch } from "./company-comparison-state";
 import type { NoteResolution } from "@/lib/read-model";
 import { readNoteDetail } from "./note-detail-resource";
 import type { CalendarPulseSummary } from "@/lib/calendar-pulse-summary";
+import type { CalendarComparisonTarget } from "@/lib/calendar-snapshot";
 import { createWikiNavigator, type WikiNavigationNotice } from "@/lib/wiki-navigation";
 import ViewErrorBoundary from "./view-error-boundary";
 import {
@@ -567,6 +569,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
   const { refresh: refreshCalendar } = calendarRead;
   const calendarModel = calendarRead.model;
   const compactCalendar = view === "calendar";
+  const [calendarComparison, setCalendarComparison] = useState<CalendarComparisonTarget[]>([]);
   const loading = compactCalendar ? calendarRead.loading || !calendarRead.revision && !calendarRead.error
     : indexedInterview ? !interviewRead.fetchedAt && !interviewRead.error : INDEX_ONLY_VIEWS.has(view) ? false
     : vaultState.loading || vaultState.readyScopes.size === 0 && vaultState.errors.size === 0;
@@ -1317,6 +1320,13 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
   }, [navigateToView]);
 
   const openInterviewInsights = useCallback((contextPath?: string) => navigateToView("insights", companyComparisonSearch(typeof contextPath === "string" ? [contextPath] : [])), [navigateToView]);
+  const toggleCalendarComparisonTarget = useCallback((target: CalendarComparisonTarget) => {
+    setCalendarComparison((selection) => toggleCalendarComparison(selection, target));
+  }, []);
+  const clearCalendarComparison = useCallback(() => setCalendarComparison([]), []);
+  const openCalendarComparison = useCallback(() => {
+    if (calendarComparison.length >= 2) navigateToView("insights", companyComparisonSearch(calendarComparison.map(({ path }) => path)));
+  }, [calendarComparison, navigateToView]);
 
   // 分析页直接打开看板案件抽屉，跟进操作仍使用案件本身的表单。
   const openCase = useCallback((note: Note) => {
@@ -1708,6 +1718,7 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
               )}
               {view === "insights" && <CompanyComparison key={interviewRouteVersion} companyContexts={interviewRead.companyContexts}
                 catalog={interviewRead.catalog} comparisonPaths={interviewRead.comparisonPaths} onSelect={syncComparisonSelection}
+                analysisAvailable={interviewChatAvailable}
                 notes={notes} today={calendarToday} loading={!scopeReady || interviewRead.loading} onRetry={() => void refreshInterview()}
                 onOpenCompany={(context) => openApplicationCompany(context.company, context.note)} onOpenWiki={openWikiLink} />}
               {view === "practice" && (
@@ -1814,6 +1825,10 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
                   onOpen={openNote}
                   interviewTargets={calendarInterviewTargets}
                   onInterview={openCalendarInterview}
+                  comparisonSelection={calendarComparison}
+                  onComparisonToggle={toggleCalendarComparisonTarget}
+                  onComparisonClear={clearCalendarComparison}
+                  onComparisonOpen={openCalendarComparison}
                 />
               )}
               {(view === "actions" || view === "activity") && (

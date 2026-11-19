@@ -14,6 +14,8 @@ export type CalendarPhaseData = {
   rating: CalendarCompanyRating | null;
 };
 
+export type CalendarComparisonTarget = { path: string; company: string; role: string };
+
 export type CalendarSnapshot = {
   schemaVersion: 1;
   events: {
@@ -22,6 +24,7 @@ export type CalendarSnapshot = {
     past: CalendarPhaseData;
     destinations: CalendarInterviewDestinations;
     origin: CalendarEventOrigin;
+    comparison?: CalendarComparisonTarget;
   }[];
   // 仅保留申请分桶需要的字段和标题；完整正文通过单篇接口按需读取。
   applicationNotes: Note[];
@@ -40,6 +43,7 @@ export function calendarModelFromSnapshot(snapshot: CalendarSnapshot, today: str
     events,
     interviewTargets: new Map(entries.flatMap(({ event, phase }) => phase.target ? [[event.id, phase.target] as const] : [])),
     interviewDestinations: new Map(entries.map(({ event, destinations }) => [event.id, destinations])),
+    comparisonTargets: new Map(entries.flatMap(({ event, comparison }) => comparison ? [[event.id, comparison] as const] : [])),
     progressByEvent: new Map(entries.map(({ event, phase }) => [event.id, phase.progress])),
     scoreByEvent: new Map(entries.map(({ event, phase }) => [event.id, phase.score])),
     companyRatingByEvent: new Map(entries.flatMap(({ event, phase }) => phase.rating ? [[event.id, phase.rating] as const] : [])),

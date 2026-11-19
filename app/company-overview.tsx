@@ -448,11 +448,12 @@ const COMPARE_VIEWS = [
 ] as const;
 
 export function CompanyCompare({
-  contexts, notes = [], today = "1970-01-01", onClose, onDetail, onRemove, onOpenWiki, onEdit, embedded = false, projectedCandidates,
+  contexts, notes = [], today = "1970-01-01", onClose, onDetail, onRemove, onOpenWiki, onEdit, embedded = false, projectedCandidates, analysisTab,
 }: {
   contexts: CompanyOverview[]; notes?: Note[]; today?: string; onClose: () => void;
   onDetail: (context: CompanyOverview) => void; onRemove: (path: string) => void;
   onOpenWiki: (target: string) => void; onEdit?: () => void; embedded?: boolean; projectedCandidates?: CompanyCompareCandidate[];
+  analysisTab?: { active: boolean; disabled: boolean; onToggle: (active: boolean) => void; content: ReactNode };
 }) {
   const t = useCompanyCopy();
   const [view, setView] = useState<CompareView>("overview");
@@ -528,8 +529,12 @@ export function CompanyCompare({
     </header>}
     <div className="co-board-controls">
       <div role="group" aria-label={t("比较内容")}>{COMPARE_VIEWS.map((tab) =>
-        <button type="button" key={tab.id} aria-pressed={view === tab.id} onClick={() => setView(tab.id)}>{t(tab.label)}</button>)}</div>
-      {view === "reviews" && <label className="co-review-sort">{t("列排序")}
+        <button type="button" key={tab.id} aria-pressed={!analysisTab?.active && view === tab.id}
+          onClick={() => { setView(tab.id); analysisTab?.onToggle(false); }}>{t(tab.label)}</button>)}
+        {analysisTab && <button type="button" aria-pressed={analysisTab.active} disabled={analysisTab.disabled}
+          onClick={() => analysisTab.onToggle(true)}>{t("AI 分析")}</button>}
+      </div>
+      {!analysisTab?.active && view === "reviews" && <label className="co-review-sort">{t("列排序")}
         <select value={reviewSort} onChange={(event) => setReviewSort(event.target.value as typeof reviewSort)}>
           <option value="selected">{t("选择顺序")}</option>
           <option value="openwork">{t("OpenWork 高 → 低")}</option>
@@ -537,8 +542,9 @@ export function CompanyCompare({
           <option value="recent">{t("最近面谈")}</option>
         </select>
       </label>}
-      {showScrollHint && <span>{t("向右滚动查看更多公司 →")}</span>}
+      {!analysisTab?.active && showScrollHint && <span>{t("向右滚动查看更多公司 →")}</span>}
     </div>
+    {analysisTab?.active ? analysisTab.content : <>
     {view === "conditions" && mixedCriteria && <p className="co-notice co-compare-notice">{t("这些岗位使用不同的契合评价标准，可打开各公司查看原始判断。")}</p>}
     <div className="co-board-scroll" role="region" aria-label={t("公司与岗位并排对比")} tabIndex={showScrollHint ? 0 : undefined}>
       <table className="co-board-table" style={{ minWidth: `${132 + columns.length * 190}px` }}>
@@ -562,5 +568,6 @@ export function CompanyCompare({
         </tr>)}</tbody>
       </table>
     </div>
+    </>}
   </CompareFrame>;
 }

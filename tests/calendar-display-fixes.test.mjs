@@ -199,6 +199,7 @@ test("代投入口只在面板开着时屏蔽翻页键；关闭后焦点留在�
       },
       "./use-url-state": { enumCodec: (values) => ({ parse: (raw) => values.includes(raw) ? raw : null }), useInitialUrlSearch: () => browser.location.search, useUrlState: (key, initial) => [initial, () => {}] },
       "./ui-locale": { useUiLocale: () => ({ locale: "zh-CN" }) },
+      "./calendar-comparison": { useCalendarComparison: () => ({ eventProps: () => ({}), eventAction: () => null, popup: null }) },
     },
   });
   const application = note("20_求職/テスト/応募.md", { type: "job-case", case_id: "ai", company: "株式会社テスト", position: "テスト職", status: "応募済", application_actor: "ai", application_agent: "Codex", applied_on: TODAY });
