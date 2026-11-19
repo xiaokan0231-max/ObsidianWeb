@@ -292,7 +292,10 @@ test("临场备用三块逐项检查：朗读节链接、懸念台词、单纯�
 
 test("2026-11 契约：規律与事実カード必有，懸念固定打底定着与日本語；2026-10 稿与无标记样稿不受影响", () => {
   assert.deepEqual(prepStageBlockIssues(WITH_STAGE_11, { contract: "2026-11" }), []);
-  assert.deepEqual(interviewPrepStructureIssues(WITH_STAGE_11.replace(/## 逆質問[\s\S]*?(?=## 研究资料)/, questionsSection()), 2, { contract: "2026-11", round: "一次面接" }), []);
+  const simplified = WITH_STAGE_11
+    .replace(/^▷ 正本確認：在留・年収・他社は.*\n\n/m, "")
+    .replace(/^\| (?:在留・入社時期|希望年収|他社状況) \|.*\n/gm, "");
+  assert.deepEqual(interviewPrepStructureIssues(simplified.replace(/## 逆質問[\s\S]*?(?=## 研究资料)/, questionsSection()), 2, { contract: "2026-11", round: "一次面接" }), []);
   // 旧契约的稿照旧；没写 prep_contract 的对照样稿与 strict 都按最早一版查，不因加版被拦。
   assert.deepEqual(prepStageBlockIssues(WITH_STAGE, { contract: "2026-10" }), []);
   assert.deepEqual(prepStageBlockIssues(WITH_STAGE, { replay: true }), []);
@@ -302,10 +305,10 @@ test("2026-11 契约：規律与事実カード必有，懸念固定打底定着
   assert.match(interviewPrepStructureIssues(WITH_QUESTIONS, 2, { contract: "2027-01" }).join("\n"), /只支持 2026-10／2026-11/);
   assert.match(prepContractReminder(BODY, 2, { date: "2026-10-16" }), /prep_contract: 2026-11/);
   // 事実カード逐行：必有行、第一句不能单纯否定、第三列回链正本、逐社子表与出处。
-  const issues = (from, to) => prepStageBlockIssues(WITH_STAGE_11.replace(from, to), { contract: "2026-11" }).join("\n");
-  assert.match(issues("| 希望年収 |", "| 希望の金額 |"), /缺少「希望年収」一行/);
+  const issues = (from, to) => prepStageBlockIssues(simplified.replace(from, to), { contract: "2026-11" }).join("\n");
+  assert.match(issues("| 来日理由 |", "| 自己紹介 |"), /缺少「来日理由」一行/);
   assert.match(issues("チームリーダーは通算約3年、正式な最大人数は4名です。", "チームを率いた経験（けいけん）はまだありません。"), /「リーダー経験・規模」不能用单纯否定/);
-  assert.match(issues("[[面接標準回答集#p24 他社選考状況]]", "p24"), /「他社状況」要在第三列回链正本/);
+  assert.match(issues("[[面接標準回答集#p17 管理经验与今后的领导角色]]", "p17"), /「リーダー経験・規模」要在第三列回链正本/);
   assert.match(issues("#### 逐社退職理由（聞かれた社だけ一句で）", "#### 退職理由"), /逐社退職理由…` 子表（当前 0 个）/);
   assert.match(issues("| 株式会社テスト | 2020-04〜2023-03 | 事業の縮小に伴い、次の構築機会を求めて転職しました。 |", "| 株式会社テスト | 2020-04〜2023-03 |  |"), /一句不能留空/);
   assert.match(issues("[[転職理由台本#逐社一句(深掘り対策)]]", "転職理由台本"), /回链 `\[\[転職理由台本#…\]\]`/);

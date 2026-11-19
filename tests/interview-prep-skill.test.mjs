@@ -75,9 +75,10 @@ test("v2 模板在临场备用开头固定規律・冒頭・事実カード・�
   const h3 = [...backup.matchAll(/^### (.+)$/gm)].map((match) => match[1]);
   assert.deepEqual(h3.slice(0, PREP_V2_STAGE_BLOCKS.length), PREP_V2_STAGE_BLOCKS.map((spec) => spec.title), "固定块在最前，顺序与标题原样");
   assert.match(backup, /\[\[自己紹介_音読台本#30秒版\]\]/);
-  // 規律取自趋势表；事実カード八行必有，逐社子表只抄転職理由台本的台本栏。
+  // 規律取自趋势表，事実カード五条履历题，逐社子表只抄転職理由台本的台本栏。
   assert.match(backup, /\[\[面接傾向_横断#/);
   for (const row of PREP_V2_FACT_ROWS) assert.match(backup, new RegExp(`^\\| ${row.key} \\|`, "m"), row.key);
+  assert.doesNotMatch(backup, /^\| (?:在留・入社時期|希望年収|他社状況) \|/m);
   assert.match(backup, /^#### 逐社退職理由/m);
   assert.match(backup, /\[\[転職理由台本#逐社一句/);
   assert.match(backup, /【内部・言わない】欄は写さない/);
