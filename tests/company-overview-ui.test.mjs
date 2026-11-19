@@ -16,6 +16,15 @@ const review = (platform, score, overrides = {}) => ({ platform, url: "https://e
 const profile = (reviews = []) => ({ version: 1, updatedOn: "2026-01-01", facts: [], reviews });
 const compareProps = { onClose() {}, onDetail() {}, onRemove() {}, onOpenWiki() {} };
 
+// SSR 没有点击事件；用真实组件渲染指定页签，其他状态与正文照常执行。
+const reactForCompare = await import("react");
+const tabComponents = (view) => loadAppModule("app/company-overview.tsx", { stubs: {
+  react: { ...reactForCompare, useState: (initial) => reactForCompare.useState(initial === "overview" ? view : initial) },
+} });
+const [reviewsTab, conditionsTab] = await Promise.all([tabComponents("reviews"), tabComponents("conditions")]);
+const renderReviewCompare = (contexts) => render(reviewsTab.CompanyCompare, { ...compareProps, contexts, embedded: true });
+const renderConditionsCompare = (contexts) => render(conditionsTab.CompanyCompare, { ...compareProps, contexts, embedded: true });
+
 test("结论优先，公司故事首段可读、余文可展开且全部来源保留", () => {
   const item = context("数据平台岗位");
   item.summary = { note: { path: "80_AI分析/公司研究.md" }, schemaVersion: 1, assessedOn: "2026-09-20", aiAuthor: "Codex", coveragePeriod: "2023～2026年",
@@ -123,25 +132,51 @@ test("满八个禁用新加入，但已选项仍可移除；单项托盘不能�
   assert.match(render(components.CompanyCompareButton, { context: item, compared: false, full: true, onToggle() {} }), /已选满 8 项/);
 });
 
-test("同公司不同岗位保持分列，比较使用原始平台量尺与独立维度", () => {
+test("同公司不同岗位保持分列，公司体量优先且缺失值有明确状态", () => {
   const first = context("平台开发"), second = context("分析工程");
+  const fact = (id, value, asOf, scope) => ({ id, label: id, value, asOf, scope, sources: [{ label: "公司公开原文", url: "https://example.com/company" }] });
   first.profile = profile([review("OpenWork", 3.2), review("転職会議", 4.1, { sampleCount: 28, sampleUnit: "条分类评论" })]);
-  const html = render(components.CompanyCompare, { contexts: [first, second], onClose() {}, onDetail() {}, onRemove() {}, onOpenWiki() {} });
-  assert.match(html, /平台开发的独立判断/);
-  assert.match(html, /分析工程的独立判断/);
-  assert.equal((html.match(/class="co-fit-pips(?: unknown)?"/g) ?? []).length, 12);
-  assert.doesNotMatch(html, /class="co-radar/);
-  assert.match(html, /3\.20<small> \/ 5/);
-  assert.match(html, /4\.10<small> \/ 5/);
-  assert.match(html, /12 名回答者/);
-  assert.match(html, /28 条分类评论/);
-  assert.match(html, /样本范围有限/);
-  assert.match(html, /style="width:64%"/, "平台分通过自己的五分量尺显示刻度");
-  assert.match(html, /aria-label="资料不足，未评分"/);
+  first.profile.facts = [
+    fact("employees", "約1,500名", "2026-01-01", "公司单体"),
+    fact("revenue", "14.33億円", "2025年7月期，2026-01-01 读取", "集团・年度实绩"),
+    fact("capital", "約1.2345億円", "2026-01-01", "公司单体"),
+    fact("business", "数据软件", "2026-01-01", "主营产品"),
+  ];
+  second.profile = profile();
+  second.profile.facts = [
+    fact("employees", "未披露", "2026-01-01", "公司单体"),
+    fact("fiscal", "营业收入约4亿日元，利润另列。", "2025年", "历史业绩记载"),
+  ];
+  const html = render(components.CompanyCompare, { ...compareProps, contexts: [first, second] });
+  assert.match(html, /员工人数[\s\S]*年营收[\s\S]*资本金[\s\S]*主营业务/);
+  assert.match(html, /<strong>約1,500<\/strong><small>名<\/small>/);
+  assert.match(html, />集团 · 2025年7月期</);
+  assert.match(html, /<strong>約12,345<\/strong><small>万円<\/small>/);
+  assert.match(html, /<p>約1\.2345億円<\/p>/, "换算保留记载原值");
+  assert.match(html, /未披露/);
+  assert.match(html, /待确认[\s\S]*营业收入约4亿日元/);
+  assert.equal((html.match(/class="co-scale-amount"/g) ?? []).length, 3, "旧资料中多个数字与来源口径没有被擅自提取");
+  assert.match(html, /href="https:\/\/example.com\/company"/);
   assert.match(html, /aria-label="从对比移除株式会社テスト 平台开发"/);
   assert.match(html, /aria-label="从对比移除株式会社テスト 分析工程"/);
   assert.match(html, /aria-label="关闭对比"/);
-  assert.doesNotMatch(html, /応募优先度|job-compare-rating/);
+  assert.doesNotMatch(html, /co-score-number|co-fit-pips|co-radar|応募优先度/, "其他评价从次级页签打开");
+
+  const conditions = renderConditionsCompare([first, second]);
+  assert.match(conditions, /平台开发的独立判断/);
+  assert.match(conditions, /分析工程的独立判断/);
+  assert.equal((conditions.match(/class="co-fit-pips(?: unknown)?"/g) ?? []).length, 12);
+  assert.match(conditions, /aria-label="资料不足，未评分"/);
+  assert.doesNotMatch(conditions, /co-score-number|co-radar/);
+
+  const ratings = renderReviewCompare([first, second]);
+  assert.match(ratings, /3\.20<small> \/ 5/);
+  assert.match(ratings, /4\.10<small> \/ 5/);
+  assert.match(ratings, /12 名回答者/);
+  assert.match(ratings, /28 条分类评论/);
+  assert.match(ratings, /样本范围有限/);
+  assert.match(ratings, /style="width:64%"/, "平台分通过自己的五分量尺显示刻度");
+  assert.doesNotMatch(ratings, /co-fit-pips|co-radar/);
 });
 
 test("平台别名使用同一最新评分及样本来源，不把旧记录元数据拼到新分数上", () => {
@@ -154,15 +189,18 @@ test("平台别名使用同一最新评分及样本来源，不把旧记录元�
     review("転職会議", 3.7, { readOn: "2026-01-09" }),
     review("TenshokuKaigi", 4.1, { readOn: "2026-01-09" }),
   ]) };
-  const html = render(components.CompanyCompare, { ...compareProps, contexts: [item, conflicted] });
+  const html = renderReviewCompare([item, conflicted]);
   assert.match(html, /4\.60<small> \/ 5/);
   assert.match(html, /37 条分类评论/);
   assert.match(html, /href="https:\/\/example.com\/reviews\/latest"/);
   assert.match(html, /最新工程师样本范围/);
   assert.match(html, /最新样本限制/);
-  assert.match(html, /2026-01-09 读取 · 2025～2026年最新期间/);
+  assert.match(html, /class="co-score-date" dateTime="2026-01-09">2026-01-09/);
+  assert.match(html, /<small>2025～2026年最新期间<\/small>/);
   assert.match(html, /style="width:92/);
-  assert.doesNotMatch(html, /2\.10|条旧样本|reviews\/old|旧记录范围|旧记录限制|2024年旧期间/);
+  const scoreRows = html.split('>口碑总结')[0];
+  assert.doesNotMatch(scoreRows, /2\.10|条旧样本|reviews\/old|旧记录范围|旧记录限制|2024年旧期间/);
+  assert.match(html, /旧记录范围/, "历史记录仍可在原文详情中核对");
   assert.match(html, /评分记录待核对/);
   assert.doesNotMatch(html, /3\.70<small>|4\.10<small>/, "同日别名记录冲突时不能任意取一个分数展示");
 
@@ -186,14 +224,15 @@ test("评价保留原话、中文解释、员工来源及岗位启示，比较�
   assert.match(html, /href="https:\/\/example.com\/reviews\/two"/);
   assert.doesNotMatch(html, /旧主题摘要/, "完整主题取代短摘要，避免重复");
   assert.equal((html.match(/<blockquote /g) ?? []).length, 1, "没有原句的来源只显示释义，不伪装成引述");
-  const compared = render(components.CompanyCompare, { contexts: [item, context("另一个岗位")], onClose() {}, onDetail() {}, onRemove() {}, onOpenWiki() {} });
+  const compared = renderReviewCompare([item, context("另一个岗位")]);
   assert.match(compared, /<details class="co-signal mixed"><summary>/);
   assert.match(compared, /自主性与支援要一起看/);
   assert.match(compared, /一名员工描述了自主决定的空间，也提到支援因项目而异/);
   assert.match(compared, /href="https:\/\/example.com\/reviews\/one"/);
   assert.match(compared, /确认首个项目如何分配/);
-  assert.match(compared, /aria-pressed="false">外部口碑/);
-  assert.doesNotMatch(compared, /co-review-readings|相談しやすい環境です。/, "默认概览只提炼关键信号，原文在口碑页按需阅读");
+  assert.match(compared, /aria-pressed="true">外部口碑/);
+  assert.match(compared, /<details class="co-board-expand"><summary>1 个主题/);
+  assert.match(compared, /相談しやすい環境です。/);
 });
 
 test("外部总结先于平台与摘录，正文连续可读，阅读边界、日期、署名及来源可核对", () => {
@@ -217,18 +256,11 @@ test("外部总结先于平台与摘录，正文连续可读，阅读边界、�
   assert.equal((synthesis.match(/<p>/g) ?? []).length, 3, "所有保存的正文自然段均显示");
 
   const compared = render(components.CompanyCompare, { contexts: [item, context("另一岗位")], onClose() {}, onDetail() {}, onRemove() {}, onOpenWiki() {} });
-  assert.match(compared, /aria-pressed="true">一眼看差异/);
+  assert.match(compared, /aria-pressed="true">公司概况/);
   assert.match(compared, /aria-pressed="false">外部口碑/);
-  assert.match(compared, /aria-pressed="false">职责与条件/);
+  assert.match(compared, /aria-pressed="false">岗位与条件/);
   assert.doesNotMatch(compared, /co-review-synthesis compact|co-review-synthesis-more|反映沟通方式有所不同|需要在面谈核实/, "长篇总结不堆在默认概览，完整阅读仍由独立口碑视图承接");
 });
-
-// SSR 没有交互点击；只把真实组件的初始标签设为口碑，其他 React 状态与正文渲染照常执行。
-const reactForReviewTab = await import("react");
-const reviewTabComponents = await loadAppModule("app/company-overview.tsx", { stubs: {
-  react: { ...reactForReviewTab, useState: (initial) => reactForReviewTab.useState(initial === "overview" ? "reviews" : initial) },
-} });
-const renderReviewCompare = (contexts) => render(reviewTabComponents.CompanyCompare, { ...compareProps, contexts, embedded: true });
 
 test("并排口碑总结默认显示两段，余文、范围和来源仍完整保留", () => {
   const item = context("两段概要岗位");
@@ -381,14 +413,14 @@ test("新旧口径混选保留平台口碑和独立判断，禁止把不同契�
   const first = context("旧岗位", 1), second = context("新岗位", 2);
   first.profile = profile([review("OpenWork", 4.2)]);
   second.profile = profile([review("転職会議", 2.8)]);
-  const html = render(components.CompanyCompare, { ...compareProps, contexts: [first, second], onEdit() {} });
-  assert.match(html, /所选画像的评价维度不同，暂不并排比较六维契合刻度。/);
-  assert.match(html, /旧岗位的独立判断/);
-  assert.match(html, /新岗位的独立判断/);
-  assert.match(html, /更换公司/);
-  assert.match(html, /4\.20<small> \/ 5/);
-  assert.match(html, /2\.80<small> \/ 5/);
-  assert.doesNotMatch(html, /class="co-radar|class="co-dimension|class="co-fit-pips|契合刻度 · 满分 5/);
+  const conditions = renderConditionsCompare([first, second]);
+  assert.match(conditions, /这些岗位使用不同的契合评价标准/);
+  assert.match(conditions, /旧岗位的独立判断/);
+  assert.match(conditions, /新岗位的独立判断/);
+  assert.doesNotMatch(conditions, /class="co-radar|class="co-dimension|class="co-fit-pips|契合刻度 · 满分 5/);
+  const reviews = renderReviewCompare([first, second]);
+  assert.match(reviews, /4\.20<small> \/ 5/);
+  assert.match(reviews, /2\.80<small> \/ 5/);
 });
 
 test("选择器满八项后仅第九项禁用，已选项和清空入口仍可使用", () => {
@@ -451,13 +483,13 @@ test("外部平台缺分按真实原因留空，资料独立存在时仍能对�
     { ...context("仅面试体验岗位"), assessment: null, profile: profile([review("転職会議", null, { sampleUnit: "条面试体验" })]) },
     { ...context("访问受限岗位"), assessment: null, profile: profile([review("OpenWork", null, { status: "restricted" })]) },
   ];
-  const html = render(components.CompanyCompare, { ...compareProps, contexts: items });
+  const html = renderReviewCompare(items);
   for (const label of ["尚未调查", "无有效员工样本", "仅面试体验", "正文访问受限"]) assert.match(html, new RegExp(label));
   assert.equal((html.match(/class="co-company-detail"/g) ?? []).length, 4);
   assert.equal((html.match(/class="co-score-number">—<\/strong>/g) ?? []).length, 8);
   assert.doesNotMatch(html, /0\.00|style="width:0%"/);
-  assert.match(html, /向右滚动查看更多公司/);
-  assert.match(html, /没有足够证据判断岗位契合；外部口碑仍可独立比较/);
+  assert.doesNotMatch(html, /向右滚动查看更多公司|co-fit-pips/, "四列直接显示，岗位判断从独立页签打开");
+  assert.match(renderConditionsCompare(items), /尚未评估/);
 });
 
 test("加入按钮与选择器的状态切换共用八项上限，取消后可替换且不重复加入", () => {
@@ -506,23 +538,28 @@ test("普通公司入口仍可选择相关旧稿，精确准备路径始终优�
   assert.doesNotMatch(exact, /本场尚无准备稿/);
 });
 
-test("默认概览区分平台口碑与案件百分制采点，详细案件条件留在独立入口", () => {
+test("岗位事实先于主观契合与百分制采点，平台口碑保留在外部口碑", () => {
   const scored = context("已采点岗位");
   scored.note.frontmatter = {
     ...scored.note.frontmatter, rating_version: "v2", fit_score_100: 74, fit_band_final: "B", hard_gate: "hold",
     score_technical_value: 20, score_document_match: 6, score_transferability: 12, score_org_legibility: 16, score_client_deployability: 12, score_role_coherence: 8,
   };
   scored.profile = profile([review("OpenWork", 4.2)]);
-  scored.profile.facts = [{ id: "compensation", label: "报酬条件", value: "待双方确认的测试条件", asOf: "2026-01-01", scope: "测试岗位", sources: [] }];
+  scored.note.frontmatter.salary = "500万～700万円";
+  scored.note.frontmatter.location = "東京都";
+  scored.assessment.contextFacts = [{ id: "work_style", label: "工作方式", value: "混合办公", asOf: "2026-01-01", scope: "测试岗位", sources: [] }];
   const meeting = { ...context("面谈"), kind: "meeting", key: "meeting:x" };
   const unscored = context("未采点岗位");
   assert.equal(toJobCard(scored.note).fit?.score, 74, "案件自身的百分制采点仍有独立正本");
   assert.equal(toJobCard(scored.note).fit?.band, "B");
   assert.equal(toJobCard(unscored.note).fit, null);
   const html = render(components.CompanyCompare, { ...compareProps, contexts: [scored, unscored, meeting], onEdit() {} });
-  assert.match(html, /aria-pressed="true">一眼看差异/);
-  assert.match(html, /aria-pressed="false">职责与条件/);
-  assert.match(html, /4\.20<small> \/ 5/);
-  assert.match(html, /class="co-fit-pips" aria-label="4 \/ 5"/);
-  assert.doesNotMatch(html, /co-case-fit|co-jobfit-meter|Fit 74|74%|案件 v2 採点|报酬条件|待双方确认的测试条件/, "概览不能把百分彩点、条件长文和平台五分评分铺成一张大表");
+  assert.match(html, /aria-pressed="true">公司概况/);
+  assert.match(html, /aria-pressed="false">岗位与条件/);
+  assert.doesNotMatch(html, /co-case-fit|co-fit-pips|co-score-number|500万|混合办公/);
+  const conditions = renderConditionsCompare([scored, unscored, meeting]);
+  assert.match(conditions, /招聘年收[\s\S]*500万～700万円[\s\S]*東京都[\s\S]*混合办公[\s\S]*岗位判断[\s\S]*案件 v2 採点/);
+  assert.match(conditions, /class="co-fit-pips" aria-label="4 \/ 5"/);
+  assert.doesNotMatch(conditions, /co-score-number/);
+  assert.match(renderReviewCompare([scored, unscored, meeting]), /4\.20<small> \/ 5/);
 });

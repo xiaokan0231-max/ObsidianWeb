@@ -56,10 +56,14 @@ test("全源已验证的六维和公司故事在局部正文集合中保持可�
   assert.equal(a.partial.includes(a.evidence), false, "无须把引用证据正文放进场次依赖");
 });
 
-test("公司对比沿用投影的两组六维，旧界面和目录界面都不重新判空", async () => {
-  const { default: CompanyComparison } = await loadAppModule("app/company-comparison.tsx", { stubs: { "./ui-locale": locale } });
+test("岗位与条件沿用投影的两组六维，两种资料入口都不重新判空", async () => {
+  const { default: CompanyComparison } = await loadAppModule("app/company-comparison.tsx", { stubs: {
+    "./ui-locale": locale,
+    react: { ...React, useState: (initial) => React.useState(initial === "overview" ? "conditions" : initial) },
+  } });
   for (const remote of [false, true]) {
     const html = render(CompanyComparison, { notes: partial, today, companyContexts, catalog: remote ? catalog : undefined, onOpenCompany() {}, onOpenWiki() {} });
+    assert.match(html, /aria-pressed="true">岗位与条件/);
     assert.match(html, /已核对的六维判断甲/);
     assert.match(html, /已核对的六维判断乙/);
     assert.equal((html.match(/class="co-fit-pips"/g) ?? []).length, 12);

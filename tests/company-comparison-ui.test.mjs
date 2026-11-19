@@ -4,6 +4,7 @@ import { createElement } from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { renderToStaticMarkup } from "react-dom/server";
 import { buildCompanyOverviews } from "../lib/company-overview.ts";
+import { buildInterviewReadModelRecords, INTERVIEW_RECORDS } from "../lib/interview-read-model.ts";
 import { loadAppModule } from "./helpers/render-tsx.mjs";
 
 const today = "2026-10-25";
@@ -13,7 +14,10 @@ function fixture(key, score, day) {
   const owner = note(`20_求職/テスト${key}/案件.md`, { type: "job-case", company, case_id: `test-${key}`, status: "面接中",
     company_dossier: `[[20_求職/テスト${key}/_会社]]`, next_event_at: `${day} 13:00`, next_event_label: "一次面接" }, `# ${company} データ基盤エンジニア`);
   const dossier = note(`20_求職/テスト${key}/_会社.md`, { type: "company", company, company_profile: {
-    version: 1, updated_on: today, facts: [], reviews: [{ platform: "OpenWork", status: "available", score, scale: 5,
+    version: 1, updated_on: today, facts: key === "甲" ? [
+      { id: "employees", label: "员工人数", value: "120 人", scope: "单体", as_of: today, sources: [{ label: "会社概要", url: "https://example.com/about" }] },
+      { id: "revenue", label: "年营收", value: "20 億円", scope: "集团・2026年3月期", as_of: today, sources: [{ label: "財務報告", url: "https://example.com/results" }] },
+    ] : [], reviews: [{ platform: "OpenWork", status: "available", score, scale: 5,
       sample_count: 12, sample_unit: "名回答者", read_on: today, comment_period: "2026年", url: `https://example.com/${key}/reviews`, coverage: "工程师样本", limitations: "不代表全体员工", positive: [], negative: [] }],
   } });
   return { owner, notes: [owner, dossier] };
@@ -24,18 +28,24 @@ const notes = [...first.notes, ...second.notes];
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 const callbacks = { onOpenCompany() {}, onOpenWiki() {} };
 
-test("公司对比默认作为独立页面呈现，直接显示最近公司与各自原始评分", async () => {
+test("公司对比两种资料入口共用紧凑工具栏，默认先显示核心数字，保留公司顺序", async () => {
   const { default: CompanyComparison } = await loadAppModule("app/company-comparison.tsx");
-  const html = render(CompanyComparison, { notes, today, ...callbacks });
-  assert.match(html, /<h1>公司对比<\/h1>/);
-  assert.match(html, /class="company-comparison-page"/);
-  assert.match(html, /项正在对比/);
-  assert.match(html, /テスト甲/);
-  assert.match(html, /テスト乙/);
-  assert.match(html, /4\.20<small> \/ 5/);
-  assert.match(html, /2\.80<small> \/ 5/);
-  assert.match(html, /公司事实、六维契合度与外部评价并排比较/);
-  assert.doesNotMatch(html, /role="dialog"|aria-modal=|co-compare-backdrop|关闭对比|关闭公司选择/);
+  const records = buildInterviewReadModelRecords(notes, { today });
+  const catalog = records.find(({ kind }) => kind === INTERVIEW_RECORDS.catalog).value;
+  for (const source of [{}, { catalog, companyContexts: buildCompanyOverviews(notes) }]) {
+    const html = render(CompanyComparison, { notes, today, ...callbacks, ...source });
+    assert.match(html, /<h1>公司对比<\/h1>/);
+    assert.match(html, /class="company-comparison-page"/);
+    assert.match(html, /aria-live="polite">2 项/);
+    assert.match(html, /<select aria-label="快捷组"/);
+    const table = html.slice(html.indexOf("<table"));
+    assert.match(table, /テスト甲[\s\S]*テスト乙/);
+    assert.match(table, /员工人数[\s\S]*年营收[\s\S]*资本金/);
+    assert.match(table, /<strong>120<\/strong><small>人<\/small>/);
+    assert.match(table, /集团・2026年3月期/);
+    assert.doesNotMatch(table, /4\.20<small>|2\.80<small>/);
+    assert.doesNotMatch(html, /role="dialog"|aria-modal=|co-compare-backdrop|关闭对比|关闭公司选择/);
+  }
 });
 
 test("内嵌选择器和对比表正常参与页面，不生成弹框语义或关闭按钮", async () => {

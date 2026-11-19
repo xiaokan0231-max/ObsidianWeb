@@ -12,7 +12,7 @@ import {
   type CompanyReview,
   type CompanyReviewSynthesis,
 } from "@/lib/company-overview";
-import { HARD_GATE_LABEL, JOB_FIT_AXES, JOB_FIT_SCORE_LABEL, UNRATED_V2_LABEL, toJobCard } from "@/lib/jobs";
+import { HARD_GATE_LABEL, JOB_FIT_AXES, JOB_FIT_SCORE_LABEL, UNRATED_V2_LABEL, jobSection, salaryLabel, toJobCard } from "@/lib/jobs";
 import { prepOpeningCompanyFacts } from "@/lib/interview-prep-v2";
 import { prefersReducedMotion } from "@/lib/motion";
 import { useDialogFocus } from "./use-dialog-focus";
@@ -244,7 +244,8 @@ function PlatformScore({ context, platform, mini = false }: { context: CompanyOv
     <div className="co-score-top"><span>{!mini && source?.url ? <a href={source.url} target="_blank" rel="noopener noreferrer">{platform} ↗</a> : platform}</span><strong className="co-score-number">{rating ? rating.score.toFixed(2) : "—"}{!mini && valid && <small> / 5</small>}</strong></div>
     {!mini && <div className="co-score-track" aria-hidden="true">{rating && <i style={{ width: `${rating.score / 5 * 100}%` }} />}</div>}
     <small className={valid ? "co-score-sample" : "co-score-empty"}>{valid ? sample : missing}</small>
-    {!mini && source && <details className="co-score-context"><summary>{t("样本与范围")}</summary><p>{source.coverage}</p><p>{source.limitations}</p><small>{source.readOn}{t(" 读取 · ")}{source.commentPeriod}</small></details>}
+    {!mini && source?.readOn && <time className="co-score-date" dateTime={source.readOn}>{source.readOn}</time>}
+    {!mini && source && <details className="co-score-context"><summary>{t("样本与范围")}</summary><p>{source.coverage}</p><p>{source.limitations}</p><small>{source.commentPeriod}</small></details>}
   </div>;
 }
 function CandidateMeta({ item }: { item: CompanyCompareCandidate }) {
@@ -302,11 +303,13 @@ export function CompanyCompareSelector({ contexts, selected, notes = [], today =
     else { for (const path of selectedPaths) if (!paths.includes(path)) onToggle(path); for (const path of paths) if (!selectedSet.has(path)) onToggle(path); }
   };
   return <CompareFrame embedded={embedded} className="co-selector-shell" label={t("选择公司对比")} onClose={onClose}>
-    <header className="co-selector-hero"><div className="co-selector-icon" aria-hidden="true">⇄</div><div className="co-selector-heading"><p>{t("COMPARE · 先认出公司，再看差异")}</p><h2>{t("选几家，一起看")}</h2><span>{t("岗位、面谈时间与口碑放在一起，最多选择 ")}{COMPANY_COMPARE_LIMIT}{t(" 项。")}</span></div>{!embedded && <button type="button" className="co-dialog-close" onClick={onClose} aria-label={t("关闭公司选择")}>×</button>}</header>
-    <CompanyCompareQuickPicks candidates={candidates} onSelect={(paths, preset) => { replaceSelection(paths); setQuery(""); setFilter("selected"); setSort(preset.id === "upcoming" ? "relevance" : preset.id); setPresetMessage(t("已按{preset}选入 {count} 家，可继续调整。", { preset: t(preset.title), count: paths.length })); }} />
+    {!embedded && <>
+      <header className="co-selector-hero"><div className="co-selector-icon" aria-hidden="true">⇄</div><div className="co-selector-heading"><h2>{t("选择公司")}</h2><span>{t("岗位、面谈时间与口碑放在一起，最多选择 ")}{COMPANY_COMPARE_LIMIT}{t(" 项。")}</span></div><button type="button" className="co-dialog-close" onClick={onClose} aria-label={t("关闭公司选择")}>×</button></header>
+      <CompanyCompareQuickPicks candidates={candidates} onSelect={(paths, preset) => { replaceSelection(paths); setQuery(""); setFilter("selected"); setSort(preset.id === "upcoming" ? "relevance" : preset.id); setPresetMessage(t("已按{preset}选入 {count} 家，可继续调整。", { preset: t(preset.title), count: paths.length })); }} />
+    </>}
     <div className="co-selector-tools"><label><span className="sr-only">{t("搜索公司、岗位或业务")}</span><span aria-hidden="true">⌕</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("想不起来名字？也可以搜岗位、业务或渠道")} /></label><label>{t("排序")}<select value={sort} onChange={(event) => setSort(event.target.value as CompanyCompareSort)}><option value="relevance">{t("面谈与资料优先")}</option><option value="recent">{t("最近面过在前")}</option><option value="openwork">{t("OpenWork 高 → 低")}</option><option value="jobtalk">{t("転職会議 高 → 低")}</option></select></label></div>
     <div className="co-selector-filters" aria-label={t("筛选对比公司")}>{COMPARE_FILTERS.map((item) => <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{t(item.label)}<small>{filterCompanyCompareCandidates(candidates, "", item.id, selectedPaths, "relevance").length}</small></button>)}</div>
-    <p className="co-selector-guide" aria-live="polite">{query ? t("找到 {count} 项", { count: visible.length }) : presetMessage || t("默认显示有公司资料或面谈记录的项目；近期安排排在前面。快捷选择会替换已选项。")}</p>
+    {(query || !embedded) && <p className="co-selector-guide" aria-live="polite">{query ? t("找到 {count} 项", { count: visible.length }) : presetMessage || t("默认显示有公司资料或面谈记录的项目；近期安排排在前面。快捷选择会替换已选项。")}</p>}
     <div className="co-candidate-grid" role="group" aria-label={t("可对比的公司与岗位")}>{visible.map((item) => {
       const checked = selectedSet.has(item.context.note.path);
       const business = item.context.profile?.facts.find((fact) => /business/.test(fact.id))?.value || t("业务资料待补，可先查看岗位与已有评价");
@@ -346,39 +349,218 @@ function ReviewThemeCell({ context, onOpenWiki }: { context: CompanyOverview; on
     <details className="co-board-expand"><summary>{themes.length}{t(" 个主题 · 查看原文与阅读边界")}</summary><Reviews compact reviews={reviews} onOpenWiki={onOpenWiki} /></details>
   </div>;
 }
-export function CompanyCompare({ contexts, notes = [], today = "1970-01-01", onClose, onDetail, onRemove, onOpenWiki, onEdit, embedded = false, projectedCandidates }: { contexts: CompanyOverview[]; notes?: Note[]; today?: string; onClose: () => void; onDetail: (context: CompanyOverview) => void; onRemove: (path: string) => void; onOpenWiki: (target: string) => void; onEdit?: () => void; embedded?: boolean; projectedCandidates?: CompanyCompareCandidate[] }) {
+const COMPANY_SCALE_FIELDS = [
+  { id: "employees", label: "员工人数" },
+  { id: "revenue", label: "年营收" },
+  { id: "capital", label: "资本金" },
+] as const;
+
+const COMPANY_BUSINESS_FIELDS = [
+  { id: "business", label: "主营业务" },
+  { id: "business_model", label: "业务与交付模式" },
+  { id: "team_size", label: "技术团队人数" },
+] as const;
+
+type ScaleField = typeof COMPANY_SCALE_FIELDS[number]["id"];
+type CompareView = "overview" | "conditions" | "reviews";
+type CompareRow = { label: string; hint?: string; render: (context: CompanyOverview) => ReactNode };
+
+function scaleFact(profileFacts: CompanyFact[], id: ScaleField) {
+  return profileFacts.find((fact) => fact.id === id)
+    ?? (id === "revenue" ? profileFacts.find((fact) => fact.id === "fiscal" || fact.id === "business_scale") : undefined);
+}
+
+function capitalInManYen(amount: string, unit: string) {
+  if (!/^[亿億]\s*(?:日元|円)$/u.test(unit)) return null;
+  const parts = amount.match(/^(约|約)?\s*(\d[\d,]*)(?:\.(\d{1,4}))?$/u);
+  if (!parts) return null;
+  const [, approximation = "", whole, fraction = ""] = parts;
+  const manYen = Number(whole.replaceAll(",", "")) * 10_000 + Number(fraction.padEnd(4, "0"));
+  return Number.isSafeInteger(manYen) ? { amount: approximation + manYen.toLocaleString("ja-JP"), unit: "万円" } : null;
+}
+
+function ScaleFact({ fact, id, onOpenWiki }: { fact?: CompanyFact; id: ScaleField; onOpenWiki: (target: string) => void }) {
   const t = useCompanyCopy();
-  const [view, setView] = useState<"overview" | "reviews" | "conditions">("overview");
-  const [sort, setSort] = useState<"selected" | CompanyCompareSort>("selected");
+  if (!fact) return <span className="co-muted co-scale-missing">{t("待确认")}</span>;
+
+  // 旧卷宗有多口径说明和摘录。只有完整的单一指标值才按大数字显示，原记录与来源始终可展开。
+  const value = fact.value.normalize("NFKC").trim();
+  const number = id === "employees"
+    ? value.match(/^((?:约|約)?\s*\d+(?:,\d{3})*)\s*(人|名)$/u)
+    : value.match(/^((?:约|約)?\s*\d+(?:[,.]\d+)*(?:\s*[万亿億]\s*\d+(?:[,.]\d+)*)*)\s*([万亿億]?\s*(?:日元|円))$/u);
+  const disclosed = number && fact.id === id && (id !== "capital" || !/含(?:む)?\s*(?:资本准备金|資本準備金)/u.test(fact.scope));
+  const converted = disclosed && id === "capital" ? capitalInManYen(number[1], number[2]) : null;
+  const normalizedScope = fact.scope.normalize("NFKC").trim();
+  const scope = normalizedScope.match(/^(?:集团口径|集团|公司单体|公司口径|日本法人|单体|単体|連結|グループ)(?=$|[\s,、;。・|(:]|期末)/u)?.[0];
+  const period = id === "revenue"
+    ? [fact.asOf, normalizedScope].join(" ").match(/(?:\d{4}\s*年\s*(?:\d{1,2}\s*月期|度)|\d{4}-\d{2}\s*期|FY\s*\d{4})/iu)?.[0] ?? fact.asOf
+    : fact.asOf;
+  const metricDate = id === "employees" && /(?:未标|未注明)统计日/u.test(fact.scope) ? t("统计时点未注明") : period;
+  const status = /^(未披露|未公開|非公開|非公表)$/u.test(value) ? t("未披露") : t("待确认");
+  return <details className="co-scale-fact">
+    <summary>
+      {disclosed ? <span className="co-scale-amount"><strong>{converted?.amount ?? number[1].trim()}</strong><small>{converted?.unit ?? number[2].trim()}</small></span>
+        : <span className="co-muted">{status}</span>}
+      {disclosed && (scope || metricDate) && <span className="co-scale-meta">{[scope && t(scope), metricDate].filter(Boolean).join(" · ")}</span>}
+      <span className="co-scale-source-label">{t("来源与口径")}</span>
+    </summary>
+    <div className="co-scale-evidence">
+      {(converted || (!disclosed && value !== "待确认")) && <p>{fact.value}</p>}
+      <p>{fact.asOf}{fact.scope && <> · {fact.scope}</>}</p>
+      <Evidence items={fact.sources} onOpenWiki={onOpenWiki} />
+    </div>
+  </details>;
+}
+
+const JOB_CONDITION_FIELDS = [
+  { id: "salary", label: "招聘年收", aliases: ["salary", "compensation", "annual_salary"] },
+  { id: "location", label: "工作地点", aliases: ["location", "work_location", "workplace"] },
+  { id: "work_style", label: "工作方式", aliases: ["work_style", "remote", "work_model"] },
+  { id: "role", label: "职责", aliases: ["role", "responsibilities", "duties", "job_content"] },
+] as const;
+type ConditionField = typeof JOB_CONDITION_FIELDS[number];
+
+function ConditionFact({ context, field, onOpenWiki }: { context: CompanyOverview; field: ConditionField; onOpenWiki: (target: string) => void }) {
+  const t = useCompanyCopy();
+  const matches = (fact: CompanyFact) => field.aliases.some((alias) => alias === fact.id);
+  const specific = context.assessment?.contextFacts.find(matches);
+  if (specific) return <Fact fact={specific} onOpenWiki={onOpenWiki} />;
+  if (context.kind === "case") {
+    const card = toJobCard(context.note);
+    if (field.id === "salary" && (card.salaryText || card.salary.min !== null)) {
+      return <>{card.salaryText || salaryLabel(card)}</>;
+    }
+    if (field.id === "location" && card.location) return <>{card.location}</>;
+    if (field.id === "role") {
+      const directions = jobSection(context.note, "仕事内容") || jobSection(context.note, "仕事内容（求人原文・逐語）")
+        || jobSection(context.note, "岗位职责");
+      if (directions) return <div className="co-role-text">{directions}</div>;
+    }
+  }
+  if (field.id === "work_style") return <Fact fact={context.profile?.facts.find(matches)} onOpenWiki={onOpenWiki} />;
+  return <span className="co-muted">{t("待确认")}</span>;
+}
+
+const COMPARE_VIEWS = [
+  { id: "overview", label: "公司概况" },
+  { id: "conditions", label: "岗位与条件" },
+  { id: "reviews", label: "外部口碑" },
+] as const;
+
+export function CompanyCompare({
+  contexts, notes = [], today = "1970-01-01", onClose, onDetail, onRemove, onOpenWiki, onEdit, embedded = false, projectedCandidates,
+}: {
+  contexts: CompanyOverview[]; notes?: Note[]; today?: string; onClose: () => void;
+  onDetail: (context: CompanyOverview) => void; onRemove: (path: string) => void;
+  onOpenWiki: (target: string) => void; onEdit?: () => void; embedded?: boolean; projectedCandidates?: CompanyCompareCandidate[];
+}) {
+  const t = useCompanyCopy();
+  const [view, setView] = useState<CompareView>("overview");
+  const [reviewSort, setReviewSort] = useState<"selected" | CompanyCompareSort>("selected");
   const candidates = useMemo(() => projectedCandidates ?? buildCompanyCompareCandidates(contexts, notes, today), [projectedCandidates, contexts, notes, today]);
-  const items = sort === "selected" ? contexts.flatMap((context) => { const item = candidates.find((candidate) => candidate.context.key === context.key); return item ? [item] : []; }) : filterCompanyCompareCandidates(candidates, "", "all", [], sort);
+  const byKey = new Map(candidates.map((item) => [item.context.key, item]));
+  const selected = contexts.flatMap((context) => {
+    const candidate = byKey.get(context.key);
+    return candidate ? [candidate] : [];
+  });
+  const items = view === "reviews" && reviewSort !== "selected"
+    ? filterCompanyCompareCandidates(selected, "", "all", [], reviewSort)
+    : selected;
   const columns = items.map((item) => item.context);
   const versions = new Set(columns.flatMap((context) => context.assessment ? [context.assessment.criteriaVersion] : []));
   const mixedCriteria = versions.size > 1;
   const axes = companyFitDimensions([...versions][0] ?? 2);
-  const facts = new Map<string, string>();
-  for (const context of columns) for (const fact of [...(context.profile?.facts ?? []), ...(context.assessment?.contextFacts ?? [])]) if (!facts.has(fact.id)) facts.set(fact.id, fact.label);
-  const rows: { label: string; hint?: string; render: (context: CompanyOverview) => ReactNode }[] = view === "conditions" ? [
-    { label: "案件 v2 採点", hint: "与公司口碑分开", render: (context) => <CaseFitGraphic context={context} /> },
-    ...[...facts].map(([id, label]) => ({ label, render: (context: CompanyOverview) => <Fact fact={[...(context.assessment?.contextFacts ?? []), ...(context.profile?.facts ?? [])].find((fact) => fact.id === id)} onOpenWiki={onOpenWiki} /> })),
-    { label: "面谈核实", render: (context) => context.assessment?.questions.length ? <ul>{context.assessment.questions.slice(0, 3).map((question) => <li key={question}>{question}</li>)}</ul> : <span className="co-muted">{t("岗位职责与工作条件待核实")}</span> },
-    { label: "资料时点", render: (context) => <span className="co-muted">{t("公司资料 ")}{context.profile?.updatedOn || t("未整理")}<br />{t("契合判断 ")}{context.assessment?.assessedOn || t("未评估")}</span> },
+  const remainingConditions = new Map<string, string>();
+  if (view === "conditions") {
+    const coreIds = new Set<string>(JOB_CONDITION_FIELDS.flatMap((field) => [...field.aliases]));
+    for (const context of columns) {
+      for (const fact of context.assessment?.contextFacts ?? []) {
+        if (!coreIds.has(fact.id) && !remainingConditions.has(fact.id)) remainingConditions.set(fact.id, fact.label);
+      }
+    }
+  }
+
+  const rows: CompareRow[] = view === "overview" ? [
+    ...COMPANY_SCALE_FIELDS.map(({ id, label }) => ({
+      label, render: (context: CompanyOverview) => <ScaleFact fact={scaleFact(context.profile?.facts ?? [], id)} id={id} onOpenWiki={onOpenWiki} />,
+    })),
+    ...COMPANY_BUSINESS_FIELDS.map(({ id, label }) => ({
+      label, render: (context: CompanyOverview) => <Fact fact={context.profile?.facts.find((fact) => fact.id === id)} onOpenWiki={onOpenWiki} />,
+    })),
+  ] : view === "conditions" ? [
+    ...JOB_CONDITION_FIELDS.map((field) => ({
+      label: field.label, render: (context: CompanyOverview) => <ConditionFact context={context} field={field} onOpenWiki={onOpenWiki} />,
+    })),
+    ...[...remainingConditions].map(([id, label]) => ({
+      label, render: (context: CompanyOverview) => <Fact fact={context.assessment?.contextFacts.find((fact) => fact.id === id)} onOpenWiki={onOpenWiki} />,
+    })),
+    { label: "岗位判断", render: (context) => context.assessment
+      ? <details className="co-board-expand"><summary>{t("展开岗位判断")}</summary><p>{context.assessment.summary}</p></details>
+      : <span className="co-muted">{t("尚未评估")}</span> },
+    { label: "案件 v2 採点", render: (context) => <CaseFitGraphic context={context} /> },
+    ...(mixedCriteria ? [] : axes.map((axis) => ({
+      label: axis.label, hint: "契合刻度 · 满分 5",
+      render: (context: CompanyOverview) => <FitPips dimension={context.assessment?.dimensions.find((item) => item.key === axis.key)} />,
+    }))),
+    { label: "面谈核实", render: (context) => context.assessment?.questions.length
+      ? <ul>{context.assessment.questions.slice(0, 3).map((question) => <li key={question}>{question}</li>)}</ul>
+      : <span className="co-muted">{t("岗位职责与工作条件待核实")}</span> },
   ] : [
-    ...COMPARE_PLATFORMS.map((platform) => ({ label: platform, hint: "原始评分 · 满分 5", render: (context: CompanyOverview) => <PlatformScore context={context} platform={platform} /> })),
-    ...(view === "overview" ? [
-      { label: "值得争取", hint: "来自已有评价", render: (context: CompanyOverview) => <ComparisonSignal context={context} kind="positive" /> },
-      { label: "主要取舍", hint: "先看具体疑虑", render: (context: CompanyOverview) => <ComparisonSignal context={context} kind="concern" /> },
-      { label: "岗位判断", hint: "本人经验与岗位", render: (context: CompanyOverview) => <details className="co-board-expand"><summary>{context.assessment ? t("展开岗位判断") : t("尚未评估")}</summary><p>{context.assessment?.summary || t("没有足够证据判断岗位契合；外部口碑仍可独立比较。")}</p></details> },
-      ...(mixedCriteria ? [] : axes.map((axis) => ({ label: axis.label, hint: "契合刻度 · 满分 5", render: (context: CompanyOverview) => <FitPips dimension={context.assessment?.dimensions.find((item) => item.key === axis.key)} /> }))),
-    ] : [
-      { label: "口碑总结", hint: "先读这家最重要的取舍", render: (context: CompanyOverview) => context.profile?.reviewSynthesis ? <ReviewSynthesis compact synthesis={context.profile.reviewSynthesis} onOpenWiki={onOpenWiki} /> : <span className="co-muted">{t("尚无可核对的总结")}</span> },
-      { label: "主题与原文", hint: "按需展开证据", render: (context: CompanyOverview) => <ReviewThemeCell context={context} onOpenWiki={onOpenWiki} /> },
-    ]),
+    ...COMPARE_PLATFORMS.map((platform) => ({
+      label: platform, hint: "原始评分 · 满分 5", render: (context: CompanyOverview) => <PlatformScore context={context} platform={platform} />,
+    })),
+    { label: "口碑总结", render: (context) => context.profile?.reviewSynthesis
+      ? <ReviewSynthesis compact synthesis={context.profile.reviewSynthesis} onOpenWiki={onOpenWiki} />
+      : <span className="co-muted">{t("尚无可核对的总结")}</span> },
+    { label: "值得争取", render: (context) => <ComparisonSignal context={context} kind="positive" /> },
+    { label: "主要取舍", render: (context) => <ComparisonSignal context={context} kind="concern" /> },
+    { label: "主题与原文", render: (context) => <ReviewThemeCell context={context} onOpenWiki={onOpenWiki} /> },
   ];
+
+  const showScrollHint = columns.length > 4;
   return <CompareFrame embedded={embedded} className="co-board-shell" label={t("公司与岗位并排对比")} onClose={onClose}>
-    <header className="co-board-header"><div className="co-selector-icon" aria-hidden="true">⇄</div><div><p>COMPARE · {columns.length}{t(" 项并排")}</p><h2>{t("差异，放在一起看")}</h2><span>{t("先看分数和取舍，再展开原文。不同平台不平均，资料缺失保留空白。")}</span></div><div className="co-board-actions">{onEdit && <button type="button" onClick={onEdit}>{t("更换公司")}</button>}{!embedded && <button type="button" className="co-dialog-close" onClick={onClose} aria-label={t("关闭对比")}>×</button>}</div></header>
-    <div className="co-board-controls"><div role="group" aria-label={t("比较内容")}>{[{ id: "overview", label: t("一眼看差异") }, { id: "reviews", label: t("外部口碑") }, { id: "conditions", label: t("职责与条件") }].map((tab) => <button type="button" key={tab.id} aria-pressed={view === tab.id} onClick={() => setView(tab.id as typeof view)}>{t(tab.label)}</button>)}</div><label>{t("列排序")}<select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="selected">{t("选择顺序")}</option><option value="openwork">{t("OpenWork 高 → 低")}</option><option value="jobtalk">{t("転職会議 高 → 低")}</option><option value="recent">{t("最近面谈")}</option></select></label><span>{columns.length > 3 ? t("向右滚动查看更多公司 →") : t("点开主题，查看具体依据")}</span></div>
-    {mixedCriteria && <p className="co-notice co-compare-notice">{t("所选画像的评价维度不同，暂不并排比较六维契合刻度。公司事实和各平台口碑仍可比较；各公司的原始判断可从「查看总览」阅读。")}</p>}
-    <div className="co-board-scroll"><table className="co-board-table" style={{ minWidth: `${170 + columns.length * 270}px` }}><caption className="sr-only">{t("公司事实、六维契合度与外部评价并排比较")}</caption><colgroup><col style={{ width: 170 }} />{columns.map((context) => <col key={context.key} style={{ width: 270 }} />)}</colgroup><thead><tr><th scope="col"><span>{t("公司 / 岗位")}</span><small>{t("每一列独立判断")}</small></th>{items.map((item) => <th scope="col" key={item.context.key} data-tone={companyTone(item.shortName)}><div className="co-board-company"><button type="button" className="co-company-detail" onClick={() => onDetail(item.context)}><span className="co-company-monogram" data-tone={companyTone(item.shortName)} aria-hidden="true">{item.shortName.slice(0, 2)}</span><strong>{item.shortName}</strong><small title={item.context.title}>{item.displayRole}</small><em>{t("查看总览 ↗")}</em></button><button type="button" className="co-remove" onClick={() => onRemove(item.context.note.path)} aria-label={t("从对比移除{company} {role}", { company: item.context.company, role: item.displayRole })}>×</button></div><CandidateMeta item={item} /></th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={`${view}:${row.label}:${index}`}><th scope="row">{t(row.label)}{row.hint && <small>{t(row.hint)}</small>}</th>{columns.map((context) => <td key={context.key}>{row.render(context)}</td>)}</tr>)}</tbody></table></div>
+    {!embedded && <header className="co-board-header">
+      <h2>{t("公司对比")}</h2>
+      <div className="co-board-actions">
+        {onEdit && <button type="button" onClick={onEdit}>{t("更换公司")}</button>}
+        <button type="button" className="co-dialog-close" onClick={onClose} aria-label={t("关闭对比")}>×</button>
+      </div>
+    </header>}
+    <div className="co-board-controls">
+      <div role="group" aria-label={t("比较内容")}>{COMPARE_VIEWS.map((tab) =>
+        <button type="button" key={tab.id} aria-pressed={view === tab.id} onClick={() => setView(tab.id)}>{t(tab.label)}</button>)}</div>
+      {view === "reviews" && <label className="co-review-sort">{t("列排序")}
+        <select value={reviewSort} onChange={(event) => setReviewSort(event.target.value as typeof reviewSort)}>
+          <option value="selected">{t("选择顺序")}</option>
+          <option value="openwork">{t("OpenWork 高 → 低")}</option>
+          <option value="jobtalk">{t("転職会議 高 → 低")}</option>
+          <option value="recent">{t("最近面谈")}</option>
+        </select>
+      </label>}
+      {showScrollHint && <span>{t("向右滚动查看更多公司 →")}</span>}
+    </div>
+    {view === "conditions" && mixedCriteria && <p className="co-notice co-compare-notice">{t("这些岗位使用不同的契合评价标准，可打开各公司查看原始判断。")}</p>}
+    <div className="co-board-scroll" role="region" aria-label={t("公司与岗位并排对比")} tabIndex={showScrollHint ? 0 : undefined}>
+      <table className="co-board-table" style={{ minWidth: `${132 + columns.length * 190}px` }}>
+        <caption className="sr-only">{t("公司事实、六维契合度与外部评价并排比较")}</caption>
+        <colgroup><col className="co-board-label-column" />{columns.map((context) => <col key={context.key} />)}</colgroup>
+        <thead><tr>
+          <th scope="col">{t("公司 / 岗位")}</th>
+          {items.map((item) => <th scope="col" key={item.context.key}>
+            <div className="co-board-company">
+              <button type="button" className="co-company-detail" title={t("查看{company}的公司总览", { company: item.context.company })} onClick={() => onDetail(item.context)}>
+                <strong>{item.shortName}</strong><small title={item.context.title}>{item.displayRole}</small>
+              </button>
+              <button type="button" className="co-remove" onClick={() => onRemove(item.context.note.path)}
+                aria-label={t("从对比移除{company} {role}", { company: item.context.company, role: item.displayRole })}>×</button>
+            </div>
+          </th>)}
+        </tr></thead>
+        <tbody>{rows.map((row, index) => <tr key={`${view}:${row.label}:${index}`}>
+          <th scope="row">{t(row.label)}{row.hint && <small>{t(row.hint)}</small>}</th>
+          {columns.map((context) => <td key={context.key}>{row.render(context)}</td>)}
+        </tr>)}</tbody>
+      </table>
+    </div>
   </CompareFrame>;
 }

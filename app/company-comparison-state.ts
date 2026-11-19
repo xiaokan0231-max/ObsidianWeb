@@ -25,7 +25,7 @@ export function resolveCompanyComparisonSelection(contexts: CompanyOverview[], n
     return [...new Set(params.getAll("compare"))].filter((path) => valid.has(path)).slice(0, COMPANY_COMPARE_LIMIT);
   }
   const candidates = buildCompanyCompareCandidates(contexts, notes, today);
-  for (const preset of ["upcoming", "recent", "openwork"] as const) {
+  for (const preset of ["upcoming", "recent"] as const) {
     const paths = companyComparePreset(candidates, preset, 4);
     if (paths.length >= 2) return paths;
   }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildCompanyOverviews } from "../lib/company-overview.ts";
+import { buildInterviewReadModelRecords, INTERVIEW_RECORDS } from "../lib/interview-read-model.ts";
 import { resolveCompanyComparisonSelection, updateCompanyComparisonSearch } from "../app/company-comparison-state.ts";
 
 const today = "2026-10-25";
@@ -59,12 +60,16 @@ test("未来不足两家时按最近面谈选组，研究更新日期不充当�
   assert.deepEqual(setup(future, old, researched, recent)(), [recent.path, old.path]);
 });
 
-test("没有足够日程时按OpenWork原分选组，仍不足则只用相关资料前两项", () => {
+test("没有足够日程时默认按已有资料选组，平台高分仍可显式快选", () => {
   const high = fixture("high", { score: 4.6 });
   const low = fixture("low", { score: 3.1 });
   const info = fixture("info");
   const empty = fixture("empty", { profile: false });
-  assert.deepEqual(setup(low, info, high, empty)(), [high.path, low.path]);
+  const notes = [low, info, high, empty].flatMap((item) => item.notes);
+  const catalog = buildInterviewReadModelRecords(notes, { today }).find(({ kind }) => kind === INTERVIEW_RECORDS.catalog).value;
+  assert.deepEqual(setup(low, info, high, empty)(), [high.path, info.path]);
+  assert.deepEqual(catalog.compareDefaults, [high.path, info.path]);
+  assert.deepEqual(catalog.comparePresets.openwork, [high.path, low.path]);
   assert.deepEqual(setup(info, empty)(), [info.path]);
   assert.deepEqual(setup(empty)(), []);
 });

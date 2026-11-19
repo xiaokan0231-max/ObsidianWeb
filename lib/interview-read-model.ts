@@ -352,7 +352,7 @@ export function buildInterviewReadModelRecords(notes: Note[], options: { today?:
   })), buildCardCoverage(library?.content ?? "")));
   const compareCandidates = buildCompanyCompareCandidates(contexts, notes, today);
   const comparePresets = Object.fromEntries((["upcoming", "recent", "openwork", "jobtalk"] as const).map((preset) => [preset, companyComparePreset(compareCandidates, preset, 4)])) as InterviewCatalog["comparePresets"];
-  const compareDefaults = [comparePresets.upcoming, comparePresets.recent, comparePresets.openwork].find((paths) => paths.length >= 2)
+  const compareDefaults = [comparePresets.upcoming, comparePresets.recent].find((paths) => paths.length >= 2)
     ?? compareCandidates.filter((item) => item.context.profile || item.context.assessment || item.hasInterview).slice(0, 2).map((item) => item.context.note.path);
   const comparisons: InterviewCompareSummary[] = compareCandidates.map((candidate) => ({
     path: candidate.context.note.path, company: candidate.context.company, title: candidate.context.title,

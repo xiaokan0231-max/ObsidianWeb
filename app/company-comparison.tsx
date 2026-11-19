@@ -4,17 +4,16 @@ import { useCompanyCopy } from "./company-copy";
 
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { buildCompanyOverviews, type CompanyOverview } from "@/lib/company-overview";
-import { buildCompanyCompareCandidates, COMPANY_COMPARE_LIMIT, type CompanyCompareCandidate } from "@/lib/company-compare";
+import { buildCompanyCompareCandidates, companyComparePreset, COMPANY_COMPARE_LIMIT, type CompanyCompareCandidate, type CompanyComparePreset } from "@/lib/company-compare";
 import type { Note } from "@/lib/notes";
 import { prefersReducedMotion } from "@/lib/motion";
 import { appViewFromPathname, appViewHref } from "./app-route";
-import { CompanyCompare, CompanyCompareQuickPicks, CompanyCompareSelector, toggleCompanyComparison } from "./company-overview";
+import { CompanyCompare, CompanyCompareSelector, toggleCompanyComparison } from "./company-overview";
 import { resolveCompanyComparisonSelection, updateCompanyComparisonSearch } from "./company-comparison-state";
 import { URL_CHANGE_EVENT } from "./use-url-state";
-import type { InterviewCatalog } from "@/lib/interview-read-model";
+import type { InterviewCatalog, InterviewCompareSummary } from "@/lib/interview-read-model";
 import ScopeLoading from "./scope-loading";
 import { loadInterviewComparisons } from "./interview-catalog-options";
-import type { InterviewCompareSummary } from "@/lib/interview-read-model";
 
 type CompanyComparisonProps = {
   notes: Note[];
@@ -29,25 +28,59 @@ type CompanyComparisonProps = {
   onRetry?: () => void;
 };
 
+const quickGroups = [
+  { id: "upcoming", label: "即将面谈" },
+  { id: "recent", label: "最近面过" },
+  { id: "openwork", label: "OpenWork 高分" },
+  { id: "jobtalk", label: "転職会議 高分" },
+] as const;
+
+function ComparisonToolbar({ count, choosing, onToggle, groups, onPick }: {
+  count: number;
+  choosing: boolean;
+  onToggle: () => void;
+  groups: Record<CompanyComparePreset, string[]>;
+  onPick: (paths: string[]) => void;
+}) {
+  const t = useCompanyCopy();
+  return <header className="cc-page-header">
+    <div className="cc-page-title">
+      <h1>{t("公司对比")}</h1>
+      <span aria-live="polite">{t("{count} 项", { count })}</span>
+    </div>
+    <div className="cc-page-actions">
+      <button type="button" aria-expanded={choosing} aria-controls={choosing ? "company-comparison-selection" : undefined} onClick={onToggle}>
+        {t(choosing ? "收起选择" : "选择公司")}
+      </button>
+      <select aria-label={t("快捷组")} value="" onChange={(event) => {
+        const group = quickGroups.find(({ id }) => id === event.currentTarget.value);
+        if (group) onPick(groups[group.id]);
+      }}>
+        <option value="" disabled>{t("快捷组")}</option>
+        {quickGroups.map(({ id, label }) => <option key={id} value={id} disabled={!groups[id].length}>
+          {t(label)} · {t("{count} 项", { count: groups[id].length })}
+        </option>)}
+      </select>
+    </div>
+  </header>;
+}
+
 function CompanyComparisonReady({ notes, today, onOpenCompany, onOpenWiki, companyContexts }: CompanyComparisonProps) {
   const t = useCompanyCopy();
   const contexts = useMemo(() => companyContexts ?? buildCompanyOverviews(notes), [notes, companyContexts]);
   const candidates = useMemo(() => buildCompanyCompareCandidates(contexts, notes, today), [contexts, notes, today]);
   const [selection, setSelection] = useState(() => resolveCompanyComparisonSelection(contexts, notes, today, typeof window === "undefined" ? "" : window.location.search));
   const [choosing, setChoosing] = useState(selection.length < 2);
-  const [message, setMessage] = useState("");
   const boardRef = useRef<HTMLDivElement>(null);
   const revealBoard = useRef(false);
   const selected = selection.flatMap((path) => { const context = contexts.find((item) => item.note.path === path); return context ? [context] : []; });
-  const relevantCount = candidates.filter((item) => item.context.profile || item.context.assessment || item.hasInterview).length;
-  const ratedCount = candidates.filter((item) => item.reviews.length > 0).length;
+  const groups = useMemo(() => Object.fromEntries(quickGroups.map(({ id }) => [id, companyComparePreset(candidates, id)])) as InterviewCatalog["comparePresets"], [candidates]);
 
   const syncFromUrl = useEffectEvent(() => {
     if (appViewFromPathname(window.location.pathname) !== "insights") return;
     const paths = resolveCompanyComparisonSelection(contexts, notes, today, window.location.search);
     setSelection(paths);
     setChoosing(paths.length < 2);
-    setMessage("");
   });
   useEffect(() => {
     const sync = () => syncFromUrl();
@@ -72,12 +105,11 @@ function CompanyComparisonReady({ notes, today, onOpenCompany, onOpenWiki, compa
   const startCompare = () => { revealBoard.current = true; setChoosing(false); };
 
   return <div className="company-comparison-page">
-    <header className="cc-page-header"><div><p className="cc-eyebrow">{t("COMPARE · 机会，放在一起看")}</p><h1>{t("公司对比")}</h1><p>{t("从口碑、岗位契合与工作条件里，找到值得继续了解的机会。")}</p></div><div className="cc-page-actions"><button type="button" aria-expanded={choosing} aria-controls="company-comparison-selection" onClick={() => setChoosing((open) => !open)}>{choosing ? t("收起选择") : t("选择公司")}<span aria-hidden="true">{selected.length} / {COMPANY_COMPARE_LIMIT}</span></button></div></header>
-    <div className="cc-page-summary" aria-live="polite"><span><strong>{selected.length}</strong>{t(" 项正在对比")}</span><span><strong>{relevantCount}</strong>{t(" 项有面谈或研究资料")}</span><span><strong>{ratedCount}</strong>{t(" 项有平台评分")}</span>{message && <span>{message}</span>}</div>
-    {!choosing && <CompanyCompareQuickPicks candidates={candidates} onSelect={(paths, preset) => { select(paths); setMessage(t("已选入{preset} {count} 家", { preset: t(preset.title), count: paths.length })); }} />}
+    <ComparisonToolbar count={selected.length} choosing={choosing} groups={groups}
+      onToggle={() => setChoosing((open) => !open)} onPick={(paths) => { select(paths); setChoosing(paths.length < 2); }} />
     {choosing && <div className="cc-selection-region" id="company-comparison-selection"><CompanyCompareSelector embedded contexts={contexts} selected={selected} notes={notes} today={today} onToggle={(path) => select(toggleCompanyComparison(selection, path))} onSelectPaths={select} onClose={() => setChoosing(false)} onCompare={startCompare} /></div>}
-    {selected.length >= 2 ? <div className="cc-board-region" ref={boardRef} tabIndex={-1}><CompanyCompare embedded contexts={selected} notes={notes} today={today} onClose={() => {}} onEdit={() => { setChoosing(true); window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" }); }} onDetail={onOpenCompany} onRemove={(path) => select(selection.filter((item) => item !== path))} onOpenWiki={onOpenWiki} /></div>
-      : <section className="cc-empty"><span aria-hidden="true">⇄</span><h2>{selected.length ? t("再选一家，就能看出差异") : t("从几家感兴趣的公司开始")}</h2><p>{t("最多比较 ")}{COMPANY_COMPARE_LIMIT}{t(" 项。按近期面谈或平台高分快速选组，也可以搜索岗位和业务。")}</p>{!choosing && <button type="button" onClick={() => setChoosing(true)}>{t("选择公司")}</button>}</section>}
+    {selected.length >= 2 ? <div className="cc-board-region" ref={boardRef} tabIndex={-1}><CompanyCompare embedded contexts={selected} notes={notes} today={today} onClose={() => {}} onDetail={onOpenCompany} onRemove={(path) => select(selection.filter((item) => item !== path))} onOpenWiki={onOpenWiki} /></div>
+      : <section className="cc-empty"><h2>{selected.length ? t("再选一家，就能看出差异") : t("从几家感兴趣的公司开始")}</h2></section>}
   </div>;
 }
 
@@ -144,21 +176,21 @@ function ProjectedCompanyComparison({ notes, today, catalog, comparisonPaths, lo
     }
     return order.get(a.path)! - order.get(b.path)!;
   });
-  const presets = [{ id: "upcoming", title: "近期面谈" }, { id: "recent", title: "最近面过" }, { id: "openwork", title: "OpenWork 高分" }, { id: "jobtalk", title: "転職会議 高分" }] as const;
-  const picks = <div className="co-quick-picks">{presets.map((preset) => <button key={preset.id} type="button" disabled={!catalog.comparePresets[preset.id].length} onClick={() => {
-    select(catalog.comparePresets[preset.id]); setQuery(""); setFilter("selected"); setSort(preset.id === "upcoming" ? "relevance" : preset.id);
-  }}>{t(preset.title)}<small>{catalog.comparePresets[preset.id].length}</small></button>)}</div>;
   const candidates: CompanyCompareCandidate[] = selected.flatMap((context) => {
     const item = options.find((item) => item.path === context.note.path);
     return item ? [{ ...item, context }] : [];
   });
   return <div className="company-comparison-page">
-    <header className="cc-page-header"><div><p className="cc-eyebrow">{t("COMPARE · 机会，放在一起看")}</p><h1>{t("公司对比")}</h1><p>{t("从口碑、岗位契合与工作条件里，找到值得继续了解的机会。")}</p></div>
-      <div className="cc-page-actions"><button type="button" aria-expanded={choosing} aria-controls="company-comparison-selection" onClick={() => setChoosing((open) => !open)}>{choosing ? t("收起选择") : t("选择公司")}<span>{selection.length} / {COMPANY_COMPARE_LIMIT}</span></button></div></header>
-    <div className="cc-page-summary" aria-live="polite"><span><strong>{selection.length}</strong>{t(" 项正在对比")}</span><span><strong>{catalog.comparisonCounts?.relevant ?? options.filter((item) => item.hasProfile || item.hasAssessment || item.hasInterview).length}</strong>{t(" 项有面谈或研究资料")}</span><span><strong>{catalog.comparisonCounts?.rated ?? options.filter((item) => item.reviews.length).length}</strong>{t(" 项有平台评分")}</span></div>
-    {choosing ? <div className="cc-selection-region co-selector-shell" id="company-comparison-selection">
-      <header className="co-selector-hero"><div className="co-selector-heading"><h2>{t("选几家，一起看")}</h2><span>{t("岗位、面谈时间与口碑放在一起，最多选择 ")}{COMPANY_COMPARE_LIMIT}{t(" 项。")}</span></div></header>
-      {picks}<div className="co-selector-tools"><label><span className="sr-only">{t("搜索公司、岗位或业务")}</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("想不起来名字？也可以搜岗位、业务或渠道")} /></label>
+    <ComparisonToolbar count={selection.length} choosing={choosing} groups={catalog.comparePresets}
+      onToggle={() => setChoosing(!choosing)} onPick={(paths) => {
+        select(paths);
+        setChoosing(paths.length < 2);
+        setQuery("");
+        setFilter("relevant");
+        setSort("relevance");
+      }} />
+    {choosing && <section className="cc-selection-region co-selector-shell" id="company-comparison-selection" aria-label={t("选择公司对比")}>
+      <div className="co-selector-tools"><label><span className="sr-only">{t("搜索公司、岗位或业务")}</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索公司、岗位或业务")} /></label>
         <label>{t("排序")}<select value={sort} onChange={(event) => setSort(event.target.value)}><option value="relevance">{t("面谈与资料优先")}</option><option value="recent">{t("最近面过在前")}</option><option value="openwork">{t("OpenWork 高 → 低")}</option><option value="jobtalk">{t("転職会議 高 → 低")}</option></select></label></div>
       <div className="co-selector-filters">{filters.map((item) => <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{t(item.label)}<small>{optionsReady ? filtered(item.id).length : "—"}</small></button>)}</div>
       {!optionsReady ? optionsError ? <p role="alert">{optionsError}<button type="button" onClick={() => void loadOptions()}>{t("重试")}</button></p> : <ScopeLoading label={t("选择公司")} /> : <><div className="co-candidate-grid" role="group" aria-label={t("可对比的公司与岗位")}>{visible.map((item) => <label key={item.path} className={`co-candidate-card${selectedSet.has(item.path) ? " selected" : ""}${full && !selectedSet.has(item.path) ? " disabled" : ""}`}>
@@ -171,8 +203,8 @@ function ProjectedCompanyComparison({ notes, today, catalog, comparisonPaths, lo
       </>}
       <footer className="co-selector-footer"><div className="co-selected-chips">{selection.map((path) => <button key={path} type="button" onClick={() => select(selection.filter((item) => item !== path))}>{options.find((item) => item.path === path)?.shortName} ×</button>)}</div>
         <div className="co-selector-submit"><span>{selection.length} / {COMPANY_COMPARE_LIMIT}</span><button type="button" onClick={() => select([])}>{t("清空")}</button><button type="button" disabled={selection.length < 2} onClick={() => setChoosing(false)}>{t("开始对比 ")}→</button></div></footer>
-    </div> : picks}
-    {selection.length >= 2 ? selected.length === selection.length ? <CompanyCompare embedded contexts={selected} notes={notes} today={today} projectedCandidates={candidates} onClose={() => {}} onEdit={() => setChoosing(true)} onDetail={onOpenCompany} onRemove={(path) => select(selection.filter((item) => item !== path))} onOpenWiki={onOpenWiki} />
+    </section>}
+    {selection.length >= 2 ? selected.length === selection.length ? <CompanyCompare embedded contexts={selected} notes={notes} today={today} projectedCandidates={candidates} onClose={() => {}} onDetail={onOpenCompany} onRemove={(path) => select(selection.filter((item) => item !== path))} onOpenWiki={onOpenWiki} />
       : loading ? <ScopeLoading label={t("公司对比")} /> : <section className="cc-empty" role="alert"><p>{t("对比资料读取失败。")}</p>{onRetry && <button type="button" onClick={onRetry}>{t("重试")}</button>}</section> : <section className="cc-empty"><h2>{selection.length ? t("再选一家，就能看出差异") : t("从几家感兴趣的公司开始")}</h2></section>}
   </div>;
 }
