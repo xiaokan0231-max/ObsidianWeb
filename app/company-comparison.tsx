@@ -66,7 +66,7 @@ function ComparisonToolbar({ count, choosing, onToggle, groups, onPick, onAnalyz
         </option>)}
       </select>
       {onAnalyze && <button type="button" className="cc-analysis-trigger" disabled={analyzeDisabled}
-        title={t("发送所选公司的公开来源事实给 OpenAI，现场生成对比。")} onClick={onAnalyze}>{t("AI 分析")}</button>}
+        title={t("使用本机 Codex 和所选公司的公开资料生成分析。")} onClick={onAnalyze}>{t("AI 分析")}</button>}
     </div>
   </header>;
 }

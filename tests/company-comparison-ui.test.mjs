@@ -75,21 +75,28 @@ test("本机两项比较可进入 AI 分析，单项或远端页面不发起分�
   assert.doesNotMatch(render(CompanyComparison, props), /cc-analysis-trigger|>AI 分析<\/button>/);
 });
 
-test("AI 比较并排呈现优势、取舍和追问，证据显示原始来源链接", async () => {
+test("AI 比较呈现入职影响、条件式选择和优先追问，证据链接仍可展开", async () => {
   const { CompanyAiAnalysisPanel } = await loadAppModule("app/company-ai-analysis.tsx");
-  const left = { path: first.owner.path, label: "测试甲", role: "数据平台", advantages: [{ text: "可了解自有产品", evidenceIds: ["C1-F1"] }],
-    tradeoffs: [], unknowns: ["团队分工待确认"], questions: ["该岗位可负责哪些产品能力？"] };
+  const left = { path: first.owner.path, label: "测试甲", role: "数据平台",
+    advantages: [{ text: "可了解自有产品", implication: "可能持续跟踪产品指标的变化", evidenceIds: ["C1-F1"] }],
+    tradeoffs: [], unknowns: ["团队分工待确认"],
+    questions: [{ question: "该岗位可负责哪些产品能力？", reason: "决定是否有从设计到上线的职责。", evidenceIds: [] }] };
   const result = {
-    companies: [left, { ...left, path: second.owner.path, label: "测试乙", advantages: [], tradeoffs: [{ text: "交付范围取决于项目", evidenceIds: [] }] }],
-    differences: [{ text: "产品与项目交付方式有差异", evidenceIds: ["C1-F1"] }],
+    companies: [left, { ...left, path: second.owner.path, label: "测试乙", advantages: [],
+      tradeoffs: [{ text: "交付范围取决于项目", implication: "前期需要确认配属内容", evidenceIds: ["C2-F1"] }] }],
+    differences: [{ axis: "产品与交付", text: "产品与项目交付方式有差异", implication: "项目轮换与长期迭代提供不同的经验", evidenceIds: ["C1-F1", "C2-F1"] }],
+    scenarios: [{ priority: "重视产品长期演进", choice: "优先了解测试甲。", verify: "确认岗位是否参与迭代。", evidenceIds: ["C1-F1", "C2-F1"] }],
     evidence: [{ id: "C1-F1", path: left.path, label: "业务", value: "开发自有产品", asOf: today, scope: "单体",
-      sourceLabels: ["公司概要"], sources: [{ label: "公司概要", url: "https://example.com/company" }] }],
+      sourceLabels: ["公司概要"], sources: [{ label: "公司概要", url: "https://example.com/company" }] },
+    { id: "C2-F1", path: second.owner.path, label: "业务", value: "按项目交付", asOf: today, scope: "单体", sourceLabels: ["公司概要"] }],
   };
   const html = render(CompanyAiAnalysisPanel, { ready: true, analysis: { result, loading: false, error: null } });
-  assert.match(html, /最值得比较的差异[\s\S]*产品与项目交付方式有差异/);
-  assert.match(html, /测试甲[\s\S]*测试乙[\s\S]*优势[\s\S]*短板与取舍[\s\S]*面试追问/);
+  assert.match(html, /最值得比较的差异[\s\S]*产品与交付[\s\S]*项目轮换与长期迭代提供不同的经验/);
+  assert.match(html, /重视产品长期演进[\s\S]*优先了解测试甲[\s\S]*选择前先确认[\s\S]*确认岗位是否参与迭代/);
+  assert.match(html, /测试甲[\s\S]*测试乙[\s\S]*优势[\s\S]*短板与取舍[\s\S]*面试优先追问/);
   assert.match(html, /可了解自有产品[\s\S]*href="https:\/\/example.com\/company"/);
-  assert.match(html, /交付范围取决于项目/);
+  assert.match(html, /交付范围取决于项目[\s\S]*该岗位可负责哪些产品能力[\s\S]*决定是否有从设计到上线的职责/);
+  assert.match(html, /class="cc-ai-regenerate">重新分析/);
 });
 
 test("加载期间不解析空资料中的路径，资料齐备后仍保留链接明确指定的一家公司", async () => {

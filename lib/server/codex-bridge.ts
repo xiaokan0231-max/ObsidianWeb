@@ -1,4 +1,5 @@
 import type { CodexRuntimeStatus } from "@/lib/dojo/types";
+import { companyComparisonDeadlines, type CompanyComparisonModelInput } from "../company-comparison-analysis.ts";
 import { RequestRejectedError } from "./write-guards.ts";
 
 const BRIDGE_URL = (
@@ -79,21 +80,26 @@ export async function interviewChatBridge<T>(init: RequestInit): Promise<T> {
   }
 }
 
-export async function companyComparisonBridge<T>(body: unknown): Promise<T> {
+export async function companyComparisonBridge<T>(body: CompanyComparisonModelInput): Promise<T> {
+  const signal = AbortSignal.timeout(companyComparisonDeadlines(body.companies.length).bridgeMs);
   try {
-    const response = await bridgeRequest("/company-comparison", {
-      method: "POST", body: JSON.stringify(body), signal: AbortSignal.timeout(55_000),
+    // 新端点只接受 Codex 任务，桥接进程换版期间也不能命中旧的 API Key 路由。
+    const response = await bridgeRequest("/company-comparison-codex", {
+      method: "POST", body: JSON.stringify(body), signal,
     });
     const result = (await response.json()) as T & { error?: string; code?: string };
     if (!response.ok) {
-      if (![422, 429, 502, 503, 504].includes(response.status)) throw new Error();
+      if (![412, 422, 429, 502, 503, 504].includes(response.status)) throw new Error();
       throw Object.assign(new RequestRejectedError(result.error || "本机 AI 分析暂时不可用。", response.status),
         { code: result.code });
     }
     return result;
   } catch (error) {
     if (error instanceof RequestRejectedError) throw error;
-    throw Object.assign(new RequestRejectedError("本机 AI 服务尚未连接，请确认本机开发服务已启动。", 503), { code: "openai_config" });
+    if (signal.aborted) {
+      throw Object.assign(new RequestRejectedError("本机 Codex 分析超时，请重试。", 504), { code: "codex_timeout" });
+    }
+    throw Object.assign(new RequestRejectedError("本机 Codex 服务尚未连接，请确认本机开发服务已启动。", 503), { code: "codex_config" });
   }
 }
 

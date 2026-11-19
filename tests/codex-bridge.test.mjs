@@ -37,6 +37,7 @@ function startBridge({ port, token, logPath, login = "chatgpt", executable = fak
       FAKE_CODEX_LOGIN: login,
       OPENAI_API_KEY: "must-not-reach-child",
       CODEX_API_KEY: "must-not-reach-child",
+      OBSIDIAN_API_KEY: "must-not-reach-comparison-child",
     },
   });
 }
@@ -98,6 +99,9 @@ test("bridge clears ready status when the configured CLI disappears", async () =
     });
     assert.equal(invoke.status, 502);
     assert.match((await invoke.json()).error, /CODEX_BRIDGE_CODEX_PATH/);
+    const comparison = await postComparison(url, token);
+    assert.equal(comparison.status, 503);
+    assert.equal((await comparison.json()).code, "codex_config");
   } finally {
     await stopBridge(child);
     await rm(directory, { recursive: true, force: true });
@@ -328,6 +332,69 @@ test("bridge refuses API-key login", async () => {
       body: JSON.stringify({ task: "grade_language_exam", payload: { items: [] } }),
     });
     assert.equal(invoke.status, 412);
+    const comparison = await postComparison(url, token);
+    assert.equal(comparison.status, 412);
+    assert.equal((await comparison.json()).code, "codex_login");
+  } finally {
+    await stopBridge(child);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+const comparisonInput = {
+  companies: ["库存系统", "财务软件"].map((value, index) => ({
+    id: `C${index + 1}`,
+    facts: [{ id: `C${index + 1}-F1`, label: "职责", value, scope: "", asOf: "" }],
+  })),
+  locale: "zh-CN",
+};
+
+function postComparison(url, token, path = "/company-comparison-codex", body = comparisonInput) {
+  return fetch(`${url}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+test("company comparison uses the authenticated Codex queue without search, shell tools or API keys", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "company-comparison-bridge-"));
+  const logPath = join(directory, "fake.log");
+  const port = 53000 + Math.floor(Math.random() * 1000);
+  const token = "company-comparison-test-longer-than-24-characters";
+  const url = `http://127.0.0.1:${port}`;
+  const child = startBridge({ port, token, logPath });
+  try {
+    await waitForBridge(url, token);
+    assert.equal((await postComparison(url, token, "/company-comparison")).status, 404);
+    assert.equal((await postComparison(url, token, "/invoke", { task: "company_comparison", payload: comparisonInput })).status, 400);
+    assert.equal((await postComparison(url, token, "/company-comparison-codex", { ...comparisonInput, companies: [] })).status, 422);
+
+    const result = postComparison(url, token);
+    let execution;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      execution = (await readFile(logPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
+        .find((event) => event.args?.includes("exec"));
+      if (execution) break;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 30));
+    }
+    assert.ok(execution, "comparison must start the Codex CLI");
+    const busy = await postComparison(url, token);
+    assert.equal(busy.status, 429);
+    assert.equal((await busy.json()).code, "codex_busy");
+    await writeFile(`${logPath}.release`, "");
+
+    const response = await result;
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).differences[0].evidenceIds, ["C1-F1", "C2-F1"]);
+    assert.ok(execution.args.includes("--ephemeral"));
+    assert.ok(execution.args.includes("read-only"));
+    assert.ok(execution.args.includes("shell_tool"));
+    assert.ok(execution.args.includes("view_image"));
+    assert.ok(execution.args.includes('web_search="disabled"'));
+    assert.equal(execution.hasOpenAiKey, false);
+    assert.equal(execution.hasCodexApiKey, false);
+    assert.equal(execution.hasObsidianApiKey, false);
   } finally {
     await stopBridge(child);
     await rm(directory, { recursive: true, force: true });

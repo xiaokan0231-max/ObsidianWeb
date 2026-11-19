@@ -37,15 +37,16 @@ export async function POST(request: Request) {
     const result = await companyComparisonBridge<ModelCompanyAnalysis>({ companies: context.companies, locale });
     return reply(formatCompanyComparisonAnalysis(result, context));
   } catch (error) {
-    const rejected = error as { status?: number; code?: string } | null;
+    const rejected = error as { status?: number } | null;
     if (rejected?.status === 409) return failure("stale_revision", "比较资料已更新，请重新加载后重试。", 409);
-    if (!(error instanceof RequestRejectedError)) return failure("openai_unavailable", "暂时无法读取比较资料，请稍后重试。", 503);
+    if (rejected?.status === 400 || rejected?.status === 415) return failure("invalid_selection", "请求格式无效，请刷新页面后重试。", rejected.status);
+    if (!(error instanceof RequestRejectedError)) return failure("codex_unavailable", "暂时无法读取比较资料，请稍后重试。", 503);
     if (error.status === 403) return failure("local_only", "只接受本机比较页面发出的请求。", 403);
-    if (error.status === 415) return failure("invalid_selection", "请求格式无效，请刷新页面后重试。", 415);
-    if (rejected?.code === "openai_credit") return failure("openai_credit", error.message, error.status);
-    if (error.status === 429) return failure("openai_busy", error.message, 429);
-    if (error.status === 503) return failure("openai_config", error.message, 503);
-    if (error.status === 504) return failure("openai_timeout", error.message, 504);
-    return failure("openai_unavailable", error.message, error.status);
+    if (error.status === 422) return failure("insufficient_evidence", error.message, 422);
+    if (error.status === 412) return failure("codex_login", error.message, 412);
+    if (error.status === 429) return failure("codex_busy", error.message, 429);
+    if (error.status === 503) return failure("codex_config", error.message, 503);
+    if (error.status === 504) return failure("codex_timeout", error.message, 504);
+    return failure("codex_unavailable", error.message, error.status);
   }
 }

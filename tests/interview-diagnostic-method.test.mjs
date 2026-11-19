@@ -31,7 +31,8 @@ test("Bridge injects the shared diagnostic method into answers, advisory and ins
   const { REVIEW_LIMITS } = await import("../lib/review-contract.mjs");
   const source = await readFile("scripts/codex-bridge.mjs", "utf8");
   const start = source.indexOf("function buildPrompt(task, payload) {");
-  const end = source.indexOf("\nfunction safeEnvironment()", start);
+  const end = source.indexOf("\nfunction safeEnvironment(", start);
+  assert.ok(start >= 0 && end > start);
   const make = new Function("interviewDiagnosticInstruction", "REVIEW_LIMITS", "severityBand", "commonInstruction", `${source.slice(start, end)}\nreturn buildPrompt;`);
   const build = make(interviewDiagnosticInstruction, REVIEW_LIMITS, (key) => key, "test boundary");
   const payload = { blocks: [{ blockId: "q01" }], note: "INPUT_JSON stays source data" };

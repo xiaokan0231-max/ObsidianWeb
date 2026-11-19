@@ -1,4 +1,4 @@
-import type { CompanyComparisonAnalysis, CompanyComparisonEvidence } from "../company-comparison-analysis.ts";
+import type { CompanyComparisonAnalysis, CompanyComparisonEvidence, CompanyComparisonModelInput, ComparisonImpact } from "../company-comparison-analysis.ts";
 import { INTERVIEW_RECORDS, type InterviewCatalog, type InterviewCompanyProjection, type InterviewCompareSummary } from "../interview-read-model.ts";
 import { RequestRejectedError } from "./write-guards.ts";
 import { readInterviewRecord } from "./interview-read-model.ts";
@@ -11,10 +11,8 @@ const PRIVATE_URL = /(?:^|[/?&#=_-])(?:token|signature|password|passcode|invite|
 
 type PublicSource = NonNullable<CompanyComparisonEvidence["sources"]>[number];
 type Fact = { label: string; value: string; scope: string; asOf: string; sources: PublicSource[] };
-type ModelFact = Pick<CompanyComparisonEvidence, "id" | "label" | "value" | "scope" | "asOf">;
-type ModelCompany = { id: string; facts: ModelFact[] };
 type AnalysisCompany = Omit<CompanyComparisonAnalysis["companies"][number], "path" | "label" | "role"> & { id: string };
-export type ModelCompanyAnalysis = { companies: AnalysisCompany[]; differences: CompanyComparisonAnalysis["differences"] };
+export type ModelCompanyAnalysis = Omit<CompanyComparisonAnalysis, "companies" | "evidence"> & { companies: AnalysisCompany[] };
 
 function safeText(text: string, limit: number) {
   const clean = text.trim().replace(/\s+/g, " ");
@@ -72,7 +70,7 @@ export async function resolveCompanyComparisonAiContext(
 
   const projections = await Promise.all(paths.map(readCompany));
   const evidence: CompanyComparisonEvidence[] = [];
-  const companies: ModelCompany[] = [];
+  const companies: CompanyComparisonModelInput["companies"] = [];
   const labels = new Map<string, { path: string; label: string; role: string }>();
   for (const [index, path] of paths.entries()) {
     const projection = projections[index];
@@ -112,21 +110,37 @@ export function formatCompanyComparisonAnalysis(
   for (const { label } of labels.values()) counts.set(label, (counts.get(label) ?? 0) + 1);
   const displayNames = new Map([...labels].map(([id, { label, role }]) =>
     [id, counts.get(label)! > 1 && role ? `${label}（${role}）` : label]));
-  const replaceCompanyIds = (text: string) => text.replace(/\bC[1-8]\b/g, (id) => displayNames.get(id) ?? id);
-  const renamePoints = (points: CompanyComparisonAnalysis["differences"]) =>
-    points.map((point) => ({ ...point, text: replaceCompanyIds(point.text) }));
+  // 引用通过 evidenceIds 展开；模型偶尔也会把编号写进正文。
+  const replaceCompanyIds = (text: string) => text
+    .replace(/[（(【\[]\s*C[1-8]-F\d+(?:\s*[、,，;；/]\s*C[1-8]-F\d+)*\s*[）)】\]]/gu, "")
+    .replace(/\bC[1-8]-F\d+\b/gu, "")
+    .replace(/\bC[1-8]\b/g, (id) => displayNames.get(id) ?? id)
+    .replace(/[ \t]+([。！？、，；])/gu, "$1")
+    .trim();
+  const renameImpact = (point: ComparisonImpact) =>
+    ({ ...point, text: replaceCompanyIds(point.text), implication: replaceCompanyIds(point.implication) });
   return {
     companies: companies.map(({ id }) => {
       const { advantages, tradeoffs, unknowns, questions } = byId.get(id)!;
       return {
         ...labels.get(id)!,
-        advantages: renamePoints(advantages),
-        tradeoffs: renamePoints(tradeoffs),
+        advantages: advantages.map(renameImpact),
+        tradeoffs: tradeoffs.map(renameImpact),
         unknowns: unknowns.map(replaceCompanyIds),
-        questions: questions.map(replaceCompanyIds),
+        questions: questions.map((item) => ({
+          ...item,
+          question: replaceCompanyIds(item.question),
+          reason: replaceCompanyIds(item.reason),
+        })),
       };
     }),
-    differences: renamePoints(result.differences),
+    differences: result.differences.map(({ axis, ...impact }) => ({ axis: replaceCompanyIds(axis), ...renameImpact(impact) })),
+    scenarios: result.scenarios.map((item) => ({
+      ...item,
+      priority: replaceCompanyIds(item.priority),
+      choice: replaceCompanyIds(item.choice),
+      verify: replaceCompanyIds(item.verify),
+    })),
     evidence,
   };
 }
