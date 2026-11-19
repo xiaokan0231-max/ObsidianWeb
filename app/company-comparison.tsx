@@ -10,9 +10,8 @@ import { prefersReducedMotion } from "@/lib/motion";
 import { appViewFromPathname, appViewHref } from "./app-route";
 import { CompanyCompare, CompanyCompareQuickPicks, CompanyCompareSelector, toggleCompanyComparison } from "./company-overview";
 import { resolveCompanyComparisonSelection, updateCompanyComparisonSearch } from "./company-comparison-state";
-import { URL_CHANGE_EVENT, useInitialUrlSearch } from "./use-url-state";
+import { URL_CHANGE_EVENT } from "./use-url-state";
 import type { InterviewCatalog } from "@/lib/interview-read-model";
-import type { InterviewSelection } from "./use-interview-context";
 import ScopeLoading from "./scope-loading";
 import { loadInterviewComparisons } from "./interview-catalog-options";
 import type { InterviewCompareSummary } from "@/lib/interview-read-model";
@@ -25,7 +24,9 @@ type CompanyComparisonProps = {
   onOpenCompany: (context: CompanyOverview) => void;
   onOpenWiki: (target: string) => void;
   catalog?: InterviewCatalog | null;
-  onRemoteSelect?: (selection: InterviewSelection) => void;
+  comparisonPaths?: string[];
+  onSelect?: (paths: string[]) => void;
+  onRetry?: () => void;
 };
 
 function CompanyComparisonReady({ notes, today, onOpenCompany, onOpenWiki, companyContexts }: CompanyComparisonProps) {
@@ -87,16 +88,11 @@ export default function CompanyComparison(props: CompanyComparisonProps) {
     : props.catalog ? <ProjectedCompanyComparison {...props} catalog={props.catalog} /> : <CompanyComparisonReady {...props} />;
 }
 
-function ProjectedCompanyComparison({ notes, today, catalog, onRemoteSelect, onOpenCompany, onOpenWiki, companyContexts }: CompanyComparisonProps & { catalog: InterviewCatalog }) {
+function ProjectedCompanyComparison({ notes, today, catalog, comparisonPaths, loading, onSelect, onRetry, onOpenCompany, onOpenWiki, companyContexts }: CompanyComparisonProps & { catalog: InterviewCatalog }) {
   const t = useCompanyCopy();
-  const initialSearch = useInitialUrlSearch();
-  const selectionFrom = (search: string) => {
-    const params = new URLSearchParams(search);
-    const valid = new Set(catalog.comparisons.map((item) => item.path));
-    return params.has("compare") ? [...new Set(params.getAll("compare"))].filter((path) => valid.has(path)).slice(0, COMPANY_COMPARE_LIMIT) : catalog.compareDefaults;
-  };
-  const [selection, setSelection] = useState(() => selectionFrom(initialSearch));
-  const [choosing, setChoosing] = useState(selection.length < 2);
+  const selection = comparisonPaths ?? catalog.compareDefaults;
+  const [choosingOverride, setChoosing] = useState<boolean | null>(null);
+  const choosing = choosingOverride ?? selection.length < 2;
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("relevant");
   const [sort, setSort] = useState("relevance");
@@ -126,22 +122,9 @@ function ProjectedCompanyComparison({ notes, today, catalog, onRemoteSelect, onO
   const selectedSet = new Set(selection);
   const full = selection.length >= COMPANY_COMPARE_LIMIT;
   const select = (paths: string[]) => {
-    const valid = new Set(options.map((item) => item.path));
-    const next = [...new Set(paths)].filter((path) => valid.has(path)).slice(0, COMPANY_COMPARE_LIMIT);
-    setSelection(next);
-    const params = updateCompanyComparisonSearch(window.location.search, next);
-    window.history.replaceState(window.history.state, "", `${appViewHref("insights", params)}${window.location.hash}`);
-    onRemoteSelect?.({ paths: next });
+    if (choosing) setChoosing(true);
+    onSelect?.(paths);
   };
-  const syncFromUrl = useEffectEvent(() => {
-    const paths = selectionFrom(window.location.search);
-    setSelection(paths); setChoosing(paths.length < 2); onRemoteSelect?.({ paths });
-  });
-  useEffect(() => {
-    const sync = () => syncFromUrl();
-    window.addEventListener("popstate", sync); window.addEventListener(URL_CHANGE_EVENT, sync);
-    return () => { window.removeEventListener("popstate", sync); window.removeEventListener(URL_CHANGE_EVENT, sync); };
-  }, []);
   const filters = [{ id: "relevant", label: "有资料或面谈" }, { id: "selected", label: "已选公司" }, { id: "upcoming", label: "即将面谈" },
     { id: "recent", label: "面过的公司" }, { id: "rated", label: "有平台评分" }, { id: "all", label: "全部案件" }];
   const filtered = (id: string) => options.filter((item) => id === "selected" ? selectedSet.has(item.path)
@@ -190,6 +173,6 @@ function ProjectedCompanyComparison({ notes, today, catalog, onRemoteSelect, onO
         <div className="co-selector-submit"><span>{selection.length} / {COMPANY_COMPARE_LIMIT}</span><button type="button" onClick={() => select([])}>{t("清空")}</button><button type="button" disabled={selection.length < 2} onClick={() => setChoosing(false)}>{t("开始对比 ")}→</button></div></footer>
     </div> : picks}
     {selection.length >= 2 ? selected.length === selection.length ? <CompanyCompare embedded contexts={selected} notes={notes} today={today} projectedCandidates={candidates} onClose={() => {}} onEdit={() => setChoosing(true)} onDetail={onOpenCompany} onRemove={(path) => select(selection.filter((item) => item !== path))} onOpenWiki={onOpenWiki} />
-      : <ScopeLoading label={t("公司对比")} /> : <section className="cc-empty"><h2>{selection.length ? t("再选一家，就能看出差异") : t("从几家感兴趣的公司开始")}</h2></section>}
+      : loading ? <ScopeLoading label={t("公司对比")} /> : <section className="cc-empty" role="alert"><p>{t("对比资料读取失败。")}</p>{onRetry && <button type="button" onClick={onRetry}>{t("重试")}</button>}</section> : <section className="cc-empty"><h2>{selection.length ? t("再选一家，就能看出差异") : t("从几家感兴趣的公司开始")}</h2></section>}
   </div>;
 }

@@ -342,6 +342,59 @@ test("数百个案件的首屏目录与选择器每页均低于100KB，完整总
   }
 });
 
+test("对比快捷组保留首屏外的案件，换版时默认选择与正文同时更新", async () => {
+  const notes = Array.from({ length: 28 }, (_, index) => note(`20_求職/测试${index}/案件.md`, {
+    type: "job-case", company: `株式会社テスト${index}`, case_id: `compare-${index}`, status: "面接中",
+  }));
+  const oldRecords = buildInterviewReadModelRecords(notes, { today });
+  const newRecords = buildInterviewReadModelRecords(notes, { today });
+  const oldCatalog = record(oldRecords, INTERVIEW_RECORDS.catalog, "root");
+  const newCatalog = record(newRecords, INTERVIEW_RECORDS.catalog, "root");
+  const oldSelection = oldCatalog.comparisons.slice(0, 2).map((item) => item.path);
+  const newSelection = newCatalog.comparisons.slice(-2).map((item) => item.path);
+  oldCatalog.compareDefaults = oldSelection;
+  oldCatalog.comparePresets.openwork = newSelection;
+  newCatalog.compareDefaults = newSelection;
+  const models = new Map([["r1", reader(oldRecords, "r1")], ["r2", reader(newRecords, "r2")]]);
+  const initial = await interviewQuery(models.get("r1"), "r1", new URL("http://localhost/api/interview/catalog?view=insights"));
+  const compactPaths = initial.catalog.comparisons.map((item) => item.path);
+  assert.ok(newSelection.every((path) => compactPaths.includes(path)));
+  assert.equal(compactPaths.length, 26, "仅额外附加快捷组需要的摘要");
+
+  const { createInterviewContextResource } = await loadAppModule("app/use-interview-context.ts");
+  const { default: CompanyComparison } = await loadAppModule("app/company-comparison.tsx");
+  let revision = "r1";
+  const contextRequests = [];
+  const resource = createInterviewContextResource(async (url) => {
+    const parsed = new URL(url, "http://localhost");
+    const path = parsed.searchParams.get("path");
+    if (parsed.pathname === "/api/note") return Response.json({ note: notes.find((item) => item.path === path) });
+    if (parsed.pathname === "/api/interview/context") contextRequests.push(path);
+    return Response.json(await interviewQuery(models.get(revision), revision, parsed));
+  });
+  const renderComparison = (extra = {}) => renderToStaticMarkup(React.createElement(CompanyComparison, {
+    ...resource.getState(), today, onOpenCompany() {}, onOpenWiki() {}, onRetry() {}, ...extra,
+  }));
+  await resource.query("insights", {});
+  assert.deepEqual(resource.getState().comparisonPaths, oldSelection);
+  assert.match(renderComparison(), /<table/);
+  revision = "r2";
+  await resource.refresh();
+  assert.deepEqual(resource.getState().comparisonPaths, newSelection);
+  assert.deepEqual(resource.getState().companyContexts.map((item) => item.note.path), newSelection);
+  assert.match(renderComparison(), /<table/);
+
+  contextRequests.length = 0;
+  await resource.select({ paths: [newSelection[1], "20_求職/撤回案件.md", newSelection[0], newSelection[1]] });
+  assert.deepEqual(contextRequests, [...newSelection].reverse());
+  assert.deepEqual(resource.getState().comparisonPaths, [...newSelection].reverse());
+  assert.match(renderComparison(), /<table/);
+  assert.match(renderComparison({ companyContexts: [] }), /role="alert"/);
+  assert.doesNotMatch(renderComparison({ companyContexts: [] }), /class="scope-loading"/);
+  assert.match(renderComparison({ companyContexts: [], loading: true }), /class="scope-loading"/);
+  resource.dispose();
+});
+
 test("增量批注复用其他整理稿；同一对象内容改变也会正确重新解析", () => {
   const first = study("缓存一");
   const second = study("缓存二", "二次面接");

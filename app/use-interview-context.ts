@@ -10,6 +10,7 @@ import type { InterviewTrends } from "@/lib/interview-trends.mjs";
 import type { CalendarInterviewTarget } from "@/lib/calendar-interview";
 import { ReadModelFetchError } from "./read-model-resource";
 import type { CompanyOverview } from "@/lib/company-overview";
+import { COMPANY_COMPARE_LIMIT } from "@/lib/company-compare";
 import { applyInterviewPageTranslation, interviewPageTranslationTarget } from "@/lib/interview-page-translation";
 
 export type InterviewView = "session" | "prep" | "review" | "insights" | "practice";
@@ -25,7 +26,7 @@ export type InterviewRemoteReview = {
   loadQualityBlock: (id: string, retry?: boolean) => Promise<void>;
 };
 export type JapaneseInterviewPage = { sourcePath: string; prep: Note; dependencies: Note[]; company: CompanyOverview | null };
-type State = { notes: Note[]; companyContexts?: CompanyOverview[]; japanese?: JapaneseInterviewPage; catalog: InterviewCatalog | null; digest: InterviewTrends | null; target: CalendarInterviewTarget | null; revision: string; fetchedAt: number | null; syncState: "ready" | "building" | "failed"; ready: boolean; loading: boolean; error: string; sourcePath: string; contextPath: string; review: InterviewRemoteReview | null };
+type State = { notes: Note[]; companyContexts?: CompanyOverview[]; comparisonPaths?: string[]; japanese?: JapaneseInterviewPage; catalog: InterviewCatalog | null; digest: InterviewTrends | null; target: CalendarInterviewTarget | null; revision: string; fetchedAt: number | null; syncState: "ready" | "building" | "failed"; ready: boolean; loading: boolean; error: string; sourcePath: string; contextPath: string; review: InterviewRemoteReview | null };
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 /** 正文、目录、分块各有独立缓存，迟到的 A 场请求不能覆盖刚选中的 B 场。 */
@@ -182,14 +183,18 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
     const id = ++generation;
     controller?.abort();
     controller = new AbortController();
-    const signal = controller.signal;
-    // 刷新本场时保留已展开章节，等新投影完整到达才替换，草稿和滚动不依赖目录对象。
+    const cancelSignal = controller.signal;
+    const signal = view === "insights" ? AbortSignal.any([cancelSignal, AbortSignal.timeout(65_000)]) : cancelSignal;
+    // 刷新本场时保留已展开章节；对比选择与正文一起换版，加载中先反映明确选中的案件。
     const clearSelection = changedSelection && (view !== "insights" || previousView !== view);
-    publish({ ...(clearSelection ? initial : state), ready: false, loading: true, error: "" });
+    const previous = clearSelection ? initial : state;
+    const requestedComparison = view === "insights" && selection.paths
+      ? [...new Set(selection.paths.filter(Boolean))].slice(0, COMPANY_COMPARE_LIMIT) : undefined;
+    publish({ ...previous, comparisonPaths: requestedComparison ?? previous.comparisonPaths, ready: false, loading: true, error: "" });
     try {
       const catalogParams = new URLSearchParams({ view });
       for (const field of ["sourcePath", "contextPath", "company"] as const) if (selection[field]) catalogParams.set(field, selection[field]!);
-      for (const path of selection.paths ?? []) catalogParams.append("selected", path);
+      for (const path of requestedComparison ?? []) catalogParams.append("selected", path);
       const payload = await json<{ revision: string; catalog: InterviewCatalog; syncState?: "building" | "failed" }>(`/api/interview/catalog?${catalogParams}`, signal);
       if (id !== generation) return;
       const { revision, catalog } = payload;
@@ -208,9 +213,12 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
       const sourcePath = view === "session" ? target ? target.path || target.sourcePath
         : selection.overviewOnly && selection.contextPath ? selection.contextPath : interviewDefaultSource(catalog, selection)
         : view === "review" ? target ? target.path ?? "" : selection.sourcePath ?? "" : "";
+      // 目录会额外返回明确选择的有效路径；已撤回的链接不再请求正文。
+      const selectedComparisons = view === "insights"
+        ? requestedComparison?.filter((path) => catalog.comparisons.some((item) => item.path === path)) ?? catalog.compareDefaults
+        : undefined;
       const roots = view === "prep" ? catalog.libraryPaths : view === "practice" ? catalog.practicePaths
-        : view === "insights" ? selection.paths ?? catalog.compareDefaults
-          : sourcePath ? [sourcePath] : [];
+        : selectedComparisons ?? (sourcePath ? [sourcePath] : []);
       const [contexts, trendPayload] = await Promise.all([
         Promise.all([...new Set(roots)].map((path) => json<{ revision: string; context: InterviewContext; company?: InterviewCompanyProjection | null }>(endpoint("context", revision, { path }), signal))),
         view === "session" ? json<{ digest: InterviewTrends | null }>(endpoint("trends", revision, {}), signal) : Promise.resolve({ digest: null }),
@@ -283,14 +291,14 @@ export function createInterviewContextResource(fetcher: Fetcher = fetch) {
       }
       if (id === generation) {
         if (revision !== state.revision) expiredReviewReads.clear();
-        publish({ notes, companyContexts, japanese, catalog, digest: trendPayload.digest, target, revision, fetchedAt: Date.now(), syncState: payload.syncState ?? "ready", ready: true, loading: false, error: "", sourcePath,
+        publish({ notes, companyContexts, comparisonPaths: selectedComparisons, japanese, catalog, digest: trendPayload.digest, target, revision, fetchedAt: Date.now(), syncState: payload.syncState ?? "ready", ready: true, loading: false, error: "", sourcePath,
           contextPath: contexts[0]?.context.contextPath ?? "", review });
       }
       if (id === generation && payload.syncState === "building" && Date.now() < pollDeadline) pollTimer = setTimeout(() => {
         pollTimer = null; void query(view, selection, true, true);
       }, 1_000);
     } catch (error) {
-      if (id !== generation || signal.aborted) return;
+      if (id !== generation || cancelSignal.aborted) return;
       if (error instanceof ReadModelFetchError && error.status === 409 && Date.now() < pollDeadline) {
         // 本地桥重启可能已回收旧正文快照；等同版目录和正文恢复，不把暂时不可读误报为没有准备稿。
         publish({ ...state, ready: false, loading: true, syncState: "building", error: "" });

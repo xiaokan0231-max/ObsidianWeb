@@ -45,6 +45,7 @@ import { createVaultReader, type VaultReadOptions } from "@/lib/vault-reader";
 import { useCalendarProjection } from "./use-calendar-projection";
 import { useInterviewOverlayNotes } from "./use-interview-overlay-notes";
 import { useInterviewContext, type InterviewView } from "./use-interview-context";
+import { updateCompanyComparisonSearch } from "./company-comparison-state";
 import type { NoteResolution } from "@/lib/read-model";
 import { readNoteDetail } from "./note-detail-resource";
 import type { CalendarPulseSummary } from "@/lib/calendar-pulse-summary";
@@ -427,7 +428,7 @@ const INTERVIEW_ENTRY_KEYS: ReadonlySet<string> = new Set(
 function interviewNavigationKey(view: AppView, search: string) {
   const params = new URLSearchParams();
   for (const [key, value] of new URLSearchParams(search)) {
-    if (INTERVIEW_ENTRY_KEYS.has(key)) params.append(key, value);
+    if (INTERVIEW_ENTRY_KEYS.has(key) || (view === "insights" && key === "compare")) params.append(key, value);
   }
   return appViewHref(view, params);
 }
@@ -1398,6 +1399,13 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
     interviewNavigation.current = interviewNavigationKey("session", params.toString());
   }, []);
 
+  const syncComparisonSelection = useCallback((paths: string[]) => {
+    const params = updateCompanyComparisonSearch(window.location.search, paths);
+    window.history.replaceState(window.history.state, "", `${appViewHref("insights", params)}${window.location.hash}`);
+    setInterviewRouteSearch(params.toString());
+    interviewNavigation.current = interviewNavigationKey("insights", params.toString());
+  }, []);
+
   const syncReviewSelection = useCallback((key: string | null) => {
     // 复盘页自己的筛选（filter / pattern）原样留着，外壳只重写自己的键。
     // 换了一场（或回到一览）时，panel / block / sentence 指的是上一场里的位置；
@@ -1698,7 +1706,9 @@ function MemoryAtlasContent({ initialView = "calendar", initialSummary, initialC
                   onOpenSession={openReviewSession}
                 />
               )}
-              {view === "insights" && <CompanyComparison companyContexts={interviewRead.companyContexts} catalog={interviewRead.catalog} onRemoteSelect={interviewRead.select} notes={notes} today={calendarToday} loading={!scopeReady}
+              {view === "insights" && <CompanyComparison key={interviewRouteVersion} companyContexts={interviewRead.companyContexts}
+                catalog={interviewRead.catalog} comparisonPaths={interviewRead.comparisonPaths} onSelect={syncComparisonSelection}
+                notes={notes} today={calendarToday} loading={!scopeReady || interviewRead.loading} onRetry={() => void refreshInterview()}
                 onOpenCompany={(context) => openApplicationCompany(context.company, context.note)} onOpenWiki={openWikiLink} />}
               {view === "practice" && (
                 <InterviewPractice

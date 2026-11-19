@@ -1,8 +1,9 @@
 import vinext from "vinext";
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv, type ViteDevServer } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
 import { feedbackDevProxy } from "./build/feedback-dev-proxy";
+import { warmReadModel } from "./scripts/warm-read-model.mjs";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
@@ -67,6 +68,27 @@ export default defineConfig(async ({ command }) => {
       : undefined,
     plugins: [
       feedbackDevProxy(feedbackVars),
+      {
+        name: "warm-local-read-model",
+        apply: "serve",
+        configureServer({ httpServer, config }: ViteDevServer) {
+          if (!httpServer || !d1 || !localBindingConfig.vars.CODEX_BRIDGE_TOKEN || localBindingConfig.vars.OBSIDIAN_DATA_SOURCE !== "live") return;
+          const controller = new AbortController();
+          httpServer.once("close", () => controller.abort());
+          // 冷启动由开发服务器完成索引导入，避免等待浏览器的有限次数重试逐批推进。
+          httpServer.once("listening", () => {
+            const address = httpServer.address();
+            if (!address || typeof address === "string") return;
+            const host = address.address === "::" ? "[::1]" : address.family === "IPv6" ? `[${address.address}]`
+              : address.address === "0.0.0.0" ? "127.0.0.1" : address.address;
+            void warmReadModel(`http://${host}:${address.port}`, { signal: controller.signal })
+              .then(({ completedBatches, batchCount }) => config.logger.info(`本地资料索引已就绪（${completedBatches}/${batchCount}）`))
+              .catch((error: unknown) => {
+                if (!controller.signal.aborted) config.logger.warn(`本地资料索引预热失败：${error instanceof Error ? error.message : String(error)}`);
+              });
+          });
+        },
+      },
       vinext(),
       sites(),
       cloudflare({

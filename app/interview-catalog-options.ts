@@ -8,8 +8,9 @@ async function options<T>(revision: string, section: "picker" | "comparisons"): 
   const key = JSON.stringify([revision, section]);
   const cached = pages.get(key);
   if (cached) return cached as Promise<T[]>;
+  const signal = section === "comparisons" ? AbortSignal.timeout(30_000) : undefined;
   const request = async (offset: number) => {
-    const response = await fetch(`/api/interview/catalog?${new URLSearchParams({ revision, section, offset: String(offset) })}`, { cache: "no-store" });
+    const response = await fetch(`/api/interview/catalog?${new URLSearchParams({ revision, section, offset: String(offset) })}`, { cache: "no-store", signal });
     const result = await response.json() as { revision: string; groups?: T[]; items?: T[]; total: number; nextOffset: number | null; error?: string };
     if (!response.ok || result.revision !== revision) throw new Error(result.error || "选择目录读取失败，请刷新后重试");
     return result;

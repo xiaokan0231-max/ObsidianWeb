@@ -62,7 +62,9 @@ export async function interviewQuery(model: RecordReader, revision: string, requ
       return { revision, groups, total, nextOffset: offset + limit < total ? offset + limit : null };
     }
     const view = params.get("view");
-    const selected = new Set(params.getAll("selected"));
+    const visibleComparisons = new Set([
+      ...params.getAll("selected"), ...source.compareDefaults, ...Object.values(source.comparePresets).flat(),
+    ]);
     const sourcePath = params.get("sourcePath") || params.get("contextPath") || "";
     const current = sourcePath ? await model.readRecord<InterviewContext>(revision, INTERVIEW_RECORDS.context, sourcePath) : null;
     const visiblePicker = new Set(source.preps.map((item) => item.pickerId));
@@ -75,7 +77,7 @@ export async function interviewQuery(model: RecordReader, revision: string, requ
         rated: source.comparisons.filter((item) => item.reviews.length).length } };
     const catalog = view === "session" ? { ...base, pickerGroups, reviews: [], comparisons: [] }
       : view === "review" ? { ...base, pickerGroups: [], preps: [], comparisons: [] }
-        : view === "insights" ? { ...base, pickerGroups: [], preps: [], reviews: [], comparisons: source.comparisons.filter((item, index) => index < 24 || selected.has(item.path)) }
+        : view === "insights" ? { ...base, pickerGroups: [], preps: [], reviews: [], comparisons: source.comparisons.filter((item, index) => index < 24 || visibleComparisons.has(item.path)) }
           : view === "prep" || view === "practice" ? { ...base, pickerGroups: [], preps: [], reviews: [], comparisons: [] } : base;
     return { revision, catalog };
   }
