@@ -1,42 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { buildCalendarSnapshot } from "../lib/server/calendar-snapshot.ts";
 import { createCalendarReadModel } from "../lib/server/calendar-read-model.ts";
 import { buildCalendarPulseSummary, buildCalendarPulseSummaries } from "../lib/calendar-pulse-summary.ts";
-
-function database(t) {
-  const sqlite = new DatabaseSync(":memory:");
-  t.after(() => sqlite.close());
-  for (const file of readdirSync(new URL("../drizzle/", import.meta.url)).filter((name) => name.endsWith(".sql")).sort()) {
-    sqlite.exec(readFileSync(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
-  }
-  const calls = [];
-  let failure = null;
-  const db = {
-    prepare(sql) { return { sql, values: [], bind(...values) { return { sql, values }; } }; },
-    async batch(statements) {
-      calls.push(statements.map(({ sql, values }) => ({ sql, values })));
-      sqlite.exec("BEGIN");
-      try {
-        const results = statements.map(({ sql, values }) => {
-          if (failure && sql.includes(failure)) throw new Error("模拟数据库故障");
-          const statement = sqlite.prepare(sql);
-          if (statement.columns().length) return { success: true, results: statement.all(...values).map((row) => ({ ...row })) };
-          statement.run(...values);
-          return { success: true, results: [] };
-        });
-        sqlite.exec("COMMIT");
-        return results;
-      } catch (error) {
-        sqlite.exec("ROLLBACK");
-        throw error;
-      }
-    },
-  };
-  return { db, sqlite, calls, failOn: (text) => { failure = text; } };
-}
+import { database } from "./read-model-db.mjs";
 
 function snapshot(count = 3, status = "応募済") {
   return buildCalendarSnapshot(Array.from({ length: count }, (_, index) => ({
