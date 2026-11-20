@@ -141,6 +141,8 @@ npm run lint
 ## 写代码时
 
 - 常规修改直接在 `main` 对应的工作区完成、提交并推送，不另建临时分支或 worktree。当前会话若在临时 worktree，先用 `git worktree list` 找到 `main` 的检出目录，再在那里操作；保留已有未提交改动。
+- 推送代码分支时，`pre-push` 从待推送提交创建临时快照，按 `.nvmrc` 使用与 GitHub Actions 相同的 Node 版本运行 `npm test`。检查失败时，先修好并提交，再重试推送。
+- 新克隆的仓库可在主检出目录用 `ln -s ../../.githooks/pre-push "$(git rev-parse --git-path hooks/pre-push)"` 启用检查。同一仓库的 worktree 共用该 hook。
 - 开发与验收默认使用 `http://localhost:3000`，从同一个 `main` 工作区运行 `npm run dev`。端口号不代表分支；启动时核对监听进程的工作目录，不得只在其他端口验证后报告完成。
 - 所有页面以桌面端为设计与验收目标；不要求移动端适配，不为移动端新增布局或测试。
 - 注释和文档跟随周围风格：本仓库注释用中文，说明「为什么」而不是「做了什么」。

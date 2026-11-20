@@ -1,0 +1,56 @@
+#!/bin/sh
+set -eu
+
+commits=""
+while read -r local_ref local_commit remote_ref remote_commit; do
+  case "$remote_ref" in
+    refs/heads/*) ;;
+    *) continue ;;
+  esac
+  if [ "$local_ref" = "(delete)" ] || [ "$local_commit" = "$remote_commit" ]; then
+    continue
+  fi
+  case " $commits " in
+    *" $local_commit "*) continue ;;
+  esac
+  commits="$commits $local_commit"
+done
+[ -n "$commits" ] || exit 0
+
+if ! command -v npm >/dev/null 2>&1; then
+  printf '%s\n' 'ObsidianWeb pre-push: 找不到 npm，无法运行测试。' >&2
+  exit 1
+fi
+
+temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/obsidianweb-pre-push.XXXXXX")
+trap 'rm -rf "$temp_dir"' EXIT
+trap 'exit 1' HUP INT TERM
+
+for commit in $commits; do
+  # 读取待推送版本的设置，兼容早于 .nvmrc 的现有分支。
+  node_version=$(git show "$commit:.nvmrc" 2>/dev/null || git show refs/heads/main:.nvmrc)
+  printf 'ObsidianWeb pre-push: 正在用 Node %s 检查 %.12s。\n' "$node_version" "$commit"
+
+  # 从提交导出，避免未提交的改动或本机 Vault 配置影响验证。
+  snapshot="$temp_dir/$commit"
+  mkdir "$snapshot"
+  git archive --format=tar --output="$temp_dir/source.tar" "$commit"
+  tar -xf "$temp_dir/source.tar" -C "$snapshot"
+
+  if ! (
+    cd "$snapshot" && npm exec --prefer-offline --yes --package="node@$node_version" -- sh -c '
+      set -eu
+      actual_version=$(node --version)
+      if [ "$actual_version" != "v$1" ]; then
+        printf "ObsidianWeb pre-push: Node 版本为 %s，测试需要 v%s。\n" "$actual_version" "$1" >&2
+        exit 1
+      fi
+      npm ci --include=dev --prefer-offline --no-audit --no-fund
+      npm test
+    ' sh "$node_version"
+  ) </dev/null; then
+    printf 'ObsidianWeb pre-push: %.12s 检查失败，修复并提交后再推送。\n' "$commit" >&2
+    exit 1
+  fi
+  rm -rf "$snapshot"
+done
